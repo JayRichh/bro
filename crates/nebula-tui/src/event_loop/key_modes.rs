@@ -35,6 +35,10 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientReque
     if handle_locked_pane_key(app, key, out) {
         return;
     }
+    // The ORCHESTRATOR VIEW with the keys stepped out to its strip.
+    if orchestrator::handle_view_key(app, key, out) {
+        return;
+    }
     // A session card expanded into its FOLLOW-UP COMPOSER: the box owns
     // every key the SESSIONS PANEL would otherwise act on — they are all
     // letters, and `a` in a prompt must not archive the session being
@@ -76,6 +80,30 @@ fn handle_locked_pane_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequ
                 .keymap
                 .lookup(crate::keymap::Scope::Terminal, &chord)
                 == Some(crate::keymap::Action::UnlockTerminal);
+        // F10 reaches through a locked pane: no agent CLI takes a function
+        // key as text, and the ORCHESTRATOR VIEW is where the keys live
+        // most of the time, so leaving it must not need a hatch first.
+        if app
+            .chrome
+            .keymap
+            .lookup(crate::keymap::Scope::Global, &chord)
+            == Some(crate::keymap::Action::ToggleOrchestratorView)
+        {
+            crate::key_combo::note(
+                app,
+                &[chord],
+                crate::keymap::spec_of(crate::keymap::Action::ToggleOrchestratorView)
+                    .map(|s| s.label),
+            );
+            orchestrator::toggle(app, out);
+            return true;
+        }
+        // In the ORCHESTRATOR VIEW the hatch steps out to the strip of
+        // chips, staying full-screen; a second one leaves for the grid.
+        if is_hatch && orchestrator::unlock_to_strip(app) {
+            crate::key_combo::note(app, &[chord], Some("To the session chips"));
+            return true;
+        }
         // `^F` full-screens the pane under the cards and brings it back
         // down; in a full-screen session the hatches and the pane fold's
         // `^`` bring it back down too, rather than straight out to the
@@ -316,7 +344,7 @@ fn handle_global_action(
         | Action::DeleteAll
         | Action::FollowUp => handle_session_state_action(app, action, chord, out),
         // F10: the ORCHESTRATOR VIEW, or the prompt that starts one.
-        Action::ToggleOrchestratorView => crate::orchestrator_view::toggle(app, out),
+        Action::ToggleOrchestratorView => orchestrator::toggle(app, out),
         // Listed rather than `_`: a new action is a compile error here
         // until it is routed, never an `unreachable!` at the user's press.
         Action::GitDiff

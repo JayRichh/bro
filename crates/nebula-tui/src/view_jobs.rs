@@ -110,6 +110,11 @@ pub enum Answer {
     /// This process's resident set, for the footer's memory readout and the
     /// memory modal: a `ps`, on a five-second beat.
     ClientRss(u64),
+    /// The REVIEW MODAL's Diff tab: the session's worktree diff, whole.
+    ReviewDiff {
+        session: nebula_core::SessionRef,
+        result: Result<String, String>,
+    },
     /// The outcome of something a key started and did not wait for, in the
     /// footer's words (`Shift+G`: which page was opened, or why not).
     Flash(String),

@@ -2254,6 +2254,20 @@ fn draw_card(
         }
     }
 
+    // The ORCHESTRATOR BADGE: the machine's one orchestrator says so ahead
+    // of what it runs on (F10 opens it).
+    if a.role.is_orchestrator() {
+        second.insert(
+            0,
+            Span::styled(
+                ORCHESTRATOR_BADGE,
+                Style::default()
+                    .fg(quiet_or(th.accent))
+                    .add_modifier(Modifier::BOLD),
+            ),
+        );
+    }
+
     // The last thing it was asked to do, on the prompt's own `›` (which
     // `hide_card_marks` leaves off), over the card's last rows rather than
     // clipped at the first.
@@ -2274,6 +2288,9 @@ fn draw_card(
         Paragraph::new(Line::from(spans)).render(r, buf);
     }
 }
+
+/// What the orchestrator's card says ahead of its harness.
+pub(crate) const ORCHESTRATOR_BADGE: &str = "◆ orchestrator ";
 
 /// The `#15` an ISSUE SESSION's card shows for the GitHub issue it was
 /// started from, while the `card_issue_number` setting is on. None on

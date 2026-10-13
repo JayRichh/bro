@@ -21059,6 +21059,7 @@ fn overlay_label(overlay: &Overlay) -> &'static str {
         Overlay::PullRequests(_) => "PullRequests",
         Overlay::BranchSwitch(_) => "BranchSwitch",
         Overlay::Review(_) => "Review",
+        Overlay::OrchestratorStart(_) => "OrchestratorStart",
         Overlay::ProjectPicker(_) => "ProjectPicker",
     }
 }
@@ -22159,3 +22160,4 @@ fn a_live_port_shows_on_its_band_rule() {
 }
 
 mod dispatch;
+mod orch_view;

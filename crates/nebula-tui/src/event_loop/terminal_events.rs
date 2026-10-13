@@ -206,6 +206,12 @@ pub(crate) fn dispatch_input(app: &mut App, event: Event, out: &mut Vec<ClientRe
             let typing = typing_into_pane(app);
             app.chrome.flash = None;
             handle_key(app, key, out);
+            orchestrator::settle_review(app, out);
+            // A review the orchestrator held back keeps saying so until
+            // F10 shows it.
+            if app.orch.pending_review.is_some() && app.chrome.flash.is_none() {
+                app.chrome.flash = Some(orchestrator::PENDING_REVIEW.into());
+            }
             // A key that only went to the PTY changed nothing here: what
             // it does shows up as the PTY's answer, a couple of
             // milliseconds on. Painting an identical frame for it first
@@ -218,6 +224,7 @@ pub(crate) fn dispatch_input(app: &mut App, event: Event, out: &mut Vec<ClientRe
         }
         Event::Mouse(mouse) => {
             handle_mouse(app, mouse, out);
+            orchestrator::settle_review(app, out);
             // A click anywhere hands the keys back to the cards from the
             // PROJECT TABS' cursor — after the click, which on a tab is
             // Enter on it while the header holds them (`launcher::click_tab`).

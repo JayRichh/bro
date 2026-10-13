@@ -260,6 +260,10 @@ pub fn clamp_files_width(area: Rect, boundary_x: i32) -> Option<u16> {
 pub enum MenuAction {
     Attach(SessionRef),
     RestartAgent(AgentId),
+    /// Pin this session as the machine's ORCHESTRATOR (`SetOrchestrator`).
+    MakeOrchestrator(AgentId),
+    /// Unpin the ORCHESTRATOR (`ClearOrchestrator`).
+    ClearOrchestrator,
     /// Queue a message on the row's Claude Cloud session
     /// (`ClientRequest::SendCloudMessage`), via a prompt.
     SendCloudMessage(AgentId),
@@ -2315,8 +2319,10 @@ pub enum Overlay {
     PullRequests(crate::pr_modal::PullRequestsView),
     /// `c`: the BRANCH SWITCHER — the ROOT WORKTREE onto another branch.
     BranchSwitch(crate::branch_switch::BranchSwitchView),
-    /// Tabbed review opened by the orchestrator.
+    /// Tabbed review opened by the orchestrator, or a chip on its strip.
     Review(crate::review_modal::ReviewView),
+    /// F10 with no orchestrator yet: pick a harness and profile, start one.
+    OrchestratorStart(crate::orchestrator_view::StartView),
     /// `^P` in the LAUNCHER VIEW's box: the PROJECT PICKER.
     ProjectPicker(crate::launcher::ProjectPicker),
 }
@@ -2483,6 +2489,9 @@ pub enum PendingIntent {
     },
     /// Select the added project and step into its Worktrees panel.
     SelectCreatedProject,
+    /// F10's start prompt: open the ORCHESTRATOR VIEW on the created
+    /// orchestrator.
+    OpenOrchestrator,
     /// The NEW WORKTREE modal's create. The stand-in row `placeholder`
     /// went up and took the cursor when Enter was pressed, exactly as the
     /// Ack used to leave the real row: the Ack only swaps the real id in.
@@ -4515,6 +4524,8 @@ pub struct App {
     pub requests: RequestState,
     pub jobs: JobState,
     pub github: GithubState,
+    /// The ORCHESTRATOR VIEW (F10) and the reviews it opens.
+    pub orch: crate::orchestrator_view::OrchState,
 }
 
 impl Default for App {
@@ -4535,6 +4546,7 @@ impl App {
             requests: RequestState::default(),
             jobs: JobState::default(),
             github: GithubState::default(),
+            orch: crate::orchestrator_view::OrchState::default(),
         };
         app.launcher.columns_recent_prompts_count = 3;
         app
