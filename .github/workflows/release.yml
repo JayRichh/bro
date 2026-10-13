@@ -68,8 +68,45 @@ jobs:
             kete-${{ matrix.target }}.zip
           if-no-files-found: error
 
+  # The desktop window as a per-user NSIS installer (no admin prompt). It
+  # isn't code signed, so SmartScreen may warn the first time it runs.
+  # desktop/ is its own Cargo workspace, so the bundle lands in desktop/target.
+  desktop-windows:
+    name: kete-desktop (windows installer)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build the installer
+        run: npm run tauri build
+
+      - name: Name the installer
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem target/release/bundle/nsis -Filter 'Kete_*_x64-setup.exe' | Select-Object -First 1
+          if (-not $setup) { throw "no Kete_*_x64-setup.exe in target/release/bundle/nsis" }
+          Copy-Item $setup.FullName ../kete-desktop-x86_64-setup.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kete-desktop-x86_64-setup
+          path: kete-desktop-x86_64-setup.exe
+          if-no-files-found: error
+
   release:
-    needs: build
+    needs: [build, desktop-windows]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     steps:
@@ -82,4 +119,5 @@ jobs:
           files: |
             kete-*.tar.gz
             kete-*.zip
+            kete-desktop-x86_64-setup.exe
           generate_release_notes: true

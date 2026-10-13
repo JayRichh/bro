@@ -14,13 +14,26 @@
 # starts the new build. Your data moves to %LOCALAPPDATA%\kete the first
 # time kete runs.
 #
+# On x64 it also installs the desktop window: when the release has
+# kete-desktop-x86_64-setup.exe, it runs that installer silently, for your
+# user only (no admin prompt), into %LOCALAPPDATA%\kete\desktop, and copies
+# kete-desktop.exe beside kete.exe so `kete desktop` finds it. A release
+# without it (older ones) just skips this step. The installer isn't code
+# signed yet, so Windows SmartScreen may warn the first time it runs.
+#
+# Skip the desktop window with -NoDesktop, or KETE_NO_DESKTOP=1:
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/JayRichh/kete/main/install.ps1))) -NoDesktop
+#
 # Environment overrides:
 #   KETE_INSTALL_DIR   install destination (default: %LOCALAPPDATA%\kete\bin)
 #   KETE_BRANCH        branch the source fallback builds (default: windows)
+#   KETE_NO_DESKTOP    set to 1 to skip the desktop window
 #   (BRO_INSTALL_DIR and BRO_BRANCH still work.)
 #
 # Written for Windows PowerShell 5.1 and PowerShell 7. It never calls `exit`,
 # so piping it into `iex` can't close your shell.
+
+param([switch]$NoDesktop)
 
 & {
     $ErrorActionPreference = 'Stop'
@@ -96,6 +109,47 @@
         }
     }
 
+    # The desktop window: run the release's NSIS installer silently into
+    # %LOCALAPPDATA%\kete\desktop (kept off PATH, since NSIS puts an
+    # uninstall.exe there), then copy kete-desktop.exe beside kete.exe.
+    # Returns $false, after saying why, when there's nothing to install;
+    # never throws, so a missing desktop never fails the CLI install.
+    function Install-Desktop([string]$BinDir) {
+        $url = "https://github.com/$Repo/releases/latest/download/kete-desktop-x86_64-setup.exe"
+        $desktopDir = Join-Path $env:LOCALAPPDATA 'kete\desktop'
+        $tmp = Join-Path ([IO.Path]::GetTempPath()) ("kete-desktop-" + [Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $tmp | Out-Null
+        try {
+            $setup = Join-Path $tmp 'kete-desktop-setup.exe'
+            Say "downloading $url"
+            try {
+                Invoke-WebRequest -Uri $url -OutFile $setup -UseBasicParsing
+            } catch {
+                Say "no desktop installer in the latest release; skipping the desktop window."
+                return $false
+            }
+            # NSIS wants /D= last and unquoted, even with spaces in the path.
+            $proc = Start-Process -FilePath $setup -ArgumentList "/S /D=$desktopDir" -Wait -PassThru
+            if ($proc.ExitCode -ne 0) {
+                Say "the desktop installer failed (exit $($proc.ExitCode)); skipping the desktop window."
+                return $false
+            }
+            $exe = Join-Path $desktopDir 'kete-desktop.exe'
+            if (-not (Test-Path $exe)) {
+                Say "the desktop installer left no kete-desktop.exe in $desktopDir; skipping the desktop window."
+                return $false
+            }
+            Replace-Exe $exe (Join-Path $BinDir 'kete-desktop.exe')
+            Say "installed the desktop window at $desktopDir; run 'kete desktop' to open it"
+            return $true
+        } catch {
+            Say "couldn't install the desktop window: $($_.Exception.Message)"
+            return $false
+        } finally {
+            Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
     function Install-FromSource {
         if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
             throw "there's no prebuilt kete for this machine and cargo isn't installed. Get Rust from https://rustup.rs and run this again."
@@ -166,5 +220,14 @@
 
     $version = & $installed --version
     Say "installed $version at $installed (and bro.exe beside it)"
+
+    # The desktop installer is x64 only.
+    if ($NoDesktop -or $env:KETE_NO_DESKTOP -eq '1') {
+        Say "skipping the desktop window (-NoDesktop)."
+    } elseif ($target -eq 'x86_64-pc-windows-msvc') {
+        Install-Desktop (Split-Path $installed -Parent) | Out-Null
+    } else {
+        Say "no desktop window for this CPU architecture yet; 'kete' runs in the terminal."
+    }
     Say "run 'kete' to start."
 }

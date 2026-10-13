@@ -35,6 +35,19 @@ It puts `kete.exe` in `%LOCALAPPDATA%\kete\bin`, with `bro.exe` beside it (Kete'
 program), and adds that folder to your user `PATH`. When the latest release has nothing for your CPU,
 it builds from source with `cargo install` and tells you. Run it again to update.
 
+On x64 it also installs the desktop window (`kete desktop`): it runs the release's
+`kete-desktop-x86_64-setup.exe` silently, for your user only with no admin prompt, into
+`%LOCALAPPDATA%\kete\desktop`, and copies `kete-desktop.exe` beside `kete.exe`. The installer isn't
+code signed yet, so Windows SmartScreen may warn the first time it runs; choose **More info**, then
+**Run anyway**. To skip the desktop window:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/JayRichh/kete/main/install.ps1))) -NoDesktop
+```
+
+or set `KETE_NO_DESKTOP=1` first. Uninstalling "Kete" from Settings → Apps removes the desktop
+folder but leaves the copy in `kete\bin`; delete `kete-desktop.exe` there by hand.
+
 **macOS and Linux:**
 
 ```sh
@@ -192,7 +205,8 @@ from inside a terminal too. It follows the OS theme, One Dark or One Light, and 
 overrides it.
 
 `kete-desktop` is a separate binary, built from `desktop/` (see Building). `kete desktop` looks for
-it beside `kete`, then on `PATH`.
+it beside `kete`, then on `PATH`. On Windows x64 the installer puts it there for you; each release
+also carries it as `kete-desktop-x86_64-setup.exe`, a per-user installer you can run by hand.
 
 ## Where things live
 
@@ -219,6 +233,8 @@ build never compiles Tauri. It needs Node 20+ and, on Windows, the WebView2 runt
 cd desktop
 npm ci
 npm run tauri build       # desktop/target/release/kete-desktop (.exe on Windows)
+                          # plus, on Windows, bundle/nsis/Kete_<version>_x64-setup.exe
+                          # (elsewhere: npm run tauri build -- --no-bundle)
 ```
 
 Put `kete-desktop` next to `kete` and `kete desktop` finds it.

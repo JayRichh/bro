@@ -69,8 +69,15 @@ jobs:
       - name: Type-check the frontend
         run: npm run check
 
+      # The bundle config targets the Windows NSIS installer only, so the
+      # other runners build the binary without bundling.
       - name: Build kete-desktop
+        if: runner.os == 'Windows'
         run: npm run tauri build
+
+      - name: Build kete-desktop (no bundle)
+        if: runner.os != 'Windows'
+        run: npm run tauri build -- --no-bundle
 
       - name: Check clippy
         run: cargo clippy --release --all-targets --locked -- -D warnings
