@@ -360,6 +360,25 @@ pub async fn for_source(
     query(client, repo_id, &[("sourceRefName", &r)]).await
 }
 
+/// The repo's active PRs in one list call. A PR whose source branch
+/// `wants_work_items` picks also gets its linked work items (one call
+/// each; a failed one leaves them empty).
+pub async fn active(
+    ado: &AdoContext,
+    wants_work_items: impl Fn(&str) -> bool,
+) -> Result<Vec<PrSummary>, AdoError> {
+    let (repo_id, _) = repo_ids(&ado.client, &ado.remote).await?;
+    let mut prs = query(&ado.client, &repo_id, &[]).await?;
+    for pr in &mut prs {
+        if pr.work_items.is_empty() && wants_work_items(&pr.source) {
+            if let Ok(w) = work_items(&ado.client, &repo_id, pr.id).await {
+                pr.work_items = w;
+            }
+        }
+    }
+    Ok(prs)
+}
+
 /// The ids of the work items linked to a PR.
 pub async fn work_items(
     client: &AdoClient,
