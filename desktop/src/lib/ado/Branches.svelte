@@ -1,11 +1,11 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { app, openDiff } from '../store.svelte';
+  import { app, openDiff, openDiffRange } from '../store.svelte';
   import { ownsKey } from './tasks-api';
   import { nav } from '../shell/history.svelte';
   import Chip from './Chip.svelte';
   import { composeItem } from './prs-api';
-  import { branchesApi, filterBranches, shortAge, syncWords, type BranchRow, type BranchTree, type RangeDiff } from './branches-api';
+  import { branchesApi, filterBranches, shortAge, syncWords, type BranchRow, type BranchTree } from './branches-api';
 
   let { repo }: { repo: string } = $props();
 
@@ -30,10 +30,9 @@
   let listBox: HTMLDivElement | undefined = $state();
 
   // Per-branch action state: which action runs, and the last failure.
-  let busy = $state<{ branch: string; action: 'checkout' | 'delete' | 'diff' } | null>(null);
+  let busy = $state<{ branch: string; action: 'checkout' | 'delete' } | null>(null);
   let actionError = $state<{ branch: string; message: string } | null>(null);
   let confirmDelete = $state<string | null>(null);
-  let range = $state<{ branch: string; diff: RangeDiff } | null>(null);
 
   async function load() {
     if (!worktree) return;
@@ -127,7 +126,7 @@
     }
   }
 
-  async function run(branch: string, action: 'checkout' | 'delete' | 'diff', work: () => Promise<void>) {
+  async function run(branch: string, action: 'checkout' | 'delete', work: () => Promise<void>) {
     busy = { branch, action };
     actionError = null;
     try {
@@ -153,17 +152,20 @@
     run(r.name, 'delete', async () => {
       await branchesApi.deleteLocal(worktree!, r.name);
       confirmDelete = null;
-      if (range?.branch === r.name) range = null;
       await load();
       if (!allRows.some((x) => x.name === r.name)) nav.replace({ view: 'branches', repo });
     });
 
-  const diffVsMain = (r: BranchRow) =>
-    run(r.name, 'diff', async () => {
-      // A remote-only branch is read from the remote; a local one as it is.
-      const tip = r.local ? r.name : `refs/remotes/origin/${r.name}`;
-      range = { branch: r.name, diff: await branchesApi.diffRange(r.worktree ?? worktree!, TARGET, tip) };
-    });
+  /** The full Diff view on the branch against the target. A branch with no
+   *  worktree of its own is read in the repo's main one (any will do: the
+   *  range reads commits, not files on disk). */
+  function diffVsMain(r: BranchRow) {
+    const wt = r.worktree ?? worktree;
+    if (!wt) return;
+    // A remote-only branch is read from the remote; a local one as it is.
+    const tip = r.local ? r.name : `refs/remotes/origin/${r.name}`;
+    openDiffRange(wt, { base: TARGET, tip });
+  }
 
   /** The sync badge's square: trouble filled, one-sided hollow, in step olive. */
   function syncSquare(r: BranchRow): string {
@@ -173,7 +175,6 @@
     return 'bg-done';
   }
 
-  const STATUS_WORD: Record<string, string> = { M: 'modified', A: 'added', D: 'deleted', R: 'renamed', C: 'conflicted', U: 'untracked' };
   const action =
     'h-8 border border-rule bg-transparent px-3 text-left text-[13px] text-ink enabled:hover:border-rule-strong disabled:text-faint';
 </script>
@@ -348,7 +349,7 @@
             {:else}
               <button class={action} onclick={() => checkout(r)} disabled={!!busy}>{doing === 'checkout' ? 'Checking out' : 'Check out to worktree'}</button>
             {/if}
-            <button class={action} onclick={() => diffVsMain(r)} disabled={!!busy}>{doing === 'diff' ? 'Comparing' : `Diff vs ${TARGET}`}</button>
+            <button class={action} onclick={() => diffVsMain(r)} disabled={!r.worktree && !worktree}>Diff vs {TARGET}</button>
             <button class={action} onclick={() => nav.go({ view: 'prs', repo, item: composeItem(r.name, r.task) })} disabled={!!r.pr}
               >{r.pr ? 'PR already open' : 'Draft PR'}</button
             >
@@ -382,41 +383,6 @@
               <span class="mt-1.5 size-1.5 flex-none bg-fail" aria-hidden="true"></span>
               <span><span class="font-medium text-fail">Failed.</span> {failed}</span>
             </p>
-          {/if}
-
-          {#if range?.branch === r.name}
-            {@const d = range.diff}
-            <h3 class="m-0 mt-6 flex items-baseline gap-2 text-[13px] font-semibold text-ink">
-              Changes vs {TARGET}
-              <span class="font-mono text-[12px] font-normal text-muted">{d.base.slice(0, 7)}..{d.tip.slice(0, 7)}</span>
-            </h3>
-            {#if d.offline}
-              <p class="m-0 mt-1 flex items-center gap-2 text-[12px] text-muted">
-                <span class="size-1.5 flex-none border border-muted" aria-hidden="true"></span>Offline: compared with the refs as last fetched.
-              </p>
-            {/if}
-            {#if d.files.length}
-              <ul class="m-0 mt-2 list-none border-t border-rule p-0">
-                {#each d.files as f (f.path)}
-                  <li class="grid grid-cols-[14px_minmax(0,1fr)_auto] items-baseline gap-2 border-b border-rule py-1.5 text-[12px]" title="{STATUS_WORD[f.status] ?? f.status}{f.from ? ` from ${f.from}` : ''}">
-                    <span
-                      class="font-mono {f.status === 'A' ? 'text-git-added' : f.status === 'D' ? 'text-git-deleted' : f.status === 'R' ? 'text-git-renamed' : 'text-git-modified'}"
-                      >{f.status}</span
-                    >
-                    <span class="min-w-0 truncate text-left font-mono text-ink" dir="rtl"><bdi>{f.path}</bdi></span>
-                    <span class="font-mono text-muted">
-                      {#if f.added !== null}<span class="text-git-added">+{f.added}</span>{/if}
-                      {#if f.removed !== null}<span class="text-git-deleted">-{f.removed}</span>{/if}
-                    </span>
-                  </li>
-                {/each}
-              </ul>
-              <p class="m-0 mt-2 font-mono text-[12px] text-muted">
-                {d.files.length} files, +{d.files.reduce((n, f) => n + (f.added ?? 0), 0)} -{d.files.reduce((n, f) => n + (f.removed ?? 0), 0)}
-              </p>
-            {:else}
-              <p class="m-0 mt-1 text-[13px] text-muted">No changes: {r.name} has nothing {TARGET} lacks.</p>
-            {/if}
           {/if}
         </div>
       </aside>
