@@ -11,6 +11,7 @@ your behalf — see [How it works](how-it-works.md).
 
 ```
 bro                      open the TUI (auto-starts the daemon)
+bro desktop              open the desktop window: kanban, terminals, diffs
 bro add <dir>            register a git checkout as a project
 bro daemon               run the daemon that owns every session
 bro kill                 shut the running daemon down (stops all sessions)
@@ -37,6 +38,9 @@ bro upgrade              install the latest published bro
 bro                    # launch the TUI (auto-starts the daemon). With no project yet, a
                           # launch from inside a git repo offers it on the splash — Enter
                           # opens it; anywhere else, `o` browses for one
+bro desktop            # the same sessions in a native window (bro-desktop, built from
+                          # desktop/; looked for beside bro, then on PATH). After `--`:
+                          # --view board|session|diff, --session <name>, --theme light|dark
 ```
 
 ## Projects and the daemon

@@ -1,0 +1,21 @@
+// Monaco (MIT), bundled from disk: the editor API, the diff editor and a
+// handful of reading features, the Monarch grammars, and the one editor
+// worker the diff computation runs in. No CDN, no language services.
+
+import * as monaco from 'monaco-esm/editor/editor.api.js';
+import 'monaco-esm/features/diffEditor/register.js';
+import 'monaco-esm/features/codicon/register.js';
+import 'monaco-esm/features/find/register.js';
+import 'monaco-esm/features/folding/register.js';
+import 'monaco-esm/features/bracketMatching/register.js';
+import 'monaco-esm/features/wordHighlighter/register.js';
+import 'monaco-esm/features/clipboard/register.js';
+import 'monaco-esm/features/hover/register.js';
+import 'monaco-esm/languages/definitions/register.all.js';
+import EditorWorker from 'monaco-esm/editor/editor.worker.js?worker';
+
+(self as unknown as { MonacoEnvironment: unknown }).MonacoEnvironment = {
+  getWorker: () => new EditorWorker(),
+};
+
+export { monaco };

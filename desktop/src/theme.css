@@ -1,0 +1,212 @@
+/*
+ * bro-desktop's theme: every colour and font the window uses, in one file.
+ *
+ * - Tailwind v4 turns each `--color-*` / `--font-*` / `--shadow-*` token into
+ *   utilities (`bg-raised`, `text-muted`, `border-line`, `font-mono`, ...).
+ *   Components use only those utilities, never a literal colour.
+ * - Dark is the default block; `html[data-theme='light']` overrides it. The
+ *   app sets `data-theme` from the OS (prefers-color-scheme) or the user's
+ *   override (Ctrl+Shift+L, `--theme`).
+ * - The terminal (`--color-term-*`) and the diff editor (`--color-syn-*`,
+ *   `--color-diff-*`) read these same variables at runtime, so swapping a
+ *   value here re-themes them too. Any CSS colour syntax works.
+ *
+ * Current values: One Dark / One Light.
+ */
+
+@import '@fontsource-variable/inter/index.css';
+@import '@fontsource/jetbrains-mono/400.css';
+@import '@fontsource/jetbrains-mono/500.css';
+@import '@fontsource/jetbrains-mono/700.css';
+@import '@fontsource/jetbrains-mono/400-italic.css';
+
+@theme static {
+  --font-ui: 'Inter Variable', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+  /* The terminal and diff editor take the first family of --font-mono. */
+
+  /* Surfaces */
+  --color-bg: #282c34;
+  --color-side: #21252b;
+  --color-raised: #2c313a;
+  --color-sunk: #1e2227;
+  --color-hover: #2a2f37;
+  --color-sel: #2c313a;
+  --color-active: #353b45;
+  --color-scrim: rgb(10 12 16 / 0.42);
+
+  /* Text */
+  --color-fg: #abb2bf;
+  --color-fg-strong: #d7dae0;
+  --color-muted: #7f848e;
+  --color-faint: #5c6370;
+
+  /* Lines and focus */
+  --color-line: #3a3f4b;
+  --color-line-soft: #2f343e;
+  --color-focus: #528bff;
+  --color-on-focus: #ffffff;
+
+  /* Accents */
+  --color-red: #e06c75;
+  --color-green: #98c379;
+  --color-yellow: #e5c07b;
+  --color-blue: #61afef;
+  --color-purple: #c678dd;
+  --color-cyan: #56b6c2;
+  --color-orange: #d19a66;
+  --color-on-accent: #1b1e23;
+
+  /* Session status: the dots, lane headers and alert cards */
+  --color-st-needs: #e06c75;
+  --color-st-running: #e5c07b;
+  --color-st-unseen: #61afef;
+  --color-st-done: #98c379;
+  --color-st-pr: #c678dd;
+  --color-st-shell: #56b6c2;
+  --color-st-idle: #5c6370;
+
+  /* Harness names on cards */
+  --color-h-claude: #d19a66;
+  --color-h-codex: #56b6c2;
+  --color-h-copilot: #c678dd;
+  --color-h-cursor: #61afef;
+
+  /* Diff file status letters and line counts */
+  --color-git-modified: #e5c07b;
+  --color-git-added: #98c379;
+  --color-git-deleted: #e06c75;
+  --color-git-renamed: #61afef;
+  --color-git-conflict: #c678dd;
+
+  /* Terminal (xterm.js) */
+  --color-term-bg: #282c34;
+  --color-term-fg: #abb2bf;
+  --color-term-cursor: #528bff;
+  --color-term-selection: #3e4451;
+  --color-term-black: #3f4451;
+  --color-term-red: #e06c75;
+  --color-term-green: #98c379;
+  --color-term-yellow: #d19a66;
+  --color-term-blue: #61afef;
+  --color-term-magenta: #c678dd;
+  --color-term-cyan: #56b6c2;
+  --color-term-white: #d7dae0;
+  --color-term-bright-black: #4f5666;
+  --color-term-bright-red: #ff616e;
+  --color-term-bright-green: #a5e075;
+  --color-term-bright-yellow: #e5c07b;
+  --color-term-bright-blue: #4dc4ff;
+  --color-term-bright-magenta: #de73ff;
+  --color-term-bright-cyan: #4cd1e0;
+  --color-term-bright-white: #e6e6e6;
+
+  /* Diff editor (Monaco) */
+  --color-syn-comment: #7f848e;
+  --color-syn-keyword: #c678dd;
+  --color-syn-string: #98c379;
+  --color-syn-number: #d19a66;
+  --color-syn-type: #e5c07b;
+  --color-syn-tag: #e06c75;
+  --color-syn-attr: #d19a66;
+  --color-syn-function: #61afef;
+  --color-syn-regexp: #56b6c2;
+  --color-editor-gutter: #495162;
+  --color-editor-line: #2c313c;
+  --color-diff-insert: rgb(152 195 121 / 0.15);
+  --color-diff-insert-line: rgb(152 195 121 / 0.08);
+  --color-diff-remove: rgb(224 108 117 / 0.15);
+  --color-diff-remove-line: rgb(224 108 117 / 0.08);
+
+  --shadow-pop: 0 8px 28px rgb(0 0 0 / 0.45), 0 1px 3px rgb(0 0 0 / 0.3);
+}
+
+html[data-theme='light'] {
+  color-scheme: light;
+
+  --color-bg: #fafafa;
+  --color-side: #eaeaeb;
+  --color-raised: #ffffff;
+  --color-sunk: #f0f0f1;
+  --color-hover: #efeff0;
+  --color-sel: #e5e5e6;
+  --color-active: #dcdcde;
+  --color-scrim: rgb(40 44 52 / 0.18);
+
+  --color-fg: #383a42;
+  --color-fg-strong: #202227;
+  --color-muted: #696c77;
+  --color-faint: #8e9099;
+
+  --color-line: #d3d3d6;
+  --color-line-soft: #e1e1e3;
+  --color-focus: #526fff;
+  --color-on-focus: #ffffff;
+
+  --color-red: #e45649;
+  --color-green: #50a14f;
+  --color-yellow: #c18401;
+  --color-blue: #4078f2;
+  --color-purple: #a626a4;
+  --color-cyan: #0184bc;
+  --color-orange: #986801;
+  --color-on-accent: #ffffff;
+
+  --color-st-needs: #e45649;
+  --color-st-running: #c18401;
+  --color-st-unseen: #4078f2;
+  --color-st-done: #50a14f;
+  --color-st-pr: #a626a4;
+  --color-st-shell: #0184bc;
+  --color-st-idle: #8e9099;
+
+  --color-h-claude: #986801;
+  --color-h-codex: #0184bc;
+  --color-h-copilot: #a626a4;
+  --color-h-cursor: #4078f2;
+
+  --color-git-modified: #c18401;
+  --color-git-added: #50a14f;
+  --color-git-deleted: #e45649;
+  --color-git-renamed: #4078f2;
+  --color-git-conflict: #a626a4;
+
+  --color-term-bg: #fafafa;
+  --color-term-fg: #383a42;
+  --color-term-cursor: #526fff;
+  --color-term-selection: #d5dbf7;
+  --color-term-black: #383a42;
+  --color-term-red: #e45649;
+  --color-term-green: #50a14f;
+  --color-term-yellow: #986801;
+  --color-term-blue: #4078f2;
+  --color-term-magenta: #a626a4;
+  --color-term-cyan: #0184bc;
+  --color-term-white: #a0a1a7;
+  --color-term-bright-black: #4f525e;
+  --color-term-bright-red: #e06c75;
+  --color-term-bright-green: #50a14f;
+  --color-term-bright-yellow: #c18401;
+  --color-term-bright-blue: #4078f2;
+  --color-term-bright-magenta: #a626a4;
+  --color-term-bright-cyan: #0184bc;
+  --color-term-bright-white: #ffffff;
+
+  --color-syn-comment: #a0a1a7;
+  --color-syn-keyword: #a626a4;
+  --color-syn-string: #50a14f;
+  --color-syn-number: #986801;
+  --color-syn-type: #c18401;
+  --color-syn-tag: #e45649;
+  --color-syn-attr: #986801;
+  --color-syn-function: #4078f2;
+  --color-syn-regexp: #0184bc;
+  --color-editor-gutter: #9d9d9f;
+  --color-editor-line: #f0f0f1;
+  --color-diff-insert: rgb(80 161 79 / 0.18);
+  --color-diff-insert-line: rgb(80 161 79 / 0.08);
+  --color-diff-remove: rgb(228 86 73 / 0.18);
+  --color-diff-remove-line: rgb(228 86 73 / 0.08);
+
+  --shadow-pop: 0 10px 30px rgb(40 44 52 / 0.16), 0 1px 3px rgb(40 44 52 / 0.12);
+}
