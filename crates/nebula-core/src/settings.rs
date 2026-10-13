@@ -132,9 +132,16 @@ fn read_json(path: &Path) -> Result<Option<Value>, String> {
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(err) => return Err(err.to_string()),
     };
-    serde_json::from_str(&raw)
+    serde_json::from_str(strip_bom(&raw))
         .map(Some)
         .map_err(|err| format!("not valid JSON ({err})"))
+}
+
+/// `raw` without a leading UTF-8 byte order mark. Notepad and Windows
+/// PowerShell 5's `Set-Content -Encoding utf8` both write one, and
+/// serde_json rejects it as the first character of a document.
+pub fn strip_bom(raw: &str) -> &str {
+    raw.strip_prefix('\u{feff}').unwrap_or(raw)
 }
 
 /// A list file read entry by entry: the entries `T` reads, then the raw ones
@@ -347,6 +354,27 @@ mod tests {
         let loaded = load::<Sample>(&config, &local);
         assert_eq!(loaded.value, Sample::default());
         assert_eq!(loaded.problems.len(), 2, "{:?}", loaded.problems);
+    }
+
+    #[test]
+    fn a_byte_order_mark_is_read_past() {
+        // Notepad and PowerShell 5's Set-Content -Encoding utf8 both start
+        // the file with one; serde_json rejects it as the first character.
+        let dir = tempfile::tempdir().unwrap();
+        let (config, local) = (
+            dir.path().join("config.json"),
+            dir.path().join("config.local.json"),
+        );
+        std::fs::write(&config, "\u{feff}{\"count\": 4}").unwrap();
+        std::fs::write(&local, "\u{feff}{\"on\": false}").unwrap();
+        let loaded = load::<Sample>(&config, &local);
+        assert!(loaded.problems.is_empty(), "{:?}", loaded.problems);
+        assert_eq!(loaded.value.count, 4);
+        assert!(!loaded.value.on);
+        assert_eq!(read_object(&config).unwrap().unwrap()["count"], 4);
+        let list = dir.path().join("list.json");
+        std::fs::write(&list, "\u{feff}[{\"count\": 1}]").unwrap();
+        assert_eq!(read_list::<Sample>(&list).0.len(), 1);
     }
 
     #[test]
