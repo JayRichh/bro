@@ -80,14 +80,22 @@ fn handle_locked_pane_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequ
                 .keymap
                 .lookup(crate::keymap::Scope::Terminal, &chord)
                 == Some(crate::keymap::Action::UnlockTerminal);
-        // F10 reaches through a locked pane: no agent CLI takes a function
-        // key as text, and the ORCHESTRATOR VIEW is where the keys live
-        // most of the time, so leaving it must not need a hatch first.
-        if app
-            .chrome
-            .keymap
-            .lookup(crate::keymap::Scope::Global, &chord)
-            == Some(crate::keymap::Action::ToggleOrchestratorView)
+        // F10 reaches through a locked AGENT pane: no agent CLI takes a
+        // function key as text, and the ORCHESTRATOR VIEW is where the keys
+        // live most of the time, so leaving it must not need a hatch first.
+        // A terminal tab is the user's own shell, where F10 is htop's and
+        // mc's quit: there it stays the program's (`^q` first).
+        let agent_pane = app
+            .pane
+            .term
+            .as_ref()
+            .is_some_and(|t| matches!(t.sref, SessionRef::Agent(_)));
+        if (agent_pane || crate::orchestrator_view::active(app))
+            && app
+                .chrome
+                .keymap
+                .lookup(crate::keymap::Scope::Global, &chord)
+                == Some(crate::keymap::Action::ToggleOrchestratorView)
         {
             crate::key_combo::note(
                 app,

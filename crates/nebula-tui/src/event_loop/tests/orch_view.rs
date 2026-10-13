@@ -196,6 +196,29 @@ fn f10_opens_the_view_on_the_orchestrator_and_again_from_inside_it_leaves() {
     });
 }
 
+/// In a locked TERMINAL tab F10 is the shell program's (htop's and mc's
+/// quit), never the orchestrator view's.
+#[test]
+fn f10_in_a_locked_terminal_tab_goes_to_the_shell() {
+    with_default_config(|| {
+        let mut app = app_with_orchestrator();
+        let mut out = Vec::new();
+        let term = SessionRef::Terminal(nebula_core::TerminalId("t1".into()));
+        app.pane.term = Some(AttachedTerm::new(term.clone(), 80, 24));
+        app.nav.focus = Focus::Terminal;
+        app.pane.term_locked = true;
+        key(&mut app, KeyCode::F(10), &mut out);
+        assert!(!crate::orchestrator_view::active(&app));
+        assert!(app.modals.overlay.is_none());
+        assert_eq!(pane_on(&app), Some(term.clone()));
+        assert!(
+            out.iter()
+                .any(|r| matches!(r, ClientRequest::Input { session, .. } if *session == term)),
+            "{out:?}"
+        );
+    });
+}
+
 #[test]
 fn the_strip_shows_every_other_session_in_attention_order_and_collapses_when_narrow() {
     with_default_config(|| {

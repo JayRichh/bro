@@ -42,7 +42,8 @@ nobody has read, then the rest. A click on a chip opens the review modal on
 that session. Under 60 columns the strip collapses to one chip that counts the
 sessions and how many need you.
 
-- `F10` again goes back to the grid; it reaches through the locked pane.
+- `F10` again goes back to the grid; it reaches through a locked agent pane
+  (in a terminal tab F10 stays the shell program's, so `^q` first).
 - `^q` steps out of the orchestrator to the chips without leaving the view:
   `←`/`→` walk them, `Enter` reviews one, `Esc` goes back to typing, and `^q`
   again leaves for the grid.
