@@ -738,7 +738,6 @@ fn a_pane_scrolled_past_its_cursor_leaves_the_host_cursor_alone() {
 
 /// With the editor modal up every key goes to it, so the host cursor
 /// follows the editor's PTY cursor, not the attached pane's underneath.
-#[cfg(unix)]
 #[test]
 fn the_editor_modal_takes_the_host_cursor_over_the_pane() {
     use crate::app::{AttachedTerm, Focus};
@@ -753,8 +752,8 @@ fn the_editor_modal_takes_the_host_cursor_over_the_pane() {
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let dir = tempfile::tempdir().unwrap();
     let mut vim = crate::vim_term::VimTerm::spawn_cmd(
-        "/bin/sh",
-        &["-c".into(), "sleep 30".into()],
+        LONG_LIVED.0,
+        &LONG_LIVED.1.map(String::from),
         dir.path(),
         "a.txt:1".into(),
         80,
@@ -5820,6 +5819,19 @@ pub(super) fn with_default_config<T>(f: impl FnOnce() -> T) -> T {
 }
 
 /// Pin the config to a temp file holding `json` for the duration of `f`.
+/// A stand-in editor: a child that stays up whatever `+<line> <file>`
+/// it is handed.
+#[cfg(unix)]
+const STAND_IN_EDITOR: &str = "/bin/sh";
+#[cfg(windows)]
+const STAND_IN_EDITOR: &str = "cmd.exe";
+
+/// A child that stays up for the length of a test.
+#[cfg(unix)]
+const LONG_LIVED: (&str, [&str; 2]) = ("/bin/sh", ["-c", "sleep 30"]);
+#[cfg(windows)]
+const LONG_LIVED: (&str, [&str; 3]) = ("cmd.exe", ["/d", "/c", "ping -n 30 127.0.0.1 >nul"]);
+
 pub(super) fn with_config_json<T>(json: &str, f: impl FnOnce() -> T) -> T {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.json");
@@ -14017,7 +14029,6 @@ fn finder(app: &App) -> &crate::app::FileFinder {
     }
 }
 
-#[cfg(unix)]
 #[test]
 fn f_opens_file_finder_listing_tracked_and_untracked() {
     // Pinned to the legacy behavior: with `close_finder_on_open`
@@ -14056,7 +14067,7 @@ fn f_opens_file_finder_listing_tracked_and_untracked() {
         // open underneath. A shell stands in for vim (`sh +1 fresh.txt`
         // still spawns fine).
         if let Some(Overlay::Files(f)) = &mut app.modals.overlay {
-            f.editor = "/bin/sh".into();
+            f.editor = STAND_IN_EDITOR.into();
         }
         press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
         let vim = app
@@ -14093,7 +14104,6 @@ fn f_opens_file_finder_listing_tracked_and_untracked() {
 /// Enter on a markdown file reads it first: the FILE TABS take the
 /// finder's place with the rendered page, and Enter there is the
 /// editor. The same rule serves a `.md` ⌥clicked in the pane.
-#[cfg(unix)]
 #[test]
 fn a_markdown_file_from_the_finder_or_a_clicked_path_is_read_first() {
     let dir = tempfile::tempdir().unwrap();
@@ -14123,7 +14133,7 @@ fn a_markdown_file_from_the_finder_or_a_clicked_path_is_read_first() {
     // Enter in the tabs is the editor, embedded under the strip. A
     // shell stands in for vim.
     if let Some(Overlay::FileTabs(t)) = &mut app.modals.overlay {
-        t.editor = "/bin/sh".into();
+        t.editor = STAND_IN_EDITOR.into();
     }
     press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
     let vim = app.pane.vim.as_ref().expect("enter edits");
@@ -14145,7 +14155,7 @@ fn a_markdown_file_from_the_finder_or_a_clicked_path_is_read_first() {
     assert!(tabs.renders_markdown());
     assert!(app.pane.vim.is_none());
     app.modals.overlay = None;
-    with_config_json(r#"{"editor": "/bin/sh"}"#, || {
+    with_config_json(&format!(r#"{{"editor": {STAND_IN_EDITOR:?}}}"#), || {
         open_file_link(&mut app, "a.txt", Some(1));
     });
     assert!(app.modals.overlay.is_none(), "no tabs for a text file");
@@ -14156,7 +14166,6 @@ fn a_markdown_file_from_the_finder_or_a_clicked_path_is_read_first() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn close_finder_on_open_leaves_only_the_editor_modal() {
     let dir = tempfile::tempdir().unwrap();
@@ -14171,9 +14180,9 @@ fn close_finder_on_open_leaves_only_the_editor_modal() {
         let mut out = Vec::new();
 
         press(&mut app, KeyCode::Char('f'), KeyModifiers::NONE, &mut out);
-        // A shell stands in for vim (`sh +1 a.txt` still spawns fine).
+        // A shell stands in for vim ([`STAND_IN_EDITOR`] `+1 a.txt` still spawns fine).
         if let Some(Overlay::Files(f)) = &mut app.modals.overlay {
-            f.editor = "/bin/sh".into();
+            f.editor = STAND_IN_EDITOR.into();
         }
         press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
         assert!(app.pane.vim.is_some(), "enter spawns the editor modal");
@@ -14391,7 +14400,6 @@ fn ctrl_r_flips_a_markdown_preview_between_the_page_and_its_source() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn t_opens_tree_browser_folds_dirs_and_filters_hierarchies() {
     let dir = tempfile::tempdir().unwrap();
@@ -14438,7 +14446,7 @@ fn t_opens_tree_browser_folds_dirs_and_filters_hierarchies() {
     // Enter opens the selected file in an editor embedded in the
     // preview pane; the browser stays open. A shell stands in for vim.
     if let Some(Overlay::Tree(v)) = &mut app.modals.overlay {
-        v.editor = "/bin/sh".into();
+        v.editor = STAND_IN_EDITOR.into();
     }
     press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
     let vim = app.pane.vim.as_ref().expect("enter spawns the editor");
@@ -14589,7 +14597,6 @@ fn file_preview_gets_a_line_number_gutter_but_listings_dont() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn embedded_editor_takes_over_the_preview_pane() {
     let dir = tempfile::tempdir().unwrap();
@@ -14606,7 +14613,7 @@ fn embedded_editor_takes_over_the_preview_pane() {
     let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
     terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
     if let Some(Overlay::Tree(v)) = &mut app.modals.overlay {
-        v.editor = "/bin/sh".into();
+        v.editor = STAND_IN_EDITOR.into();
     }
     press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
     let pane = tree_view(&app).preview_area;
@@ -14640,7 +14647,6 @@ fn grep_view(app: &App) -> &crate::app::GrepView {
     }
 }
 
-#[cfg(unix)]
 fn fake_grep_view(hits: Vec<crate::grep_search::GrepHit>) -> GrepView {
     let mut view = GrepView::new(
         "/nonexistent-nebula-grep-test".into(),
@@ -14700,7 +14706,6 @@ fn shift_f_without_worktree_flashes() {
     assert_eq!(app.chrome.flash.as_deref(), Some("no worktree selected"));
 }
 
-#[cfg(unix)]
 #[test]
 fn grep_enter_spawns_editor_and_ctrl_q_closes_it() {
     // Pinned to the legacy behavior — the "lands back on the
@@ -14720,9 +14725,9 @@ fn grep_enter_spawns_editor_and_ctrl_q_closes_it() {
             press(&mut app, KeyCode::Char(c), KeyModifiers::NONE, &mut out);
         }
         assert_eq!(grep_view(&app).selected_hit().unwrap().path, "a.txt");
-        // A shell stands in for vim (`sh +1 a.txt` still spawns fine).
+        // A shell stands in for vim ([`STAND_IN_EDITOR`] `+1 a.txt` still spawns fine).
         if let Some(Overlay::Grep(v)) = &mut app.modals.overlay {
-            v.editor = "/bin/sh".into();
+            v.editor = STAND_IN_EDITOR.into();
         }
 
         press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
@@ -14758,7 +14763,6 @@ fn grep_enter_spawns_editor_and_ctrl_q_closes_it() {
     });
 }
 
-#[cfg(unix)]
 #[test]
 fn close_finder_on_open_also_closes_the_grep_overlay() {
     let dir = tempfile::tempdir().unwrap();
@@ -14774,9 +14778,9 @@ fn close_finder_on_open_also_closes_the_grep_overlay() {
         for c in "orig".chars() {
             press(&mut app, KeyCode::Char(c), KeyModifiers::NONE, &mut out);
         }
-        // A shell stands in for vim (`sh +1 a.txt` still spawns fine).
+        // A shell stands in for vim ([`STAND_IN_EDITOR`] `+1 a.txt` still spawns fine).
         if let Some(Overlay::Grep(v)) = &mut app.modals.overlay {
-            v.editor = "/bin/sh".into();
+            v.editor = STAND_IN_EDITOR.into();
         }
         press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
         assert!(app.pane.vim.is_some(), "enter spawns the editor modal");
@@ -14787,15 +14791,14 @@ fn close_finder_on_open_also_closes_the_grep_overlay() {
     });
 }
 
-#[cfg(unix)]
 #[test]
 fn stale_generation_editor_events_are_dropped() {
     let mut app = App::new();
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let dir = tempfile::tempdir().unwrap();
     let mut vim = crate::vim_term::VimTerm::spawn_cmd(
-        "/bin/sh",
-        &["-c".into(), "sleep 30".into()],
+        LONG_LIVED.0,
+        &LONG_LIVED.1.map(String::from),
         dir.path(),
         "a.txt:1".into(),
         80,
@@ -14837,7 +14840,6 @@ fn stale_generation_editor_events_are_dropped() {
     assert!(app.pane.vim.is_none());
 }
 
-#[cfg(unix)]
 #[test]
 fn grep_overlay_renders_hits_and_editor_modal_renders_on_top() {
     let mut app = App::new();
@@ -14871,8 +14873,8 @@ fn grep_overlay_renders_hits_and_editor_modal_renders_on_top() {
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let dir = tempfile::tempdir().unwrap();
     let mut vim = crate::vim_term::VimTerm::spawn_cmd(
-        "/bin/sh",
-        &["-c".into(), "sleep 30".into()],
+        LONG_LIVED.0,
+        &LONG_LIVED.1.map(String::from),
         dir.path(),
         "src/alpha.rs:3".into(),
         80,
@@ -20885,7 +20887,6 @@ fn files_opened_event_raises_the_file_tabs_previewing_the_first() {
 /// The one modal where Ctrl+Q backs out a level: from the editor it
 /// lands on the strip (editor killed, file re-read), from the preview
 /// it lands on the strip, and only from the strip does it close.
-#[cfg(unix)]
 #[test]
 fn file_tabs_ctrl_q_steps_back_to_the_strip_before_closing() {
     with_default_config(|| {
@@ -20896,10 +20897,10 @@ fn file_tabs_ctrl_q_steps_back_to_the_strip_before_closing() {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         app.pane.vim_tx = Some(tx);
         let mut out = Vec::new();
-        // A shell stands in for vim (`sh +1 a.md` still spawns fine).
+        // A shell stands in for vim ([`STAND_IN_EDITOR`] `+1 a.md` still spawns fine).
         app.modals.overlay = Some(Overlay::FileTabs(crate::file_tabs::FileTabsView::new(
             dir.path().to_path_buf(),
-            "/bin/sh".into(),
+            STAND_IN_EDITOR.into(),
             vec![a],
         )));
 
