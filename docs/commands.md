@@ -23,6 +23,7 @@ kete open <file>…         show files/images/diagrams in file tabs     (agents 
 kete sessions             list every session across every project     (agents run this)
 kete read <session>       read recent context from another session    (agents run this)
 kete ask <session> <q>    ask another session and print its answer    (agents run this)
+kete orchestrator <cmd>   start the one orchestrator; its own verbs   (see Orchestrator)
 kete config <cmd>         back up, restore or locate this machine's settings
 kete profile <cmd>        several accounts per harness: add, sign in, list, remove
 kete setup terminal       install a Nerd Font and add a "Kete" Windows Terminal profile
@@ -99,6 +100,15 @@ kete ask <session> "<question>" [--timeout S] [--no-wait]
                           # send a labelled question into another local agent, wait for that turn
                           # to finish, and print the answer. A busy target is queued until idle by
                           # default; --no-wait fails fast instead.
+kete orchestrator start [--kind K] [--profile P] [--project X] [--replace]
+                          # start the machine's one orchestrator (F10 in kete does the same),
+                          # in its own workspace under the data dir unless --project names one.
+kete orchestrator status [--json]
+                          # which session is the orchestrator, where it runs, what it is doing.
+kete orchestrator clear   # unpin it; the session keeps running as a worker.
+kete orchestrator list|read|send|spawn|review
+                          # the orchestrator session's own verbs, refused for every other caller.
+                          # See docs/orchestrator.md.
 ```
 
 ## Settings

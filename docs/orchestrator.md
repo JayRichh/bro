@@ -2,101 +2,151 @@
 
 <sub>[← README](../README.md) · [Keys](keys.md) · [Commands](commands.md) · [Sessions](sessions.md) · [Configuration](configuration.md) · [How it works](how-it-works.md)</sub>
 
-The ORCHESTRATOR view is a chat-first way to run kete. Instead of moving
-from project to project and opening each worktree by hand, the user keeps one
-pinned agent session in front of them and asks it to coordinate the rest.
+The ORCHESTRATOR is a chat-first way to run kete. Instead of moving from
+project to project and opening each worktree by hand, you keep one pinned agent
+session in front of you and ask it to coordinate the rest.
 
-## Shape of the feature
+## Starting one
 
-- **One orchestrator session.** The daemon persists a session role on agent rows.
-  Exactly that row is allowed to call the orchestrator-only socket commands.
-  The default harness is Claude, and the launch path can choose another harness
-  later without changing the permission model.
-- **Chat-first layout.** In orchestrator mode the orchestrator terminal owns the
-  main view. A compact status strip shows every live session on the machine in
-  the same attention order used by `.` and `,`: needs feedback, running, unseen
-  finishes, then the rest by recency.
-- **Review modal.** The orchestrator, or the user from the status strip, can open
-  a full-screen tabbed modal for one or more sessions. Tabs are terminal, diff,
-  history and pull request. The modal reuses the normal terminal pane, git diff
-  loader and pull request reader instead of inventing a second renderer.
-- **Mobile default.** `orchestrator_view` controls the startup mode: `auto`
-  switches to the orchestrator view on narrow terminals, `always` starts there
-  everywhere, and `never` keeps the grid default.
+- **`F10` in kete.** With no orchestrator on the machine, `F10` opens a small
+  prompt: the harness (Claude by default) and the profile to run it under.
+  `Enter` starts it and the view opens on it.
+- **`kete orchestrator start`** from your own shell does the same:
+  `--kind codex`, `--model`, `--effort`, `--profile work`, `--name`, and
+  `--project <id-or-name>` to run it in that project's root worktree instead.
+- **"Make orchestrator"** on any session card's menu pins an existing session.
+  If it is idle it is handed the orchestrator guidance as its next turn;
+  otherwise it gets it with its next cold start. **"Unpin orchestrator"** on the
+  orchestrator's card (or `kete orchestrator clear`) turns it back into an
+  ordinary session.
 
-## Agent-facing commands
+There is exactly **one orchestrator per machine**. Starting another is refused
+while one is running unless you pass `--replace`; pinning a session demotes
+whichever session held the role before (it keeps running, as a worker).
+`kete orchestrator status` says which session it is, where it runs and what it
+is doing.
 
-The orchestrator receives extra guidance in its system prompt. These commands
-use the same CLI-over-socket pattern as `kete spawn`, `kete worktree` and
-`kete open`, but they are daemon-gated to the persisted orchestrator session:
+**Where it runs.** Without `--project`, the orchestrator gets a workspace of its
+own: `<data dir>/orchestrator` (`%LOCALAPPDATA%\kete\data\orchestrator` on
+Windows), a git-initialized folder registered once as a project named
+`orchestrator`, which shows as its own project tab. Its hooks, notes and scratch
+files never land in one of your repos. Every later start reuses it.
 
-```sh
-kete orchestrator list [--json]
-kete orchestrator read <session-id> [--bytes N]
-kete orchestrator send <session-id> <prompt>
-kete orchestrator spawn --project <project-id-or-name> [--worktree <branch-or-id>] <prompt>
-kete orchestrator review <session-id> [--tab terminal|diff|history|pr]...
-```
+## The view
 
-The text format is compact and model-friendly. `--json` prints stable IDs and
-status fields so the orchestrator can call a later command without fuzzy
-matching a label. `read` is bounded by the daemon's tail cap and is intended for
-recent terminal output, not full transcript export.
+`F10` with an orchestrator opens the ORCHESTRATOR VIEW: its session takes the
+whole screen, input locked, so you are typing to it straight away. A strip
+across the top holds a chip for every other live session, in the attention
+order of `/`, `.` and `,`: needs input first, then running, then finished turns
+nobody has read, then the rest. A click on a chip opens the review modal on
+that session. Under 60 columns the strip collapses to one chip that counts the
+sessions and how many need you.
 
-## Permission model
-
-The socket is already same-user only, but orchestrator commands are still
-privileged: they can message other agents and open review UI in every client.
-Every orchestrator request carries the caller's `NEBULA_AGENT_ID`; the daemon
-checks that:
-
-1. the caller exists,
-2. it is not archived, and
-3. its persisted role is `orchestrator`.
-
-Prompt text alone is never trusted. A normal agent can read the guidance only if
-it was accidentally pasted into its context, but the daemon still refuses the
-request because its row is not marked as the orchestrator.
-
-The orchestrator also does not approve permission prompts for other agents. The
-default loop is tell-and-ask: report that a session is waiting and offer to open
-it in review. Higher-autonomy policy can be added later once the UI has a clear
-way to show what was approved and why.
-
-## Attention feed
-
-The robust first design is **poll-on-demand plus visible chips**, not injected
-prompts. The daemon already broadcasts status changes to every TUI, and the
-orchestrator can call `kete orchestrator list --json` whenever it needs a
-fresh state read. The TUI status strip updates immediately from the same
-events. This avoids writing unsolicited text into an idle chat box, avoids
-races with a model mid-turn, and still gives the user an always-visible feed of
-what needs attention.
-
-Future work may add rate-limited, clearly marked notes to the orchestrator only
-when it is idle. That should be opt-in because injected notes become model
-input, while the current list command is explicit and auditable.
+- `F10` again goes back to the grid; it reaches through the locked pane.
+- `^q` steps out of the orchestrator to the chips without leaving the view:
+  `←`/`→` walk them, `Enter` reviews one, `Esc` goes back to typing, and `^q`
+  again leaves for the grid.
+- The orchestrator's card wears a `◆ orchestrator` badge on the grid.
 
 ## Review modal
 
-The review modal is a tab shell around existing surfaces:
+The orchestrator (`kete orchestrator review`), or you from a chip, can open a
+tabbed modal over one or more sessions:
 
-- **Terminal** attaches to the selected session with the normal pane.
-- **Diff** opens the selected session's worktree diff through the existing git
-  diff view.
-- **History** starts with bounded recent output from the session tail; richer
-  transcript summaries can be layered behind the same tab later.
-- **PR** reads the pull request associated with the session's worktree when the
-  TUI has one cached.
+- **Terminal** is the session's own pane, live: the modal moves the pane onto
+  it, and puts the pane back where it was when the modal closes. `Enter`, or a
+  click on the screen, closes the modal into that session with its input locked.
+- **Diff** is the uncommitted diff of the session's worktree, every changed file,
+  read with the same git loader as the diff viewer.
+- **History** is the session's recent conversation from its harness transcript
+  when kete knows one, else its cleaned terminal output.
+- **PR** is the pull request on the session's checkout: its whole conversation
+  once it has been read (`v`), else its headline, or "no PR". `Enter` opens it
+  in the browser.
 
-`Tab` and `Shift+Tab` cycle tabs, `1`-`9` jump to a tab, and `Esc` closes back to
-the orchestrator chat. On phone-width terminals the modal is full-screen and the
-status strip collapses to a single line.
+`Tab`/`⇧Tab` and `1`-`4` switch tabs, `←`/`→` (or `[`/`]`) walk the sessions
+under review, `↑`/`↓` and `PgUp`/`PgDn` scroll, `Esc` closes. The title names
+the session, not its id.
+
+A review the orchestrator opens while you are typing into another session (or
+with another modal up) does not take the screen: a toast says so, and `F10`
+shows it.
+
+## Agent-facing commands
+
+The orchestrator's guidance is injected by role on every cold start: the
+harness's system-prompt flag where it has one (Claude's
+`--append-system-prompt`), or the opening of the first prompt for a harness
+without one (Codex, Cursor, ...). It is never handed a prewarmed session that
+booted as a worker. The commands use the same CLI-over-socket pattern as
+`kete spawn`, but the daemon refuses them unless the calling session is the
+persisted orchestrator:
+
+```sh
+kete orchestrator list [--json]
+kete orchestrator read <session> [--lines N] [--bytes N]
+kete orchestrator send <session> <prompt> [--no-wait] [--timeout S]
+kete orchestrator spawn --project <project> [--worktree <branch-or-id>] [--base <ref>]
+                        [--kind K] [--name N] [--model M] [--effort E] [--profile P] <task>
+kete orchestrator review <session>... [--tab terminal|diff|history|pr]...
+```
+
+Sessions are named by id, `terminal:<id>`, or an unambiguous fragment of their
+name, project or branch.
+
+- **list** prints every live session in attention order with a normalized
+  state (`needs_feedback`, `running`, `unread`, `idle`, `terminated`,
+  `disconnected`), its project, branch, harness, parent session and open
+  subagents. `--json` keeps the tree it always printed (`projects`,
+  `worktrees`, `agents`, `terminals`, `links`) and adds `sessions`, the ordered
+  rows.
+- **read** is transcript-aware with the cleaned terminal tail as fallback;
+  `--bytes` reads the raw bounded tail instead.
+- **send** labels the turn `[from orchestrator]`, waits for a busy target to go
+  idle (or refuses with `--no-wait`), and refuses the orchestrator itself.
+- **spawn** starts a worker on a self-contained task, in a fresh worktree when
+  `--worktree` names a branch that has none.
+- **review** opens the review modal in every attached kete over all the named
+  sessions.
+
+The everyday `kete sessions`, `kete read` and `kete ask` work in the
+orchestrator too. Azure DevOps commands (`kete ado ...`) are reserved in the
+guidance for a later release.
+
+## Permission model
+
+The socket is same-user only, but orchestrator commands are privileged: they can
+message other agents and open review UI in every client. Every orchestrator
+request carries the caller's `NEBULA_AGENT_ID`, and the daemon checks the caller
+exists, is not archived, and holds the `orchestrator` role in its database.
+Prompt text is never trusted.
+
+Granting the role is guarded too:
+
+- `CreateAgent` can no longer create an orchestrator; only `StartOrchestrator`
+  and `SetOrchestrator` grant the role.
+- Those requests, and `ClearOrchestrator`, are refused when the client process
+  runs inside a live agent session (the daemon walks the process table from the
+  client's pid up to a session's PTY child), so a worker cannot mint or become
+  the orchestrator through its own shell. A kete terminal tab is your own shell
+  and may.
+- A partial unique index on the role makes a second orchestrator row impossible
+  from any path.
+
+The orchestrator does not approve permission prompts for other agents. Its loop
+is tell-then-ask: report that a session is waiting and offer to open it in
+review.
+
+## Attention feed
+
+The design is **poll-on-demand plus visible chips**, not injected prompts. The
+daemon broadcasts status changes to every client; the strip updates from them at
+once, and the orchestrator calls `kete orchestrator list` whenever it needs a
+fresh read. Nothing is written into its chat box unasked.
 
 ## Follow-ups
 
-- First-class transcript summaries per harness instead of terminal-tail history.
+- The `orchestrator_view` setting (`auto` on narrow terminals, `always`,
+  `never`) for the startup mode.
 - Optional idle-note injection for the orchestrator, behind an autonomy setting.
-- Multiple review subjects in one modal, once the single-session tab shell has
-  had real use.
-- A richer spawn target grammar for project aliases and worktree creation bases.
+- Azure DevOps commands (`kete ado ...`).
