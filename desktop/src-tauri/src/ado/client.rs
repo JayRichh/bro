@@ -95,7 +95,7 @@ impl AdoClient {
         let http = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
             .build()
-            .unwrap_or_default();
+            .expect("reqwest client");
         Self {
             http,
             tokens,
@@ -160,8 +160,9 @@ impl AdoClient {
         body: Option<&serde_json::Value>,
     ) -> Result<T, AdoError> {
         let url = self.url(path);
-        let auth = self.tokens.token(&self.org_url).await?.header();
+        let mut auth = self.tokens.token(&self.org_url).await?.header();
         let mut retried = false;
+        let mut reauthed = false;
         loop {
             let mut req = self
                 .http
@@ -176,6 +177,14 @@ impl AdoClient {
                 .await
                 .map_err(|e| AdoError::Network(e.without_url().to_string()))?;
             let status = resp.status();
+            if status == StatusCode::UNAUTHORIZED && !reauthed {
+                // The credential was refused: drop it, tell GCM, and try
+                // once more with a fresh one.
+                reauthed = true;
+                self.tokens.reject(&self.org_url).await;
+                auth = self.tokens.token(&self.org_url).await?.header();
+                continue;
+            }
             if !retried
                 && (status == StatusCode::TOO_MANY_REQUESTS
                     || status == StatusCode::SERVICE_UNAVAILABLE)
@@ -241,6 +250,7 @@ fn message_of(body: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ado::auth::fake::Fake;
     use crate::ado::auth::{Credential, TokenSource};
     use httpmock::prelude::*;
     use serde_json::json;
@@ -310,6 +320,35 @@ mod tests {
         let v: serde_json::Value = c.get("/p/_apis/x").await.unwrap();
         assert_eq!(v["ok"], 1);
         assert_eq!(server.await.unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn second_429_is_returned() {
+        let s = MockServer::start();
+        let m = s.mock(|w, t| {
+            w.path("/p/_apis/x");
+            t.status(429).header("Retry-After", "0");
+        });
+        let c = test_client(&s, Credential::Bearer("tok".into()));
+        let e = c.get::<serde_json::Value>("/p/_apis/x").await.unwrap_err();
+        assert!(matches!(e, AdoError::Http(429, _)));
+        assert_eq!(m.hits(), 2);
+    }
+
+    #[tokio::test]
+    async fn unauthorized_rejects_and_retries_once() {
+        let s = MockServer::start();
+        let m = s.mock(|w, t| {
+            w.path("/p/_apis/x");
+            t.status(401);
+        });
+        let r = Fake::new().on("git", "password=pat\n");
+        let c = AdoClient::new(&s.base_url(), Arc::new(TokenSource::new(r.clone())));
+        let e = c.get::<serde_json::Value>("/p/_apis/x").await.unwrap_err();
+        assert!(matches!(e, AdoError::Unauthorized));
+        assert_eq!(m.hits(), 2);
+        assert_eq!(r.count("git", "reject"), 1);
+        assert_eq!(r.count("git", "fill"), 2);
     }
 
     #[tokio::test]
