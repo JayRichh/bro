@@ -1,10 +1,12 @@
 //! Azure DevOps: remote parsing, branch naming, tokens, the REST client,
 //! the `ado.json` store, and the per-repo context the commands work in.
-#![allow(dead_code)]
 
 pub mod auth;
 pub mod branches;
 pub mod client;
+// The slug and template helpers wait for a branch-name suggestion
+// command; only `initials` and `validate_branch_name` are called today.
+#[allow(dead_code)]
 pub mod naming;
 pub mod prs;
 pub mod remote;
@@ -180,15 +182,11 @@ pub struct AdoContext {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectMeta {
-    pub id: String,
-    pub name: String,
     pub default_team: Option<TeamRef>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TeamRef {
-    #[serde(default)]
-    pub id: String,
     pub name: String,
 }
 

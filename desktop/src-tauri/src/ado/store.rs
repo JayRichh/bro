@@ -104,11 +104,14 @@ impl AdoStore {
         }
     }
 
+    #[cfg(test)]
     pub fn path(&self) -> &Path {
         &self.path
     }
 
     /// The last load or write error, cleared by reading it.
+    // No command surfaces store errors yet; see the integration report.
+    #[allow(dead_code)]
     pub fn take_last_error(&self) -> Option<String> {
         self.last_error
             .lock()

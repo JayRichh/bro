@@ -181,6 +181,9 @@ pub struct ReviewerVote {
     /// 10 approved, 5 approved with suggestions, 0 no vote, -5 waiting for
     /// author, -10 rejected.
     pub vote: i8,
+    /// The vote in words ([`vote_label`]), so the UI never shows it as
+    /// colour alone.
+    pub label: &'static str,
     pub required: bool,
 }
 
@@ -276,15 +279,19 @@ fn summary_from(v: &Value, org_url: &str) -> Option<PrSummary> {
         .and_then(Value::as_array)
         .map(|rs| {
             rs.iter()
-                .map(|r| ReviewerVote {
-                    id: str_at(r, &["id"]),
-                    name: str_at(r, &["displayName"]),
-                    vote: r
+                .map(|r| {
+                    let vote = r
                         .get("vote")
                         .and_then(Value::as_i64)
                         .unwrap_or(0)
-                        .clamp(-10, 10) as i8,
-                    required: r.get("isRequired").and_then(Value::as_bool) == Some(true),
+                        .clamp(-10, 10) as i8;
+                    ReviewerVote {
+                        id: str_at(r, &["id"]),
+                        name: str_at(r, &["displayName"]),
+                        vote,
+                        label: vote_label(vote),
+                        required: r.get("isRequired").and_then(Value::as_bool) == Some(true),
+                    }
                 })
                 .collect()
         })
@@ -1078,7 +1085,7 @@ mod tests {
         assert_eq!(votes, vec![10, 5, 0, -5, -10]);
         assert!(pr.reviewers[0].required);
         assert!(!pr.reviewers[1].required);
-        let labels: Vec<&str> = votes.iter().map(|v| vote_label(*v)).collect();
+        let labels: Vec<&str> = pr.reviewers.iter().map(|r| r.label).collect();
         assert_eq!(
             labels,
             vec![
