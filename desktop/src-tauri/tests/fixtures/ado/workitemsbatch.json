@@ -1,0 +1,135 @@
+{
+  "count": 5,
+  "value": [
+    {
+      "id": 100,
+      "rev": 12,
+      "fields": {
+        "System.Id": 100,
+        "System.AreaPath": "Platform\\Payments",
+        "System.TeamProject": "Platform",
+        "System.IterationPath": "Platform\\Sprint 42",
+        "System.WorkItemType": "User Story",
+        "System.State": "Active",
+        "System.Reason": "Implementation started",
+        "System.AssignedTo": {
+          "displayName": "Jay Richardson",
+          "url": "https://spsprodaue1.vssps.visualstudio.com/A1/_apis/Identities/4f6e2c8a-7b1d-6c3e-9f2a-1b4d5e6f7a8b",
+          "id": "4f6e2c8a-7b1d-6c3e-9f2a-1b4d5e6f7a8b",
+          "uniqueName": "jay@tnt.co.nz",
+          "descriptor": "aad.NGY2ZTJjOGEtN2IxZC03YzNlLTlmMmEtMWI0ZDVlNmY3YThi"
+        },
+        "System.CreatedDate": "2026-09-28T22:01:13.54Z",
+        "System.ChangedDate": "2026-10-03T01:44:02.11Z",
+        "System.Title": "GST rounding on invoices",
+        "System.BoardColumn": "Doing",
+        "System.BoardColumnDone": false,
+        "System.Parent": 300,
+        "System.Description": "<div>Invoices round GST per line.</div>",
+        "Microsoft.VSTS.Common.AcceptanceCriteria": "<ul><li>Totals match the ledger</li><li>Rounding is per invoice</li></ul>",
+        "Microsoft.VSTS.Scheduling.StoryPoints": 5.0
+      },
+      "relations": [
+        {
+          "rel": "System.LinkTypes.Hierarchy-Reverse",
+          "url": "https://dev.azure.com/tnt/6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c/_apis/wit/workItems/300",
+          "attributes": { "isLocked": false, "name": "Parent" }
+        },
+        {
+          "rel": "System.LinkTypes.Hierarchy-Forward",
+          "url": "https://dev.azure.com/tnt/6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c/_apis/wit/workItems/101",
+          "attributes": { "isLocked": false, "name": "Child" }
+        }
+      ],
+      "url": "https://dev.azure.com/tnt/6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c/_apis/wit/workItems/100"
+    },
+    {
+      "id": 101,
+      "rev": 4,
+      "fields": {
+        "System.Id": 101,
+        "System.AreaPath": "Platform\\Payments",
+        "System.TeamProject": "Platform",
+        "System.IterationPath": "Platform\\Sprint 42",
+        "System.WorkItemType": "Task",
+        "System.State": "To Do",
+        "System.Reason": "New task",
+        "System.CreatedDate": "2026-10-01T20:15:00.00Z",
+        "System.ChangedDate": "2026-10-02T03:10:00.00Z",
+        "System.Title": "Fix GST rounding",
+        "System.BoardColumn": "To Do",
+        "Microsoft.VSTS.Scheduling.RemainingWork": 3.0,
+        "System.Description": "<p>a</p><ul><li>b</li></ul>"
+      },
+      "relations": [
+        {
+          "rel": "System.LinkTypes.Hierarchy-Reverse",
+          "url": "https://dev.azure.com/tnt/6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c/_apis/wit/workItems/100",
+          "attributes": { "isLocked": false, "name": "Parent" }
+        }
+      ],
+      "url": "https://dev.azure.com/tnt/6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c/_apis/wit/workItems/101"
+    },
+    {
+      "id": 102,
+      "rev": 9,
+      "fields": {
+        "System.Id": 102,
+        "System.WorkItemType": "Task",
+        "System.State": "Done",
+        "System.AssignedTo": {
+          "displayName": "Sam Lee",
+          "id": "9a8b7c6d-0000-4e5f-8a9b-0c1d2e3f4a5b",
+          "uniqueName": "sam@tnt.co.nz"
+        },
+        "System.Title": "Write rounding tests",
+        "System.BoardColumn": "Done",
+        "Microsoft.VSTS.Scheduling.RemainingWork": 0.0,
+        "System.Parent": 100
+      },
+      "url": "https://dev.azure.com/tnt/6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c/_apis/wit/workItems/102"
+    },
+    {
+      "id": 103,
+      "rev": 2,
+      "fields": {
+        "System.Id": 103,
+        "System.WorkItemType": "Task",
+        "System.State": "In Progress",
+        "System.AssignedTo": {
+          "displayName": "Jay Richardson",
+          "id": "4f6e2c8a-7b1d-6c3e-9f2a-1b4d5e6f7a8b",
+          "uniqueName": "jay@tnt.co.nz"
+        },
+        "System.Title": "Update tax docs",
+        "System.Description": "<p>See <a href=\"https://wiki.tnt.co.nz/tax\">the wiki</a> &amp; <b>update</b> it.</p>"
+      },
+      "relations": [
+        {
+          "rel": "System.LinkTypes.Hierarchy-Reverse",
+          "url": "https://dev.azure.com/tnt/6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c/_apis/wit/workItems/300",
+          "attributes": { "isLocked": false, "name": "Parent" }
+        }
+      ],
+      "url": "https://dev.azure.com/tnt/6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c/_apis/wit/workItems/103"
+    },
+    {
+      "id": 200,
+      "rev": 3,
+      "fields": {
+        "System.Id": 200,
+        "System.WorkItemType": "Bug",
+        "System.State": "New",
+        "System.AssignedTo": {
+          "displayName": "Jay Richardson",
+          "id": "4f6e2c8a-7b1d-6c3e-9f2a-1b4d5e6f7a8b",
+          "uniqueName": "jay@tnt.co.nz"
+        },
+        "System.Title": "Login fails after password reset",
+        "System.BoardColumn": "New",
+        "Microsoft.VSTS.TCM.ReproSteps": "<ol><li>Reset password</li><li>Sign in</li></ol>"
+      },
+      "url": "https://dev.azure.com/tnt/6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c/_apis/wit/workItems/200"
+    }
+  ]
+}

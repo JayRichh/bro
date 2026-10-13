@@ -1,0 +1,9 @@
+{
+  "count": 4,
+  "value": [
+    { "name": "Task", "referenceName": "Microsoft.VSTS.WorkItemTypes.Task", "description": "Tracks work that needs to be done.", "color": "F2CB1D", "isDisabled": false, "url": "https://dev.azure.com/tnt/_apis/wit/workItemTypes/Task" },
+    { "name": "User Story", "referenceName": "Microsoft.VSTS.WorkItemTypes.UserStory", "description": "Tracks an activity the user will be able to perform with the product", "color": "009CCC", "isDisabled": false, "url": "https://dev.azure.com/tnt/_apis/wit/workItemTypes/User%20Story" },
+    { "name": "Bug", "referenceName": "Microsoft.VSTS.WorkItemTypes.Bug", "description": "Describes a divergence between required and actual behavior.", "color": "CC293D", "isDisabled": false, "url": "https://dev.azure.com/tnt/_apis/wit/workItemTypes/Bug" },
+    { "name": "Shared Parameter", "referenceName": "Microsoft.VSTS.WorkItemTypes.SharedParameter", "description": "", "color": "004B50", "isDisabled": true, "url": "https://dev.azure.com/tnt/_apis/wit/workItemTypes/Shared%20Parameter" }
+  ]
+}

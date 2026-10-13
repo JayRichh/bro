@@ -1,0 +1,56 @@
+{
+  "count": 5,
+  "value": [
+    {
+      "id": "c2f0c9a3-2c66-4e8b-a3c6-6f8b2c5e0a41",
+      "name": "Sprint 44",
+      "path": "Platform\\Sprint 44",
+      "attributes": {
+        "startDate": "2026-10-29T00:00:00Z",
+        "finishDate": "2026-11-11T00:00:00Z",
+        "timeFrame": "future"
+      },
+      "url": "https://dev.azure.com/tnt/_apis/work/teamsettings/iterations/c2f0c9a3-2c66-4e8b-a3c6-6f8b2c5e0a41"
+    },
+    {
+      "id": "0d7c3b8e-5d0a-4c1e-9a9b-8f1e2d3c4b55",
+      "name": "Sprint 41",
+      "path": "Platform\\Sprint 41",
+      "attributes": {
+        "startDate": "2026-09-17T00:00:00Z",
+        "finishDate": "2026-09-30T00:00:00Z",
+        "timeFrame": "past"
+      },
+      "url": "https://dev.azure.com/tnt/_apis/work/teamsettings/iterations/0d7c3b8e-5d0a-4c1e-9a9b-8f1e2d3c4b55"
+    },
+    {
+      "id": "a589a806-bf11-4d4f-a031-c19813331553",
+      "name": "Sprint 42",
+      "path": "Platform\\Sprint 42",
+      "attributes": {
+        "startDate": "2026-10-01T00:00:00Z",
+        "finishDate": "2026-10-14T00:00:00Z",
+        "timeFrame": "current"
+      },
+      "url": "https://dev.azure.com/tnt/_apis/work/teamsettings/iterations/a589a806-bf11-4d4f-a031-c19813331553"
+    },
+    {
+      "id": "7b1e4f0a-9c2d-4e3f-8a1b-2c3d4e5f6a77",
+      "name": "Sprint 43",
+      "path": "Platform\\Sprint 43",
+      "attributes": {
+        "startDate": "2026-10-15T00:00:00Z",
+        "finishDate": "2026-10-28T00:00:00Z",
+        "timeFrame": "future"
+      },
+      "url": "https://dev.azure.com/tnt/_apis/work/teamsettings/iterations/7b1e4f0a-9c2d-4e3f-8a1b-2c3d4e5f6a77"
+    },
+    {
+      "id": "e0e0e0e0-1111-2222-3333-444444444444",
+      "name": "Backlog",
+      "path": "Platform\\Backlog",
+      "attributes": {},
+      "url": "https://dev.azure.com/tnt/_apis/work/teamsettings/iterations/e0e0e0e0-1111-2222-3333-444444444444"
+    }
+  ]
+}

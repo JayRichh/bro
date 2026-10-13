@@ -1,0 +1,19 @@
+{
+  "id": "5febef5a-833d-4e14-b9c0-14cb638f91e6",
+  "name": "api",
+  "url": "https://dev.azure.com/tnt/6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c/_apis/git/repositories/5febef5a-833d-4e14-b9c0-14cb638f91e6",
+  "project": {
+    "id": "6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c",
+    "name": "Platform",
+    "url": "https://dev.azure.com/tnt/_apis/projects/6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c",
+    "state": "wellFormed",
+    "revision": 411,
+    "visibility": "private"
+  },
+  "defaultBranch": "refs/heads/main",
+  "size": 1048576,
+  "remoteUrl": "https://tnt@dev.azure.com/tnt/Platform/_git/api",
+  "sshUrl": "git@ssh.dev.azure.com:v3/tnt/Platform/api",
+  "webUrl": "https://dev.azure.com/tnt/Platform/_git/api",
+  "isDisabled": false
+}

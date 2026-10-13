@@ -1,0 +1,15 @@
+{
+  "id": "6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c",
+  "name": "Platform",
+  "description": "Platform services",
+  "url": "https://dev.azure.com/tnt/_apis/projects/6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c",
+  "state": "wellFormed",
+  "revision": 411,
+  "visibility": "private",
+  "lastUpdateTime": "2026-09-30T21:10:04.43Z",
+  "defaultTeam": {
+    "id": "66df9be7-3586-467b-9c5f-425b29afedfd",
+    "name": "Platform Team",
+    "url": "https://dev.azure.com/tnt/_apis/projects/6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c/teams/66df9be7-3586-467b-9c5f-425b29afedfd"
+  }
+}

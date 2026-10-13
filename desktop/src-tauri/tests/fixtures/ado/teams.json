@@ -1,0 +1,23 @@
+{
+  "value": [
+    {
+      "id": "66df9be7-3586-467b-9c5f-425b29afedfd",
+      "name": "Platform Team",
+      "url": "https://dev.azure.com/tnt/_apis/projects/6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c/teams/66df9be7-3586-467b-9c5f-425b29afedfd",
+      "description": "The default project team.",
+      "identityUrl": "https://spsprodaue1.vssps.visualstudio.com/A1/_apis/Identities/66df9be7-3586-467b-9c5f-425b29afedfd",
+      "projectName": "Platform",
+      "projectId": "6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c"
+    },
+    {
+      "id": "8e8aa3d3-6b2f-4f0b-9b1f-0b0c8b3c1a11",
+      "name": "Billing",
+      "url": "https://dev.azure.com/tnt/_apis/projects/6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c/teams/8e8aa3d3-6b2f-4f0b-9b1f-0b0c8b3c1a11",
+      "description": "",
+      "identityUrl": "https://spsprodaue1.vssps.visualstudio.com/A1/_apis/Identities/8e8aa3d3-6b2f-4f0b-9b1f-0b0c8b3c1a11",
+      "projectName": "Platform",
+      "projectId": "6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c"
+    }
+  ],
+  "count": 2
+}

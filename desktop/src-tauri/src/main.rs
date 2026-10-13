@@ -118,9 +118,11 @@ fn default_agent_name(model: &Model) -> String {
     format!("agent-{}", n + 1)
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct NewAgent {
+    /// Empty when the worktree does not exist yet (Start task fills it).
+    #[serde(default)]
     worktree: String,
     kind: String,
     profile: Option<String>,
@@ -129,6 +131,10 @@ struct NewAgent {
 
 #[tauri::command]
 async fn create_agent(client: State<'_, Arc<Client>>, spec: NewAgent) -> Res<String> {
+    spawn_agent(&client, spec).await
+}
+
+async fn spawn_agent(client: &Client, spec: NewAgent) -> Res<String> {
     let kind =
         AgentKind::parse(&spec.kind).ok_or_else(|| format!("unknown harness {}", spec.kind))?;
     let name = default_agent_name(&client.snapshot());
@@ -576,14 +582,15 @@ fn main() {
     // window has no console to say so on; `kete` says it when it moves them.
     let _ = nebula_core::paths::migrate_legacy_dirs();
     let client = Client::new();
-    let ado_prs_state = Arc::new(PrState::new(
-        Arc::new(TokenSource::system()),
-        Arc::new(AdoStore::open(AdoStore::default_path())),
-    ));
+    // One token source and one ado.json store for every ADO command.
+    let ado_tokens = Arc::new(TokenSource::system());
+    let ado_store = Arc::new(AdoStore::open(AdoStore::default_path()));
+    let ado_prs_state = Arc::new(PrState::new(ado_tokens.clone(), ado_store.clone()));
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(client.clone())
         .manage(ado_prs_state.clone())
+        .manage(ado::AdoState::new(ado_store, ado_tokens))
         .setup(move |app| {
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(daemon::run(client.clone()));
@@ -624,6 +631,13 @@ fn main() {
             ado::branches::ado_fetch,
             ado::branches::ado_checkout_worktree,
             ado::branches::ado_delete_local,
+            // ADO tasks (Tasks 6 and 10)
+            ado::tasks::ado_teams,
+            ado::tasks::ado_iterations,
+            ado::tasks::ado_tasks,
+            ado::tasks::ado_set_team,
+            ado::tasks::ado_task_prompt,
+            ado::tasks::ado_start_task,
         ])
         .run(tauri::generate_context!())
         .expect("kete-desktop failed to start");
