@@ -187,6 +187,7 @@ impl Daemon {
             name
         };
         self.create_agent(CreateAgentSpec {
+            parent: Some(caller.clone()),
             profile: None,
             worktree: worktree.id,
             name,
@@ -320,6 +321,7 @@ mod tests {
 
     fn agent(id: &str, role: AgentRole) -> Agent {
         Agent {
+            parent: None,
             profile: None,
             id: AgentId(id.into()),
             worktree_id: WorktreeId("w".into()),

@@ -344,6 +344,7 @@ mod tests {
             app,
             ServerEvent::EntityUpserted {
                 entity: Entity::Agent(Agent {
+                    parent: None,
                     profile: None,
                     id: AgentId("a9".into()),
                     worktree_id: worktree.clone(),

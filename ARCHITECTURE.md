@@ -15,12 +15,17 @@ IPC is length-prefixed MessagePack: the client sends `ClientRequest`s (CRUD, att
 
 The handshake advertises `PROTOCOL_VERSION` and accepts any peer at or above
 `MIN_COMPATIBLE_PROTOCOL`. Bump `PROTOCOL_VERSION` for every IPC schema
-change. Leave `MIN_COMPATIBLE_PROTOCOL` alone for additive changes that older
-peers can safely ignore or never send: new optional struct fields must carry
-`#[serde(default)]`, and a new request/event kind must be gated so a peer that
-does not know it is never asked to decode it. Bump both constants when a change
-removes or renames a field or variant, changes the meaning of existing data, or
-otherwise requires every connected client and daemon to move together. The
+change. Leave `MIN_COMPATIBLE_PROTOCOL` alone only for additive changes that
+older peers never decode: a new request kind the daemon only answers, or a new
+event kind gated so a peer that does not know it is never sent it. A new field
+on a struct or variant that older peers receive is *not* one of those: frames
+are positional, so the old decoder finds an element too many and drops the
+connection (`LengthMismatch`). Put such a field last with `#[serde(default)]`
+(so this build still reads the old shape) and bump both constants, so the old
+peer is refused cleanly at the handshake instead (protocol 53, which added
+`Agent.parent` and `Snapshot.subagents`, did this). Bump both constants too when
+a change removes or renames a field or variant, changes the meaning of existing
+data, or otherwise requires every connected client and daemon to move together. The
 compact MessagePack enum frames make the handshake itself part of that stable
 surface: do not add fields to `Hello`/`HelloOk` as an additive change.
 

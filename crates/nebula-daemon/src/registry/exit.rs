@@ -44,6 +44,11 @@ impl Daemon {
                             SessionRef::Agent(id) => daemon.take_resume_watch(id, &session),
                             SessionRef::Terminal(_) => None,
                         };
+                        // Any exit, deliberate or not: the process its
+                        // subagents ran in is gone either way.
+                        if let SessionRef::Agent(id) = &sref {
+                            daemon.close_subagents(id);
+                        }
                         if !was_registered {
                             break;
                         }

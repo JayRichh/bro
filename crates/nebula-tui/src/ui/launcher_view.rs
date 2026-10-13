@@ -3814,6 +3814,7 @@ mod tests {
             .collect();
         app.tree.agents = (0..2)
             .map(|i| Agent {
+                parent: None,
                 profile: None,
                 id: AgentId(format!("a{i}")),
                 worktree_id: WorktreeId(format!("w{i}")),
@@ -3847,6 +3848,7 @@ mod tests {
         let one = app.tree.agents[0].clone();
         app.tree.agents = (0..count)
             .map(|i| Agent {
+                parent: None,
                 id: AgentId(format!("api{i}")),
                 worktree_id: WorktreeId("w0".into()),
                 name: format!("session {i}"),
@@ -4375,6 +4377,7 @@ mod tests {
             .collect();
         app.tree.agents = (0..count)
             .map(|i| Agent {
+                parent: None,
                 id: AgentId(format!("api{i}")),
                 worktree_id: WorktreeId(format!("wt{i}")),
                 name: format!("session {i}"),
@@ -5033,6 +5036,7 @@ mod tests {
             pr: None,
             cards: vec![crate::launcher::Card::Session(LauncherRow {
                 agent: Agent {
+                    parent: None,
                     profile: None,
                     id: AgentId("a1".into()),
                     worktree_id: WorktreeId("w1".into()),
@@ -5270,6 +5274,7 @@ mod tests {
     fn a_cards_frame_answers_to_its_status_under_the_focus() {
         use nebula_core::{Agent, AgentId, AgentKind, AgentStatus, WorktreeId};
         let base = Agent {
+            parent: None,
             profile: None,
             id: AgentId("a1".into()),
             worktree_id: WorktreeId("w1".into()),
@@ -5338,11 +5343,13 @@ mod tests {
         );
         assert_eq!(frame(with(AgentStatus::Fresh, false), false, true), th.edge);
         let cold = Agent {
+            parent: None,
             alive: false,
             ..with(AgentStatus::Running, false)
         };
         assert_eq!(frame(cold, false, true), th.edge);
         let archived = Agent {
+            parent: None,
             archived: true,
             ..with(AgentStatus::NeedsFeedback, false)
         };
@@ -5380,6 +5387,7 @@ mod tests {
         use nebula_core::{Agent, AgentId, AgentKind, AgentStatus, WorktreeId};
         let row = LauncherRow {
             agent: Agent {
+                parent: None,
                 profile: None,
                 id: AgentId("a1".into()),
                 worktree_id: WorktreeId("w1".into()),
@@ -5437,6 +5445,7 @@ mod tests {
         use nebula_core::{Agent, AgentId, AgentKind, AgentStatus, WorktreeId};
         let row = LauncherRow {
             agent: Agent {
+                parent: None,
                 profile: None,
                 id: AgentId("a1".into()),
                 worktree_id: WorktreeId("w1".into()),
@@ -5587,6 +5596,7 @@ mod tests {
         fn card(archived: bool) -> LauncherRow {
             LauncherRow {
                 agent: Agent {
+                    parent: None,
                     profile: None,
                     id: AgentId("a1".into()),
                     worktree_id: WorktreeId("w1".into()),

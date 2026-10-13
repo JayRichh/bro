@@ -295,6 +295,7 @@ impl Daemon {
         let head = validate_head(&head)?;
         let worktree = self.pr_worktree(&project, number, &head).await?;
         self.create_agent(CreateAgentSpec {
+            parent: None,
             profile,
             worktree: worktree.id,
             name,

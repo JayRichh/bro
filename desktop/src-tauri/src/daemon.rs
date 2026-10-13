@@ -13,8 +13,8 @@ use base64::Engine;
 use nebula_core::codec::{read_frame, write_frame};
 use nebula_core::ports::WorktreePorts;
 use nebula_core::{
-    paths, Agent, ClientRequest, Entity, EntityId, Project, ServerEvent, SessionRef, TerminalTab,
-    Worktree, PROTOCOL_VERSION,
+    paths, Agent, ClientRequest, Entity, EntityId, Project, ServerEvent, SessionRef,
+    SubagentStatus, SubagentSummary, TerminalTab, Worktree, PROTOCOL_VERSION, SUBAGENTS_ENDED_KEPT,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -46,6 +46,10 @@ pub struct Model {
     pub worktrees: Vec<Worktree>,
     pub agents: Vec<Agent>,
     pub terminals: Vec<TerminalTab>,
+    /// Claude's in-session subagents, open and recently ended; each
+    /// hangs off the agent named by its `parent_agent`. Agents carry
+    /// their own `parent` for sessions started with `kete spawn`.
+    pub subagents: Vec<SubagentSummary>,
     pub ports: Vec<WorktreePorts>,
     /// Open pull request per worktree id, looked up with `gh`.
     pub prs: HashMap<String, PrInfo>,
@@ -215,6 +219,7 @@ impl Client {
                 worktrees,
                 agents,
                 terminals,
+                subagents,
                 ..
             } => {
                 let mut m = self.model.lock().expect("model lock");
@@ -222,6 +227,7 @@ impl Client {
                 m.worktrees = worktrees;
                 m.agents = agents;
                 m.terminals = terminals;
+                m.subagents = subagents;
                 drop(m);
                 self.touch();
             }
@@ -242,7 +248,10 @@ impl Client {
                 match id {
                     EntityId::Project(id) => m.projects.retain(|x| x.id != id),
                     EntityId::Worktree(id) => m.worktrees.retain(|x| x.id != id),
-                    EntityId::Agent(id) => m.agents.retain(|x| x.id != id),
+                    EntityId::Agent(id) => {
+                        m.subagents.retain(|s| s.parent_agent != id);
+                        m.agents.retain(|x| x.id != id);
+                    }
                     EntityId::Terminal(id) => m.terminals.retain(|x| x.id != id),
                     EntityId::Link(_) => {}
                 }
@@ -261,6 +270,12 @@ impl Client {
                     a.status_changed_at = changed_at;
                     a.unseen = unseen;
                 }
+                drop(m);
+                self.touch();
+            }
+            ServerEvent::SubagentChanged { sub } => {
+                let mut m = self.model.lock().expect("model lock");
+                upsert_subagent(&mut m.subagents, sub);
                 drop(m);
                 self.touch();
             }
@@ -309,6 +324,35 @@ impl Client {
             _ => {}
         }
     }
+}
+
+/// A subagent is keyed by its parent and its id: ids are unique only
+/// within one session. Each parent keeps at most
+/// [`SUBAGENTS_ENDED_KEPT`] ended rows, the oldest going first, as the
+/// daemon's book does, so a long session's tree stays bounded here too.
+fn upsert_subagent(list: &mut Vec<SubagentSummary>, sub: SubagentSummary) {
+    let parent = sub.parent_agent.clone();
+    match list
+        .iter_mut()
+        .find(|s| s.parent_agent == sub.parent_agent && s.id == sub.id)
+    {
+        Some(slot) => *slot = sub,
+        None => list.push(sub),
+    }
+    let ended =
+        |s: &SubagentSummary| s.parent_agent == parent && s.status != SubagentStatus::Running;
+    let mut drop = list
+        .iter()
+        .filter(|s| ended(s))
+        .count()
+        .saturating_sub(SUBAGENTS_ENDED_KEPT);
+    list.retain(|s| {
+        if drop > 0 && ended(s) {
+            drop -= 1;
+            return false;
+        }
+        true
+    });
 }
 
 fn upsert<T>(list: &mut Vec<T>, item: T, key: impl Fn(&T) -> String) {
@@ -539,5 +583,108 @@ pub async fn run(client: Arc<Client>) {
             _ = tokio::time::sleep(Duration::from_secs(2)) => {}
             _ = client.retry.notified() => { spawn = true; }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nebula_core::{AgentId, AgentKind, AgentRole, AgentStatus, WorktreeId};
+
+    fn agent(id: &str, parent: Option<&str>) -> Agent {
+        Agent {
+            id: AgentId(id.into()),
+            worktree_id: WorktreeId("w".into()),
+            name: id.into(),
+            status: AgentStatus::Running,
+            archived: false,
+            archived_at: 0,
+            unseen: false,
+            status_changed_at: 0,
+            kind: AgentKind::Claude,
+            custom_harness: None,
+            model: None,
+            effort: None,
+            session_id: None,
+            cloud_session_id: None,
+            issue_url: None,
+            role: AgentRole::Worker,
+            sort_order: 0,
+            alive: true,
+            recent_prompts: Vec::new(),
+            profile: None,
+            parent: parent.map(|p| AgentId(p.into())),
+        }
+    }
+
+    fn sub(parent: &str, id: &str, status: SubagentStatus) -> SubagentSummary {
+        SubagentSummary {
+            id: id.into(),
+            parent_agent: AgentId(parent.into()),
+            kind: "Explore".into(),
+            description: "Read the docs".into(),
+            started_at: 1,
+            ended_at: (status != SubagentStatus::Running).then_some(2),
+            status,
+        }
+    }
+
+    /// The overview's tree reaches the frontend: agents carry `parent`,
+    /// and `subagents` follows the snapshot, its deltas, and row deletes.
+    #[test]
+    fn parents_and_subagents_reach_the_frontend_model() {
+        let client = Client::new();
+        client.handle(ServerEvent::Snapshot {
+            projects: Vec::new(),
+            worktrees: Vec::new(),
+            agents: vec![agent("lead", None), agent("child", Some("lead"))],
+            terminals: Vec::new(),
+            links: Vec::new(),
+            pr_seen: Vec::new(),
+            ui_state: None,
+            subagents: vec![sub("child", "s1", SubagentStatus::Running)],
+        });
+        client.handle(ServerEvent::SubagentChanged {
+            sub: sub("child", "s1", SubagentStatus::Done),
+        });
+        client.handle(ServerEvent::SubagentChanged {
+            sub: sub("lead", "s1", SubagentStatus::Running),
+        });
+
+        let json = serde_json::to_value(client.snapshot()).unwrap();
+        assert_eq!(json["agents"][0]["parent"], serde_json::Value::Null);
+        assert_eq!(json["agents"][1]["parent"], "lead");
+        let subs = json["subagents"].as_array().unwrap();
+        assert_eq!(subs.len(), 2, "same id under another parent is its own row");
+        assert_eq!(subs[0]["parent_agent"], "child");
+        assert_eq!(subs[0]["status"], "done");
+        assert_eq!(subs[0]["ended_at"], 2);
+        assert_eq!(subs[1]["status"], "running");
+
+        client.handle(ServerEvent::EntityRemoved {
+            id: EntityId::Agent(AgentId("child".into())),
+        });
+        let model = client.snapshot();
+        assert_eq!(model.subagents.len(), 1);
+        assert_eq!(model.subagents[0].parent_agent, AgentId("lead".into()));
+    }
+
+    /// Mirrors the daemon's prune: per parent, the newest
+    /// `SUBAGENTS_ENDED_KEPT` ended rows stay, running ones always do, and
+    /// another parent's rows are never counted against it.
+    #[test]
+    fn a_long_session_keeps_only_its_newest_ended_subagents() {
+        let mut list = Vec::new();
+        upsert_subagent(&mut list, sub("p", "open", SubagentStatus::Running));
+        upsert_subagent(&mut list, sub("q", "other", SubagentStatus::Done));
+        for i in 0..SUBAGENTS_ENDED_KEPT + 3 {
+            upsert_subagent(&mut list, sub("p", &format!("s{i}"), SubagentStatus::Done));
+        }
+        let of_p = list.iter().filter(|s| s.parent_agent.0 == "p").count();
+        assert_eq!(of_p, SUBAGENTS_ENDED_KEPT + 1);
+        assert!(list.iter().any(|s| s.id == "open"));
+        assert!(list.iter().any(|s| s.id == "other"));
+        assert!(!list.iter().any(|s| s.id == "s2"), "the oldest ended go");
+        assert!(list.iter().any(|s| s.id == "s3"));
     }
 }

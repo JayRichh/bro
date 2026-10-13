@@ -10,14 +10,14 @@ use std::path::PathBuf;
 ///
 /// Bump on every protocol change. Additive changes keep
 /// [`MIN_COMPATIBLE_PROTOCOL`] where it is; breaking changes bump both.
-pub const PROTOCOL_VERSION: u32 = 52;
+pub const PROTOCOL_VERSION: u32 = 53;
 
 /// Oldest IPC protocol this build can safely talk to.
 ///
 /// Compatibility is a range overlap: two peers can talk when each peer's
 /// `[MIN_COMPATIBLE_PROTOCOL, PROTOCOL_VERSION]` range includes at least one
 /// version the other peer also supports.
-pub const MIN_COMPATIBLE_PROTOCOL: u32 = 52;
+pub const MIN_COMPATIBLE_PROTOCOL: u32 = 53;
 
 pub fn protocol_ranges_overlap(
     local_min: u32,
@@ -655,6 +655,12 @@ pub enum ServerEvent {
         /// How far the user has read into each pull request they've opened.
         pr_seen: Vec<PrSeen>,
         ui_state: Option<String>,
+        /// Claude's in-session subagents the daemon knows of, open and
+        /// recently ended. Last, with a default, so this build still decodes
+        /// the protocol-52 shape; a 52 peer cannot decode this one, and is
+        /// refused at the handshake (MIN_COMPATIBLE_PROTOCOL 53).
+        #[serde(default)]
+        subagents: Vec<SubagentSummary>,
     },
 
     Ack {
@@ -789,6 +795,50 @@ pub enum ServerEvent {
     WorktreePorts {
         ports: Vec<crate::ports::WorktreePorts>,
     },
+    /// A subagent started, ended, or was closed with its parent session.
+    /// The whole row each time; keyed by `(parent_agent, id)`.
+    SubagentChanged {
+        sub: SubagentSummary,
+    },
+}
+
+/// Ended subagents kept per parent session; beyond it the oldest ended
+/// go, in the daemon's book and in every client mirroring it.
+pub const SUBAGENTS_ENDED_KEPT: usize = 20;
+
+/// One of Claude's in-session subagents (the Task / Agent tool), as its
+/// SubagentStart and SubagentStop hooks report it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubagentSummary {
+    /// The hook payload's `agent_id` (Cursor's `subagent_id`). Unique
+    /// within its parent session only.
+    pub id: String,
+    /// The session the subagent runs inside.
+    pub parent_agent: AgentId,
+    /// The payload's `agent_type`: `general-purpose`, `Explore`, a custom
+    /// agent's name. Empty when the CLI sent none.
+    pub kind: String,
+    /// The task the parent gave it: the `description` of the Task / Agent
+    /// tool call that started it. Empty when none was seen.
+    pub description: String,
+    /// Epoch ms.
+    pub started_at: i64,
+    /// Epoch ms; None while it runs.
+    pub ended_at: Option<i64>,
+    pub status: SubagentStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SubagentStatus {
+    Running,
+    /// Its SubagentStop arrived.
+    Done,
+    /// Reserved: Claude's hooks report no failed subagent today.
+    Failed,
+    /// Still open when its parent session ended or the daemon restarted:
+    /// whether it finished is unknown.
+    EndedUnknown,
 }
 
 #[cfg(test)]
@@ -808,5 +858,210 @@ mod tests {
         assert!(protocol_compatible_with(PROTOCOL_VERSION));
         assert!(protocol_compatible_with(PROTOCOL_VERSION + 1));
         assert!(!protocol_compatible_with(MIN_COMPATIBLE_PROTOCOL - 1));
+    }
+
+    /// Protocol 53 grew `Agent` and `Snapshot` by a trailing field, which
+    /// a 52 decoder refuses mid-stream (rmp `LengthMismatch`). 52 must
+    /// therefore be refused at the handshake, on both sides.
+    #[test]
+    fn protocol_52_peers_are_refused_at_the_handshake() {
+        assert!(!protocol_compatible_with(52));
+        assert!(!protocol_ranges_overlap(
+            MIN_COMPATIBLE_PROTOCOL,
+            PROTOCOL_VERSION,
+            52,
+            52
+        ));
+    }
+
+    fn sample_agent(parent: Option<&str>) -> Agent {
+        Agent {
+            id: AgentId("child".into()),
+            worktree_id: WorktreeId("w".into()),
+            name: "agent-2".into(),
+            status: AgentStatus::Running,
+            archived: false,
+            archived_at: 0,
+            unseen: false,
+            status_changed_at: 7,
+            kind: AgentKind::Claude,
+            custom_harness: None,
+            model: None,
+            effort: None,
+            session_id: None,
+            cloud_session_id: None,
+            issue_url: None,
+            role: AgentRole::Worker,
+            sort_order: 0,
+            alive: true,
+            recent_prompts: Vec::new(),
+            profile: None,
+            parent: parent.map(|p| AgentId(p.into())),
+        }
+    }
+
+    fn sample_subagent() -> SubagentSummary {
+        SubagentSummary {
+            id: "agent-abc123".into(),
+            parent_agent: AgentId("child".into()),
+            kind: "Explore".into(),
+            description: "Find the hook fixtures".into(),
+            started_at: 10,
+            ended_at: None,
+            status: SubagentStatus::Running,
+        }
+    }
+
+    fn encode<T: Serialize>(msg: &T) -> Vec<u8> {
+        rmp_serde::to_vec(msg).unwrap()
+    }
+
+    #[test]
+    fn a_snapshot_round_trips_parents_and_subagents() {
+        let snap = ServerEvent::Snapshot {
+            projects: Vec::new(),
+            worktrees: Vec::new(),
+            agents: vec![sample_agent(Some("caller"))],
+            terminals: Vec::new(),
+            links: Vec::new(),
+            pr_seen: Vec::new(),
+            ui_state: None,
+            subagents: vec![sample_subagent()],
+        };
+        let back: ServerEvent = rmp_serde::from_slice(&encode(&snap)).unwrap();
+        let ServerEvent::Snapshot {
+            agents, subagents, ..
+        } = back
+        else {
+            panic!("not a snapshot");
+        };
+        assert_eq!(agents[0].parent, Some(AgentId("caller".into())));
+        assert_eq!(subagents, vec![sample_subagent()]);
+
+        let delta = ServerEvent::SubagentChanged {
+            sub: SubagentSummary {
+                ended_at: Some(20),
+                status: SubagentStatus::Done,
+                ..sample_subagent()
+            },
+        };
+        let back: ServerEvent = rmp_serde::from_slice(&encode(&delta)).unwrap();
+        let ServerEvent::SubagentChanged { sub } = back else {
+            panic!("not a SubagentChanged");
+        };
+        assert_eq!(sub.status, SubagentStatus::Done);
+        assert_eq!(sub.ended_at, Some(20));
+    }
+
+    /// Protocol 52's wire shapes, field for field: what a peer one version
+    /// back puts on the socket. The codec is positional (rmp arrays), so
+    /// only the order and the count matter.
+    mod v52 {
+        use super::*;
+
+        #[derive(Serialize)]
+        pub struct Agent<'a> {
+            pub id: &'a AgentId,
+            pub worktree_id: &'a WorktreeId,
+            pub name: &'a str,
+            pub status: &'a AgentStatus,
+            pub archived: bool,
+            pub archived_at: i64,
+            pub unseen: bool,
+            pub status_changed_at: i64,
+            pub kind: &'a AgentKind,
+            pub custom_harness: &'a Option<String>,
+            pub model: &'a Option<String>,
+            pub effort: &'a Option<String>,
+            pub session_id: &'a Option<String>,
+            pub cloud_session_id: &'a Option<String>,
+            pub issue_url: &'a Option<String>,
+            pub role: &'a AgentRole,
+            pub sort_order: i64,
+            pub alive: bool,
+            pub recent_prompts: &'a [crate::entities::PromptEntry],
+            pub profile: &'a Option<String>,
+        }
+
+        impl<'a> From<&'a super::Agent> for Agent<'a> {
+            fn from(a: &'a super::Agent) -> Self {
+                Self {
+                    id: &a.id,
+                    worktree_id: &a.worktree_id,
+                    name: &a.name,
+                    status: &a.status,
+                    archived: a.archived,
+                    archived_at: a.archived_at,
+                    unseen: a.unseen,
+                    status_changed_at: a.status_changed_at,
+                    kind: &a.kind,
+                    custom_harness: &a.custom_harness,
+                    model: &a.model,
+                    effort: &a.effort,
+                    session_id: &a.session_id,
+                    cloud_session_id: &a.cloud_session_id,
+                    issue_url: &a.issue_url,
+                    role: &a.role,
+                    sort_order: a.sort_order,
+                    alive: a.alive,
+                    recent_prompts: &a.recent_prompts,
+                    profile: &a.profile,
+                }
+            }
+        }
+
+        /// The first variants of `ServerEvent`, in order, as 52 had them.
+        #[derive(Serialize)]
+        #[allow(dead_code)]
+        pub enum ServerEvent<'a> {
+            HelloOk {
+                protocol_version: u32,
+                daemon_pid: u32,
+            },
+            Incompatible {
+                daemon_protocol_version: u32,
+            },
+            Snapshot {
+                projects: Vec<Project>,
+                worktrees: Vec<Worktree>,
+                agents: Vec<Agent<'a>>,
+                terminals: Vec<TerminalTab>,
+                links: Vec<Link>,
+                pr_seen: Vec<PrSeen>,
+                ui_state: Option<String>,
+            },
+        }
+    }
+
+    /// The 52 shape still decodes here: no `subagents` and no agent
+    /// `parent` read as empty and None. The handshake refuses 52 peers,
+    /// but the defaults keep a stray or recorded old frame readable.
+    #[test]
+    fn a_snapshot_from_a_protocol_52_peer_decodes_without_the_new_fields() {
+        let agent = sample_agent(None);
+        let old = v52::ServerEvent::Snapshot {
+            projects: Vec::new(),
+            worktrees: Vec::new(),
+            agents: vec![v52::Agent::from(&agent)],
+            terminals: Vec::new(),
+            links: Vec::new(),
+            pr_seen: Vec::new(),
+            ui_state: Some("{}".into()),
+        };
+        let back: ServerEvent = rmp_serde::from_slice(&encode(&old)).unwrap();
+        let ServerEvent::Snapshot {
+            agents,
+            subagents,
+            ui_state,
+            ..
+        } = back
+        else {
+            panic!("not a snapshot");
+        };
+        assert!(subagents.is_empty());
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].parent, None);
+        assert_eq!(agents[0].name, "agent-2");
+        assert_eq!(ui_state.as_deref(), Some("{}"));
     }
 }

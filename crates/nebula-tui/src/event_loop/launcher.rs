@@ -3216,6 +3216,7 @@ mod tests {
             app,
             ServerEvent::EntityUpserted {
                 entity: Entity::Agent(Agent {
+                    parent: None,
                     profile: None,
                     id: AgentId("a2".into()),
                     worktree_id: WorktreeId("w2".into()),
@@ -3258,6 +3259,7 @@ mod tests {
             app,
             ServerEvent::EntityUpserted {
                 entity: Entity::Agent(Agent {
+                    parent: None,
                     profile: None,
                     id: AgentId(id.into()),
                     worktree_id: WorktreeId(worktree.into()),
@@ -3312,6 +3314,7 @@ mod tests {
             app,
             ServerEvent::EntityUpserted {
                 entity: Entity::Agent(Agent {
+                    parent: None,
                     profile: None,
                     id: AgentId("a3".into()),
                     worktree_id: WorktreeId("w2root".into()),
@@ -8763,6 +8766,7 @@ mod tests {
                 &mut app,
                 ServerEvent::EntityUpserted {
                     entity: Entity::Agent(Agent {
+                        parent: None,
                         profile: None,
                         id: AgentId("a9".into()),
                         worktree_id: WorktreeId("w2root".into()),

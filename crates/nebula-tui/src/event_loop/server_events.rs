@@ -39,6 +39,8 @@ fn handle_snapshot_event(app: &mut App, event: ServerEvent, out: &mut Vec<Client
             links,
             pr_seen,
             ui_state,
+            // The TUI draws no subagent tree yet.
+            subagents: _,
         } => {
             let first_snapshot = !app.chrome.snapshot_loaded;
             app.chrome.snapshot_loaded = true;

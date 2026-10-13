@@ -12,6 +12,7 @@ fn seed_agent_in(app: &mut App, id: &str, worktree: &nebula_core::WorktreeId) {
         app,
         ServerEvent::EntityUpserted {
             entity: Entity::Agent(Agent {
+                parent: None,
                 profile: None,
                 id: AgentId(id.into()),
                 worktree_id: worktree.clone(),
@@ -43,6 +44,7 @@ fn seed_second_agent(app: &mut App, status: nebula_core::AgentStatus) {
         app,
         ServerEvent::EntityUpserted {
             entity: Entity::Agent(Agent {
+                parent: None,
                 profile: None,
                 id: AgentId("a2".into()),
                 worktree_id: WorktreeId("w1".into()),
@@ -838,6 +840,7 @@ pub(super) fn seed_tree(app: &mut App) {
         app,
         ServerEvent::EntityUpserted {
             entity: Entity::Agent(Agent {
+                parent: None,
                 profile: None,
                 id: AgentId("a1".into()),
                 worktree_id,
@@ -3872,6 +3875,7 @@ fn the_snapshot_prunes_cached_rows_the_tree_no_longer_has() {
             links: tree.links,
             pr_seen: Vec::new(),
             ui_state: None,
+            subagents: Vec::new(),
         },
     );
     assert!(fresh.github.pull_requests.contains_key(&w1));
@@ -4858,6 +4862,7 @@ fn snapshot_arms_prewarm_for_selected_worktree() {
             links: tree.links,
             pr_seen: Vec::new(),
             ui_state: None,
+            subagents: Vec::new(),
         },
     );
     let (armed, _) = fresh
@@ -4885,6 +4890,7 @@ fn snapshot_reattaches_the_remembered_session() {
         links: tree.links.clone(),
         pr_seen: Vec::new(),
         ui_state,
+        subagents: Vec::new(),
     };
     let a1 = SessionRef::Agent(nebula_core::AgentId("a1".into()));
 
@@ -4960,6 +4966,7 @@ fn mid_stream_snapshot_preserves_the_live_selection() {
                 r#"{"project":"p1","worktree":"w1","session_agent":"a1","show_archived":false,"collapsed":false}"#
                     .into(),
             ),
+            subagents: Vec::new(),
         },
         &mut out,
     );
@@ -5189,6 +5196,7 @@ fn working_sessions_head_the_list_regardless_of_age() {
     let mk =
         |id: &str, status: AgentStatus, changed_at: i64, sort: i64| ServerEvent::EntityUpserted {
             entity: Entity::Agent(Agent {
+                parent: None,
                 profile: None,
                 id: AgentId(id.into()),
                 worktree_id: WorktreeId("w1".into()),
@@ -5245,6 +5253,7 @@ fn sessions_order_by_last_interaction() {
     let mins = |n: i64| now - n * 60_000;
     let mk = |id: &str, status: AgentStatus, at: i64, sort: i64| ServerEvent::EntityUpserted {
         entity: Entity::Agent(Agent {
+            parent: None,
             profile: None,
             id: AgentId(id.into()),
             worktree_id: WorktreeId("w1".into()),
@@ -5329,6 +5338,7 @@ fn a_session_created_running_leads_the_working_ones() {
     let now = crate::app::now_ms();
     let mk = |id: &str, status: AgentStatus, at: i64, sort: i64| ServerEvent::EntityUpserted {
         entity: Entity::Agent(Agent {
+            parent: None,
             profile: None,
             id: AgentId(id.into()),
             worktree_id: WorktreeId("w1".into()),
@@ -5391,6 +5401,7 @@ fn status_change_resorts_and_selection_follows() {
         &mut app,
         ServerEvent::EntityUpserted {
             entity: Entity::Agent(Agent {
+                parent: None,
                 profile: None,
                 id: AgentId("a2".into()),
                 worktree_id: WorktreeId("w1".into()),
@@ -5461,6 +5472,7 @@ fn worktree_delete_is_optimistic_and_rolls_back_on_error() {
         &mut app,
         ServerEvent::EntityUpserted {
             entity: Entity::Agent(Agent {
+                parent: None,
                 profile: None,
                 id: AgentId("a2".into()),
                 worktree_id: wt_id.clone(),
@@ -5952,6 +5964,7 @@ fn a_picked_session_launches_into_the_selected_worktree_and_takes_the_pane() {
             &mut app,
             ServerEvent::EntityUpserted {
                 entity: Entity::Agent(Agent {
+                    parent: None,
                     id: AgentId("a2".into()),
                     worktree_id: WorktreeId("w1".into()),
                     name: "agent-2".into(),
@@ -7775,6 +7788,7 @@ fn walking_onto_a_reaped_session_still_waits_out_the_debounce() {
         &mut app,
         ServerEvent::EntityUpserted {
             entity: Entity::Agent(Agent {
+                parent: None,
                 profile: None,
                 id: AgentId("a2".into()),
                 worktree_id: WorktreeId("w1".into()),
@@ -8380,6 +8394,7 @@ fn a_removed_session_leaves_the_screen_cache() {
 fn archived_agent(id: &str, name: &str, archived_at: i64, sort: i64) -> nebula_core::Entity {
     use nebula_core::{Agent, AgentStatus, Entity, WorktreeId};
     Entity::Agent(Agent {
+        parent: None,
         profile: None,
         id: AgentId(id.into()),
         worktree_id: WorktreeId("w1".into()),
@@ -9978,6 +9993,7 @@ fn selection_follows_the_selected_agent_when_the_daemon_rehomes_it() {
     );
     app.nav.focus = Focus::Sessions;
     let moved = |worktree: &str| Agent {
+        parent: None,
         profile: None,
         id: AgentId("a1".into()),
         worktree_id: WorktreeId(worktree.into()),
@@ -10034,6 +10050,7 @@ fn selection_follows_the_selected_agent_when_the_daemon_rehomes_it() {
         &mut app,
         ServerEvent::EntityUpserted {
             entity: Entity::Agent(Agent {
+                parent: None,
                 id: AgentId("a9".into()),
                 ..moved("w1")
             }),
@@ -10043,6 +10060,7 @@ fn selection_follows_the_selected_agent_when_the_daemon_rehomes_it() {
         &mut app,
         ServerEvent::EntityUpserted {
             entity: Entity::Agent(Agent {
+                parent: None,
                 id: AgentId("a9".into()),
                 ..moved("w2")
             }),
@@ -10173,6 +10191,7 @@ fn shifted_keys_no_longer_reorder_projects() {
 fn agent_stamped(id: &str, wt: &str, at: i64) -> nebula_core::Entity {
     use nebula_core::{Agent, AgentStatus, Entity};
     Entity::Agent(Agent {
+        parent: None,
         profile: None,
         id: AgentId(id.into()),
         worktree_id: WorktreeId(wt.into()),
@@ -11239,6 +11258,7 @@ fn the_change_sweep_takes_the_stalest_unselected_checkout() {
             &mut app,
             ServerEvent::EntityUpserted {
                 entity: Entity::Agent(Agent {
+                    parent: None,
                     id: AgentId(format!("a{i}")),
                     worktree_id: WorktreeId(format!("w{i}")),
                     name: format!("agent-{i}"),
@@ -11930,6 +11950,7 @@ fn seed_second_project(app: &mut App) {
         app,
         ServerEvent::EntityUpserted {
             entity: Entity::Agent(Agent {
+                parent: None,
                 profile: None,
                 id: AgentId("a2".into()),
                 worktree_id: WorktreeId("w2".into()),
@@ -11957,6 +11978,7 @@ fn seed_second_project(app: &mut App) {
         app,
         ServerEvent::EntityUpserted {
             entity: Entity::Agent(Agent {
+                parent: None,
                 profile: None,
                 id: AgentId("a3".into()),
                 worktree_id: WorktreeId("w1".into()),
@@ -12289,6 +12311,7 @@ fn palette_ctrl_f_focuses_the_row_regardless_of_the_setting() {
 fn seed_attention_ring(app: &mut App) {
     use nebula_core::{Agent, AgentStatus, Entity, WorktreeId};
     let agent = |id: &str, wt: &str, status: AgentStatus, unseen: bool| Agent {
+        parent: None,
         profile: None,
         id: AgentId(id.into()),
         worktree_id: WorktreeId(wt.into()),
@@ -12755,6 +12778,7 @@ fn palette_rows_take_their_status_color_and_sweep() {
         &mut app,
         ServerEvent::EntityUpserted {
             entity: Entity::Agent(Agent {
+                parent: None,
                 profile: None,
                 id: AgentId("a1".into()),
                 worktree_id: nebula_core::WorktreeId("w1".into()),
@@ -15027,6 +15051,7 @@ fn shift_d_bulk_deletes_the_visible_sessions() {
             &mut app,
             ServerEvent::EntityUpserted {
                 entity: Entity::Agent(Agent {
+                    parent: None,
                     profile: None,
                     id: AgentId(id.into()),
                     worktree_id: WorktreeId("w1".into()),
@@ -15102,6 +15127,7 @@ fn wt_entity(id: &str, project: &str, branch: &str, is_main: bool) -> nebula_cor
 fn agent_entity(id: &str, wt: &str, name: &str, archived: bool) -> nebula_core::Entity {
     use nebula_core::{Agent, AgentStatus, Entity};
     Entity::Agent(Agent {
+        parent: None,
         profile: None,
         id: AgentId(id.into()),
         worktree_id: WorktreeId(wt.into()),
@@ -15799,6 +15825,7 @@ fn a_cross_project_session_jump_attaches_only_the_session_picked() {
         &mut app,
         ServerEvent::EntityUpserted {
             entity: nebula_core::Entity::Agent(nebula_core::Agent {
+                parent: None,
                 profile: None,
                 id: AgentId("a8".into()),
                 worktree_id: WorktreeId("w9".into()),
@@ -15868,6 +15895,7 @@ fn seed_background_run(app: &mut App) {
         app,
         ServerEvent::EntityUpserted {
             entity: Entity::Agent(Agent {
+                parent: None,
                 profile: None,
                 id: AgentId("a9".into()),
                 worktree_id: WorktreeId("w9".into()),
@@ -16691,6 +16719,7 @@ fn the_issue_quick_prompt_stands_on_the_modal() {
             &mut app,
             ServerEvent::EntityUpserted {
                 entity: nebula_core::Entity::Agent(nebula_core::Agent {
+                    parent: None,
                     profile: None,
                     id: fresh.clone(),
                     worktree_id: worktree,
@@ -18162,6 +18191,7 @@ fn a_quick_prompt_lands_the_row_without_taking_the_pane() {
             app,
             ServerEvent::EntityUpserted {
                 entity: Entity::Agent(Agent {
+                    parent: None,
                     profile: None,
                     id: AgentId("a2".into()),
                     worktree_id: WorktreeId("w1".into()),
@@ -20156,6 +20186,7 @@ fn parity_tree() -> App {
         &mut app,
         ServerEvent::EntityUpserted {
             entity: Entity::Agent(Agent {
+                parent: None,
                 profile: None,
                 id: AgentId("a9".into()),
                 worktree_id: WorktreeId("w2".into()),

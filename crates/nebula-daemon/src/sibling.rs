@@ -134,6 +134,7 @@ impl Daemon {
             .then(|| caller.profile.clone())
             .flatten();
         Ok(CreateAgentSpec {
+            parent: Some(caller.id.clone()),
             profile,
             worktree: worktree.clone(),
             name: self.free_name_in(worktree)?,
@@ -246,6 +247,7 @@ mod tests {
 
     fn agent(id: &str, worktree: &str, kind: AgentKind, model: Option<&str>) -> Agent {
         Agent {
+            parent: None,
             profile: None,
             id: AgentId(id.into()),
             worktree_id: WorktreeId(worktree.into()),
@@ -306,6 +308,11 @@ mod tests {
             Some("Fix the login redirect")
         );
         assert!(spec.cloud_prompt.is_none() && spec.pr_url.is_none() && spec.issue_url.is_none());
+        assert_eq!(
+            spec.parent,
+            Some(AgentId("agent-1".into())),
+            "the spawning session is the new one's parent"
+        );
     }
 
     #[test]

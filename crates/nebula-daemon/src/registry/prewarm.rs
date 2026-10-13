@@ -62,6 +62,7 @@ impl Daemon {
             Err(_) => None,
         };
         let agent = Agent {
+            parent: None,
             profile: profile.clone(),
             id: AgentId::generate(),
             worktree_id: worktree_id.clone(),

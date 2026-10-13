@@ -292,6 +292,14 @@ pub struct Agent {
     /// no profile: the daemon's own environment, as before profiles.
     #[serde(default)]
     pub profile: Option<String>,
+    /// The session that started this one with `kete spawn` (or an
+    /// orchestrator spawn); None for every session a person started.
+    /// Last, with a default, so this build still decodes a row written
+    /// before the field existed (it reads None). The reverse fails: the
+    /// codec is positional, and an older decoder refuses the extra
+    /// element, which is why protocol 53 raised MIN_COMPATIBLE_PROTOCOL.
+    #[serde(default)]
+    pub parent: Option<AgentId>,
 }
 
 impl Agent {
@@ -369,6 +377,10 @@ pub struct Link {
     pub sort_order: i64,
 }
 
+/// One row on the wire. Agent is by far the largest variant; it is not
+/// boxed because every upsert is built, sent and dropped at once, and a
+/// box would reach into every construction site for no measurable gain.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Entity {
     Project(Project),
