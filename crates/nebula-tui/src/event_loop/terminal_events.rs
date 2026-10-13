@@ -178,10 +178,13 @@ pub(crate) fn dispatch_terminal_event(app: &mut App, event: Event, out: &mut Vec
                 ..
             })
         );
-    let launcher_before =
-        (pressed && app.launcher_grid() && !app.launcher.launcher_columns && !app.pane.term_locked)
-            .then(|| launcher::cursor_entry(app))
-            .flatten();
+    let launcher_before = (pressed
+        && app.launcher_grid()
+        && !app.launcher.launcher_columns
+        && !app.launcher.launcher_kanban
+        && !app.pane.term_locked)
+        .then(|| launcher::cursor_entry(app))
+        .flatten();
     dispatch_input(app, event, out);
     if let Some(before) = launcher_before {
         launcher::keep_cursor(app, before, out);
@@ -253,6 +256,8 @@ pub(crate) fn dispatch_input(app: &mut App, event: Event, out: &mut Vec<ClientRe
         Event::FocusGained => {
             app.chrome.window_focused = true;
             schedule_pull_request_refresh(app);
+            // Back from VS Code, maybe with another theme picked there.
+            recheck_theme(app);
         }
         // …and left it: from here until it is back, a session that stops
         // to ask gets a desktop notification, since the pane can't be seen.

@@ -784,6 +784,9 @@ pub(super) fn handle_action(
     if app.launcher.launcher_tab_cursor.is_some() && tabs_action(app, action, armed, chord, out) {
         return true;
     }
+    if app.launcher.launcher_kanban && kanban_action(app, action, out) {
+        return true;
+    }
     // The NESTED layout's `h` / `l` fold the thread under the cursor
     // rather than walking a row of cards: `l` opens a collapsed root,
     // `h` closes an expanded one, and `h` on a child moves to its root.
@@ -878,6 +881,103 @@ pub(super) fn handle_action(
         _ => return false,
     }
     true
+}
+
+/// `⇧K`: the KANBAN, or back to the bands — written to Settings →
+/// Appearance → **Kanban** and adopted, exactly as cycling that row does,
+/// so the board outlives the restart. Landing on the board puts the
+/// cursor on a card of it, so the keys have something to walk.
+pub(super) fn toggle_kanban(app: &mut App, out: &mut Vec<ClientRequest>) {
+    let mut cfg = crate::config::Config::load();
+    cfg.kanban = !app.launcher.launcher_kanban;
+    if super::save_config(app, &cfg) {
+        super::apply_config(app, &cfg);
+    }
+    if app.launcher.launcher_kanban {
+        kanban_move(app, 0, 0, out);
+        app.chrome.flash = Some(kanban_flash(app));
+    } else {
+        app.chrome.flash = Some("kanban off: a band per worktree".into());
+    }
+    app.chrome.dirty = true;
+}
+
+/// What the footer says the board is showing.
+fn kanban_flash(app: &App) -> String {
+    let scope = if app.launcher.kanban_all {
+        "every project"
+    } else {
+        "this project"
+    };
+    format!("kanban: {scope} · h/l lanes · j/k cards · Tab: scope · ⇧K: bands")
+}
+
+/// The KANBAN's own keys, ahead of the grid's: `h`/`l` (`←`/`→`) walk the
+/// lanes, `j`/`k` (`↓`/`↑`) and `Ctrl+d`/`Ctrl+u` the cards of one, and
+/// `Tab` — the ACCORDION's key, with no band to open here — flips the
+/// board between the project on screen and every project, saved as
+/// **Kanban scope**. Everything else — Enter, Space, `a`, `d`, `g`, the
+/// pickers — acts on the card under the cursor as it does on the grid,
+/// since the cursor is the grid's own selection.
+fn kanban_action(app: &mut App, action: Action, out: &mut Vec<ClientRequest>) -> bool {
+    match action {
+        Action::FocusLeft => kanban_move(app, -1, 0, out),
+        Action::FocusRight => kanban_move(app, 1, 0, out),
+        Action::MoveDown => kanban_move(app, 0, 1, out),
+        Action::MoveUp => kanban_move(app, 0, -1, out),
+        Action::HalfPageDown => kanban_move(app, 0, HALF_PAGE * 2, out),
+        Action::HalfPageUp => kanban_move(app, 0, -HALF_PAGE * 2, out),
+        Action::FocusNext => {
+            let mut cfg = crate::config::Config::load();
+            cfg.kanban_scope = if app.launcher.kanban_all {
+                "project"
+            } else {
+                "all"
+            }
+            .into();
+            if super::save_config(app, &cfg) {
+                super::apply_config(app, &cfg);
+            }
+            kanban_move(app, 0, 0, out);
+            app.chrome.flash = Some(kanban_flash(app));
+        }
+        _ => return false,
+    }
+    app.chrome.dirty = true;
+    true
+}
+
+/// Move the KANBAN cursor (`launcher::kanban_step`) and land the grid's
+/// selection on the card it reaches, through the jump the `/` PALETTE
+/// takes — so the pane reads it, and on the all-projects board the
+/// header's tab follows it to its project.
+fn kanban_move(app: &mut App, dx: i64, dy: i64, out: &mut Vec<ClientRequest>) {
+    let lanes = view::kanban(app, app.launcher.kanban_all);
+    let at = app
+        .selected_session()
+        .and_then(|a| view::kanban_find(&lanes, &a.id))
+        .filter(|_| !app.launcher.launcher_unaimed);
+    let Some((lane, row)) = view::kanban_step(&lanes, at, dx, dy) else {
+        app.chrome.flash = Some("no sessions on the board".into());
+        return;
+    };
+    let id = lanes[lane][row].agent.id.clone();
+    if at != Some((lane, row)) || app.launcher.launcher_unaimed {
+        select(app, id, out);
+    }
+}
+
+/// A click on a KANBAN card: the cursor lands on it, the pane reading
+/// it; a second click on the same card is Enter, down into the pane.
+pub(super) fn click_kanban(app: &mut App, id: &AgentId, out: &mut Vec<ClientRequest>) {
+    select(app, id.clone(), out);
+    if is_double_click(
+        &mut app.pane.last_session_click,
+        crate::app::RowKey::Session(SessionRef::Agent(id.clone())),
+    ) {
+        enter_pane(app, out);
+    }
+    app.chrome.dirty = true;
 }
 
 /// Space on a card, and **Follow-up prompt** in its menu: the FOLLOW-UP
@@ -12888,6 +12988,93 @@ mod tests {
             }
             assert!(app.modals.overlay.is_none(), "no confirm");
             assert_eq!(sent_move(&out), Some(("a1".into(), "w2".into())));
+        });
+    }
+
+    // ---- the KANBAN ----
+
+    /// `⇧K` lays the grid out as lanes by status, saved to the config; the
+    /// cursor lands on the most urgent card, `h`/`l` walk the lanes and the
+    /// pane follows; `Tab` widens the board to every project, and `⇧K`
+    /// again goes back to the bands.
+    #[test]
+    fn shift_k_lays_the_grid_out_as_kanban_lanes_that_hjkl_walk() {
+        with_default_config(|| {
+            let mut app = two_sessions();
+            let a1 = app.tree.agents.iter_mut().find(|a| a.id.0 == "a1").unwrap();
+            a1.status = AgentStatus::NeedsFeedback;
+            draw(&mut app);
+
+            key(&mut app, KeyCode::Char('K'), KeyModifiers::SHIFT);
+            assert!(app.launcher.launcher_kanban);
+            assert!(crate::config::Config::load().kanban, "saved");
+            let selected = |app: &App| app.selected_session().map(|a| a.name);
+            assert_eq!(
+                selected(&app).as_deref(),
+                Some("agent-1"),
+                "the cursor lands on the one waiting on you"
+            );
+            let text = screen_text(&draw_at(&mut app, 240, 40));
+            for lane in ["Needs input", "Running", "Unseen", "Done", "PR open"] {
+                assert!(text.contains(lane), "the {lane} lane:\n{text}");
+            }
+            assert!(text.contains("polish-nav"), "{text}");
+            assert!(!text.contains("tidy-css"), "web is a tab away:\n{text}");
+
+            key(&mut app, KeyCode::Char('l'), KeyModifiers::NONE);
+            assert_eq!(selected(&app).as_deref(), Some("polish-nav"), "Running");
+            key(&mut app, KeyCode::Char('l'), KeyModifiers::NONE);
+            assert_eq!(
+                selected(&app).as_deref(),
+                Some("polish-nav"),
+                "no lane right of it holds a card"
+            );
+            key(&mut app, KeyCode::Char('h'), KeyModifiers::NONE);
+            assert_eq!(selected(&app).as_deref(), Some("agent-1"));
+
+            key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
+            assert!(app.launcher.kanban_all);
+            assert!(crate::config::Config::load().kanban_all());
+            let text = screen_text(&draw_at(&mut app, 240, 40));
+            assert!(text.contains("tidy-css"), "every project's:\n{text}");
+            assert!(text.contains(" web "), "named on its card:\n{text}");
+
+            key(&mut app, KeyCode::Char('K'), KeyModifiers::SHIFT);
+            assert!(!app.launcher.launcher_kanban);
+            assert!(!screen_text(&draw(&mut app)).contains("PR open"));
+        });
+    }
+
+    /// A click on a KANBAN card lands the cursor on it.
+    #[test]
+    fn a_click_on_a_kanban_card_selects_it() {
+        with_default_config(|| {
+            let mut app = two_sessions();
+            app.launcher.launcher_kanban = true;
+            draw(&mut app);
+            let rect = app
+                .chrome
+                .hits
+                .iter()
+                .find_map(|(r, h)| {
+                    matches!(h, HitTarget::KanbanCard(id) if id.0 == "a1").then_some(*r)
+                })
+                .expect("agent-1's card is on the board");
+            let mut out = Vec::new();
+            handle_terminal_event(
+                &mut app,
+                crossterm::event::Event::Mouse(MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: rect.x + 2,
+                    row: rect.y + 1,
+                    modifiers: KeyModifiers::NONE,
+                }),
+                &mut out,
+            );
+            assert_eq!(
+                app.selected_session().map(|a| a.name).as_deref(),
+                Some("agent-1")
+            );
         });
     }
 }

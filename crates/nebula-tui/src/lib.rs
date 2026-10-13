@@ -1,6 +1,7 @@
 pub mod agent_picker;
 pub mod agent_presets;
 pub mod app;
+pub mod appearance;
 pub mod branch_name;
 pub mod branch_switch;
 pub mod bundle;
@@ -8,6 +9,7 @@ pub mod claude_catalogue;
 pub mod completion;
 pub mod config;
 pub mod cursor_catalogue;
+pub mod diff_layout;
 pub mod diff_tree;
 pub mod dropped_files;
 pub mod event_loop;
@@ -21,6 +23,7 @@ pub mod grep_search;
 pub mod hosts;
 pub mod ipc;
 pub mod issues;
+pub mod jsonc;
 pub mod key_combo;
 pub mod keymap;
 pub mod keys;
@@ -52,6 +55,7 @@ pub mod ui;
 pub mod update_check;
 pub mod view_jobs;
 pub mod vim_term;
+pub mod vscode_theme;
 
 use anyhow::Result;
 

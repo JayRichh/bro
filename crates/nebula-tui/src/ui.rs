@@ -216,9 +216,39 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     app.chrome.rows_memo.arm();
     draw_screen(f, app);
     app.chrome.rows_memo.disarm();
-    if app.chrome.black_background {
-        let area = f.area();
-        draw_black_background(f.buffer_mut(), area);
+    let area = f.area();
+    draw_canvas(
+        f.buffer_mut(),
+        area,
+        app.chrome.theme,
+        app.chrome.black_background,
+    );
+}
+
+/// The CANVAS under every cell nothing else colored. A TRUECOLOR PRESET
+/// always paints its own — background and default foreground both, so
+/// One Light on a dark terminal is dark text on light rather than on the
+/// terminal's dark, and a session's plain output reads in the theme's
+/// text color too. An ANSI preset leaves the terminal's own background
+/// alone unless BLACK BACKGROUND asks for black ([`draw_black_background`]).
+fn draw_canvas(buf: &mut ratatui::buffer::Buffer, area: Rect, th: Theme, black: bool) {
+    let Some(canvas) = th.bg else {
+        if black {
+            draw_black_background(buf, area);
+        }
+        return;
+    };
+    for y in area.y..area.y + area.height {
+        for x in area.x..area.x + area.width {
+            if let Some(cell) = buf.cell_mut((x, y)) {
+                if cell.bg == Color::Reset {
+                    cell.bg = canvas;
+                }
+                if cell.fg == Color::Reset {
+                    cell.fg = th.text;
+                }
+            }
+        }
     }
 }
 
@@ -1945,11 +1975,13 @@ fn footer_usage(app: &App) -> Option<String> {
 /// (classification lives in syntax.rs, the `classify_diff_line` split).
 pub(crate) fn token_style(kind: crate::syntax::TokenKind, th: Theme) -> Style {
     use crate::syntax::TokenKind;
+    // The theme's syntax roles: an ANSI preset's are its status colors,
+    // as they always were; a truecolor one's are its editor's own.
     match kind {
-        TokenKind::Keyword => Style::default().fg(th.special),
-        TokenKind::String => Style::default().fg(th.ok),
-        TokenKind::Comment => Style::default().fg(th.dim),
-        TokenKind::Number => Style::default().fg(th.warn),
+        TokenKind::Keyword => Style::default().fg(th.syn_keyword),
+        TokenKind::String => Style::default().fg(th.syn_string),
+        TokenKind::Comment => Style::default().fg(th.syn_comment),
+        TokenKind::Number => Style::default().fg(th.syn_number),
         TokenKind::Text => Style::default(),
     }
 }
@@ -2469,6 +2501,91 @@ mod tests {
             app.chrome.theme.sel_bg,
             "a fill stays on top"
         );
+    }
+
+    /// The DIFF VIEWER in each layout, drawn: a replaced line wears its
+    /// side's wash and its changed word the stronger one, in the theme's
+    /// own colors; the replacement layout shows no removed line, only the
+    /// new one and a marker for what was removed outright.
+    #[test]
+    fn the_diff_viewer_paints_line_and_word_washes_in_every_layout() {
+        use crate::diff_layout::DiffMode;
+        let diff = "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n\
+                    @@ -1,4 +1,3 @@\n fn keep() {}\n-let x = old;\n+let x = new;\n-gone();\n fn tail() {}\n";
+        let th = crate::theme::ONE_DARK;
+        for mode in DiffMode::ALL {
+            let mut app = App::new();
+            app.chrome.theme = th;
+            let files = vec![crate::git_diff::DiffFile {
+                path: "a.rs".into(),
+                orig_path: None,
+                xy: [' ', 'M'],
+            }];
+            let mut view = crate::app::DiffView::new("/no-such".into(), "main".into(), files, true);
+            view.mode = mode;
+            view.show_diff(Some("a.rs"), diff.into(), false);
+            app.modals.overlay = Some(Overlay::Diff(view));
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(200, 30)).unwrap();
+            terminal.draw(|f| draw(f, &mut app)).unwrap();
+            let buf = terminal.backend().buffer().clone();
+            let find = |needle: &str| -> Option<(u16, u16)> {
+                (0..buf.area.height).find_map(|y| {
+                    let row: String = (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect();
+                    let col = row.find(needle)?;
+                    Some((row[..col].chars().count() as u16, y))
+                })
+            };
+            let (x, y) = find("new;").unwrap_or_else(|| panic!("{mode:?}: the new line"));
+            assert_eq!(
+                buf[(x, y)].bg,
+                th.diff_add_word,
+                "{mode:?}: the changed word"
+            );
+            assert_eq!(
+                buf[(x.saturating_sub(4), y)].bg,
+                th.diff_add_bg,
+                "{mode:?}: the rest of the line"
+            );
+            assert_eq!(
+                buf[(x - 8, y)].fg,
+                th.syn_keyword,
+                "{mode:?}: `let` is still a keyword"
+            );
+            match mode {
+                DiffMode::Replacement => {
+                    assert!(find("old;").is_none(), "no removed line");
+                    assert!(find("1 line removed").is_some(), "the marker");
+                }
+                _ => {
+                    let (x, y) = find("old;").unwrap();
+                    assert_eq!(buf[(x, y)].bg, th.diff_del_word, "{mode:?}");
+                }
+            }
+        }
+    }
+
+    /// A TRUECOLOR PRESET paints its canvas under every default cell and
+    /// its text over every default glyph, BLACK BACKGROUND or not — and,
+    /// as with the black, a fill something else drew stays on top.
+    #[test]
+    fn a_truecolor_preset_paints_its_canvas_and_text() {
+        let th = crate::theme::ONE_LIGHT;
+        let area = Rect::new(0, 0, 3, 1);
+        let mut buf = ratatui::buffer::Buffer::empty(area);
+        buf[(1, 0)].bg = th.sel_bg;
+        buf[(2, 0)].fg = th.err;
+        draw_canvas(&mut buf, area, th, false);
+        assert_eq!(buf[(0, 0)].bg, th.bg.unwrap());
+        assert_eq!(buf[(0, 0)].fg, th.text, "default text in the theme's");
+        assert_eq!(buf[(1, 0)].bg, th.sel_bg, "a fill stays on top");
+        assert_eq!(buf[(2, 0)].fg, th.err, "so does a color");
+
+        // An ANSI preset without BLACK BACKGROUND leaves the cell alone.
+        let mut buf = ratatui::buffer::Buffer::empty(area);
+        draw_canvas(&mut buf, area, Theme::default(), false);
+        assert_eq!(buf[(0, 0)].bg, Color::Reset);
+        assert_eq!(buf[(0, 0)].fg, Color::Reset);
     }
 
     #[test]

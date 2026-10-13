@@ -410,7 +410,8 @@ pub(crate) fn open_diff_view(app: &mut App) {
     } else {
         let mut view = DiffView::opening(path.clone(), branch, jobs.clone(), ticket);
         view.files_width = app.modals.diff_files_width;
-        view.split = app.modals.diff_split;
+        view.mode = app.modals.diff_mode;
+        view.full_context = app.modals.diff_full_context;
         if show_graph {
             view.place = crate::app::Place::ChangesHeader;
             crate::git_log::request_log(&mut view);
@@ -451,7 +452,8 @@ pub(crate) fn show_graph_diff_listing(
     let mut view = DiffView::new(path, branch, Vec::new(), true);
     view.jobs = app.jobs.view_jobs.clone();
     view.files_width = app.modals.diff_files_width;
-    view.split = app.modals.diff_split;
+    view.mode = app.modals.diff_mode;
+    view.full_context = app.modals.diff_full_context;
     view.place = crate::app::Place::ChangesHeader;
     if app.modals.diff_tree {
         view.toggle_tree();
@@ -476,7 +478,8 @@ pub(crate) fn show_diff_listing(
     let mut view = DiffView::new(path, branch, Vec::new(), true);
     view.jobs = app.jobs.view_jobs.clone();
     view.files_width = app.modals.diff_files_width;
-    view.split = app.modals.diff_split;
+    view.mode = app.modals.diff_mode;
+    view.full_context = app.modals.diff_full_context;
     crate::git_diff::fill_view(&mut view, listing);
     // After the marks: the tree opens on the first unreviewed file too.
     if app.modals.diff_tree && view.toggle_tree() {
@@ -588,6 +591,11 @@ pub(crate) fn land_view_answer(app: &mut App, answer: crate::view_jobs::Answer) 
         } => {
             if let Some(Overlay::Diff(view)) = &mut app.modals.overlay {
                 crate::git_diff::land_diff(view, id, ticket, &path, diff, prefetch);
+            }
+        }
+        Answer::DiffAux { view: id, aux } => {
+            if let Some(Overlay::Diff(view)) = &mut app.modals.overlay {
+                crate::git_diff::land_aux(view, id, aux);
             }
         }
         Answer::Preview { ticket, preview } => match &mut app.modals.overlay {

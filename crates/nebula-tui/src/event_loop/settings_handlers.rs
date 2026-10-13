@@ -400,13 +400,32 @@ pub(crate) fn apply_setting_at(app: &mut App, tab: usize, index: usize, delta: i
     apply_config(app, &cfg);
 }
 
+/// LIGHT/DARK AWARENESS: with `auto` or `vscode` picked, look at the
+/// machine again — the OS's app theme, VS Code's settings — and repaint
+/// in what it resolves to now, if that moved. Cheap enough for a beat: a
+/// registry read and a `stat` when nothing changed. Run on the loop's
+/// THEME BEAT and whenever the window takes focus back.
+pub(crate) fn recheck_theme(app: &mut App) {
+    if let Some(theme) = app.chrome.live_theme.recheck() {
+        if theme != app.chrome.theme {
+            app.chrome.theme = theme;
+            app.chrome.dirty = true;
+        }
+    }
+}
+
 /// Adopt every config value the running app mirrors. Shared by startup and
 /// the settings overlay so a new setting can't reach one and miss the
 /// other — the overlay is a live editor, not a restart-to-apply screen.
 pub(crate) fn apply_config(app: &mut App, cfg: &crate::config::Config) {
-    app.chrome.theme = cfg.theme();
+    app.chrome.theme = app.chrome.live_theme.resolve(&cfg.theme);
     app.chrome.animations = cfg.animations;
     app.chrome.black_background = cfg.black_background;
+    if let Some(mode) = cfg.diff_mode() {
+        app.modals.diff_mode = mode;
+    }
+    app.modals.diff_mode_configured = cfg.diff_mode().is_some();
+    app.modals.diff_full_context = cfg.diff_context_word() == "full";
     app.launcher.card_issue_number = cfg.card_issue_number;
     app.launcher.show_all_worktrees = cfg.show_all_worktrees;
     app.launcher.auto_cleanup_merged = cfg.auto_cleanup_merged;
@@ -417,6 +436,8 @@ pub(crate) fn apply_config(app: &mut App, cfg: &crate::config::Config) {
     app.launcher.launcher_list = cfg.list_layout();
     app.launcher.launcher_nested = cfg.nested_layout();
     app.launcher.launcher_columns = cfg.columns_layout();
+    app.launcher.launcher_kanban = cfg.kanban;
+    app.launcher.kanban_all = cfg.kanban_all();
     app.launcher.columns_hide_projects = cfg.hide_projects;
     app.launcher.columns_hide_worktrees = cfg.hide_worktrees;
     app.launcher.columns_hide_sessions = cfg.hide_sessions;

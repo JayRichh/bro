@@ -82,6 +82,12 @@ impl RowPr {
 /// the `+` in front of them) are the way to the projects beside it.
 pub fn rows(app: &App) -> Vec<LauncherRow> {
     let scope = app.selected_project().map(|p| p.id.clone());
+    rows_in(app, scope.as_ref())
+}
+
+/// [`rows`] for `scope` — one project, or with None every project on the
+/// machine (the KANBAN across all projects).
+fn rows_in(app: &App, scope: Option<&ProjectId>) -> Vec<LauncherRow> {
     // The ARCHIVED VIEW (`⇧A`) is the grid, swapped: the same cards for
     // the project's archived sessions instead of its live ones, so
     // `u` unarchives one where it stands and `⇧A` again comes back. The
@@ -93,7 +99,7 @@ pub fn rows(app: &App) -> Vec<LauncherRow> {
         .tree
         .agents
         .iter()
-        .filter_map(|agent| row_of(app, agent, scope.as_ref(), Some(want_archived)))
+        .filter_map(|agent| row_of(app, agent, scope, Some(want_archived)))
         .collect();
     let now = crate::app::now_ms();
     rows.sort_by(|a, b| {
@@ -184,6 +190,133 @@ fn row_pr(app: &App, worktree: &WorktreeId, project: &ProjectId, branch: &str) -
         standing: pr.standing(),
         trouble: pr.trouble(),
     })
+}
+
+// ---- the KANBAN ----
+
+/// A column of the KANBAN (`⇧K`, Settings → Appearance → **Kanban**): the
+/// session cards sorted by what each one wants from you, left to right
+/// from the most urgent — the board the STATUS DOTS already sketch,
+/// laid out as one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lane {
+    /// Waiting on you: a permission prompt or a question (the red dot).
+    NeedsInput,
+    /// Mid-turn (the yellow dot).
+    Running,
+    /// A finished turn nobody has read yet (the blue dot).
+    Unseen,
+    /// Read, idle, or never run — nothing for you to do.
+    Done,
+    /// Idle and read, its checkout's pull request still open: work handed
+    /// on to review rather than finished.
+    PrOpen,
+}
+
+impl Lane {
+    /// The board's columns, left to right.
+    pub const ALL: [Lane; 5] = [
+        Lane::NeedsInput,
+        Lane::Running,
+        Lane::Unseen,
+        Lane::Done,
+        Lane::PrOpen,
+    ];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Lane::NeedsInput => "Needs input",
+            Lane::Running => "Running",
+            Lane::Unseen => "Unseen",
+            Lane::Done => "Done",
+            Lane::PrOpen => "PR open",
+        }
+    }
+
+    /// Its place in [`Lane::ALL`].
+    pub fn index(self) -> usize {
+        Lane::ALL.iter().position(|l| *l == self).unwrap_or(0)
+    }
+}
+
+/// The lane `row`'s card goes in. One lane per card, the most urgent that
+/// applies: waiting on you over working over unread, and an open pull
+/// request only once nothing else about the session needs you — a
+/// session asking a question on a branch under review is asking a
+/// question first.
+pub fn lane_of(row: &LauncherRow) -> Lane {
+    use nebula_core::AgentStatus;
+    match row.agent.status {
+        AgentStatus::NeedsFeedback => Lane::NeedsInput,
+        AgentStatus::Running => Lane::Running,
+        _ if row.agent.unseen => Lane::Unseen,
+        _ if row.pr.as_ref().is_some_and(|pr| {
+            matches!(
+                pr.standing,
+                crate::pull_request::Standing::Open | crate::pull_request::Standing::Draft
+            )
+        }) =>
+        {
+            Lane::PrOpen
+        }
+        _ => Lane::Done,
+    }
+}
+
+/// The KANBAN's cards, lane by lane in [`Lane::ALL`] order, each lane in
+/// the grid's own recency order: the project on screen's sessions, or with
+/// `all` every project's.
+pub fn kanban(app: &App, all: bool) -> Vec<Vec<LauncherRow>> {
+    let scope = app.selected_project().map(|p| p.id.clone());
+    let rows = rows_in(app, if all { None } else { scope.as_ref() });
+    let mut lanes: Vec<Vec<LauncherRow>> = vec![Vec::new(); Lane::ALL.len()];
+    for row in rows {
+        lanes[lane_of(&row).index()].push(row);
+    }
+    lanes
+}
+
+/// Where session `id` sits on `lanes`: its lane and its place in it.
+pub fn kanban_find(lanes: &[Vec<LauncherRow>], id: &AgentId) -> Option<(usize, usize)> {
+    lanes
+        .iter()
+        .enumerate()
+        .find_map(|(l, lane)| lane.iter().position(|r| &r.agent.id == id).map(|i| (l, i)))
+}
+
+/// Where a KANBAN step from `at` lands: `dx` lanes across — skipping empty
+/// ones, keeping the row as near as the lane allows — or `dy` cards down
+/// its lane, stopping at either end. With no card under the cursor, the
+/// first card of the first lane that has one. None on an empty board.
+pub fn kanban_step(
+    lanes: &[Vec<LauncherRow>],
+    at: Option<(usize, usize)>,
+    dx: i64,
+    dy: i64,
+) -> Option<(usize, usize)> {
+    let first = || lanes.iter().position(|l| !l.is_empty()).map(|l| (l, 0));
+    let Some((lane, row)) = at else {
+        return first();
+    };
+    if dx != 0 {
+        let mut l = lane as i64;
+        loop {
+            l += dx.signum();
+            if l < 0 || l >= lanes.len() as i64 {
+                return Some((lane, row));
+            }
+            let len = lanes[l as usize].len();
+            if len > 0 {
+                return Some((l as usize, row.min(len - 1)));
+            }
+        }
+    }
+    let len = lanes.get(lane).map_or(0, Vec::len);
+    if len == 0 {
+        return first();
+    }
+    let row = (row as i64 + dy).clamp(0, len as i64 - 1) as usize;
+    Some((lane, row))
 }
 
 // ---- the BANDS ----
@@ -1819,7 +1952,9 @@ pub fn target_for(app: &App, project: &ProjectId, new_worktree: bool) -> QuickTa
 /// `^P`. A checkout still being cut is stepped over to the root. None
 /// for a project with no usable checkout at all.
 pub fn launch_checkout(app: &App, project: &ProjectId) -> Option<WorktreeId> {
-    let checkout = if app.launcher.launcher_columns {
+    // The columns and the KANBAN have no band under the cursor: the
+    // selection's own checkout is the one.
+    let checkout = if app.launcher.launcher_columns || app.launcher.launcher_kanban {
         app.selected_worktree().map(|w| w.id.clone())
     } else {
         cursor_checkout(app)
@@ -2124,6 +2259,99 @@ mod tests {
             role: nebula_core::AgentRole::Worker,
             recent_prompts: Vec::new(),
         }
+    }
+
+    /// A card's KANBAN lane is the most urgent thing about it: a question
+    /// over a turn in flight over an unread finish, and an open pull
+    /// request only once the session itself wants nothing.
+    #[test]
+    fn a_card_takes_the_most_urgent_lane_that_applies() {
+        let pr = |standing| RowPr {
+            number: 7,
+            title: "t".into(),
+            url: "u".into(),
+            standing,
+            trouble: None,
+        };
+        let row = |status, unseen, pr: Option<RowPr>| {
+            let mut a = agent("a", "w", "n");
+            a.status = status;
+            a.unseen = unseen;
+            LauncherRow {
+                agent: a,
+                project: "p".into(),
+                branch: "b".into(),
+                pr,
+            }
+        };
+        let open = Some(pr(Standing::Open));
+        use AgentStatus::*;
+        assert_eq!(
+            lane_of(&row(NeedsFeedback, true, open.clone())),
+            Lane::NeedsInput
+        );
+        assert_eq!(lane_of(&row(Running, true, open.clone())), Lane::Running);
+        assert_eq!(lane_of(&row(Finished, true, open.clone())), Lane::Unseen);
+        assert_eq!(lane_of(&row(Finished, false, open.clone())), Lane::PrOpen);
+        assert_eq!(
+            lane_of(&row(Finished, false, Some(pr(Standing::Draft)))),
+            Lane::PrOpen,
+            "a draft is still open"
+        );
+        assert_eq!(
+            lane_of(&row(Finished, false, Some(pr(Standing::Merged)))),
+            Lane::Done,
+            "a merged one is done"
+        );
+        assert_eq!(lane_of(&row(Finished, false, None)), Lane::Done);
+        assert_eq!(lane_of(&row(Fresh, false, None)), Lane::Done);
+    }
+
+    /// The board holds the project on screen's sessions, or every
+    /// project's, each in its lane.
+    #[test]
+    fn the_kanban_is_one_project_or_all_of_them() {
+        let mut app = app();
+        app.tree.agents[0].status = AgentStatus::NeedsFeedback;
+        app.tree.agents[2].status = AgentStatus::Finished;
+        app.tree.agents[2].unseen = true;
+        let names = |lanes: &[Vec<LauncherRow>], lane: Lane| -> Vec<String> {
+            lanes[lane.index()]
+                .iter()
+                .map(|r| r.agent.name.clone())
+                .collect()
+        };
+        let one = kanban(&app, false);
+        assert_eq!(names(&one, Lane::NeedsInput), ["fix-login"]);
+        assert_eq!(names(&one, Lane::Running), ["add-search"]);
+        assert!(one[Lane::Unseen.index()].is_empty(), "tidy-css is web's");
+        let all = kanban(&app, true);
+        assert_eq!(names(&all, Lane::Unseen), ["tidy-css"]);
+        assert_eq!(all.iter().map(Vec::len).sum::<usize>(), 4);
+    }
+
+    /// A step across skips empty lanes and keeps the row as near as the
+    /// lane allows; a step down stops at the lane's ends; with no cursor
+    /// the first card of the first lane that has one.
+    #[test]
+    fn a_kanban_step_skips_empty_lanes_and_stops_at_the_ends() {
+        let app = app();
+        let rows = rows_in(&app, None);
+        let lanes = vec![
+            vec![rows[0].clone(), rows[1].clone(), rows[2].clone()],
+            Vec::new(),
+            vec![rows[3].clone()],
+            Vec::new(),
+            Vec::new(),
+        ];
+        assert_eq!(kanban_step(&lanes, None, 0, 0), Some((0, 0)));
+        assert_eq!(kanban_step(&lanes, Some((0, 2)), 1, 0), Some((2, 0)));
+        assert_eq!(kanban_step(&lanes, Some((2, 0)), 1, 0), Some((2, 0)));
+        assert_eq!(kanban_step(&lanes, Some((2, 0)), -1, 0), Some((0, 0)));
+        assert_eq!(kanban_step(&lanes, Some((0, 1)), 0, 5), Some((0, 2)));
+        assert_eq!(kanban_step(&lanes, Some((0, 1)), 0, -5), Some((0, 0)));
+        assert_eq!(kanban_step(&vec![Vec::new(); 5], None, 0, 1), None);
+        assert_eq!(kanban_find(&lanes, &rows[3].agent.id), Some((2, 0)));
     }
 
     /// Three projects: `api` with its root and a `feat` checkout, `web`

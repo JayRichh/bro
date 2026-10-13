@@ -149,6 +149,9 @@ pub enum Action {
     ToggleLauncherPane,
     /// `F10`: toggle between the ORCHESTRATOR chat view and the grid.
     ToggleOrchestratorView,
+    /// `⇧K`: the KANBAN — the grid as lanes by status — or back to the
+    /// bands; saved as Settings → Appearance → **Kanban**.
+    ToggleKanban,
     /// `^F`: FULL-SCREEN the session in the PANE — the grid and its header
     /// give way to the PTY — or bring it back down to the pane beside the
     /// cards. From the cards it full-screens the one under the cursor.
@@ -632,6 +635,15 @@ pub const ACTIONS: &[ActionSpec] = &[
         // beside them — the shift of the `` ` `` that walks the pane's
         // tabs, which is the key everything else about the pane is on.
         defaults: &["ctrl+`", "ctrl+~", "~"],
+    },
+    ActionSpec {
+        action: Action::ToggleKanban,
+        id: "toggle_kanban",
+        label: "Kanban board",
+        hint: "Lay the grid out as lanes by status — Needs input, Running, Unseen, Done, PR open — or back to a band per worktree. On the board h/l walk the lanes, j/k the cards, Tab flips between this project and every project",
+        group: "GENERAL",
+        scope: Scope::Global,
+        defaults: &["shift+k"],
     },
     ActionSpec {
         action: Action::ToggleOrchestratorView,

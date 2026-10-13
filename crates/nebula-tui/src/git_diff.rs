@@ -316,6 +316,27 @@ pub fn head_oid(root: &Path) -> Option<String> {
 /// errors become the displayed text so the modal survives a repo vanishing
 /// out from under it.
 pub fn diff_for(root: &Path, file: &DiffFile, head_ok: bool, commit: Option<&str>) -> String {
+    diff_with(root, file, head_ok, commit, None)
+}
+
+/// How much context the FULL CONTEXT read asks git for: more lines than
+/// any file the pane would show has, so one hunk is the whole file.
+pub const FULL_CONTEXT: &str = "-U1000000";
+
+/// [`diff_for`] with the whole file as context: what the DIFF VIEWER shows
+/// with unchanged lines on (`Ctrl+o`). Read for display only — the ✓ marks
+/// fingerprint `diff_for`'s three-line text, which this never replaces.
+pub fn full_context_diff(root: &Path, file: &DiffFile, head_ok: bool) -> String {
+    diff_with(root, file, head_ok, None, Some(FULL_CONTEXT))
+}
+
+fn diff_with(
+    root: &Path,
+    file: &DiffFile,
+    head_ok: bool,
+    commit: Option<&str>,
+    context: Option<&str>,
+) -> String {
     let output = if let Some(sha) = commit {
         let mut args = vec![
             "show",
@@ -350,6 +371,7 @@ pub fn diff_for(root: &Path, file: &DiffFile, head_ok: bool, commit: Option<&str
         if head_ok {
             args.push("HEAD");
         }
+        args.extend(context);
         args.extend(["--no-color", "--no-ext-diff", "--", &file.path]);
         if let Some(orig) = &file.orig_path {
             args.push(orig);
@@ -374,6 +396,113 @@ pub fn diff_for(root: &Path, file: &DiffFile, head_ok: bool, commit: Option<&str
         return "(no textual changes)".to_string();
     }
     cap_lines(&text, MAX_DIFF_LINES, false)
+}
+
+/// The zero-context diff of `file` between `from` (the index, or HEAD
+/// with `head`) and the worktree, as raw bytes split into hunks — the
+/// stuff a CHANGE's patch is cut from. Raw because the text the pane
+/// shows is decoded lossily, capped and stripped of its `\r`s, none of
+/// which `git apply` would take.
+fn zero_context_hunks(
+    root: &Path,
+    file: &DiffFile,
+    head: bool,
+) -> Result<(Vec<u8>, Vec<crate::diff_layout::RawHunk>), String> {
+    let mut args = vec!["diff"];
+    if head {
+        args.push("HEAD");
+    }
+    args.extend(["-U0", "--no-color", "--no-ext-diff", "--", &file.path]);
+    let output = run_git(root, &args)?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git diff failed: {}", stderr.trim()));
+    }
+    Ok(crate::diff_layout::split_patch(&output.stdout))
+}
+
+/// What of `file` is not staged yet: the zero-context hunks between the
+/// index and the worktree, by range. A CHANGE none of them covers is
+/// staged in full (`diff_layout::covers`). None where git could not say.
+pub fn unstaged_hunks(root: &Path, file: &DiffFile) -> Option<Vec<crate::diff_layout::RawHunk>> {
+    if file.is_untracked() {
+        return None;
+    }
+    let (_, hunks) = zero_context_hunks(root, file, false).ok()?;
+    Some(
+        hunks
+            .into_iter()
+            .map(|h| crate::diff_layout::RawHunk {
+                bytes: Vec::new(),
+                ..h
+            })
+            .collect(),
+    )
+}
+
+/// `git apply <args> -` with `patch` on stdin, in `root`.
+fn apply(root: &Path, args: &[&str], patch: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    use std::process::Stdio;
+    let mut child = git_command(root)
+        .arg("apply")
+        .args(args)
+        .arg("-")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("failed to run git: {e}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(patch)
+            .map_err(|e| format!("git apply: {e}"))?;
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("git apply: {e}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!("git apply failed: {}", stderr.trim()))
+    }
+}
+
+/// ACCEPT a CHANGE: stage what of it is still unstaged — the zero-context
+/// hunks between the index and the worktree that cover it, applied to the
+/// index (`git apply --cached --unidiff-zero`). The worktree is not
+/// touched. `Ok(false)` when nothing of it was left to stage.
+pub fn stage_change(
+    root: &Path,
+    file: &DiffFile,
+    change: &crate::diff_layout::Change,
+) -> Result<bool, String> {
+    let (header, hunks) = zero_context_hunks(root, file, false)?;
+    let Some(patch) = crate::diff_layout::patch_for(&header, &hunks, change) else {
+        return Ok(false);
+    };
+    apply(root, &["--cached", "--unidiff-zero"], &patch)?;
+    Ok(true)
+}
+
+/// REJECT a CHANGE: put the worktree's lines back as HEAD has them — the
+/// zero-context hunks between HEAD (the index, on an unborn HEAD) and the
+/// worktree that cover it, applied in reverse to the worktree
+/// (`git apply -R --unidiff-zero`). The index is not touched, so a part
+/// already staged stays staged. `Ok(false)` when nothing covered it.
+pub fn discard_change(
+    root: &Path,
+    file: &DiffFile,
+    head_ok: bool,
+    change: &crate::diff_layout::Change,
+) -> Result<bool, String> {
+    let (header, hunks) = zero_context_hunks(root, file, head_ok)?;
+    let Some(patch) = crate::diff_layout::patch_for(&header, &hunks, change) else {
+        return Ok(false);
+    };
+    apply(root, &["-R", "--unidiff-zero"], &patch)?;
+    Ok(true)
 }
 
 /// What a capped text ends with, so the pane says why it stops short.
@@ -506,6 +635,7 @@ pub fn load_selected_diff(view: &mut DiffView) {
     let Some(jobs) = view.jobs.clone() else {
         let diff = diff_for(&view.root, &file, view.head_ok, None);
         view.show_diff(Some(&file.path), diff, false);
+        request_aux(view);
         return;
     };
     if let Some(text) = view.cached(&file.path) {
@@ -565,6 +695,7 @@ pub fn land_diff(
     if !(same_file && view.diff == diff) {
         view.show_diff(Some(path), diff, same_file);
     }
+    request_aux(view);
     crate::git_log::read_ahead(view);
     let next = view
         .file_after_cursor()
@@ -572,6 +703,51 @@ pub fn land_diff(
         .cloned();
     if let (Some(file), Some(jobs)) = (next, view.jobs.clone()) {
         request_diff(view, &jobs, file, crate::view_jobs::ticket(), true);
+    }
+}
+
+/// Read what goes beside the working-tree diff on screen — its whole-file
+/// text while FULL CONTEXT is on, and its unstaged hunks, which say which
+/// CHANGES are staged — off the loop for a view with BACKGROUND READS,
+/// inline otherwise. Nothing for a diff that is not a stageable file's
+/// (`DiffView::stageable`) or has no hunk to lay out.
+pub fn request_aux(view: &mut DiffView) {
+    if view.laid.is_none() {
+        return;
+    }
+    let Some(file) = view.stageable().cloned() else {
+        return;
+    };
+    let (root, head_ok, id, full) = (view.root.clone(), view.head_ok, view.id, view.full_context);
+    let read = move || crate::app::DiffAux {
+        full: full.then(|| full_context_diff(&root, &file, head_ok)),
+        unstaged: unstaged_hunks(&root, &file),
+        path: file.path,
+    };
+    match view.jobs.clone() {
+        Some(jobs) => jobs.run(move || {
+            Some(crate::view_jobs::Answer::DiffAux {
+                view: id,
+                aux: read(),
+            })
+        }),
+        None => land_aux(view, id, read()),
+    }
+}
+
+/// What [`request_aux`] read came back: kept while its file is still the
+/// one on screen, and the diff laid out again if it brought the whole
+/// file's text for FULL CONTEXT.
+pub fn land_aux(view: &mut DiffView, id: u64, aux: crate::app::DiffAux) {
+    if id != view.id || view.shown.as_deref() != Some(aux.path.as_str()) {
+        return;
+    }
+    let relayout =
+        view.full_context && view.aux.as_ref().and_then(|a| a.full.as_ref()) != aux.full.as_ref();
+    view.aux = Some(aux);
+    if relayout {
+        view.relayout();
+        view.scroll = view.scroll.min(view.max_scroll());
     }
 }
 
@@ -584,99 +760,6 @@ pub fn diff_slow(view: &mut DiffView, ticket: u64) {
         view.show_diff(None, "loading…".to_string(), false);
     }
 }
-
-/// One row of a diff laid out side by side: the old file left, the new
-/// one right.
-#[derive(Debug, Clone, PartialEq)]
-pub enum SplitRow {
-    /// A hunk header, or a line about the file (a rename, a mode change),
-    /// across both sides.
-    Note(String, DiffLineKind),
-    /// A line of each side, numbered; `None` is a side with nothing facing
-    /// it (pure add or remove).
-    Pair {
-        left: Option<(u32, String)>,
-        right: Option<(u32, String)>,
-        changed: bool,
-    },
-}
-
-/// Turn a unified diff into rows that can be drawn old-left/new-right.
-/// Removed lines are held until the following additions arrive, so a
-/// replacement reads across one row. The `diff --git` / `index` / `---` /
-/// `+++` headers say nothing the pane's title does not, and are dropped.
-/// `None` for text with no hunk in it (a summary, status, or error), which
-/// is shown as it is.
-pub fn split_rows(diff: &str) -> Option<Vec<SplitRow>> {
-    if !diff.lines().any(|l| l.starts_with("@@")) {
-        return None;
-    }
-    let mut rows = Vec::new();
-    let (mut old, mut new) = (0u32, 0u32);
-    let mut removed: Vec<(u32, String)> = Vec::new();
-    let mut added: Vec<(u32, String)> = Vec::new();
-    let flush = |rows: &mut Vec<SplitRow>, removed: &mut Vec<_>, added: &mut Vec<_>| {
-        let n = removed.len().max(added.len());
-        let mut left = removed.drain(..);
-        let mut right = added.drain(..);
-        for _ in 0..n {
-            rows.push(SplitRow::Pair {
-                left: left.next(),
-                right: right.next(),
-                changed: true,
-            });
-        }
-    };
-    let mut in_hunk = false;
-    for line in diff.lines() {
-        if line.starts_with("@@") {
-            flush(&mut rows, &mut removed, &mut added);
-            let mut starts = line.split_whitespace().skip(1).take(2).map(|part| {
-                part.trim_start_matches(['-', '+'])
-                    .split_once(',')
-                    .map(|(n, _)| n)
-                    .unwrap_or(part)
-                    .parse::<u32>()
-                    .unwrap_or(1)
-            });
-            old = starts.next().unwrap_or(1);
-            new = starts.next().unwrap_or(1);
-            rows.push(SplitRow::Note(line.to_string(), DiffLineKind::Hunk));
-            in_hunk = true;
-        } else if line.starts_with("diff --git") {
-            flush(&mut rows, &mut removed, &mut added);
-            in_hunk = false;
-        } else if !in_hunk {
-            const DROPPED: [&str; 3] = ["index ", "--- ", "+++ "];
-            if !DROPPED.iter().any(|d| line.starts_with(d)) {
-                rows.push(SplitRow::Note(line.to_string(), DiffLineKind::Header));
-            }
-        } else if let Some(text) = line.strip_prefix('-') {
-            removed.push((old, text.to_string()));
-            old += 1;
-        } else if let Some(text) = line.strip_prefix('+') {
-            added.push((new, text.to_string()));
-            new += 1;
-        } else if line.starts_with('\\') {
-            // `\ No newline at end of file`
-            flush(&mut rows, &mut removed, &mut added);
-            rows.push(SplitRow::Note(line.to_string(), DiffLineKind::Header));
-        } else {
-            flush(&mut rows, &mut removed, &mut added);
-            let text = line.strip_prefix(' ').unwrap_or(line).to_string();
-            rows.push(SplitRow::Pair {
-                left: Some((old, text.clone())),
-                right: Some((new, text)),
-                changed: false,
-            });
-            old += 1;
-            new += 1;
-        }
-    }
-    flush(&mut rows, &mut removed, &mut added);
-    Some(rows)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -869,37 +952,6 @@ mod tests {
         );
         assert_eq!(classify_diff_line(" context"), DiffLineKind::Context);
     }
-
-    #[test]
-    fn split_rows_pairs_removals_with_the_additions_after_them() {
-        let diff = "diff --git a/x b/x\nold mode 100644\nnew mode 100755\nindex 1..2\n--- a/x\n+++ b/x\n\
-                    @@ -10,4 +10,5 @@ fn f\n keep\n-gone one\n-gone two\n+new one\n+new two\n+new three\n tail\n";
-        let rows = split_rows(diff).unwrap();
-        let pair = |l: Option<(u32, &str)>, r: Option<(u32, &str)>, changed| SplitRow::Pair {
-            left: l.map(|(n, t)| (n, t.to_string())),
-            right: r.map(|(n, t)| (n, t.to_string())),
-            changed,
-        };
-        assert_eq!(
-            rows,
-            vec![
-                SplitRow::Note("old mode 100644".into(), DiffLineKind::Header),
-                SplitRow::Note("new mode 100755".into(), DiffLineKind::Header),
-                SplitRow::Note("@@ -10,4 +10,5 @@ fn f".into(), DiffLineKind::Hunk),
-                pair(Some((10, "keep")), Some((10, "keep")), false),
-                pair(Some((11, "gone one")), Some((11, "new one")), true),
-                pair(Some((12, "gone two")), Some((12, "new two")), true),
-                pair(None, Some((13, "new three")), true),
-                pair(Some((13, "tail")), Some((14, "tail")), false),
-            ]
-        );
-        assert_eq!(
-            split_rows("commit abc\n\n    subject"),
-            None,
-            "no hunk: shown as it is"
-        );
-    }
-
     fn git(repo: &PathBuf, args: &[&str]) {
         let out = Command::new("git")
             .arg("-C")
@@ -1119,6 +1171,102 @@ mod tests {
             "HEAD 1 2 3 -> 1 TWO 4 is +2 -2, and new.txt's two lines add"
         );
         assert_eq!(line_changes(repo, &[]), Some(LineChanges::default()));
+    }
+
+    /// A file with two changes far enough apart to be two hunks, as the
+    /// DIFF VIEWER reads it, and the CHANGES it lays out.
+    fn two_changes(repo: &PathBuf, crlf: bool) -> (DiffFile, crate::diff_layout::DiffDoc) {
+        let eol = if crlf { "\r\n" } else { "\n" };
+        let body: Vec<String> = (1..=20).map(|n| format!("line {n}")).collect();
+        std::fs::write(repo.join("two.txt"), body.join(eol) + eol).unwrap();
+        git(repo, &["add", "two.txt"]);
+        git(repo, &["commit", "-qm", "two"]);
+        let mut edited = body.clone();
+        edited[2] = "line three".into();
+        edited.remove(16);
+        std::fs::write(repo.join("two.txt"), edited.join(eol) + eol).unwrap();
+        let file = changed_files(repo)
+            .unwrap()
+            .into_iter()
+            .find(|f| f.path == "two.txt")
+            .unwrap();
+        let diff = diff_for(repo, &file, true, None);
+        let doc = crate::diff_layout::DiffDoc::parse(&diff, "two.txt", false).unwrap();
+        assert_eq!(doc.changes.len(), 2, "{diff}");
+        (file, doc)
+    }
+
+    fn cached_diff(repo: &Path) -> String {
+        let out = run_git(repo, &["diff", "--cached", "--no-color"]).unwrap();
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    /// ACCEPT stages one CHANGE and nothing else; the other stays
+    /// unstaged, and the worktree is not touched. Asked again, the staged
+    /// one has nothing left to stage.
+    #[test]
+    fn accepting_a_change_stages_that_change_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = make_repo(&dir);
+        let (file, doc) = two_changes(&repo, false);
+        let before = std::fs::read(repo.join("two.txt")).unwrap();
+
+        assert_eq!(stage_change(&repo, &file, &doc.changes[0]), Ok(true));
+        let staged = cached_diff(&repo);
+        assert!(staged.contains("+line three"), "{staged}");
+        assert!(
+            !staged.contains("-line 17"),
+            "only the first change: {staged}"
+        );
+        assert_eq!(std::fs::read(repo.join("two.txt")).unwrap(), before);
+
+        let unstaged = unstaged_hunks(&repo, &file).unwrap();
+        assert!(!unstaged
+            .iter()
+            .any(|h| crate::diff_layout::covers(h, &doc.changes[0])));
+        assert!(unstaged
+            .iter()
+            .any(|h| crate::diff_layout::covers(h, &doc.changes[1])));
+        assert_eq!(stage_change(&repo, &file, &doc.changes[0]), Ok(false));
+    }
+
+    /// REJECT puts one CHANGE's lines back as HEAD has them, in the
+    /// worktree only — CRLF line endings and all.
+    #[test]
+    fn rejecting_a_change_reverts_that_change_in_the_worktree() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = make_repo(&dir);
+        git(&repo, &["config", "core.autocrlf", "false"]);
+        let (file, doc) = two_changes(&repo, true);
+
+        assert_eq!(
+            discard_change(&repo, &file, true, &doc.changes[1]),
+            Ok(true)
+        );
+        let now = std::fs::read_to_string(repo.join("two.txt")).unwrap();
+        assert!(
+            now.contains("line 17\r\n"),
+            "the removed line is back: {now:?}"
+        );
+        assert!(now.contains("line three\r\n"), "the other change stays");
+        assert!(cached_diff(&repo).is_empty(), "the index is not touched");
+        let diff = diff_for(&repo, &file, true, None);
+        let left = crate::diff_layout::DiffDoc::parse(&diff, "two.txt", false).unwrap();
+        assert_eq!(left.changes.len(), 1);
+    }
+
+    /// FULL CONTEXT reads the whole file as one hunk, leaving `diff_for`'s
+    /// three-line text — what the ✓ marks fingerprint — as it was.
+    #[test]
+    fn full_context_reads_the_whole_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = make_repo(&dir);
+        let (file, _) = two_changes(&repo, false);
+        let full = full_context_diff(&repo, &file, true);
+        let doc = crate::diff_layout::DiffDoc::parse(&full, "two.txt", true).unwrap();
+        assert_eq!(doc.hunks.len(), 1);
+        assert!(full.contains(" line 10"), "the middle is there");
+        assert!(!diff_for(&repo, &file, true, None).contains(" line 10"));
     }
 
     #[test]

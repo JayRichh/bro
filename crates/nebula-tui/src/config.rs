@@ -46,6 +46,13 @@ pub const PANE_SIDES: &[&str] = &[
 /// COLUMNS: projects, worktrees and sessions beside the pane.
 pub const WORKTREE_LAYOUTS: &[&str] = &["cards", "list", "nested", "columns"];
 
+/// What **Kanban scope** cycles through.
+pub const KANBAN_SCOPES: &[&str] = &["project", "all"];
+
+/// What **Diff context** cycles through: the three lines git gives each
+/// side of a change, or the whole file.
+pub const DIFF_CONTEXTS: &[&str] = &["collapsed", "full"];
+
 /// Inline graphics choices (Settings → Appearance).
 pub const INLINE_GRAPHICS: &[&str] = crate::graphics::INLINE_GRAPHICS_MODES;
 
@@ -407,8 +414,12 @@ pub enum SettingKind {
     HideCardMarks,
     HighlightCurrentCard,
     SourceControlGraph,
+    DiffMode,
+    DiffContext,
     SessionPane,
     WorktreeLayout,
+    Kanban,
+    KanbanScope,
     InlineGraphics,
     ExpandAllWorktrees,
     CardIssueNumber,
@@ -518,6 +529,10 @@ impl SettingKind {
             SettingKind::AskBeforeArchive => (2026, 10, 3),
             SettingKind::ConfirmDragMove => (2026, 10, 2),
             SettingKind::SourceControlGraph | SettingKind::InlineGraphics => (2026, 10, 9),
+            SettingKind::DiffMode
+            | SettingKind::DiffContext
+            | SettingKind::Kanban
+            | SettingKind::KanbanScope => (2026, 10, 13),
         }
     }
 
@@ -670,7 +685,7 @@ pub const SETTINGS_TABS: &[SettingsTab] = &[
             SettingSpec {
                 kind: SettingKind::Theme,
                 label: "Color theme",
-                hint: "Accent colors used across the grid and overlays",
+                hint: "Colors across the grid, overlays, previews and diffs. one-dark / one-light paint their own canvas; auto follows the OS light or dark; vscode reads the theme VS Code is set to",
                 group: "",
             },
             SettingSpec {
@@ -710,6 +725,18 @@ pub const SETTINGS_TABS: &[SettingsTab] = &[
                 group: "",
             },
             SettingSpec {
+                kind: SettingKind::Kanban,
+                label: "Kanban",
+                hint: "Lay the grid out as lanes by status — Needs input, Running, Unseen, Done, PR open — instead of a band per worktree (⇧K)",
+                group: "",
+            },
+            SettingSpec {
+                kind: SettingKind::KanbanScope,
+                label: "Kanban scope",
+                hint: "Whose sessions the kanban lanes hold: the project on screen, or every project (Tab on the board)",
+                group: "",
+            },
+            SettingSpec {
                 kind: SettingKind::CardIssueNumber,
                 label: "Card issue number",
                 hint: "Show the #number of the GitHub issue a session was started from on its card; click it to open the issue",
@@ -731,6 +758,18 @@ pub const SETTINGS_TABS: &[SettingsTab] = &[
                 kind: SettingKind::HideDraftPrs,
                 label: "Draft pull requests",
                 hint: "Show or hide draft pull requests in / search; checkouts always stay",
+                group: "",
+            },
+            SettingSpec {
+                kind: SettingKind::DiffMode,
+                label: "Diff layout",
+                hint: "How the g diff viewer lays a diff out: side by side, inline with two line-number gutters, or the new text alone (Ctrl+s in the viewer)",
+                group: "",
+            },
+            SettingSpec {
+                kind: SettingKind::DiffContext,
+                label: "Diff context",
+                hint: "The unchanged lines around a change: three each side with the rest folded, or the whole file (Ctrl+o in the viewer)",
                 group: "",
             },
             SettingSpec {
@@ -1128,6 +1167,14 @@ pub struct Config {
     /// [`Config::worktree_layout_word`], so a word off the list is the
     /// cards.
     pub worktree_layout: String,
+    /// KANBAN: the grid laid out as five lanes by status — Needs input,
+    /// Running, Unseen, Done, PR open — instead of a band per worktree.
+    /// `⇧K` flips it and writes it back. Off by default.
+    pub kanban: bool,
+    /// KANBAN SCOPE: `project` (the project on screen's sessions, the
+    /// default) or `all` (every project's). `Tab` on the board flips it
+    /// and writes it back. Anything else reads as `project`.
+    pub kanban_scope: String,
     /// INLINE GRAPHICS: images and Mermaid diagrams in file previews.
     /// `off` shows source/hints only; enabled values currently use the
     /// Unicode half-block renderer, which works in native terminals,
@@ -1167,6 +1214,18 @@ pub struct Config {
     /// read-only commit graph under the changed files. Off by default, and
     /// with it off the DIFF VIEWER does not run `git log` or `rev-list`.
     pub source_control_graph: bool,
+    /// The DIFF LAYOUT the `g` DIFF VIEWER opens in: `side-by-side`,
+    /// `inline` or `replacement` (`crate::diff_layout::DiffMode`), which
+    /// `Ctrl+s` in the viewer cycles and writes back. Empty — a config
+    /// that never set it — reads as side by side, unless the side-by-side
+    /// switch older builds kept in state.json says unified
+    /// ([`Config::diff_mode`]).
+    pub diff_mode: String,
+    /// UNCHANGED CONTEXT in the DIFF VIEWER: `collapsed` (three lines each
+    /// side of a change, the rest folded into the hunk's row) or `full`
+    /// (the whole file). `Ctrl+o` in the viewer flips it and writes it
+    /// back. Anything else reads as collapsed.
+    pub diff_context: String,
     /// RETIRED with the line counts always drawn. Through 0.37 the **Card
     /// line counts** SETTING (Settings → Appearance, off by default)
     /// switched each card's `+3 files` to `+3 files +120 -45`. Every card
@@ -1506,19 +1565,23 @@ impl Default for Config {
             delete_empty_worktree: false,
             auto_cleanup_merged: false,
             show_all_worktrees: true,
-            theme: "default".into(),
+            theme: crate::theme::DEFAULT_THEME.into(),
             animations: true,
             black_background: true,
             hide_card_marks: false,
             highlight_current_card: true,
             session_pane: crate::launcher::PaneSide::default().as_str().into(),
             worktree_layout: WORKTREE_LAYOUTS[0].into(),
+            kanban: false,
+            kanban_scope: KANBAN_SCOPES[0].into(),
             inline_graphics: crate::graphics::DEFAULT_INLINE_GRAPHICS.into(),
             expand_all_worktrees: false,
             hide_card_prompt: false,
             card_issue_number: true,
             hide_draft_prs: false,
             source_control_graph: false,
+            diff_mode: String::new(),
+            diff_context: DIFF_CONTEXTS[0].into(),
             card_line_changes: false,
             skip_session_naming: false,
             confirm_on_archive: false,
@@ -1680,15 +1743,40 @@ impl Config {
         Ok(())
     }
 
-    /// `theme` resolved to the palette the UI draws with.
+    /// `theme` resolved to a palette without asking the machine: a preset
+    /// as it is, `auto` and `vscode` as One Dark. The running UI resolves
+    /// through its LIVE THEME instead (`crate::appearance::LiveTheme`),
+    /// which does ask.
     pub fn theme(&self) -> crate::theme::Theme {
-        crate::theme::Theme::by_name(&self.theme)
+        crate::theme::resolve(&self.theme, &crate::theme::Machine::default())
     }
 
     /// `session_pane` resolved to the side the LAUNCHER VIEW lays its pane
     /// out on.
     pub fn pane_side(&self) -> crate::launcher::PaneSide {
         crate::launcher::PaneSide::parse(&self.session_pane)
+    }
+
+    /// `kanban_scope` says every project rather than the one on screen.
+    pub fn kanban_all(&self) -> bool {
+        self.kanban_scope.trim().eq_ignore_ascii_case("all")
+    }
+
+    /// The DIFF LAYOUT `diff_mode` names; None while the file has not set
+    /// one (or names one this build does not know), when the side-by-side
+    /// switch an older build kept in state.json decides.
+    pub fn diff_mode(&self) -> Option<crate::diff_layout::DiffMode> {
+        crate::diff_layout::DiffMode::parse(&self.diff_mode)
+    }
+
+    /// `diff_context` as one of [`DIFF_CONTEXTS`].
+    pub fn diff_context_word(&self) -> &'static str {
+        let stored = self.diff_context.trim();
+        DIFF_CONTEXTS
+            .iter()
+            .copied()
+            .find(|w| w.eq_ignore_ascii_case(stored))
+            .unwrap_or(DIFF_CONTEXTS[0])
     }
 
     /// `worktree_layout` says the compact LIST rather than the cards.
@@ -2368,11 +2456,22 @@ impl Config {
             SettingKind::HighlightCurrentCard => on_off(self.highlight_current_card).into(),
             SettingKind::SessionPane => self.pane_side().as_str().into(),
             SettingKind::WorktreeLayout => self.worktree_layout_word().into(),
+            SettingKind::Kanban => on_off(self.kanban).into(),
+            SettingKind::KanbanScope => {
+                if self.kanban_all() {
+                    "all"
+                } else {
+                    "project"
+                }
+            }
+            .into(),
             SettingKind::InlineGraphics => self.inline_graphics_label().into(),
             SettingKind::ExpandAllWorktrees => on_off(self.expand_all_worktrees).into(),
             SettingKind::CardIssueNumber => on_off(self.card_issue_number).into(),
             SettingKind::HideDraftPrs => shown_hidden(self.hide_draft_prs).into(),
             SettingKind::SourceControlGraph => on_off(self.source_control_graph).into(),
+            SettingKind::DiffMode => self.diff_mode().unwrap_or_default().as_str().into(),
+            SettingKind::DiffContext => self.diff_context_word().into(),
             // A project row with no project to speak of: what one without
             // an entry would show.
             SettingKind::RunCommand | SettingKind::OpenCommand => {
@@ -2483,6 +2582,12 @@ impl Config {
                 self.session_pane =
                     cycle_choice(self.pane_side().as_str(), PANE_SIDES, step).into();
             }
+            SettingKind::Kanban => {
+                self.kanban = !self.kanban;
+            }
+            SettingKind::KanbanScope => {
+                self.kanban_scope = if self.kanban_all() { "project" } else { "all" }.into();
+            }
             SettingKind::WorktreeLayout => {
                 let now = self.worktree_layout_word();
                 self.worktree_layout = cycle_choice(now, WORKTREE_LAYOUTS, step).into();
@@ -2502,6 +2607,15 @@ impl Config {
             }
             SettingKind::SourceControlGraph => {
                 self.source_control_graph = !self.source_control_graph;
+            }
+            SettingKind::DiffMode => {
+                let modes = crate::diff_layout::DiffMode::ALL.map(|m| m.as_str());
+                let now = self.diff_mode().unwrap_or_default().as_str();
+                self.diff_mode = cycle_choice(now, &modes, step).into();
+            }
+            SettingKind::DiffContext => {
+                let now = self.diff_context_word();
+                self.diff_context = cycle_choice(now, DIFF_CONTEXTS, step).into();
             }
             // One project's, not the file's, and typed: see `set_project_text`.
             SettingKind::RunCommand | SettingKind::OpenCommand => {}
@@ -3717,7 +3831,13 @@ mod tests {
     #[test]
     fn theme_cycles_through_presets_and_resolves() {
         let mut cfg = Config::default();
-        assert_eq!(cfg.theme, "default");
+        // One Dark out of the box on Windows, the classic look elsewhere.
+        assert_eq!(cfg.theme, crate::theme::DEFAULT_THEME);
+        assert_eq!(
+            cfg.theme(),
+            crate::theme::Theme::by_name(crate::theme::DEFAULT_THEME)
+        );
+        cfg.theme = "default".into();
         assert_eq!(cfg.theme(), crate::theme::Theme::default());
         let (tab, theme_row) = locate(SettingKind::Theme).unwrap();
         cfg.cycle(tab, theme_row, 1);

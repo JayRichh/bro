@@ -97,6 +97,7 @@ macro_rules! main_loop_body {
     // The last sweep tick still had something to animate (see the tick).
     let mut sweep_was_ticking = false;
     let mut next_ago_refresh = tokio::time::Instant::now() + AGO_REFRESH;
+    let mut next_theme_recheck = tokio::time::Instant::now() + THEME_RECHECK;
     // The host's runtime modes, re-asked on a slow beat (see host_$terminal).
     let mut next_mode_reassert = tokio::time::Instant::now() + MODE_REASSERT;
     // Editor-modal PTY output; the channel outlives individual editor
@@ -228,6 +229,11 @@ macro_rules! main_loop_body {
                     app.chrome.dirty = true;
                 }
                 next_ago_refresh = tokio::time::Instant::now() + AGO_REFRESH;
+            }
+            // The THEME BEAT, only while the theme follows the machine.
+            _ = tokio::time::sleep_until(next_theme_recheck), if app.chrome.live_theme.is_live() => {
+                recheck_theme(&mut app);
+                next_theme_recheck = tokio::time::Instant::now() + THEME_RECHECK;
             }
             // The KEY COMBO DISPLAY clears itself a moment after the press
             // (`key_combo::LINGER`) — nothing else repaints an idle app, so

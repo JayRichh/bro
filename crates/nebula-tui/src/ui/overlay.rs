@@ -1283,18 +1283,46 @@ fn draw_diff_overlay(f: &mut Frame, app: &mut App, view: crate::app::DiffView) {
         ),
         (diff_a.width as usize).saturating_sub(4),
     );
-    let mut block = panel_block(&title, true, th).title_bottom(Line::from(Span::styled(
-        " ^r: toggle reviewed ",
-        Style::default().fg(th.dim),
-    )));
+    // The bottom rule says what the keys do here, as much of it as fits,
+    // or — with a discard waiting on its answer — the question.
+    let hint = if let Some(c) = view.confirm_discard {
+        Span::styled(
+            format!(
+                " discard change {}? y/Enter: discard · any key: keep ",
+                c + 1
+            ),
+            Style::default().fg(th.err).add_modifier(Modifier::BOLD),
+        )
+    } else {
+        let room = (diff_a.width as usize).saturating_sub(12);
+        let full = format!(
+            " ^s {} · ^o context · ^n/^p change · ^y stage · ^x discard · ^r reviewed ",
+            view.mode.label()
+        );
+        let short = format!(" ^s {} · ^n/^p · ^y/^x · ^r ", view.mode.label());
+        let text = if full.chars().count() <= room {
+            full
+        } else {
+            short
+        };
+        Span::styled(text, Style::default().fg(th.dim))
+    };
+    let mut block = panel_block(&title, true, th).title_bottom(Line::from(hint));
     let diff_inner = block.inner(diff_a);
-    // Side by side when it fits; a narrow pane reads the unified diff
-    // instead.
-    let split = view
-        .split_rows
-        .as_deref()
-        .filter(|_| diff_inner.width >= crate::app::MIN_SPLIT_W);
-    let total = split.map_or(view.diff_line_count, <[_]>::len);
+    // The laid-out diff in the view's DIFF LAYOUT — side by side only when
+    // the pane is wide enough for two numbered sides, inline otherwise —
+    // or, for text with no hunk in it, the text as it is.
+    let wide = view.mode != crate::diff_layout::DiffMode::SideBySide
+        || diff_inner.width >= crate::app::MIN_SPLIT_W;
+    let rows = view.laid.as_deref().map(|laid| match &laid.inline {
+        Some(inline) if !wide => (laid, inline.as_slice(), false),
+        _ => (
+            laid,
+            laid.rows.as_slice(),
+            view.mode == crate::diff_layout::DiffMode::SideBySide,
+        ),
+    });
+    let total = rows.map_or(view.diff_line_count, |(_, r, _)| r.len());
     let max_scroll = (total as u16).saturating_sub(diff_inner.height.max(1));
     let scroll = view.scroll.min(max_scroll);
     if max_scroll > 0 {
@@ -1307,20 +1335,30 @@ fn draw_diff_overlay(f: &mut Frame, app: &mut App, view: crate::app::DiffView) {
         );
     }
     f.render_widget(block, diff_a);
-    if let Some(rows) = split {
-        draw_split_diff(f, rows, scroll, diff_inner, th);
-    } else {
-        // Only the rows in view are styled: a diff runs to 20 000
-        // lines, and building a `Line` for each of them on every frame
-        // was most of what scrolling a large one cost.
-        let lines: Vec<Line> = view
-            .diff
-            .lines()
-            .skip(scroll as usize)
-            .take(diff_inner.height as usize)
-            .map(|l| Line::from(Span::styled(l.to_string(), diff_line_style(l, th))))
-            .collect();
-        f.render_widget(Paragraph::new(lines), diff_inner);
+    match rows {
+        Some((laid, rows, two_sides)) => {
+            let look = DiffLook {
+                laid,
+                mode: view.mode,
+                cursor: view.change_cursor,
+                staged: &|c| view.change_staged(c),
+                th,
+            };
+            draw_laid_diff(f, &look, rows, scroll, diff_inner, two_sides);
+        }
+        None => {
+            // Only the rows in view are styled: a diff runs to 20 000
+            // lines, and building a `Line` for each of them on every frame
+            // was most of what scrolling a large one cost.
+            let lines: Vec<Line> = view
+                .diff
+                .lines()
+                .skip(scroll as usize)
+                .take(diff_inner.height as usize)
+                .map(|l| Line::from(Span::styled(l.to_string(), diff_line_style(l, th))))
+                .collect();
+            f.render_widget(Paragraph::new(lines), diff_inner);
+        }
     }
 
     // Write-back (draw works on a clone): page size for key paging,
@@ -1331,7 +1369,7 @@ fn draw_diff_overlay(f: &mut Frame, app: &mut App, view: crate::app::DiffView) {
         v.list_area = list_inner;
         v.area = area;
         v.files_width = files_w;
-        v.split_shown = split.is_some();
+        v.wide_shown = wide;
     }
 }
 
@@ -1347,75 +1385,276 @@ fn diff_line_style(line: &str, th: Theme) -> Style {
     }
 }
 
-/// A diff side by side (`git_diff::split_rows`): the old file left and the
-/// new one right, each line numbered, a removed line facing what replaced
-/// it. Only the rows in view are built.
-fn draw_split_diff(
-    f: &mut Frame,
-    rows: &[crate::git_diff::SplitRow],
-    scroll: u16,
-    area: Rect,
+/// What every row of a laid-out diff is drawn with: the document, the
+/// CHANGE the cursor is on, whether a change is staged, the theme.
+struct DiffLook<'a> {
+    laid: &'a crate::app::LaidDiff,
+    mode: crate::diff_layout::DiffMode,
+    cursor: Option<usize>,
+    staged: &'a dyn Fn(usize) -> Option<bool>,
     th: Theme,
-) {
-    use crate::git_diff::SplitRow;
-    let widest = rows
-        .iter()
-        .filter_map(|row| match row {
-            SplitRow::Pair { left, right, .. } => Some(
-                left.as_ref()
-                    .map_or(0, |l| l.0)
-                    .max(right.as_ref().map_or(0, |r| r.0)),
-            ),
-            SplitRow::Note(..) => None,
-        })
-        .max()
-        .unwrap_or(0);
-    let num_w = widest.to_string().len();
-    let [left_a, sep_a, right_a] = Layout::horizontal([
-        Constraint::Length(area.width.saturating_sub(1) / 2),
-        Constraint::Length(1),
-        Constraint::Min(0),
-    ])
-    .areas(area);
-    let dim = Style::default().fg(th.dim);
-    let cell = |side: &Option<(u32, String)>, style: Style| match side {
-        Some((n, text)) => Line::from(vec![
-            Span::styled(format!("{n:>num_w$} "), dim),
-            Span::styled(text.replace('\t', "    "), style),
-        ]),
-        None => Line::default(),
+}
+
+/// The gutter's mark for a row of CHANGE `change`: an accent bar on the
+/// change the cursor is on, a `✓` on a staged one, blank otherwise.
+fn change_mark(look: &DiffLook, change: Option<usize>) -> Span<'static> {
+    match change {
+        Some(c) if look.cursor == Some(c) => Span::styled("▌", Style::default().fg(look.th.accent)),
+        Some(c) if (look.staged)(c) == Some(true) => {
+            Span::styled("✓", Style::default().fg(look.th.ok))
+        }
+        _ => Span::raw(" "),
+    }
+}
+
+/// A line number right-aligned in `w` columns, or blank.
+fn line_no(n: Option<u32>, w: usize) -> String {
+    match n {
+        Some(n) => format!("{n:>w$}"),
+        None => " ".repeat(w),
+    }
+}
+
+/// Line `i`'s text as spans: its syntax colors, over its side's wash
+/// (none for an unchanged line), with the words its partner line does not
+/// share lit stronger — `width` columns of it, the wash run to the edge.
+fn line_spans(look: &DiffLook, i: usize, width: usize) -> Vec<Span<'static>> {
+    use crate::diff_layout::Kind;
+    let doc = &look.laid.doc;
+    let th = look.th;
+    let line = &doc.lines[i];
+    let (wash, word) = match line.kind {
+        Kind::Add => (Some(th.diff_add_bg), th.diff_add_word),
+        Kind::Remove => (Some(th.diff_del_bg), th.diff_del_word),
+        Kind::Context => (None, th.sel_bg),
     };
-    let (mut left, mut right) = (Vec::new(), Vec::new());
-    for row in rows.iter().skip(scroll as usize).take(area.height as usize) {
-        match row {
-            SplitRow::Note(text, kind) => {
-                let style = if *kind == DiffLineKind::Hunk {
-                    Style::default().fg(th.accent)
-                } else {
-                    dim
-                };
-                left.push(Line::from(Span::styled(text.clone(), style)));
-                right.push(Line::default());
+    let ranges = match (line.kind, line.partner) {
+        (Kind::Add, Some(p)) => crate::diff_layout::word_ranges(&doc.lines[p].text, &line.text).1,
+        (Kind::Remove, Some(p)) => {
+            crate::diff_layout::word_ranges(&line.text, &doc.lines[p].text).0
+        }
+        _ => Vec::new(),
+    };
+    let mut spans = Vec::new();
+    let mut at = 0usize;
+    for (kind, text) in &line.tokens {
+        let base = crate::ui::token_style(*kind, th);
+        let base = match wash {
+            Some(bg) => base.bg(bg),
+            None => base,
+        };
+        // Split the run where a changed range starts or ends.
+        let mut run = String::new();
+        let mut lit = false;
+        for ch in text.chars() {
+            if at >= width {
+                break;
             }
-            SplitRow::Pair {
-                left: old,
-                right: new,
-                changed,
-            } => {
-                let (old_style, new_style) = if *changed {
-                    (Style::default().fg(th.err), Style::default().fg(th.ok))
-                } else {
-                    (Style::default(), Style::default())
-                };
-                left.push(cell(old, old_style));
-                right.push(cell(new, new_style));
+            let now = ranges.iter().any(|&(a, b)| (a..b).contains(&at));
+            if now != lit && !run.is_empty() {
+                let style = if lit { base.bg(word) } else { base };
+                spans.push(Span::styled(std::mem::take(&mut run), style));
             }
+            lit = now;
+            run.push(ch);
+            at += 1;
+        }
+        if !run.is_empty() {
+            let style = if lit { base.bg(word) } else { base };
+            spans.push(Span::styled(run, style));
         }
     }
-    let seam = vec![Line::from(Span::styled("│", dim)); area.height as usize];
-    f.render_widget(Paragraph::new(left), left_a);
-    f.render_widget(Paragraph::new(seam), sep_a);
-    f.render_widget(Paragraph::new(right), right_a);
+    if let Some(bg) = wash {
+        if at < width {
+            spans.push(Span::styled(
+                " ".repeat(width - at),
+                Style::default().bg(bg),
+            ));
+        }
+    }
+    spans
+}
+
+/// The sign column of a line: `+`, `-` or blank, over its wash.
+fn sign_span(look: &DiffLook, i: usize) -> Span<'static> {
+    use crate::diff_layout::Kind;
+    let th = look.th;
+    match look.laid.doc.lines[i].kind {
+        Kind::Add => Span::styled("+", Style::default().fg(th.ok).bg(th.diff_add_bg)),
+        Kind::Remove => Span::styled("-", Style::default().fg(th.err).bg(th.diff_del_bg)),
+        Kind::Context => Span::raw(" "),
+    }
+}
+
+/// A hunk's row: what the diff left out above it, then the section git
+/// named after its `@@` (the function the hunk is in), in the accent.
+fn hunk_spans(look: &DiffLook, h: usize) -> Vec<Span<'static>> {
+    let hunk = &look.laid.doc.hunks[h];
+    let th = look.th;
+    let dim = Style::default().fg(th.dim);
+    let mut spans = Vec::new();
+    if hunk.hidden > 0 {
+        spans.push(Span::styled(
+            format!(
+                "⋯ {} unchanged line{}",
+                hunk.hidden,
+                if hunk.hidden == 1 { "" } else { "s" }
+            ),
+            dim,
+        ));
+    } else {
+        spans.push(Span::styled("⋯", dim));
+    }
+    let section = hunk
+        .header
+        .splitn(3, "@@")
+        .nth(2)
+        .map(str::trim)
+        .unwrap_or("");
+    let ranges = format!(
+        "  @@ -{},{} +{},{} @@",
+        hunk.old_start, hunk.old_len, hunk.new_start, hunk.new_len
+    );
+    spans.push(Span::styled(ranges, dim));
+    if !section.is_empty() {
+        spans.push(Span::styled(
+            format!(" {section}"),
+            Style::default().fg(th.accent),
+        ));
+    }
+    spans
+}
+
+/// A laid-out diff (`diff_layout`), the rows in view only. Side by side,
+/// each half has its own line numbers; inline, an old and a new gutter;
+/// in the replacement layout, the new numbers alone. Every row starts on
+/// its CHANGE's mark ([`change_mark`]).
+fn draw_laid_diff(
+    f: &mut Frame,
+    look: &DiffLook,
+    rows: &[crate::diff_layout::LaidRow],
+    scroll: u16,
+    area: Rect,
+    two_sides: bool,
+) {
+    use crate::diff_layout::Row;
+    let th = look.th;
+    let doc = &look.laid.doc;
+    let widest = doc
+        .lines
+        .iter()
+        .map(|l| l.old.unwrap_or(0).max(l.new.unwrap_or(0)))
+        .max()
+        .unwrap_or(0);
+    let w = widest.to_string().len();
+    let dim = Style::default().fg(th.dim);
+    let visible = rows.iter().skip(scroll as usize).take(area.height as usize);
+    if two_sides {
+        let half = area.width.saturating_sub(1) / 2;
+        let [left_a, sep_a, right_a] = Layout::horizontal([
+            Constraint::Length(half),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
+        .areas(area);
+        let side = |i: Option<usize>, old: bool, cols: u16| -> Line<'static> {
+            let Some(i) = i else {
+                return Line::default();
+            };
+            let line = &doc.lines[i];
+            let n = if old { line.old } else { line.new };
+            let text_w = (cols as usize).saturating_sub(w + 3);
+            let mut spans = vec![
+                Span::styled(format!("{} ", line_no(n, w)), dim),
+                sign_span(look, i),
+            ];
+            spans.extend(line_spans(look, i, text_w));
+            Line::from(spans)
+        };
+        let (mut left, mut right) = (Vec::new(), Vec::new());
+        for r in visible {
+            let mark = change_mark(look, r.change);
+            match &r.row {
+                Row::Pair(old, new) => {
+                    let mut l = side(*old, true, left_a.width.saturating_sub(1));
+                    l.spans.insert(0, mark);
+                    left.push(l);
+                    right.push(side(*new, false, right_a.width));
+                }
+                Row::Hunk(h) => {
+                    let mut spans = vec![mark];
+                    spans.extend(hunk_spans(look, *h));
+                    left.push(Line::from(spans));
+                    right.push(Line::default());
+                }
+                Row::Note(text, kind) => {
+                    let style = if *kind == DiffLineKind::Hunk {
+                        Style::default().fg(th.accent)
+                    } else {
+                        dim
+                    };
+                    left.push(Line::from(vec![mark, Span::styled(text.clone(), style)]));
+                    right.push(Line::default());
+                }
+                Row::Line(i) => {
+                    left.push(Line::from(vec![mark]));
+                    right.push(side(Some(*i), false, right_a.width));
+                }
+                Row::Removed { .. } => {
+                    left.push(Line::default());
+                    right.push(Line::default());
+                }
+            }
+        }
+        let seam = vec![Line::from(Span::styled("│", dim)); area.height as usize];
+        f.render_widget(Paragraph::new(left), left_a);
+        f.render_widget(Paragraph::new(seam), sep_a);
+        f.render_widget(Paragraph::new(right), right_a);
+        return;
+    }
+    // Inline and replacement: one column. Inline numbers both sides; the
+    // replacement layout shows only the new file, so only its numbers.
+    let inline = look.mode != crate::diff_layout::DiffMode::Replacement;
+    let gutter_w = if inline { 2 * w + 2 } else { w + 1 };
+    let text_w = (area.width as usize).saturating_sub(1 + gutter_w + 1);
+    let mut lines = Vec::new();
+    for r in visible {
+        let mut spans = vec![change_mark(look, r.change)];
+        match &r.row {
+            Row::Line(i) => {
+                let line = &doc.lines[*i];
+                let gutter = if inline {
+                    format!("{} {} ", line_no(line.old, w), line_no(line.new, w))
+                } else {
+                    format!("{} ", line_no(line.new, w))
+                };
+                spans.push(Span::styled(gutter, dim));
+                spans.push(sign_span(look, *i));
+                spans.extend(line_spans(look, *i, text_w));
+            }
+            Row::Removed { first, count } => {
+                let at = doc.lines[*first].old.unwrap_or(0);
+                spans.push(Span::styled(" ".repeat(gutter_w), dim));
+                spans.push(Span::styled(
+                    format!(
+                        "− {count} line{} removed (old {at}{})",
+                        if *count == 1 { "" } else { "s" },
+                        if *count > 1 {
+                            format!("–{}", at + count - 1)
+                        } else {
+                            String::new()
+                        }
+                    ),
+                    Style::default().fg(th.err).bg(th.diff_del_bg),
+                ));
+            }
+            Row::Hunk(h) => spans.extend(hunk_spans(look, *h)),
+            Row::Note(text, _) => spans.push(Span::styled(text.clone(), dim)),
+            Row::Pair(..) => {}
+        }
+        lines.push(Line::from(spans));
+    }
+    f.render_widget(Paragraph::new(lines), area);
 }
 
 /// A section header's fold marker and name, bold.
