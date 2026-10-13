@@ -7,6 +7,7 @@
 // `people` is a list of `[person, rows]` pairs. The types say so.
 
 import { invoke } from '@tauri-apps/api/core';
+import type { RangeDiff } from '../diff-api';
 import { fuzzy } from './tasks-api';
 
 export interface PrRef {
@@ -40,22 +41,6 @@ export interface BranchTree {
   /** My initials: my group is first. */
   me: string;
   people: [string, BranchRow[]][];
-}
-
-export interface RangeFile {
-  path: string;
-  from: string | null;
-  status: string;
-  added: number | null;
-  removed: number | null;
-}
-
-export interface RangeDiff {
-  base: string;
-  tip: string;
-  /** The remote could not be fetched; the refs are as last fetched. */
-  offline: boolean;
-  files: RangeFile[];
 }
 
 export const branchesApi = {

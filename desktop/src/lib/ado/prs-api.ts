@@ -1,9 +1,10 @@
 // Typed wrappers over the pull request commands (`ado_*` in prs.rs and
 // main.rs), the range diff the PR views read, and `session_ask`. Field
-// names match the Rust structs as serde writes them (camelCase).
+// names match the Rust structs as serde writes them (camelCase). The diff
+// types are diff-api's; the PR views draw their diff with DiffPane.
 
 import { invoke } from '@tauri-apps/api/core';
-import type { DiffFile } from '../api';
+import type { Blob, DiffSide, RangeDiff } from '../diff-api';
 
 export interface ReviewerVote {
   id: string;
@@ -111,19 +112,6 @@ export interface TaskList {
 }
 export type TaskScope = 'currentSprint' | 'myOpen' | 'sprintAll' | { iteration: string };
 
-/** A range diff pinned to SHAs: `base` is the merge-base. */
-export interface RangeDiff {
-  base: string;
-  tip: string;
-  offline: boolean;
-  files: DiffFile[];
-}
-export type DiffSide = { kind: 'commit'; rev: string };
-export type Blob =
-  | { state: 'text'; value: string }
-  | { state: 'missing' }
-  | { state: 'tooLarge'; value: number }
-  | { state: 'binary' };
 
 /** Votes as the backend takes them, in the order the buttons show. */
 export const VOTES: { vote: number; label: string }[] = [

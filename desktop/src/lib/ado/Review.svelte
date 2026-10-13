@@ -7,7 +7,8 @@
   import { age } from '../status';
   import Chip from './Chip.svelte';
   import Mark from './Mark.svelte';
-  import PrDiff from './PrDiff.svelte';
+  import DiffPane from '../DiffPane.svelte';
+  import type { DiffMode } from '../diff-api';
   import { policyMark, prMark, prs, VOTES, voteSquare, type PrDetail, type Thread } from './prs-api';
   import { prsState } from './prs-state.svelte';
 
@@ -22,6 +23,8 @@
   let error = $state<string | null>(null);
   let loading = $state(false);
   let tab = $state<'overview' | 'changes'>('overview');
+  /** The Changes tab opens inline, as the PR detail's column is narrow. */
+  let diffMode = $state<DiffMode>('inline');
   let publishing = $state(false);
   let voting = $state<number | null>(null);
   let actionError = $state<string | null>(null);
@@ -156,7 +159,7 @@
 
     {#if tab === 'changes'}
       <div class="min-h-0 flex-1">
-        <PrDiff {worktree} base={pr.target} tip={`origin/${pr.source}`} />
+        <DiffPane {worktree} range={{ base: pr.target, tip: `origin/${pr.source}` }} bind:mode={diffMode} />
       </div>
     {:else}
       <div class="min-h-0 flex-1 overflow-y-auto px-6 pt-5 pb-10">

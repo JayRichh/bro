@@ -6,7 +6,8 @@
   import { app } from '../store.svelte';
   import { nav } from '../shell/history.svelte';
   import Mark from './Mark.svelte';
-  import PrDiff from './PrDiff.svelte';
+  import DiffPane from '../DiffPane.svelte';
+  import type { DiffMode } from '../diff-api';
   import { BLOCKING, preflight } from './policy';
   import { prItem, prs, type Reviewer, type WorkItem } from './prs-api';
   import { describe, freshDraft, prsState, type ComposeDraft } from './prs-state.svelte';
@@ -59,6 +60,8 @@
   /** The diff preview's target: taken when seeded, then on commit of an
    *  edit (Enter or leaving the field), never per keystroke. */
   let diffBase = $state('');
+  /** The preview opens inline: the column beside the form is narrow. */
+  let diffMode = $state<DiffMode>('inline');
   $effect(() => {
     if (d.seeded && !diffBase) diffBase = d.target.trim();
   });
@@ -470,7 +473,7 @@
 
     <div class="min-h-0 min-w-0">
       {#if diffBase}
-        <PrDiff {worktree} base={diffBase} tip={branch} />
+        <DiffPane {worktree} range={{ base: diffBase, tip: branch }} bind:mode={diffMode} />
       {:else}
         <p class="m-0 px-6 py-6 font-mono text-[12px] text-muted" role="status">Reading the branch</p>
       {/if}
