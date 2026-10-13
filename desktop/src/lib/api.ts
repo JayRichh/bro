@@ -42,6 +42,7 @@ export interface Agent {
   kind: string;
   custom_harness: string | null;
   model: string | null;
+  effort?: string | null;
   profile: string | null;
   alive: boolean;
   recent_prompts: PromptEntry[];
@@ -119,11 +120,83 @@ export interface DiffPair {
   modified: string;
   note: string | null;
 }
+/** A harness's model and effort pickers, from the Agents tab's lists. */
+export interface LaunchChoices {
+  models: string[];
+  /** The configured model ('default' = the CLI's pick). */
+  model: string;
+  /** Efforts by model; empty where the harness has none. */
+  efforts: Record<string, string[]>;
+  /** The configured effort ('n/a' where the harness has none). */
+  effort: string;
+}
+export interface HarnessInfo {
+  id: string;
+  label: string;
+  choices?: LaunchChoices;
+}
 export interface Launchables {
-  harnesses: { id: string; label: string }[];
+  harnesses: HarnessInfo[];
   profiles: { name: string; harness: string; default: boolean }[];
   /** The Agents tab's quick prompt harness; empty from an old backend. */
   default_harness?: string;
+  /** Quick prompt starts in a new worktree (Sessions tab). */
+  new_worktree?: boolean;
+  /** Open the session a launch starts (Sessions tab). */
+  follow?: boolean;
+}
+/** An agent preset (agent_presets.json, shared with the terminal app). */
+export interface Preset {
+  name: string;
+  harness: string;
+  model: string | null;
+  effort: string | null;
+  prefix: string;
+  postfix: string;
+  skipTask: boolean;
+  spec?: string;
+  usable?: boolean;
+}
+export interface ProfileRow {
+  name: string;
+  harness: string;
+  default: boolean;
+  useDefault: boolean;
+  envKeys: string[];
+  home: string | null;
+  problem: string | null;
+  login: string | null;
+  usage: string | null;
+}
+export interface ProfileForm {
+  name: string;
+  harness: string;
+  default: boolean;
+  useDefault: boolean;
+  /** KEY=VALUE lines. */
+  env: string;
+}
+export interface ProfileSaved {
+  rows: ProfileRow[];
+  login: string | null;
+  home: string | null;
+}
+export interface QuickLaunch {
+  project: string;
+  worktree: string;
+  newWorktree: boolean;
+  /** A harness id, or 'terminal'. */
+  kind: string;
+  profile?: string | null;
+  prompt: string;
+  model?: string | null;
+  effort?: string | null;
+  preset?: string | null;
+}
+export interface Launched {
+  worktree: string;
+  agent: string | null;
+  terminal: string | null;
 }
 
 /** Where a settings write lands, as the Rust side's `schema::Target`. */
@@ -195,8 +268,45 @@ export const api = {
   resize: (session: SessionRef, cols: number, rows: number) =>
     invoke<void>('resize', { session, cols, rows }),
   markSeen: (agent: string) => invoke<void>('mark_seen', { agent }),
-  createAgent: (spec: { worktree: string; kind: string; profile?: string | null; prompt?: string }) =>
-    invoke<string>('create_agent', { spec }),
+  createAgent: (spec: {
+    worktree: string;
+    kind: string;
+    profile?: string | null;
+    prompt?: string;
+    model?: string | null;
+    effort?: string | null;
+  }) => invoke<string>('create_agent', { spec }),
+  quickLaunch: (spec: QuickLaunch) => invoke<Launched>('quick_launch', { spec }),
+  // Session verbs
+  renameAgent: (agent: string, name: string) => invoke<void>('rename_agent', { agent, name }),
+  archiveAgent: (agent: string) => invoke<void>('archive_agent', { agent }),
+  unarchiveAgent: (agent: string) => invoke<void>('unarchive_agent', { agent }),
+  deleteAgent: (agent: string) => invoke<void>('delete_agent', { agent }),
+  restartAgent: (agent: string) => invoke<void>('restart_agent', { agent }),
+  moveAgent: (agent: string, worktree: string) => invoke<void>('move_agent', { agent, worktree }),
+  renameTerminal: (terminal: string, name: string) => invoke<void>('rename_terminal', { terminal, name }),
+  closeTerminal: (terminal: string) => invoke<void>('close_terminal', { terminal }),
+  followUp: (agent: string, text: string) => invoke<void>('follow_up', { agent, text }),
+  // Projects and worktrees
+  suggestBranch: (project: string) => invoke<string>('suggest_branch', { project }),
+  createWorktree: (project: string, branch: string, base: string | null) =>
+    invoke<string>('create_worktree', { project, branch, base }),
+  deleteWorktree: (worktree: string, force: boolean) => invoke<void>('delete_worktree', { worktree, force }),
+  renameProject: (project: string, name: string) => invoke<void>('rename_project', { project, name }),
+  removeProject: (project: string) => invoke<void>('remove_project', { project }),
+  setProjectPath: (project: string, path: string) => invoke<void>('set_project_path', { project, path }),
+  openWorktree: (worktree: string) => invoke<string>('open_worktree', { worktree }),
+  openRemote: (worktree: string) => invoke<string>('open_remote', { worktree }),
+  // Presets and profiles
+  presets: () => invoke<Preset[]>('presets_list'),
+  presetSave: (original: string | null, preset: Preset) => invoke<Preset[]>('preset_save', { original, preset }),
+  presetDelete: (name: string) => invoke<Preset[]>('preset_delete', { name }),
+  profiles: () => invoke<ProfileRow[]>('profiles_list'),
+  profileHarnesses: () => invoke<string[]>('profile_harnesses'),
+  profileAdd: (form: ProfileForm) => invoke<ProfileSaved>('profile_add', { form }),
+  profileUpdate: (form: ProfileForm, keepEnv: boolean) => invoke<ProfileSaved>('profile_update', { form, keepEnv }),
+  profileRemove: (name: string) => invoke<ProfileSaved>('profile_remove', { name }),
+  profileSetDefault: (name: string) => invoke<ProfileRow[]>('profile_set_default', { name }),
   createTerminal: (worktree: string) => invoke<string>('create_terminal', { worktree }),
   addProject: (path: string) => invoke<string>('add_project', { path }),
   startRun: (worktree: string) => invoke<string>('start_run', { worktree }),
