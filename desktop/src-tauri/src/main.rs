@@ -262,6 +262,72 @@ async fn diff_pair(
         .map_err(err)?
 }
 
+/// A range diff pinned to SHAs: `base` is the merge-base, not the target.
+#[derive(Serialize)]
+struct RangeDiff {
+    base: String,
+    tip: String,
+    files: Vec<git::DiffFile>,
+}
+
+#[tauri::command]
+async fn diff_range(
+    client: State<'_, Arc<Client>>,
+    worktree: String,
+    base: String,
+    tip: String,
+) -> Res<RangeDiff> {
+    let root = worktree_path(&client, &worktree)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        git::ensure_refs(&root, &[&base, &tip])?;
+        let tip = git::resolve_commit(&root, &git::commit_name(&root, &tip)?)?;
+        let base = git::merge_base(&root, &git::commit_name(&root, &base)?, &tip)?;
+        let files = git::diff_files_range(&root, &base, &tip)?;
+        Ok(RangeDiff { base, tip, files })
+    })
+    .await
+    .map_err(err)?
+}
+
+#[tauri::command]
+async fn diff_blob(
+    client: State<'_, Arc<Client>>,
+    worktree: String,
+    side: git::DiffSide,
+    path: String,
+) -> Res<git::Blob> {
+    let root = worktree_path(&client, &worktree)?;
+    tauri::async_runtime::spawn_blocking(move || git::blob(&root, &side, &path))
+        .await
+        .map_err(err)?
+}
+
+#[tauri::command]
+async fn diff_hunks(
+    client: State<'_, Arc<Client>>,
+    worktree: String,
+    path: String,
+    staged: bool,
+) -> Res<Vec<git::Hunk>> {
+    let root = worktree_path(&client, &worktree)?;
+    tauri::async_runtime::spawn_blocking(move || git::hunks(&root, &path, staged))
+        .await
+        .map_err(err)?
+}
+
+#[tauri::command]
+async fn diff_apply_hunk(
+    client: State<'_, Arc<Client>>,
+    worktree: String,
+    hunk: git::Hunk,
+    action: git::HunkAction,
+) -> Res<()> {
+    let root = worktree_path(&client, &worktree)?;
+    tauri::async_runtime::spawn_blocking(move || git::apply_hunk(&root, &hunk, action))
+        .await
+        .map_err(err)?
+}
+
 #[tauri::command]
 fn open_url(app: tauri::AppHandle, url: String) -> Res<()> {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
@@ -615,6 +681,10 @@ fn main() {
             start_run,
             diff_files,
             diff_pair,
+            diff_range,
+            diff_blob,
+            diff_hunks,
+            diff_apply_hunk,
             open_url,
             launchables,
             startup,
