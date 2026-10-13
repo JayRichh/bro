@@ -44,8 +44,11 @@
     } else if (p.view === 'diff') {
       out.push({ label: 'Diff' });
       const d = parseDiffItem(p.item);
-      if (d.worktree) out.push({ label: placeOf(m, d.worktree).branch, mono: true });
-      if (d.range) out.push({ label: `${d.range.base}...${d.range.tip}`, mono: true });
+      // A range reads commits, so it names its two ends, not the worktree
+      // it happens to be read in.
+      const ref = (r: string) => r.replace(/^refs\/(heads|remotes)\//, '');
+      if (d.range) out.push({ label: `${ref(d.range.base)}...${ref(d.range.tip)}`, mono: true });
+      else if (d.worktree) out.push({ label: placeOf(m, d.worktree).branch, mono: true });
     }
     return out;
   });

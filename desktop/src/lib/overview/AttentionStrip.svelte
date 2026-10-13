@@ -28,7 +28,7 @@
   }
 </script>
 
-<div class="flex items-center gap-4" role="group" aria-label="Across all repos">
+<div class="flex flex-none items-center gap-4 whitespace-nowrap" role="group" aria-label="Across all repos">
   {#each shown as it, i (it.status)}
     {@const n = counts[it.status]?.length ?? 0}
     {@const hot = n > 0 && (it.status === 'needs' || it.status === 'failed')}

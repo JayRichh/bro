@@ -570,18 +570,20 @@
       >
     </button>
     {@render lead?.()}
-    {#if pinned}
-      <span class="flex-none font-mono text-[12px] whitespace-nowrap text-ink" title="Merge-base {pinned.base}, tip {pinned.tip}"
-        >{short(pinned.base)}<span class="text-faint">...</span>{short(pinned.tip)}</span
-      >
-    {/if}
-    {#if files.length}
-      <span class="flex-none font-mono text-[12px] whitespace-nowrap text-muted"
-        >{files.length} {files.length === 1 ? 'file' : 'files'}
-        <span class="text-git-added">+{totals.add}</span> <span class="text-git-deleted">&minus;{totals.del}</span></span
-      >
-    {/if}
-    <span class="flex-1"></span>
+    <!-- The range and totals give way first when the pane is narrow. -->
+    <span class="flex min-w-0 flex-auto items-center gap-3 overflow-hidden">
+      {#if pinned}
+        <span class="min-w-0 truncate font-mono text-[12px] whitespace-nowrap text-ink" title="Merge-base {pinned.base}, tip {pinned.tip}"
+          >{short(pinned.base)}<span class="text-faint">...</span>{short(pinned.tip)}</span
+        >
+      {/if}
+      {#if files.length}
+        <span class="min-w-0 truncate font-mono text-[12px] whitespace-nowrap text-muted"
+          >{files.length} {files.length === 1 ? 'file' : 'files'}
+          <span class="text-git-added">+{totals.add}</span> <span class="text-git-deleted">&minus;{totals.del}</span></span
+        >
+      {/if}
+    </span>
     {#if loading}<span class="font-mono text-[12px] text-muted" role="status">Loading</span>{/if}
     <div class="flex h-7 flex-none items-center border border-rule" aria-label="Changes">
       <button
@@ -596,7 +598,7 @@
         >
       </button>
       <span class="min-w-[74px] border-x border-rule px-2 text-center font-mono text-[12px] leading-[26px] text-muted" aria-live="polite"
-        >{#if !stops.length}no changes{:else if stopAt >= 0}{stopAt + 1} of {stops.length}{:else}{stops.length}
+        >{#if !current}&nbsp;{:else if !stops.length}no changes{:else if stopAt >= 0}{stopAt + 1} of {stops.length}{:else}{stops.length}
           {stops.length === 1 ? 'change' : 'changes'}{/if}</span
       >
       <button
