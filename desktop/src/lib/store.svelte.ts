@@ -140,6 +140,14 @@ export function toast(msg: string) {
   toastTimer = setTimeout(() => (app.toast = null), 5000);
 }
 
+/** A failed ado.json write as a toast. The ADO views ask when they open. */
+export function checkAdoStore() {
+  ado
+    .storeError()
+    .then((e) => e && toast(e))
+    .catch(() => {});
+}
+
 /** Look up each project's ADO remote once (each lookup runs git). */
 const asked = new Set<string>();
 /** A failed lookup is asked again, at most this often. */

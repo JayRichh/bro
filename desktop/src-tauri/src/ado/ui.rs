@@ -1,7 +1,7 @@
-//! The two small commands the Workshop shell needs: whether a worktree's
-//! repo lives on Azure DevOps (the rail shows Tasks, Branches and PRs only
-//! then), and saving a view's UI state into `ado.json` so it survives a
-//! restart.
+//! The small commands the Workshop shell needs: whether a worktree's repo
+//! lives on Azure DevOps (the rail shows Tasks, Branches and PRs only
+//! then), saving a view's UI state into `ado.json` so it survives a
+//! restart, and the store's last load or write failure for a toast.
 
 use super::store::{AdoStore, RepoKey};
 use super::{ado_remote, checkout_path, AdoState};
@@ -75,6 +75,14 @@ pub async fn ado_save_ui(
     json: serde_json::Value,
 ) -> Result<(), String> {
     save_ui(&ado.store, &repo_key, &view, json)
+}
+
+/// The last `ado.json` load or write failure, once: reading clears it. The
+/// ADO views ask when they open and show it as a toast; the change that
+/// failed to write is still held in memory.
+#[tauri::command]
+pub fn ado_store_error(ado: State<'_, AdoState>) -> Option<String> {
+    ado.store.take_last_error()
 }
 
 fn saved_ui(store: &AdoStore, key: &RepoKey) -> serde_json::Value {

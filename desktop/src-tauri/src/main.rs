@@ -728,6 +728,7 @@ fn main() {
             // Workshop shell (Task 13)
             ado::ui::ado_context,
             ado::ui::ado_save_ui,
+            ado::ui::ado_store_error,
         ])
         .run(tauri::generate_context!())
         .expect("kete-desktop failed to start");

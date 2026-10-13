@@ -109,9 +109,8 @@ impl AdoStore {
         &self.path
     }
 
-    /// The last load or write error, cleared by reading it.
-    // No command surfaces store errors yet; see the integration report.
-    #[allow(dead_code)]
+    /// The last load or write error, cleared by reading it. The window
+    /// reads it through `ado_store_error`.
     pub fn take_last_error(&self) -> Option<String> {
         self.last_error
             .lock()
@@ -161,7 +160,10 @@ impl AdoStore {
         if let Err(e) = &res {
             *self.last_error.lock().unwrap_or_else(|p| p.into_inner()) = Some(match &self.hold {
                 Some(why) => why.clone(),
-                None => format!("Could not save {}: {e}", self.path.display()),
+                None => format!(
+                    "Could not save {}: {e}. The change is kept until Kete closes.",
+                    self.path.display()
+                ),
             });
         }
         (out, res)

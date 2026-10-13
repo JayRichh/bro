@@ -22,4 +22,6 @@ export const ado = {
   /** Save one view's UI state for a repo into ado.json. */
   saveUi: (repoKey: string, view: string, json: unknown) =>
     invoke<void>('ado_save_ui', { repoKey, view, json }),
+  /** The last ado.json load or write failure, once (reading clears it). */
+  storeError: () => invoke<string | null>('ado_store_error'),
 };

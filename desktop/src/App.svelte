@@ -3,6 +3,7 @@
   import {
     app,
     boot,
+    checkAdoStore,
     focusQuickPrompt,
     follow,
     goHome,
@@ -50,6 +51,13 @@
   const split = $derived(view === 'session' || view === 'diff');
   const adoView = $derived(view === 'tasks' || view === 'branches' || view === 'prs');
   const ADO_TITLE: Record<string, string> = { tasks: 'Tasks', branches: 'Branches', prs: 'Pull requests' };
+
+  // Each ADO view, as it opens for a repo, asks whether ado.json failed to
+  // save. Keyed on view and repo, so picking a row inside does not ask.
+  const adoOpen = $derived(adoView ? `${view}\u0000${nav.current.repo ?? ''}` : '');
+  $effect(() => {
+    if (adoOpen) checkAdoStore();
+  });
 
   // Session and Diff stay mounted once opened, so a terminal keeps its
   // scrollback and the diff editor its place while you look elsewhere.
