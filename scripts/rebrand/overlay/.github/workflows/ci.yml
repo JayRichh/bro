@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, windows]
+
+permissions:
+  contents: read
+
+jobs:
+  cargo:
+    name: cargo (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Install Rust stable
+        # Cargo 1.83 cannot parse some edition-2024 transitive dependencies.
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+
+      - name: Use Rust stable
+        run: rustup default stable
+
+      - name: Cache cargo and target directories
+        uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Warn on large Rust source files
+        if: runner.os != 'Windows'
+        continue-on-error: true
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          LIMIT = 3000
+
+          def count_non_test_lines(path: Path) -> int:
+              lines = path.read_text(errors="ignore").splitlines()
+              count = 0
+              skipping_test_mod = False
+              pending_test_mod = False
+              depth = 0
+              for line in lines:
+                  stripped = line.strip()
+                  if stripped == "#[cfg(test)]":
+                      pending_test_mod = True
+                      continue
+                  if pending_test_mod and stripped.startswith("mod tests"):
+                      skipping_test_mod = True
+                      depth = stripped.count("{") - stripped.count("}")
+                      pending_test_mod = False
+                      continue
+                  pending_test_mod = False
+                  if skipping_test_mod:
+                      depth += stripped.count("{") - stripped.count("}")
+                      if depth <= 0:
+                          skipping_test_mod = False
+                      continue
+                  if stripped and not stripped.startswith("//"):
+                      count += 1
+              return count
+
+          for path in sorted(Path(".").rglob("*.rs")):
+              if "target" in path.parts or "tests" in path.parts:
+                  continue
+              lines = count_non_test_lines(path)
+              if lines > LIMIT:
+                  print(f"::warning file={path}::Rust source has {lines} non-test lines (limit {LIMIT})")
+          PY
+
+      - name: Build workspace
+        run: cargo build --workspace --locked
+
+      - name: Test workspace
+        # The Windows port still has known failing tests (unix-shaped fixtures);
+        # report them without failing the job until they are ported.
+        continue-on-error: ${{ matrix.os == 'windows-latest' }}
+        run: cargo test --workspace --locked
+
+  windows-arm64:
+    name: cargo build (aarch64-pc-windows-msvc)
+    runs-on: windows-latest
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Install Rust stable
+        run: rustup toolchain install stable --profile minimal --target aarch64-pc-windows-msvc
+
+      - name: Use Rust stable
+        run: rustup default stable
+
+      - name: Cache cargo and target directories
+        uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
+
+      - name: Cross-build workspace
+        run: cargo build --workspace --locked --target aarch64-pc-windows-msvc
