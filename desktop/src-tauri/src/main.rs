@@ -6,6 +6,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod ado;
+mod attribution;
 mod daemon;
 mod git;
 
@@ -385,6 +386,105 @@ async fn ado_pr_detail(
     })
 }
 
+#[tauri::command]
+async fn ado_create_pr(
+    client: State<'_, Arc<Client>>,
+    ado: State<'_, Arc<PrState>>,
+    worktree: String,
+    pr: prs::NewPr,
+) -> Res<prs::CreateOutcome> {
+    let ctx = ado.ctx(&worktree_path(&client, &worktree)?).await?;
+    let reviewers = pr.reviewers.clone();
+    let repo = ctx.repo_path.clone();
+    let out = prs::create(&ctx, &repo, pr).await.map_err(err)?;
+    for r in reviewers.into_iter().rev() {
+        ado.store.remember_reviewer(&ctx.key, r);
+    }
+    Ok(out)
+}
+
+/// Retry for "Created, task not linked".
+#[tauri::command]
+async fn ado_link_pr_task(
+    client: State<'_, Arc<Client>>,
+    ado: State<'_, Arc<PrState>>,
+    worktree: String,
+    id: u32,
+    task: u32,
+) -> Res<()> {
+    let ctx = ado.ctx(&worktree_path(&client, &worktree)?).await?;
+    prs::link_task(&ctx, id, task).await.map_err(err)
+}
+
+#[tauri::command]
+async fn ado_publish_pr(
+    client: State<'_, Arc<Client>>,
+    ado: State<'_, Arc<PrState>>,
+    worktree: String,
+    id: u32,
+) -> Res<()> {
+    let ctx = ado.ctx(&worktree_path(&client, &worktree)?).await?;
+    prs::publish(&ctx, id).await.map_err(err)
+}
+
+#[tauri::command]
+async fn ado_vote(
+    client: State<'_, Arc<Client>>,
+    ado: State<'_, Arc<PrState>>,
+    worktree: String,
+    id: u32,
+    vote: i8,
+) -> Res<()> {
+    let ctx = ado.ctx(&worktree_path(&client, &worktree)?).await?;
+    prs::vote(&ctx, id, vote).await.map_err(err)
+}
+
+#[tauri::command]
+async fn ado_reply(
+    client: State<'_, Arc<Client>>,
+    ado: State<'_, Arc<PrState>>,
+    worktree: String,
+    id: u32,
+    thread: u32,
+    text: String,
+) -> Res<prs::Comment> {
+    let ctx = ado.ctx(&worktree_path(&client, &worktree)?).await?;
+    prs::reply(&ctx, id, thread, &text).await.map_err(err)
+}
+
+#[tauri::command]
+async fn ado_search_identities(
+    client: State<'_, Arc<Client>>,
+    ado: State<'_, Arc<PrState>>,
+    worktree: String,
+    q: String,
+) -> Res<Vec<ado::store::Reviewer>> {
+    let ctx = ado.ctx(&worktree_path(&client, &worktree)?).await?;
+    prs::search_identities(&ctx, &q).await.map_err(err)
+}
+
+/// Reviewers picked before in this repo, newest first. Local only.
+#[tauri::command]
+async fn ado_recent_reviewers(
+    client: State<'_, Arc<Client>>,
+    ado: State<'_, Arc<PrState>>,
+    worktree: String,
+) -> Res<Vec<ado::store::Reviewer>> {
+    let path = worktree_path(&client, &worktree)?;
+    let found = tauri::async_runtime::spawn_blocking(move || prs::find_ado_remote(&path))
+        .await
+        .map_err(err)??;
+    let Some((_, r)) = found else {
+        return Ok(Vec::new());
+    };
+    let key = ado::store::RepoKey {
+        org: r.org,
+        project: r.project,
+        repo: r.repo,
+    };
+    Ok(ado.store.read_repo(&key, |s| s.recent_reviewers.clone()))
+}
+
 /// The open ADO pull request from `branch`, for the PR open lane. A
 /// sign-in failure pauses the org's poll (see [`PrState`]).
 async fn ado_open_pr(
@@ -513,6 +613,13 @@ fn main() {
             startup,
             ado_prs,
             ado_pr_detail,
+            ado_create_pr,
+            ado_link_pr_task,
+            ado_publish_pr,
+            ado_vote,
+            ado_reply,
+            ado_search_identities,
+            ado_recent_reviewers,
         ])
         .run(tauri::generate_context!())
         .expect("kete-desktop failed to start");

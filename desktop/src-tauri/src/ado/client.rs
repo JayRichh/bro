@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub const API_VERSION: &str = "7.1";
+const JSON_PATCH: &str = "application/json-patch+json";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const RETRY_AFTER_CAP: Duration = Duration::from_secs(30);
 
@@ -127,6 +128,17 @@ impl AdoClient {
         self.send(Method::PATCH, path, Some(body)).await
     }
 
+    /// A JSON Patch document (work item updates), sent as
+    /// `application/json-patch+json`, which those endpoints require.
+    pub async fn patch_json_patch<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<T, AdoError> {
+        self.send_as(Method::PATCH, path, Some(body), Some(JSON_PATCH))
+            .await
+    }
+
     pub async fn put_json<T: DeserializeOwned>(
         &self,
         path: &str,
@@ -159,6 +171,16 @@ impl AdoClient {
         path: &str,
         body: Option<&serde_json::Value>,
     ) -> Result<T, AdoError> {
+        self.send_as(method, path, body, None).await
+    }
+
+    async fn send_as<T: DeserializeOwned>(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<&serde_json::Value>,
+        content_type: Option<&str>,
+    ) -> Result<T, AdoError> {
         let url = self.url(path);
         let mut auth = self.tokens.token(&self.org_url).await?.header();
         let mut retried = false;
@@ -169,8 +191,14 @@ impl AdoClient {
                 .request(method.clone(), &url)
                 .header(reqwest::header::AUTHORIZATION, &auth)
                 .header(reqwest::header::ACCEPT, "application/json");
-            if let Some(b) = body {
-                req = req.json(b);
+            match (body, content_type) {
+                (Some(b), Some(ct)) => {
+                    req = req
+                        .header(reqwest::header::CONTENT_TYPE, ct)
+                        .body(b.to_string());
+                }
+                (Some(b), None) => req = req.json(b),
+                (None, _) => {}
             }
             let resp = req
                 .send()

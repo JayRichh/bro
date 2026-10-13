@@ -3,8 +3,9 @@
 use crate::ado::auth::TokenSource;
 use crate::ado::client::{AdoClient, AdoError};
 use crate::ado::remote::{parse_remote, AdoRemote};
-use crate::ado::store::{AdoStore, RepoKey};
-use serde::Serialize;
+use crate::ado::store::{AdoStore, RepoKey, Reviewer};
+use crate::attribution::strip_ai_trailers;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -111,14 +112,18 @@ impl PrState {
     /// The context for a worktree, for a user-initiated command. No ADO
     /// remote is an error here.
     pub async fn ctx(&self, path: &Path) -> Result<PrCtx, String> {
-        match PrCtx::from_worktree(path, self.tokens.clone()).await {
-            Ok(Some(ctx)) => {
-                self.resume(&ctx.org_url);
-                Ok(ctx)
-            }
-            Ok(None) => Err("This checkout has no Azure DevOps remote.".into()),
-            Err(e) => Err(e.user_message()),
-        }
+        let p = path.to_path_buf();
+        let found = tokio::task::spawn_blocking(move || find_ado_remote(&p))
+            .await
+            .map_err(|e| e.to_string())??;
+        let Some((name, remote)) = found else {
+            return Err("This checkout has no Azure DevOps remote.".into());
+        };
+        let ctx = PrCtx::from_remote(path, name, remote, self.tokens.clone())
+            .await
+            .map_err(|e| e.user_message())?;
+        self.resume(&ctx.org_url);
+        Ok(ctx)
     }
 }
 
@@ -616,6 +621,312 @@ fn thread_from(t: &Value) -> Option<Thread> {
     })
 }
 
+// ---------------------------------------------------------------------------
+// Write side
+// ---------------------------------------------------------------------------
+
+/// What the composer sends.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewPr {
+    pub source: String,
+    pub target: String,
+    pub title: String,
+    pub description: String,
+    pub draft: bool,
+    pub reviewers: Vec<Reviewer>,
+    pub work_item: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CreateOutcome {
+    Created(u32),
+    /// The PR exists but the task link failed; the reason is for the UI's
+    /// "Created, task not linked" line with Retry.
+    CreatedTaskNotLinked(u32, String),
+    /// An active PR from that branch already existed; nothing was created.
+    Existing(u32),
+}
+
+impl Serialize for CreateOutcome {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let (kind, id, reason) = match self {
+            CreateOutcome::Created(id) => ("created", id, None),
+            CreateOutcome::CreatedTaskNotLinked(id, why) => {
+                ("createdTaskNotLinked", id, Some(why.as_str()))
+            }
+            CreateOutcome::Existing(id) => ("existing", id, None),
+        };
+        let mut st = s.serialize_struct("CreateOutcome", 3)?;
+        st.serialize_field("kind", kind)?;
+        st.serialize_field("id", id)?;
+        st.serialize_field("reason", &reason)?;
+        st.end()
+    }
+}
+
+/// `git push --set-upstream <remote> <source>` in `repo`.
+fn push(repo: &Path, remote: &str, source: &str) -> Result<(), AdoError> {
+    let out = git_command(repo)
+        .args(["push", "--set-upstream", remote, source])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| AdoError::Network(format!("could not run git: {e}")))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let why = stderr
+        .lines()
+        .map(str::trim)
+        .find(|l| l.starts_with("error:") || l.starts_with("fatal:") || l.starts_with('!'))
+        .or_else(|| stderr.lines().map(str::trim).find(|l| !l.is_empty()))
+        .unwrap_or("unknown error");
+    Err(AdoError::Conflict(format!(
+        "git push of {source} to {remote} failed: {why}"
+    )))
+}
+
+/// A create whose outcome is unknown: the PR may exist anyway.
+fn ambiguous(e: &AdoError) -> bool {
+    matches!(e, AdoError::Network(_) | AdoError::Conflict(_))
+        || matches!(e, AdoError::Http(code, _) if *code >= 500)
+}
+
+fn pr_artifact(ctx: &PrCtx, pr_id: u32) -> String {
+    format!(
+        "vstfs:///Git/PullRequestId/{}%2F{}%2F{pr_id}",
+        ctx.project_id, ctx.repo_id
+    )
+}
+
+/// Link work item `task` to a PR by its artifact id.
+async fn link_artifact(ctx: &PrCtx, task: u32, artifact: &str) -> Result<(), AdoError> {
+    let body = serde_json::json!([{
+        "op": "add",
+        "path": "/relations/-",
+        "value": {
+            "rel": "ArtifactLink",
+            "url": artifact,
+            "attributes": {"name": "Pull Request"}
+        }
+    }]);
+    let _: Value = ctx
+        .client
+        .patch_json_patch(&format!("/_apis/wit/workitems/{task}"), &body)
+        .await?;
+    Ok(())
+}
+
+/// Link `task` to PR `pr_id` (the Retry for "Created, task not linked").
+pub async fn link_task(ctx: &PrCtx, pr_id: u32, task: u32) -> Result<(), AdoError> {
+    if work_items(&ctx.client, &ctx.repo_id, pr_id)
+        .await?
+        .contains(&task)
+    {
+        return Ok(());
+    }
+    let v: Value = ctx
+        .client
+        .get(&format!("{}/{pr_id}", pulls_path(&ctx.repo_id)))
+        .await?;
+    let artifact = v
+        .get("artifactId")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| pr_artifact(ctx, pr_id));
+    link_artifact(ctx, task, &artifact).await
+}
+
+/// Push `pr.source` and open a pull request for it, never twice:
+/// 1. clean AI trailers from the branch's unpushed commits,
+/// 2. `git push --set-upstream`,
+/// 3. an active PR from the branch already there is returned as `Existing`,
+/// 4. POST the PR with reviewers and the task link,
+/// 5. a create that may have landed (timeout, 409, 5xx) is reconciled by
+///    listing again, never by posting again,
+/// 6. a task the reply does not show as linked is linked with a PATCH; if
+///    that fails the PR is still returned, as `CreatedTaskNotLinked`.
+pub async fn create(ctx: &PrCtx, repo_path: &Path, pr: NewPr) -> Result<CreateOutcome, AdoError> {
+    let source = strip_heads(pr.source.trim());
+    let target = strip_heads(pr.target.trim());
+    if source.is_empty() || target.is_empty() {
+        return Err(AdoError::Conflict(
+            "a pull request needs a source and a target branch".into(),
+        ));
+    }
+
+    let (repo, remote, src, tgt) = (
+        repo_path.to_path_buf(),
+        ctx.remote_name.clone(),
+        source.clone(),
+        target.clone(),
+    );
+    tokio::task::spawn_blocking(move || -> Result<(), AdoError> {
+        crate::attribution::rewrite_unpushed(&repo, &format!("{remote}/{tgt}"), &src)
+            .map_err(|e| AdoError::Conflict(format!("could not clean the commit messages: {e}")))?;
+        push(&repo, &remote, &src)
+    })
+    .await
+    .map_err(|e| AdoError::Network(e.to_string()))??;
+
+    if let Some(p) = for_source(&ctx.client, &ctx.repo_id, &source)
+        .await?
+        .first()
+    {
+        return Ok(CreateOutcome::Existing(p.id));
+    }
+
+    let (description, _) = strip_ai_trailers(&pr.description);
+    let mut body = serde_json::json!({
+        "sourceRefName": format!("refs/heads/{source}"),
+        "targetRefName": format!("refs/heads/{target}"),
+        "title": pr.title.trim(),
+        "description": description,
+        "isDraft": pr.draft,
+        "reviewers": pr.reviewers.iter().map(|r| serde_json::json!({"id": r.id})).collect::<Vec<_>>(),
+    });
+    if let Some(task) = pr.work_item {
+        body["workItemRefs"] = serde_json::json!([{ "id": task.to_string() }]);
+    }
+
+    let reply: Value = match ctx.client.post_json(&pulls_path(&ctx.repo_id), &body).await {
+        Ok(v) => v,
+        Err(e) if ambiguous(&e) => {
+            return match for_source(&ctx.client, &ctx.repo_id, &source).await {
+                Ok(found) if !found.is_empty() => Ok(CreateOutcome::Existing(found[0].id)),
+                _ => Err(e),
+            };
+        }
+        Err(e) => return Err(e),
+    };
+    let id = reply
+        .get("pullRequestId")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| AdoError::Http(200, "the reply had no pull request id".into()))?
+        as u32;
+
+    if let Some(task) = pr.work_item {
+        let in_reply = reply
+            .get("workItemRefs")
+            .and_then(Value::as_array)
+            .is_some_and(|w| w.iter().filter_map(work_item_id).any(|w| w == task));
+        // The create reply may not echo workItemRefs; ask before linking,
+        // so an existing link is never added twice.
+        let linked = in_reply
+            || work_items(&ctx.client, &ctx.repo_id, id)
+                .await
+                .is_ok_and(|w| w.contains(&task));
+        if !linked {
+            let artifact = reply
+                .get("artifactId")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| pr_artifact(ctx, id));
+            if let Err(e) = link_artifact(ctx, task, &artifact).await {
+                return Ok(CreateOutcome::CreatedTaskNotLinked(id, e.user_message()));
+            }
+        }
+    }
+    Ok(CreateOutcome::Created(id))
+}
+
+/// Take a draft out of draft.
+pub async fn publish(ctx: &PrCtx, id: u32) -> Result<(), AdoError> {
+    let _: Value = ctx
+        .client
+        .patch_json(
+            &format!("{}/{id}", pulls_path(&ctx.repo_id)),
+            &serde_json::json!({"isDraft": false}),
+        )
+        .await?;
+    Ok(())
+}
+
+/// Vote on a PR as me: 10, 5, 0, -5 or -10.
+pub async fn vote(ctx: &PrCtx, id: u32, vote: i8) -> Result<(), AdoError> {
+    if ![10, 5, 0, -5, -10].contains(&vote) {
+        return Err(AdoError::Conflict(format!("{vote} is not a vote")));
+    }
+    let me = my_id(&ctx.client).await?;
+    let _: Value = ctx
+        .client
+        .put_json(
+            &format!("{}/{id}/reviewers/{}", pulls_path(&ctx.repo_id), enc(&me)),
+            &serde_json::json!({"vote": vote}),
+        )
+        .await?;
+    Ok(())
+}
+
+/// Add a comment to a thread.
+pub async fn reply(ctx: &PrCtx, id: u32, thread: u32, text: &str) -> Result<Comment, AdoError> {
+    let (text, _) = strip_ai_trailers(text);
+    let text = text.trim_end();
+    if text.is_empty() {
+        return Err(AdoError::Conflict("the reply is empty".into()));
+    }
+    let v: Value = ctx
+        .client
+        .post_json(
+            &format!(
+                "{}/{id}/threads/{thread}/comments",
+                pulls_path(&ctx.repo_id)
+            ),
+            &serde_json::json!({"content": text, "commentType": 1}),
+        )
+        .await?;
+    Ok(Comment {
+        author: str_at(&v, &["author", "displayName"]),
+        text: str_at(&v, &["content"]),
+        at: str_at(&v, &["publishedDate"]),
+    })
+}
+
+/// The identity search URL under a vssps base.
+pub fn identities_url(vssps_base: &str, q: &str) -> String {
+    format!(
+        "{}/_apis/identities?searchFilter=General&filterValue={}",
+        vssps_base.trim_end_matches('/'),
+        enc(q)
+    )
+}
+
+/// People (and groups) matching `q`, for the reviewer picker. Email is
+/// included so look-alike names can be told apart.
+pub async fn search_identities(ctx: &PrCtx, q: &str) -> Result<Vec<Reviewer>, AdoError> {
+    let q = q.trim();
+    if q.is_empty() {
+        return Ok(Vec::new());
+    }
+    let v: Value = ctx.client.get(&identities_url(&ctx.vssps_base, q)).await?;
+    Ok(v["value"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter(|i| i.get("isActive").and_then(Value::as_bool) != Some(false))
+                .filter_map(|i| {
+                    let id = str_at(i, &["id"]);
+                    if id.is_empty() {
+                        return None;
+                    }
+                    let mut name = str_at(i, &["providerDisplayName"]);
+                    if name.is_empty() {
+                        name = str_at(i, &["customDisplayName"]);
+                    }
+                    let mut email = str_at(i, &["properties", "Mail", "$value"]);
+                    if email.is_empty() {
+                        email = str_at(i, &["properties", "Account", "$value"]);
+                    }
+                    Some(Reviewer { id, name, email })
+                })
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -862,5 +1173,476 @@ mod tests {
             Some("https://vssps.dev.azure.com/tnt")
         );
         assert_eq!(vssps_base("https://github.com/x"), None);
+    }
+
+    // --- write side -------------------------------------------------------
+
+    /// A work repo on branch `ja/fix`, one commit ahead of `main`, whose
+    /// `origin` is a bare repo holding `main`.
+    struct TempRepo {
+        root: PathBuf,
+        work: PathBuf,
+        bare: PathBuf,
+    }
+
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn git(cwd: &Path, args: &[&str]) -> String {
+        let out = Command::new("git")
+            .current_dir(cwd)
+            .args([
+                "-c",
+                "user.name=Jay Rich",
+                "-c",
+                "user.email=jay@example.com",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "core.hooksPath=",
+                "-c",
+                "core.autocrlf=false",
+                "-c",
+                "init.defaultBranch=main",
+            ])
+            .args(args)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .output()
+            .expect("git");
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    fn temp_repo() -> TempRepo {
+        static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let root = std::env::temp_dir().join(format!("kete-prs-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (work, bare) = (root.join("work"), root.join("remote.git"));
+        std::fs::create_dir_all(&work).unwrap();
+        std::fs::create_dir_all(&bare).unwrap();
+        git(&bare, &["init", "--bare", "-q"]);
+        git(&work, &["init", "-q"]);
+        std::fs::write(work.join("a.txt"), "one\n").unwrap();
+        git(&work, &["add", "."]);
+        git(&work, &["commit", "-q", "-m", "base"]);
+        git(&work, &["remote", "add", "origin", bare.to_str().unwrap()]);
+        git(&work, &["push", "-q", "origin", "main"]);
+        git(&work, &["checkout", "-q", "-b", "ja/fix"]);
+        std::fs::write(work.join("a.txt"), "two\n").unwrap();
+        git(&work, &["commit", "-q", "-am", "Fix rounding"]);
+        TempRepo { root, work, bare }
+    }
+
+    fn remote_has(bare: &Path, branch: &str) -> bool {
+        Command::new("git")
+            .current_dir(bare)
+            .args([
+                "rev-parse",
+                "--verify",
+                "-q",
+                &format!("refs/heads/{branch}"),
+            ])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    fn ctx_for(base: &str, repo: &Path) -> PrCtx {
+        PrCtx {
+            client: AdoClient::new(
+                base,
+                Arc::new(TokenSource::fixed(Credential::Bearer("tok".into()))),
+            ),
+            repo_id: "r1".into(),
+            project_id: "p1".into(),
+            org_url: base.into(),
+            remote_name: "origin".into(),
+            repo_path: repo.to_path_buf(),
+            vssps_base: "/vssps/tnt".into(),
+            key: RepoKey {
+                org: "tnt".into(),
+                project: "Platform".into(),
+                repo: "api".into(),
+            },
+        }
+    }
+
+    fn new_pr(work_item: Option<u32>, description: &str) -> NewPr {
+        NewPr {
+            source: "ja/fix".into(),
+            target: "main".into(),
+            title: "Fix rounding".into(),
+            description: description.into(),
+            draft: true,
+            reviewers: vec![Reviewer {
+                id: "u1".into(),
+                name: "Sam Lee".into(),
+                email: "sam@example.com".into(),
+            }],
+            work_item,
+        }
+    }
+
+    fn mock_no_existing(s: &MockServer) -> httpmock::Mock<'_> {
+        s.mock(|w, t| {
+            w.method(GET)
+                .path("/_apis/git/repositories/r1/pullrequests")
+                .query_param("searchCriteria.status", "active")
+                .query_param("searchCriteria.sourceRefName", "refs/heads/ja/fix");
+            t.status(200).json_body(json!({"value":[]}));
+        })
+    }
+
+    #[tokio::test]
+    async fn create_pushes_then_posts() {
+        let r = temp_repo();
+        let s = MockServer::start();
+        let list = mock_no_existing(&s);
+        let post = s.mock(|w, t| {
+            w.method(POST)
+                .path("/_apis/git/repositories/r1/pullrequests")
+                .json_body_partial(
+                    r#"{"sourceRefName":"refs/heads/ja/fix","targetRefName":"refs/heads/main","isDraft":true,"reviewers":[{"id":"u1"}]}"#,
+                );
+            t.status(201).json_body(json!({"pullRequestId": 5}));
+        });
+        assert!(!remote_has(&r.bare, "ja/fix"));
+        let out = create(&ctx_for(&s.base_url(), &r.work), &r.work, new_pr(None, "x"))
+            .await
+            .unwrap();
+        assert_eq!(out, CreateOutcome::Created(5));
+        assert!(remote_has(&r.bare, "ja/fix"));
+        assert_eq!(
+            git(&r.work, &["rev-parse", "--abbrev-ref", "ja/fix@{upstream}"]),
+            "origin/ja/fix"
+        );
+        list.assert();
+        post.assert();
+    }
+
+    #[tokio::test]
+    async fn a_failed_push_never_posts() {
+        let r = temp_repo();
+        let s = MockServer::start();
+        let list = mock_no_existing(&s);
+        let post = s.mock(|w, t| {
+            w.method(POST)
+                .path("/_apis/git/repositories/r1/pullrequests");
+            t.status(201).json_body(json!({"pullRequestId": 5}));
+        });
+        let mut ctx = ctx_for(&s.base_url(), &r.work);
+        ctx.remote_name = "nowhere".into();
+        let e = create(&ctx, &r.work, new_pr(None, "x")).await.unwrap_err();
+        assert!(e.user_message().contains("git push"), "{e}");
+        assert_eq!(list.hits(), 0);
+        assert_eq!(post.hits(), 0);
+    }
+
+    #[tokio::test]
+    async fn an_existing_pr_short_circuits() {
+        let r = temp_repo();
+        let s = MockServer::start();
+        s.mock(|w, t| {
+            w.method(GET)
+                .path("/_apis/git/repositories/r1/pullrequests")
+                .query_param("searchCriteria.sourceRefName", "refs/heads/ja/fix");
+            t.status(200)
+                .json_body(json!({"value":[pr_json(77, true, &[])]}));
+        });
+        let post = s.mock(|w, t| {
+            w.method(POST)
+                .path("/_apis/git/repositories/r1/pullrequests");
+            t.status(201).json_body(json!({"pullRequestId": 5}));
+        });
+        let out = create(&ctx_for(&s.base_url(), &r.work), &r.work, new_pr(None, "x"))
+            .await
+            .unwrap();
+        assert_eq!(out, CreateOutcome::Existing(77));
+        assert_eq!(post.hits(), 0);
+    }
+
+    /// Serves `script` in order, one connection per request: `Some(json)`
+    /// answers 200, `None` hangs up without answering. Returns the base
+    /// URL and the request lines seen.
+    async fn scripted(
+        script: Vec<Option<Value>>,
+    ) -> (String, tokio::task::JoinHandle<Vec<String>>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let handle = tokio::spawn(async move {
+            let mut seen = Vec::new();
+            for step in script {
+                let (mut sock, _) = listener.accept().await.unwrap();
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 4096];
+                loop {
+                    let n = sock.read(&mut chunk).await.unwrap();
+                    buf.extend_from_slice(&chunk[..n]);
+                    let text = String::from_utf8_lossy(&buf).to_string();
+                    if let Some(end) = text.find("\r\n\r\n") {
+                        let len = text[..end]
+                            .lines()
+                            .find_map(|l| {
+                                let (k, v) = l.split_once(':')?;
+                                k.eq_ignore_ascii_case("content-length")
+                                    .then(|| v.trim().parse::<usize>().ok())?
+                            })
+                            .unwrap_or(0);
+                        if buf.len() >= end + 4 + len || n == 0 {
+                            seen.push(text.lines().next().unwrap_or("").to_string());
+                            break;
+                        }
+                    }
+                    if n == 0 {
+                        break;
+                    }
+                }
+                match step {
+                    Some(body) => {
+                        let body = body.to_string();
+                        let reply = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            body.len()
+                        );
+                        sock.write_all(reply.as_bytes()).await.unwrap();
+                        sock.shutdown().await.unwrap();
+                    }
+                    None => drop(sock),
+                }
+            }
+            seen
+        });
+        (base, handle)
+    }
+
+    #[tokio::test]
+    async fn an_ambiguous_create_is_reconciled_by_listing() {
+        let r = temp_repo();
+        let (base, server) = scripted(vec![
+            Some(json!({"value": []})),
+            None,
+            Some(json!({"value": [pr_json(88, true, &[])]})),
+        ])
+        .await;
+        let out = create(&ctx_for(&base, &r.work), &r.work, new_pr(None, "x"))
+            .await
+            .unwrap();
+        assert_eq!(out, CreateOutcome::Existing(88));
+        let seen = server.await.unwrap();
+        assert_eq!(seen.len(), 3);
+        assert_eq!(seen.iter().filter(|l| l.starts_with("POST ")).count(), 1);
+        assert!(seen[2].starts_with("GET "));
+    }
+
+    #[tokio::test]
+    async fn work_item_refs_are_sent() {
+        let r = temp_repo();
+        let s = MockServer::start();
+        mock_no_existing(&s);
+        let post = s.mock(|w, t| {
+            w.method(POST)
+                .path("/_apis/git/repositories/r1/pullrequests")
+                .json_body_partial(r#"{"workItemRefs":[{"id":"42"}]}"#);
+            t.status(201)
+                .json_body(json!({"pullRequestId": 6, "workItemRefs": [{"id": "42"}]}));
+        });
+        let patch = s.mock(|w, t| {
+            w.method(httpmock::Method::PATCH)
+                .path("/_apis/wit/workitems/42");
+            t.status(200).json_body(json!({}));
+        });
+        let out = create(
+            &ctx_for(&s.base_url(), &r.work),
+            &r.work,
+            new_pr(Some(42), "x"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out, CreateOutcome::Created(6));
+        post.assert();
+        assert_eq!(patch.hits(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_failed_link_is_created_task_not_linked() {
+        let r = temp_repo();
+        let s = MockServer::start();
+        mock_no_existing(&s);
+        s.mock(|w, t| {
+            w.method(POST)
+                .path("/_apis/git/repositories/r1/pullrequests");
+            t.status(201).json_body(json!({
+                "pullRequestId": 9,
+                "artifactId": "vstfs:///Git/PullRequestId/p1%2Fr1%2F9"
+            }));
+        });
+        s.mock(|w, t| {
+            w.method(GET)
+                .path("/_apis/git/repositories/r1/pullrequests/9/workitems");
+            t.status(200).json_body(json!({"value": []}));
+        });
+        let patch = s.mock(|w, t| {
+            w.method(httpmock::Method::PATCH)
+                .path("/_apis/wit/workitems/42")
+                .header("content-type", "application/json-patch+json")
+                .json_body(json!([{
+                    "op": "add",
+                    "path": "/relations/-",
+                    "value": {
+                        "rel": "ArtifactLink",
+                        "url": "vstfs:///Git/PullRequestId/p1%2Fr1%2F9",
+                        "attributes": {"name": "Pull Request"}
+                    }
+                }]));
+            t.status(400).json_body(json!({"message": "link refused"}));
+        });
+        let out = create(
+            &ctx_for(&s.base_url(), &r.work),
+            &r.work,
+            new_pr(Some(42), "x"),
+        )
+        .await
+        .unwrap();
+        patch.assert();
+        assert!(
+            matches!(&out, CreateOutcome::CreatedTaskNotLinked(9, why) if why.contains("link refused")),
+            "{out:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_description_loses_its_ai_footer() {
+        let r = temp_repo();
+        let s = MockServer::start();
+        mock_no_existing(&s);
+        let post = s.mock(|w, t| {
+            w.method(POST)
+                .path("/_apis/git/repositories/r1/pullrequests")
+                .json_body_partial(r#"{"description":"Summary\n"}"#);
+            t.status(201).json_body(json!({"pullRequestId": 3}));
+        });
+        let desc =
+            "Summary\n\n\u{1f916} Generated with [Claude Code](https://claude.com/claude-code)\n";
+        create(
+            &ctx_for(&s.base_url(), &r.work),
+            &r.work,
+            new_pr(None, desc),
+        )
+        .await
+        .unwrap();
+        post.assert();
+    }
+
+    #[test]
+    fn create_outcome_serialises_with_a_kind() {
+        assert_eq!(
+            serde_json::to_value(CreateOutcome::CreatedTaskNotLinked(4, "no".into())).unwrap(),
+            json!({"kind": "createdTaskNotLinked", "id": 4, "reason": "no"})
+        );
+        assert_eq!(
+            serde_json::to_value(CreateOutcome::Existing(2)).unwrap(),
+            json!({"kind": "existing", "id": 2, "reason": null})
+        );
+    }
+
+    #[tokio::test]
+    async fn vote_puts_my_vote() {
+        let s = MockServer::start();
+        s.mock(|w, t| {
+            w.method(GET).path("/_apis/connectionData");
+            t.status(200)
+                .json_body(json!({"authenticatedUser": {"id": "me-1"}}));
+        });
+        let put = s.mock(|w, t| {
+            w.method(PUT)
+                .path("/_apis/git/repositories/r1/pullrequests/5/reviewers/me-1")
+                .json_body(json!({"vote": 10}));
+            t.status(200).json_body(json!({"vote": 10}));
+        });
+        let ctx = ctx_for(&s.base_url(), Path::new("."));
+        vote(&ctx, 5, 10).await.unwrap();
+        put.assert();
+        assert!(vote(&ctx, 5, 7).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn publish_patches_is_draft_false() {
+        let s = MockServer::start();
+        let m = s.mock(|w, t| {
+            w.method(httpmock::Method::PATCH)
+                .path("/_apis/git/repositories/r1/pullrequests/5")
+                .json_body(json!({"isDraft": false}));
+            t.status(200).json_body(json!({"pullRequestId": 5}));
+        });
+        publish(&ctx_for(&s.base_url(), Path::new(".")), 5)
+            .await
+            .unwrap();
+        m.assert();
+    }
+
+    #[tokio::test]
+    async fn reply_posts_to_the_thread() {
+        let s = MockServer::start();
+        let m = s.mock(|w, t| {
+            w.method(POST)
+                .path("/_apis/git/repositories/r1/pullrequests/5/threads/3/comments")
+                .json_body(json!({"content": "Done", "commentType": 1}));
+            t.status(200).json_body(json!({
+                "content": "Done", "author": {"displayName": "Jay"},
+                "publishedDate": "2026-10-14T03:00:00Z"
+            }));
+        });
+        let c = reply(&ctx_for(&s.base_url(), Path::new(".")), 5, 3, "Done")
+            .await
+            .unwrap();
+        m.assert();
+        assert_eq!(c.author, "Jay");
+    }
+
+    #[test]
+    fn identity_search_url() {
+        let base = vssps_base("https://tnt.visualstudio.com").unwrap();
+        assert_eq!(
+            identities_url(&base, "sam"),
+            "https://vssps.dev.azure.com/tnt/_apis/identities?searchFilter=General&filterValue=sam"
+        );
+    }
+
+    #[tokio::test]
+    async fn identity_search_hits_vssps() {
+        let s = MockServer::start();
+        let m = s.mock(|w, t| {
+            w.method(GET)
+                .path("/vssps/tnt/_apis/identities")
+                .query_param("searchFilter", "General")
+                .query_param("filterValue", "sam")
+                .query_param("api-version", "7.1");
+            t.status(200).json_body(json!({"value": [
+                {"id": "u1", "providerDisplayName": "Sam Lee", "isActive": true,
+                 "properties": {"Mail": {"$type": "System.String", "$value": "sam@tnt.co.nz"}}},
+                {"id": "u2", "providerDisplayName": "Sam Gone", "isActive": false}
+            ]}));
+        });
+        let found = search_identities(&ctx_for(&s.base_url(), Path::new(".")), "sam")
+            .await
+            .unwrap();
+        m.assert();
+        assert_eq!(
+            found,
+            vec![Reviewer {
+                id: "u1".into(),
+                name: "Sam Lee".into(),
+                email: "sam@tnt.co.nz".into()
+            }]
+        );
     }
 }
