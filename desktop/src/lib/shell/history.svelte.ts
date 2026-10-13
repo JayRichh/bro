@@ -23,6 +23,12 @@ function same(a: Place, b: Place): boolean {
   return a.view === b.view && (a.repo ?? '') === (b.repo ?? '') && (a.item ?? '') === (b.item ?? '');
 }
 
+/** A new reactive view-state object. */
+function fresh(): UiState {
+  const s: UiState = $state({});
+  return s;
+}
+
 function plain(state: UiState): UiState {
   return JSON.parse(JSON.stringify(state)) as UiState;
 }
@@ -34,8 +40,10 @@ export function createNav(opts: NavOptions = {}) {
 
   let stack = $state<Place[]>([home]);
   let index = $state(0);
-  // Keyed `view\0repo`. A $state record, so views re-render on change.
-  const states: Record<string, UiState> = $state({});
+  // Keyed `view\0repo`. Each entry is its own $state object, made on first
+  // read: views re-render on change, and a first read inside a $derived
+  // never mutates state that derived depends on.
+  const states = new Map<string, UiState>();
   const handles = new Map<string, UiState>();
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -49,15 +57,19 @@ export function createNav(opts: NavOptions = {}) {
       k,
       setTimeout(() => {
         timers.delete(k);
-        saver?.(view, repo, plain(states[k]));
+        saver?.(view, repo, plain(states.get(k) ?? {}));
       }, debounceMs),
     );
   }
 
   function raw(view: string, repo: string): UiState {
     const k = keyOf(view, repo);
-    states[k] ??= {};
-    return states[k];
+    let s = states.get(k);
+    if (!s) {
+      s = fresh();
+      states.set(k, s);
+    }
+    return s;
   }
 
   return {

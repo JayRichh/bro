@@ -54,7 +54,8 @@
 
   function meta(n: Node): string {
     if (n.agent) return [harnessLabel(n.agent), n.agent.profile].filter(Boolean).join(' \u00b7 ');
-    if (n.sub) return n.sub.kind ? `subagent \u00b7 ${n.sub.kind}` : 'subagent';
+    // Indent and the lighter name already say "subagent"; the type is the news.
+    if (n.sub) return n.sub.kind || 'subagent';
     return '';
   }
 
@@ -66,7 +67,7 @@
 
   const ROW =
     'group relative grid min-h-9 cursor-default items-center border-b border-rule pr-4 outline-none ' +
-    'grid-cols-[112px_minmax(0,1.15fr)_minmax(0,150px)_minmax(0,2fr)_44px] ' +
+    'grid-cols-[112px_minmax(0,1.15fr)_minmax(0,170px)_minmax(0,2fr)_44px] ' +
     '@max-[760px]:grid-cols-[104px_minmax(0,1fr)_44px] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rule-strong';
 </script>
 
@@ -135,7 +136,7 @@
 
       <span class="truncate pl-3 text-[13px] text-muted @max-[760px]:hidden">{meta(n)}</span>
       <span class="truncate pl-3 text-[13px] text-muted @max-[760px]:hidden">
-        {#if where && !where.isMain}<span class="mr-2 font-mono text-[12px]">{where.branch}</span>{/if}{prompt ?? ''}
+        {#if where && !where.isMain && n.depth === 0}<span class="mr-2 font-mono text-[12px]">{where.branch}</span>{/if}{prompt ?? ''}
       </span>
       <span class="text-right font-mono text-[12px] text-muted">{age(when(n), app.now)}</span>
     </div>
