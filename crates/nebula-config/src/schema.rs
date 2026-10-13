@@ -16,6 +16,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// Rows that only mean something to the terminal app — its search, file
@@ -487,6 +488,41 @@ fn parse_field(field: &str) -> Result<HarnessField, String> {
         "model" => Ok(HarnessField::Model),
         "effort" => Ok(HarnessField::Effort),
         other => Err(format!("no harness field {other}")),
+    }
+}
+
+/// What a launch picker offers for one harness, from the same lists the
+/// Agents tab rows use: the models (`default` first), the configured model,
+/// the efforts each model takes (Cursor's follow the model; others are one
+/// list), and the configured effort (`n/a` when the harness has none).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LaunchChoices {
+    pub models: Vec<String>,
+    pub model: String,
+    pub efforts: BTreeMap<String, Vec<String>>,
+    pub effort: String,
+}
+
+pub fn launch_choices(cfg: &Config, id: &str) -> LaunchChoices {
+    let descriptor = cfg.effective_harness_by_id(id);
+    let mut models = model_choices_in(&descriptor);
+    let model = descriptor.model.default.trim().to_string();
+    if !model.is_empty() && !crate::fits(&model, &models) {
+        models.push(model.clone());
+    }
+    let efforts = models
+        .iter()
+        .map(|m| {
+            let pick = (!m.eq_ignore_ascii_case(DEFAULT_CHOICE)).then_some(m.as_str());
+            let pick = pick.or(descriptor.default_model());
+            (m.clone(), effort_choices_in(&descriptor, pick))
+        })
+        .collect();
+    LaunchChoices {
+        models,
+        model,
+        efforts,
+        effort: cfg.agent_value(id, HarnessField::Effort),
     }
 }
 
