@@ -118,9 +118,11 @@ fn default_agent_name(model: &Model) -> String {
     format!("agent-{}", n + 1)
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct NewAgent {
+    /// Empty when the worktree does not exist yet (Start task fills it).
+    #[serde(default)]
     worktree: String,
     kind: String,
     profile: Option<String>,
@@ -129,6 +131,10 @@ struct NewAgent {
 
 #[tauri::command]
 async fn create_agent(client: State<'_, Arc<Client>>, spec: NewAgent) -> Res<String> {
+    spawn_agent(&client, spec).await
+}
+
+async fn spawn_agent(client: &Client, spec: NewAgent) -> Res<String> {
     let kind =
         AgentKind::parse(&spec.kind).ok_or_else(|| format!("unknown harness {}", spec.kind))?;
     let name = default_agent_name(&client.snapshot());
@@ -629,6 +635,7 @@ fn main() {
             ado::tasks::ado_teams,
             ado::tasks::ado_iterations,
             ado::tasks::ado_tasks,
+            ado::tasks::ado_start_task,
         ])
         .run(tauri::generate_context!())
         .expect("kete-desktop failed to start");

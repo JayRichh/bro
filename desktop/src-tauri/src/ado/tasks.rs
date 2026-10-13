@@ -2,11 +2,15 @@
 //! by parent, and starting a task as a branch, a worktree and an agent.
 
 use crate::ado::client::AdoError;
-use crate::ado::{enc, AdoContext, AdoState, Me, WitState};
+use crate::ado::naming::validate_branch_name;
+use crate::ado::{enc, git_out, AdoContext, AdoState, Me, WitState};
 use crate::daemon::Client;
+use crate::NewAgent;
+use nebula_core::{ClientRequest, EntityId, ProjectId};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::State;
 
@@ -649,6 +653,292 @@ async fn my_open_ids(ctx: &AdoContext, team: &str) -> Result<Vec<u32>, AdoError>
     Ok(reply.work_items.into_iter().map(|w| w.id).collect())
 }
 
+// ---- start a task ----
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartTask {
+    pub id: u32,
+    pub branch: String,
+    /// The branch to cut from; None is the daemon's default base (the
+    /// configured `worktree_base_branch`, else `origin/HEAD`).
+    pub base: Option<String>,
+    pub assign_to_me: bool,
+    pub activate: bool,
+    /// The agent to start in the new worktree. Its `worktree` is filled
+    /// in; an empty prompt becomes [`task_prompt`].
+    pub spawn: Option<NewAgent>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartedTask {
+    pub worktree_id: String,
+    pub agent_id: Option<String>,
+    /// Steps after the worktree that did not happen, one each. The
+    /// worktree and branch stay either way.
+    pub problems: Vec<StepProblem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StepProblem {
+    /// `link`, `read`, `assign`, `activate` or `spawn`.
+    pub step: String,
+    pub message: String,
+}
+
+/// What starting a task needs from git and the daemon.
+#[async_trait::async_trait]
+pub trait Workspace: Send + Sync {
+    /// Branch names already taken: local branches, and branches checked
+    /// out in one of the project's worktrees.
+    async fn taken_branches(&self) -> Result<Vec<String>, String>;
+    /// Cut a worktree on the new `branch` from `base`; its id.
+    async fn create_worktree(&self, branch: &str, base: Option<&str>) -> Result<String, String>;
+    /// Start an agent; its id.
+    async fn create_agent(&self, spec: NewAgent) -> Result<String, String>;
+}
+
+/// The agent's opening prompt: the task's title, description and
+/// acceptance criteria (the parent's when the task has none).
+pub fn task_prompt(item: &WorkItem, parent: Option<&WorkItem>) -> String {
+    let mut s = format!(
+        "# {} {}: {}\n\n{}\n",
+        item.kind, item.id, item.title, item.url
+    );
+    if let Some(p) = parent {
+        s.push_str(&format!("\nParent: {} {}: {}\n", p.kind, p.id, p.title));
+    }
+    let description = if item.description_md.is_empty() {
+        "None given."
+    } else {
+        &item.description_md
+    };
+    let acceptance = match (&item.acceptance_md, parent) {
+        (a, _) if !a.is_empty() => a.as_str(),
+        (_, Some(p)) if !p.acceptance_md.is_empty() => p.acceptance_md.as_str(),
+        _ => "None given.",
+    };
+    s.push_str(&format!(
+        "\n## Description\n\n{description}\n\n## Acceptance criteria\n\n{acceptance}\n"
+    ));
+    s
+}
+
+/// Start task `req.id`: a new branch and worktree, the branch-to-task
+/// link, then (each optional, each reported on its own) assign it to me,
+/// move it to In Progress and start an agent. Only a bad branch name or a
+/// failed worktree is an error; nothing after the worktree undoes it.
+pub async fn start_task(
+    ctx: &AdoContext,
+    ws: &dyn Workspace,
+    req: StartTask,
+) -> Result<StartedTask, String> {
+    validate_branch_name(&req.branch, &[])?;
+    let taken = ws.taken_branches().await?;
+    validate_branch_name(&req.branch, &taken)?;
+    let base = req.base.as_deref().map(str::trim).filter(|b| !b.is_empty());
+    let worktree_id = ws.create_worktree(&req.branch, base).await?;
+    let mut out = StartedTask {
+        worktree_id,
+        ..Default::default()
+    };
+    let mut problem = |step: &str, message: String| {
+        out.problems.push(StepProblem {
+            step: step.to_string(),
+            message,
+        })
+    };
+
+    if let Err(e) = ctx.store.try_with_repo(&ctx.key, |r| {
+        r.branch_tasks.insert(req.branch.clone(), req.id);
+    }) {
+        problem(
+            "link",
+            format!("The branch is made, but its link to the task was not saved: {e}"),
+        );
+    }
+
+    let mut states = HashMap::new();
+    let item = match hydrate(ctx, &[req.id], &mut states).await {
+        Ok(mut v) if !v.is_empty() => Some(v.remove(0)),
+        Ok(_) => {
+            problem("read", format!("Work item {} was not found.", req.id));
+            None
+        }
+        Err(e) => {
+            problem("read", e.user_message());
+            None
+        }
+    };
+    let parent = match item.as_ref().and_then(|h| h.item.parent) {
+        Some(p) => hydrate(ctx, &[p], &mut states)
+            .await
+            .ok()
+            .and_then(|mut v| (!v.is_empty()).then(|| v.remove(0).item)),
+        None => None,
+    };
+    let item_path = ctx.project_api(&format!("wit/workitems/{}", req.id));
+
+    if req.assign_to_me {
+        match &item {
+            None => problem(
+                "assign",
+                "Not assigned: the work item could not be read.".into(),
+            ),
+            Some(h) if h.assignee_id.is_some() || h.assignee_unique.is_some() => {
+                let me = ctx.me().await.ok();
+                if !me.as_ref().is_some_and(|me| h.is_mine(me)) {
+                    let who = h.item.assigned_to.as_deref().unwrap_or("someone else");
+                    problem(
+                        "assign",
+                        format!("Left as it is: the task is assigned to {who}."),
+                    );
+                }
+            }
+            Some(_) => match ctx.me().await {
+                Err(e) => problem("assign", e.user_message()),
+                Ok(me) if me.unique_name.is_empty() => problem(
+                    "assign",
+                    "Not assigned: Azure DevOps did not say who you are signed in as.".into(),
+                ),
+                Ok(me) => {
+                    let ops = json!([{
+                        "op": "add",
+                        "path": "/fields/System.AssignedTo",
+                        "value": me.unique_name,
+                    }]);
+                    if let Err(e) = ctx.client.patch_json_patch::<Value>(&item_path, &ops).await {
+                        problem("assign", e.user_message());
+                    }
+                }
+            },
+        }
+    }
+
+    if req.activate {
+        match &item {
+            None => problem(
+                "activate",
+                "Not moved to In Progress: the work item could not be read.".into(),
+            ),
+            Some(h) if h.item.state_category == "InProgress" => {}
+            Some(h)
+                if matches!(
+                    h.item.state_category.as_str(),
+                    "Resolved" | "Completed" | "Removed"
+                ) =>
+            {
+                problem(
+                    "activate",
+                    format!("Left as it is: the task is already {}.", h.item.state),
+                )
+            }
+            Some(h) => match ctx.states(&h.item.kind).await {
+                Err(e) => problem("activate", e.user_message()),
+                Ok(states) => match states.iter().find(|s| s.category == "InProgress") {
+                    None => problem(
+                        "activate",
+                        format!("A {} has no In Progress state to move to.", h.item.kind),
+                    ),
+                    Some(s) => {
+                        let ops = json!([{
+                            "op": "add",
+                            "path": "/fields/System.State",
+                            "value": s.name,
+                        }]);
+                        if let Err(e) = ctx.client.patch_json_patch::<Value>(&item_path, &ops).await
+                        {
+                            problem("activate", e.user_message());
+                        }
+                    }
+                },
+            },
+        }
+    }
+
+    if let Some(mut spec) = req.spawn {
+        spec.worktree = out.worktree_id.clone();
+        if spec.prompt.as_deref().is_none_or(|p| p.trim().is_empty()) {
+            spec.prompt = Some(match &item {
+                Some(h) => task_prompt(&h.item, parent.as_ref()),
+                None => format!(
+                    "Work on Azure DevOps work item {}: {}",
+                    req.id,
+                    ctx.work_item_web_url(req.id)
+                ),
+            });
+        }
+        match ws.create_agent(spec).await {
+            Ok(id) => out.agent_id = Some(id),
+            Err(e) => out.problems.push(StepProblem {
+                step: "spawn".into(),
+                message: format!("The agent did not start: {e}"),
+            }),
+        }
+    }
+    Ok(out)
+}
+
+/// [`Workspace`] over the daemon and the project's repo.
+struct DaemonWorkspace {
+    client: Arc<Client>,
+    project: ProjectId,
+    repo: PathBuf,
+}
+
+#[async_trait::async_trait]
+impl Workspace for DaemonWorkspace {
+    async fn taken_branches(&self) -> Result<Vec<String>, String> {
+        let refs = git_out(
+            &self.repo,
+            &["for-each-ref", "--format=%(refname:short)", "refs/heads"],
+        )
+        .await?;
+        let mut taken: Vec<String> = refs
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(str::to_string)
+            .collect();
+        taken.extend(
+            self.client
+                .snapshot()
+                .worktrees
+                .iter()
+                .filter(|w| w.project_id == self.project)
+                .map(|w| w.branch.clone()),
+        );
+        Ok(taken)
+    }
+
+    async fn create_worktree(&self, branch: &str, base: Option<&str>) -> Result<String, String> {
+        let req_id = self.client.req_id();
+        let created = self
+            .client
+            .rpc(
+                req_id,
+                ClientRequest::CreateWorktree {
+                    req_id,
+                    project: self.project.clone(),
+                    branch: branch.to_string(),
+                    base: base.map(str::to_string),
+                },
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        match created {
+            Some(EntityId::Worktree(id)) => Ok(id.0),
+            _ => Err("The daemon did not report the new worktree.".into()),
+        }
+    }
+
+    async fn create_agent(&self, spec: NewAgent) -> Result<String, String> {
+        crate::spawn_agent(&self.client, spec).await
+    }
+}
+
 // ---- commands ----
 
 /// The project's teams, for the team picker.
@@ -685,6 +975,32 @@ pub async fn ado_tasks(
     tasks(&ctx, &scope, &today_utc())
         .await
         .map_err(|e| e.user_message())
+}
+
+/// Start a task: branch, worktree, task link, and optionally assign,
+/// activate and an agent. `worktree` is any checkout of the repo.
+#[tauri::command]
+pub async fn ado_start_task(
+    client: State<'_, Arc<Client>>,
+    ado: State<'_, AdoState>,
+    worktree: String,
+    req: StartTask,
+) -> Result<StartedTask, String> {
+    // Refuse a bad name before any git or HTTP.
+    validate_branch_name(&req.branch, &[])?;
+    let row = client
+        .snapshot()
+        .worktrees
+        .into_iter()
+        .find(|w| w.id.0 == worktree || w.path == std::path::Path::new(&worktree))
+        .ok_or("That worktree is gone.")?;
+    let ctx = ado.context(&row.path).await?;
+    let ws = DaemonWorkspace {
+        client: client.inner().clone(),
+        project: row.project_id,
+        repo: row.path,
+    };
+    start_task(&ctx, &ws, req).await
 }
 
 // ---- HTML to markdown ----
@@ -1320,6 +1636,282 @@ mod tests {
             html_to_md("<style>p{}</style><!-- note --><p>kept</p><script>bad()</script>"),
             "kept"
         );
+    }
+
+    // ---- start a task ----
+
+    #[derive(Default)]
+    struct FakeWs {
+        taken: Vec<String>,
+        calls: std::sync::Mutex<Vec<String>>,
+        agents: std::sync::Mutex<Vec<NewAgent>>,
+        fail_agent: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl Workspace for FakeWs {
+        async fn taken_branches(&self) -> Result<Vec<String>, String> {
+            self.calls.lock().unwrap().push("branches".into());
+            Ok(self.taken.clone())
+        }
+        async fn create_worktree(
+            &self,
+            branch: &str,
+            base: Option<&str>,
+        ) -> Result<String, String> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("worktree {branch} {}", base.unwrap_or("-")));
+            Ok("wt-9".into())
+        }
+        async fn create_agent(&self, spec: NewAgent) -> Result<String, String> {
+            self.calls.lock().unwrap().push("agent".into());
+            self.agents.lock().unwrap().push(spec);
+            if self.fail_agent {
+                Err("no such harness".into())
+            } else {
+                Ok("ag-1".into())
+            }
+        }
+    }
+
+    fn start(id: u32, branch: &str) -> StartTask {
+        StartTask {
+            id,
+            branch: branch.into(),
+            base: None,
+            assign_to_me: true,
+            activate: true,
+            spawn: None,
+        }
+    }
+
+    fn spawn_spec() -> NewAgent {
+        NewAgent {
+            worktree: String::new(),
+            kind: "claude".into(),
+            profile: None,
+            prompt: None,
+        }
+    }
+
+    fn item(id: u32, title: &str, desc: &str, acc: &str) -> WorkItem {
+        WorkItem {
+            id,
+            kind: "Task".into(),
+            title: title.into(),
+            state: "To Do".into(),
+            state_category: "Proposed".into(),
+            assigned_to: None,
+            remaining: None,
+            parent: None,
+            board_column: None,
+            description_md: desc.into(),
+            acceptance_md: acc.into(),
+            url: format!("https://dev.azure.com/tnt/Platform/_workitems/edit/{id}"),
+        }
+    }
+
+    #[test]
+    fn task_prompt_has_title_description_and_acceptance() {
+        let mut task = item(101, "Fix GST rounding", "a\n\n- b", "");
+        task.parent = Some(100);
+        let mut story = item(100, "GST rounding on invoices", "", "- Totals match");
+        story.kind = "User Story".into();
+        let p = task_prompt(&task, Some(&story));
+        assert_eq!(
+            p,
+            "# Task 101: Fix GST rounding\n\n\
+             https://dev.azure.com/tnt/Platform/_workitems/edit/101\n\n\
+             Parent: User Story 100: GST rounding on invoices\n\n\
+             ## Description\n\na\n\n- b\n\n\
+             ## Acceptance criteria\n\n- Totals match\n"
+        );
+        let bare = task_prompt(&item(7, "Tidy", "", ""), None);
+        assert!(bare.contains("## Description\n\nNone given."));
+        assert!(bare.contains("## Acceptance criteria\n\nNone given."));
+        assert!(!bare.contains("Parent:"));
+        assert!(!bare.contains('\u{2014}'));
+    }
+
+    #[tokio::test]
+    async fn an_invalid_branch_is_refused_before_any_git_or_http() {
+        let s = MockServer::start();
+        let any = s.mock(|w, t| {
+            w.path_contains("/");
+            t.status(500);
+        });
+        let ctx = testing::context(&s.base_url(), testing::temp_store());
+        let ws = FakeWs::default();
+        for bad in ["jari/fix gst", "jari/..x", "-x", "jari/"] {
+            let e = start_task(&ctx, &ws, start(101, bad)).await.unwrap_err();
+            assert!(e.contains("not a valid branch name"), "{e}");
+        }
+        assert!(ws.calls.lock().unwrap().is_empty());
+        assert_eq!(any.hits(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_taken_branch_is_refused_before_the_worktree() {
+        let s = MockServer::start();
+        let any = s.mock(|w, t| {
+            w.path_contains("/");
+            t.status(500);
+        });
+        let ctx = testing::context(&s.base_url(), testing::temp_store());
+        let ws = FakeWs {
+            taken: vec!["jari/fix-gst".into()],
+            ..Default::default()
+        };
+        let e = start_task(&ctx, &ws, start(101, "jari/fix-gst"))
+            .await
+            .unwrap_err();
+        assert!(e.contains("already exists"), "{e}");
+        assert_eq!(*ws.calls.lock().unwrap(), vec!["branches"]);
+        assert_eq!(any.hits(), 0);
+    }
+
+    /// Item 101 (unassigned, To Do) under story 100.
+    fn start_mocks(s: &MockServer, patch_status: u16) -> (Mock<'_>, Mock<'_>) {
+        common(s);
+        s.mock(|w, t| {
+            w.method(POST).path("/Platform/_apis/wit/workitemsbatch");
+            t.status(200).body(BATCH_MAIN);
+        });
+        let assign = s.mock(|w, t| {
+            w.method(httpmock::Method::PATCH)
+                .path("/Platform/_apis/wit/workitems/101")
+                .header("content-type", "application/json-patch+json")
+                .json_body(json!([{
+                    "op": "add",
+                    "path": "/fields/System.AssignedTo",
+                    "value": "jay@tnt.co.nz"
+                }]));
+            t.status(patch_status).body(r#"{"id":101}"#);
+        });
+        let activate = s.mock(|w, t| {
+            w.method(httpmock::Method::PATCH)
+                .path("/Platform/_apis/wit/workitems/101")
+                .header("content-type", "application/json-patch+json")
+                .json_body(json!([{
+                    "op": "add",
+                    "path": "/fields/System.State",
+                    "value": "In Progress"
+                }]));
+            t.status(patch_status).body(r#"{"id":101}"#);
+        });
+        (assign, activate)
+    }
+
+    #[tokio::test]
+    async fn start_patches_assign_and_activate_records_the_link_and_spawns() {
+        let s = MockServer::start();
+        let (assign, activate) = start_mocks(&s, 200);
+        let store = testing::temp_store();
+        let ctx = testing::context(&s.base_url(), store.clone());
+        let ws = FakeWs::default();
+        let mut req = start(101, "jari/fix-gst-rounding");
+        req.base = Some("main".into());
+        req.spawn = Some(spawn_spec());
+        let out = start_task(&ctx, &ws, req).await.unwrap();
+        assign.assert();
+        activate.assert();
+        assert_eq!(out.worktree_id, "wt-9");
+        assert_eq!(out.agent_id.as_deref(), Some("ag-1"));
+        assert!(out.problems.is_empty(), "{:?}", out.problems);
+        assert_eq!(
+            *ws.calls.lock().unwrap(),
+            vec!["branches", "worktree jari/fix-gst-rounding main", "agent"]
+        );
+        // The store records the branch-to-task link.
+        assert_eq!(
+            store.read_repo(&ctx.key, |r| r
+                .branch_tasks
+                .get("jari/fix-gst-rounding")
+                .copied()),
+            Some(101)
+        );
+        let agents = ws.agents.lock().unwrap();
+        assert_eq!(agents[0].worktree, "wt-9");
+        let prompt = agents[0].prompt.as_deref().unwrap();
+        assert!(prompt.starts_with("# Task 101: Fix GST rounding"));
+        assert!(prompt.contains("Parent: User Story 100: GST rounding on invoices"));
+        assert!(prompt.contains("## Acceptance criteria\n\n- Totals match the ledger"));
+    }
+
+    #[tokio::test]
+    async fn a_failed_patch_keeps_the_branch_and_is_reported_per_step() {
+        let s = MockServer::start();
+        let (assign, activate) = start_mocks(&s, 500);
+        let store = testing::temp_store();
+        let ctx = testing::context(&s.base_url(), store.clone());
+        let ws = FakeWs {
+            fail_agent: true,
+            ..Default::default()
+        };
+        let mut req = start(101, "jari/fix-gst");
+        let mut spec = spawn_spec();
+        spec.prompt = Some("Use my words".into());
+        req.spawn = Some(spec);
+        let out = start_task(&ctx, &ws, req).await.unwrap();
+        assign.assert();
+        activate.assert();
+        assert_eq!(out.worktree_id, "wt-9");
+        assert_eq!(out.agent_id, None);
+        let steps: Vec<&str> = out.problems.iter().map(|p| p.step.as_str()).collect();
+        assert_eq!(steps, vec!["assign", "activate", "spawn"]);
+        assert_eq!(
+            store.read_repo(&ctx.key, |r| r.branch_tasks.get("jari/fix-gst").copied()),
+            Some(101)
+        );
+        assert_eq!(
+            ws.agents.lock().unwrap()[0].prompt.as_deref(),
+            Some("Use my words")
+        );
+    }
+
+    #[tokio::test]
+    async fn someone_elses_task_is_not_reassigned_and_active_is_not_moved() {
+        let s = MockServer::start();
+        common(&s);
+        s.mock(|w, t| {
+            w.method(POST).path("/Platform/_apis/wit/workitemsbatch");
+            t.status(200).body(BATCH_MAIN);
+        });
+        let patch = s.mock(|w, t| {
+            w.method(httpmock::Method::PATCH);
+            t.status(200).body("{}");
+        });
+        let ctx = testing::context(&s.base_url(), testing::temp_store());
+        let ws = FakeWs::default();
+        // 102 is Sam's, and Done.
+        let out = start_task(&ctx, &ws, start(102, "jari/tests"))
+            .await
+            .unwrap();
+        let steps: Vec<&str> = out.problems.iter().map(|p| p.step.as_str()).collect();
+        assert_eq!(steps, vec!["assign", "activate"]);
+        assert!(out.problems[0].message.contains("Sam Lee"));
+        assert!(out.problems[1].message.contains("already Done"));
+        // 100 is mine and already Active.
+        let out = start_task(&ctx, &ws, start(100, "jari/gst")).await.unwrap();
+        assert!(out.problems.is_empty(), "{:?}", out.problems);
+        assert_eq!(patch.hits(), 0);
+    }
+
+    #[test]
+    fn start_task_reads_camel_case_and_a_spawn_without_worktree() {
+        let req: StartTask = serde_json::from_value(json!({
+            "id": 101,
+            "branch": "jari/fix",
+            "base": null,
+            "assignToMe": true,
+            "activate": false,
+            "spawn": {"kind": "claude", "profile": null, "prompt": null}
+        }))
+        .unwrap();
+        assert!(req.assign_to_me && !req.activate);
+        assert_eq!(req.spawn.unwrap().worktree, "");
     }
 
     #[test]
