@@ -44,7 +44,7 @@
 <DiffPane bind:this={pane} {worktree} range={app.diffRange} bind:mode={() => mode, setMode} keys={active}>
   {#snippet lead()}
     <select
-      class="h-7 max-w-[240px] min-w-0 border border-rule bg-bg px-1.5 font-mono text-[12px] text-ink"
+      class="h-7 max-w-[240px] min-w-[132px] border border-rule bg-bg px-1.5 font-mono text-[12px] text-ink"
       aria-label="Worktree"
       value={worktree ?? ''}
       onchange={(e) => pickWorktree((e.target as HTMLSelectElement).value)}

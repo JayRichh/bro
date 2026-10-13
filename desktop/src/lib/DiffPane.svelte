@@ -276,6 +276,8 @@
       d.push({
         range: new M.Range(line, col, line, col),
         options: {
+          // An empty range draws nothing unless asked to.
+          showIfCollapsed: true,
           [top ? 'before' : 'after']: { content: word, inlineClassName: top ? 'kete-rep-removed kete-rep-removed-top' : 'kete-rep-removed' },
           overviewRuler: ruler('diff-del-word'),
           hoverMessage: [{ value: `Removed ${n === 1 ? '1 line' : `${n} lines`}:` }, fence(r.lines)],
@@ -505,7 +507,7 @@
 <svelte:window onkeydown={onWindowKey} />
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="flex h-full min-h-0 flex-col" onkeydowncapture={onPaneKey}>
+<div class="@container flex h-full min-h-0 flex-col" onkeydowncapture={onPaneKey}>
   <div class="flex h-10 min-w-0 flex-none items-center gap-3 border-b border-rule pr-2 pl-2 text-[13px]">
     <button
       class="grid size-7 flex-none place-items-center border-0 bg-transparent text-muted hover:bg-surface hover:text-ink {showFiles ? '' : 'text-ink'}"
@@ -574,6 +576,7 @@
             {i ? 'border-l border-rule' : ''} {on ? 'bg-ink text-bg' : 'bg-transparent text-muted hover:text-ink'}"
           onclick={() => (mode = m.id)}
           title="{m.label} ({m.key})"
+          aria-label={m.label}
         >
           <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"
             ><rect x="1.5" y="2.5" width="13" height="11" fill="none" stroke="currentColor" stroke-width="1.3" /><path
@@ -582,7 +585,8 @@
               stroke-width="1.3"
             /></svg
           >
-          {m.label}
+          <!-- In a narrow pane only the mode in use keeps its word. -->
+          <span class={on ? '' : 'hidden @min-[860px]:inline'}>{m.label}</span>
         </button>
       {/each}
     </div>
@@ -650,7 +654,7 @@
                             <button
                               class="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left font-mono text-ink hover:underline hover:underline-offset-4"
                               onclick={() => reveal(firstChange(h))}
-                              title="Show this hunk: {h.header}">{lab.range}<span class="ml-2 font-ui text-muted">{lab.context}</span></button
+                              title="Show this hunk: {h.header}">{lab.range}</button
                             >
                             <button
                               class="flex-none border border-rule bg-bg px-1.5 leading-5 text-ink enabled:hover:bg-raised disabled:text-faint"
@@ -664,9 +668,7 @@
                               onclick={() => (confirming = confirming === k ? null : k)}>Discard</button
                             >
                           {:else}
-                            <span class="min-w-0 flex-1 truncate font-mono text-ink" title={h.header}
-                              >{lab.range}<span class="ml-2 font-ui text-muted">{lab.context}</span></span
-                            >
+                            <span class="min-w-0 flex-1 truncate font-mono text-ink" title={h.header}>{lab.range}</span>
                             <button
                               class="flex-none border border-rule bg-bg px-1.5 leading-5 text-ink enabled:hover:bg-raised disabled:text-faint"
                               disabled={busy}
@@ -674,15 +676,20 @@
                             >
                           {/if}
                         </div>
+                        {#if lab.context}
+                          <div class="-mt-0.5 mb-1 truncate pr-2 font-mono text-[11.5px] text-muted" title={lab.context}>{lab.context}</div>
+                        {/if}
                         {#if confirming === k}
-                          <div class="mb-1 flex items-center gap-1 border border-fail bg-bg py-1 pr-1 pl-2" role="group" aria-label="Discard this hunk">
-                            <span class="min-w-0 flex-1 text-ink">Discard this hunk from disk? It cannot be undone.</span>
-                            <button class="flex-none border-0 bg-fail px-1.5 leading-5 font-medium text-bg" disabled={busy} onclick={() => act(h, 'discard')}
-                              >Discard</button
-                            >
-                            <button class="flex-none border border-rule bg-bg px-1.5 leading-5 text-ink hover:bg-raised" onclick={() => (confirming = null)}
-                              >Keep</button
-                            >
+                          <div class="mr-2 mb-1.5 border border-fail bg-bg px-2 py-1.5" role="group" aria-label="Discard this hunk">
+                            <p class="m-0 text-ink">Discard this hunk from disk? It cannot be undone.</p>
+                            <div class="mt-1.5 flex justify-end gap-1">
+                              <button class="border border-rule bg-bg px-1.5 leading-5 text-ink hover:bg-raised" onclick={() => (confirming = null)}
+                                >Keep</button
+                              >
+                              <button class="border-0 bg-fail px-1.5 leading-5 font-medium text-bg" disabled={busy} onclick={() => act(h, 'discard')}
+                                >Discard hunk</button
+                              >
+                            </div>
                           </div>
                         {/if}
                       {/each}
