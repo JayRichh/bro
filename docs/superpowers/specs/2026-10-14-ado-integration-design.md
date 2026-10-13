@@ -16,22 +16,24 @@ Jay and colleagues at TnT author most of their work from the ADO sprint board. A
 
 ## Constraints
 
-- **Sign-in:** reuse the user's existing sign-in. Git Credential Manager first (`git credential fill` for `https://dev.azure.com/<org>`), then `az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798`. No PAT entry, no app registration. The token lives only in memory.
+- **Sign-in:** reuse the user's existing sign-in. Git Credential Manager first (`git credential fill` for the remote's own host and org URL, so `*.visualstudio.com` remotes resolve too; run off the UI thread with a 60 s timeout and a "Signing in…" state, since an expired GCM login may open its own sign-in window), then `az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798`. No PAT entry, no app registration. The token lives only in memory.
 - **Org/project/repo detection:** read from the git remote. Accept `https://dev.azure.com/{org}/{project}/_git/{repo}`, `https://{org}.visualstudio.com/{project}/_git/{repo}` and `git@ssh.dev.azure.com:v3/{org}/{project}/{repo}`.
 - **API:** REST api-version 7.1, via `reqwest` with rustls in the Tauri backend (`desktop/src-tauri/src/ado/`).
 - **Diffs:** always local `git` (source against merge-base with target); ADO is used for metadata only.
-- **Never hard-code a sprint period.** Iterations come from the team's settings at request time.
+- **Never hard-code a sprint period.** Iterations come from the team's settings at request time. The team defaults to the project's default team, switchable from a team picker, remembered per repo.
 - **No attribution:**
   - Kete-created PR titles and descriptions are stripped of `Co-Authored-By:` lines and "Generated with" footers.
   - Sessions Kete launches get Claude Code's attribution disabled in the per-worktree settings it already writes (`includeCoAuthoredBy: false`, plus `attribution` set to empty strings for commit and PR).
-  - None of this is surfaced in the UI or docs.
+  - Codex and Copilot get their equivalent setting where the harness has one.
+  - Backstop: the PR composer scans the branch's commits for AI co-author trailers. On an unpushed or own-only branch it offers a one-click clean (message rewrite of those commits); once pushed it only notes it.
+  - None of this is surfaced in docs; the composer note is the only UI.
 - **Out of scope:** environments (dev/UAT/prod), databases, CI pipelines beyond reading PR build-policy status, and GitHub.
 
 ## Identity and branch names
 
 - Initials come from `git config user.name`: the first two letters of the first word plus the first two of the last word, lowercased (Jay Richardson → `jari`). They can be overridden as `ado.initials` in config.
 - The new-branch default is `<initials>/<slug>`, where the slug is the task title, kebab-cased, at most 40 characters, editable before create. A config template `ado.branch_template` supports `{initials}`, `{slug}` and `{id}`; the default is `{initials}/{slug}`.
-- When Kete creates a branch from a task, it records `(repo, branch) → work item id` in its database. The task for a branch is resolved, in order, from that record, from a PR's linked work items, and from a numeric id in the branch name.
+- When Kete creates a branch from a task, it records `(repo, branch) → work item id` in a desktop-local store, `<data_dir>/ado.json` (the daemon's database is not the desktop's to write). The same file holds the offline cache, recent reviewers per repo, the chosen team and per-view UI state. The task for a branch is resolved, in order, from that record, from a PR's linked work items, and from a numeric id in the branch name.
 
 ## Views (desktop app, Workshop design)
 
@@ -47,7 +49,6 @@ A left rail gains three entries under the repo list: **Tasks**, **Branches** and
 - **Actions:**
   - **Start:** branch name (prefilled), base (the default branch), and "spawn agent" with harness/profile and a prompt prefilled from title + description + acceptance criteria. It creates a worktree via the daemon.
   - **Open in ADO.**
-  - **Set state** (to the next board column only).
 
 ### Branches
 - **Tree:** person prefix (the part before `/`; branches without one go under "other"). The user's own initials are pinned first, then people alphabetically, collapsible.
@@ -60,9 +61,9 @@ A left rail gains three entries under the repo list: **Tasks**, **Branches** and
 ### PRs
 - **Tabs:** *Mine* (created by me, active) and *To review* (I'm a reviewer, active). Rows show title, the source → target branches, draft/active, reviewer votes (approved / waiting / rejected) and comment threads. The policy checklist covers a linked task, at least one reviewer, and build status if a build policy exists.
 - **Composer** (from a branch or task):
-  - **Title and description:** the title is prefilled from the task title. The description template has Summary, Changes, Testing and Task, and Summary is prefilled from the agent session's last summary when one exists.
+  - **Title and description:** the title is prefilled from the task title. The description template has Summary, Changes, Testing and Task, and Summary is prefilled from the commit subjects in the range, with an "Ask the session to summarise" button that uses `kete ask` against the branch's session when one exists.
   - **Task link:** required by default. An explicit "No task (n/a)" checkbox allows submission with a warning line; it never blocks.
-  - **Reviewers:** an identity search picker (ADO identities API), with recent reviewers stored per repo and suggested first. At least one is required, with the same n/a escape.
+  - **Reviewers:** an identity search picker (ADO IdentityPicker API, which needs no Graph scopes), with recent reviewers stored per repo and suggested first. At least one is required, with the same n/a escape.
   - **Draft and diff:** Draft is on by default. A diff preview of source against merge-base sits beside the form.
   - **Create:** creates the PR, then shows it in PRs › Mine with its checklist.
 - **Review:** open any PR to see the diff (local fetch of both refs), threads (read, reply) and vote (approve / approve with suggestions / wait / reject).
