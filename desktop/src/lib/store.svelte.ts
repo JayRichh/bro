@@ -52,8 +52,9 @@ export const app = $state({
   launch: { harnesses: [], profiles: [] } as Launchables,
   /** Per project id: its ADO remote, null when none, absent until asked. */
   adoCtx: {} as Record<string, AdoContextInfo | null>,
-  /** A repo picked in the rail, for the overview to scroll to; seq bumps per pick. */
-  reveal: { repo: null as string | null, seq: 0 },
+  /** A repo picked in the rail, for the overview to scroll to; seq bumps per
+   *  pick, and `done` is the last seq the overview scrolled for. */
+  reveal: { repo: null as string | null, seq: 0, done: 0 },
 });
 
 export function sessionKey(s: SessionRef | null): string {
@@ -109,7 +110,8 @@ export function goHome(repo?: string) {
 /** A repo picked in the rail: go home and scroll its row into view. */
 export function revealRepo(repo: string) {
   goHome(repo);
-  app.reveal = { repo, seq: app.reveal.seq + 1 };
+  app.reveal.repo = repo;
+  app.reveal.seq += 1;
 }
 
 /** Make the window's selection follow a place reached by back or forward. */

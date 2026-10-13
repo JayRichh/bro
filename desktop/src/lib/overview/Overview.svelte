@@ -12,12 +12,13 @@
 
   // Only a repo picked in the rail scrolls the overview (`revealRepo`, which
   // nothing else sets). Session clicks, strip jumps, Esc and back/forward
-  // change `nav.current.repo` too, and must leave the scroll alone.
-  let revealed = app.reveal.seq;
+  // change `nav.current.repo` too, and must leave the scroll alone. A pick
+  // made while the overview was not mounted is still pending (`done` lags
+  // `seq`), so it scrolls once the overview mounts.
   $effect(() => {
-    const { repo, seq } = app.reveal;
-    if (seq === revealed || !repo || !scroller) return;
-    revealed = seq;
+    const { repo, seq, done } = app.reveal;
+    if (seq === done || !repo || !scroller) return;
+    app.reveal.done = seq;
     tick().then(() => {
       const section = scroller.querySelector(`[data-repo="${CSS.escape(repo)}"]`);
       const selected = section?.querySelector('[data-row][aria-selected="true"]');
