@@ -288,10 +288,12 @@ mod demo {
     #[test]
     #[ignore = "writes desktop/demo/settings-schema.json"]
     fn write_demo_settings() {
-        let mut cfg = Config::default();
-        cfg.claude_model = "opus".into();
-        cfg.claude_effort = "high".into();
-        cfg.session_idle_timeout = "15m".into();
+        let mut cfg = Config {
+            claude_model: "opus".into(),
+            claude_effort: "high".into(),
+            session_idle_timeout: "15m".into(),
+            ..Config::default()
+        };
         cfg.set_project_text(
             std::path::Path::new(r"C:\demo\ledger-api"),
             nebula_config::SettingKind::RunCommand,
