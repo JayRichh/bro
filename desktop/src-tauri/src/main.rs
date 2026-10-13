@@ -9,6 +9,9 @@ mod ado;
 mod attribution;
 mod daemon;
 mod git;
+mod launch;
+mod presets;
+mod profiles;
 mod projects;
 mod sessions;
 mod settings;
@@ -125,7 +128,7 @@ fn default_agent_name(model: &Model) -> String {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct NewAgent {
+pub(crate) struct NewAgent {
     /// Empty when the worktree does not exist yet (Start task fills it).
     #[serde(default)]
     worktree: String,
@@ -149,8 +152,16 @@ async fn create_agent(client: State<'_, Arc<Client>>, spec: NewAgent) -> Res<Str
 /// id (a custom one as `Custom` with its id), and the model and effort the
 /// caller picked, else the Agents tab's defaults ("default" = no flag).
 async fn spawn_agent(client: &Client, spec: NewAgent) -> Res<String> {
-    let cfg = nebula_config::Config::load();
-    let launch = settings::launch_args(&cfg, spec.kind.trim(), spec.model, spec.effort)?;
+    spawn_agent_with(client, &nebula_config::Config::load(), spec).await
+}
+
+/// [`spawn_agent`] against a config already read.
+async fn spawn_agent_with(
+    client: &Client,
+    cfg: &nebula_config::Config,
+    spec: NewAgent,
+) -> Res<String> {
+    let launch = settings::launch_args(cfg, spec.kind.trim(), spec.model, spec.effort)?;
     let name = default_agent_name(&client.snapshot());
     let prompt = spec
         .prompt
@@ -183,6 +194,11 @@ async fn spawn_agent(client: &Client, spec: NewAgent) -> Res<String> {
 
 #[tauri::command]
 async fn create_terminal(client: State<'_, Arc<Client>>, worktree: String) -> Res<String> {
+    new_terminal(&client, worktree).await
+}
+
+/// Open a shell in `worktree`; its terminal id.
+async fn new_terminal(client: &Client, worktree: String) -> Res<String> {
     let req_id = client.req_id();
     let created = client
         .rpc(
@@ -394,6 +410,10 @@ struct Launchables {
     /// The harness the quick prompt starts on: the Agents tab's Quick
     /// prompt Agent, stepped past one switched off since.
     default_harness: String,
+    /// Quick prompt: start in a new worktree by default (Sessions tab).
+    new_worktree: bool,
+    /// Open the session a launch starts (Sessions tab).
+    follow: bool,
 }
 
 /// What the quick prompt offers: the harnesses the TUI's New session
@@ -415,6 +435,8 @@ fn launchables() -> Launchables {
         harnesses,
         profiles,
         default_harness,
+        new_worktree: cfg.quick_prompt_new_worktree,
+        follow: cfg.follow_new_session,
     }
 }
 
@@ -755,6 +777,16 @@ fn main() {
             projects::set_project_path,
             projects::open_worktree,
             projects::open_remote,
+            launch::quick_launch,
+            presets::presets_list,
+            presets::preset_save,
+            presets::preset_delete,
+            profiles::profiles_list,
+            profiles::profile_harnesses,
+            profiles::profile_add,
+            profiles::profile_update,
+            profiles::profile_remove,
+            profiles::profile_set_default,
             settings::settings_schema,
             settings::settings_set,
             settings::settings_reset,

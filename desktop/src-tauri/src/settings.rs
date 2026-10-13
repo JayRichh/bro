@@ -94,6 +94,8 @@ pub fn run_commands_for(model: &Model, cfg: &Config) -> BTreeMap<String, String>
 pub struct HarnessInfo {
     pub id: String,
     pub label: String,
+    /// The model and effort pickers' lists and defaults, as the Agents tab.
+    pub choices: schema::LaunchChoices,
 }
 
 /// What the New session picker offers, as the TUI's: enabled, valid
@@ -106,6 +108,7 @@ pub fn offered(cfg: &Config) -> Vec<HarnessInfo> {
         .map(|(kind, custom)| {
             let descriptor = cfg.effective_harness(kind, custom.as_deref());
             HarnessInfo {
+                choices: schema::launch_choices(cfg, &descriptor.id),
                 id: descriptor.id.clone(),
                 label: descriptor.display_label().to_string(),
             }
@@ -209,6 +212,19 @@ mod tests {
         assert!(!ids.contains(&"codex".to_string()), "{ids:?}");
         assert!(!ids.contains(&"cursor".to_string()), "{ids:?}");
         assert!(ids.contains(&"aider".to_string()), "{ids:?}");
+    }
+
+    #[test]
+    fn each_offered_harness_carries_its_model_and_effort_choices() {
+        let (_d, cfg) = cfg_from(json!({"claude_model": "opus", "claude_effort": "high"}));
+        let claude = offered(&cfg)
+            .into_iter()
+            .find(|h| h.id == "claude")
+            .unwrap();
+        assert_eq!(claude.choices.model, "opus");
+        assert_eq!(claude.choices.effort, "high");
+        assert_eq!(claude.choices.models[0], "default");
+        assert!(claude.choices.efforts["opus"].contains(&"high".to_string()));
     }
 
     #[test]
