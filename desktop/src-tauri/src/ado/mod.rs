@@ -3,5 +3,6 @@
 #![allow(dead_code)]
 
 pub mod auth;
+pub mod client;
 pub mod naming;
 pub mod remote;
