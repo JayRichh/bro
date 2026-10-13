@@ -336,12 +336,27 @@ pub fn my_initials(repo: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// `git fetch --prune <remote>`.
+/// How long a fetch may take before it is killed, as for the diff's.
+const FETCH_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// `git fetch --prune <remote>`, killed after [`FETCH_TIMEOUT`].
 pub fn fetch(repo: &Path, remote: &str) -> Result<()> {
     if remote.is_empty() {
         bail!("this repo has no remote to fetch from");
     }
-    git(repo, &["fetch", "--prune", remote]).map(|_| ())
+    let mut cmd = git_cmd(repo);
+    cmd.args(["fetch", "--prune", remote])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    let out = crate::git::output_within(cmd, FETCH_TIMEOUT, "git fetch").map_err(|e| anyhow!(e))?;
+    if !out.status.success() {
+        let why = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        if why.is_empty() {
+            bail!("git fetch failed");
+        }
+        bail!("git fetch failed: {why}");
+    }
+    Ok(())
 }
 
 /// `git branch -d <branch>`: refuses an unmerged branch, as git does.
@@ -792,6 +807,8 @@ mod tests {
             work_items,
             threads: 0,
             url: String::new(),
+            source_commit: None,
+            target_commit: None,
         }
     }
 

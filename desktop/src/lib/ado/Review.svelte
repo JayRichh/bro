@@ -9,7 +9,7 @@
   import Mark from './Mark.svelte';
   import DiffPane from '../DiffPane.svelte';
   import type { DiffMode } from '../diff-api';
-  import { policyMark, prMark, prs, VOTES, voteSquare, type PrDetail, type Thread } from './prs-api';
+  import { policyMark, prMark, prRange, prs, VOTES, voteSquare, type PrDetail, type Thread } from './prs-api';
   import { prsState } from './prs-state.svelte';
   import { errKind, errText, type ErrKind } from './errors';
   import { signin } from './signin.svelte';
@@ -172,7 +172,7 @@
 
     {#if tab === 'changes'}
       <div class="min-h-0 flex-1">
-        <DiffPane {worktree} range={{ base: pr.target, tip: `origin/${pr.source}` }} bind:mode={diffMode} />
+        <DiffPane {worktree} range={prRange(pr)} bind:mode={diffMode} />
       </div>
     {:else}
       <div class="min-h-0 flex-1 overflow-y-auto px-6 pt-5 pb-10">

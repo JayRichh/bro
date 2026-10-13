@@ -23,6 +23,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use store::{AdoStore, RepoKey};
 
+/// `connectionData` is a preview-only resource; every caller asks for this.
+pub const CONNECTION_API_VERSION: &str = "7.1-preview.1";
+
 /// A work item type's state and its category (`Proposed`, `InProgress`,
 /// `Resolved`, `Completed`, `Removed`), in workflow order.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -318,10 +321,14 @@ impl AdoContext {
     /// Who is signed in.
     pub async fn me(&self) -> Result<Me, AdoError> {
         // connectionData is a location-service resource without a released
-        // 7.1 version, so it is asked for as preview.
+        // 7.1 version, so it is asked for as preview, the same version
+        // `prs::my_id` uses.
         let v: serde_json::Value = self
             .client
-            .get("/_apis/connectionData?api-version=7.1-preview")
+            .get(&format!(
+                "/_apis/connectionData?api-version={}",
+                CONNECTION_API_VERSION
+            ))
             .await?;
         let user = &v["authenticatedUser"];
         let id = user["id"].as_str().unwrap_or_default().to_string();

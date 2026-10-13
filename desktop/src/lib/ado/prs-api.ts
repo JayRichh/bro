@@ -30,9 +30,13 @@ export interface PrSummary {
   /** Comment threads, system threads left out. */
   threads: number;
   url: string;
+  /** `lastMergeSourceCommit`: the source tip the review diff pins to. */
+  sourceCommit: string | null;
+  /** `lastMergeTargetCommit`: the target at that merge. */
+  targetCommit: string | null;
 }
 
-export type PolicyState = 'approved' | 'rejected' | 'queued' | 'running' | 'notApplicable' | 'notEvaluated';
+export type PolicyState = 'approved' | 'rejected' | 'queued' | 'running' | 'notApplicable' | 'notEvaluated' | 'unavailable';
 
 export interface PolicyRow {
   name: string;
@@ -197,9 +201,22 @@ export function policyMark(state: PolicyState, draft: boolean): { square: string
       return { square: 'border border-running', word: 'queued' };
     case 'notApplicable':
       return { square: 'bg-faint', word: 'not applicable' };
+    case 'unavailable':
+      return { square: 'border border-fail', word: 'unavailable' };
     default:
       return { square: 'border border-muted', word: draft ? 'not evaluated (draft)' : 'not evaluated' };
   }
+}
+
+/**
+ * The range a PR's review diff reads: the last merge's target and source
+ * commits, pinned by SHA; without them, the parents of the PR's merge ref.
+ * Never a moving branch name.
+ */
+export function prRange(pr: Pick<PrSummary, 'id' | 'sourceCommit' | 'targetCommit'>): { base: string; tip: string; pr: number } {
+  if (pr.sourceCommit && pr.targetCommit) return { base: pr.targetCommit, tip: pr.sourceCommit, pr: pr.id };
+  const merge = `refs/pull/${pr.id}/merge`;
+  return { base: `${merge}^1`, tip: `${merge}^2`, pr: pr.id };
 }
 
 /** A PR's own state: draft is hollow, active filled. */

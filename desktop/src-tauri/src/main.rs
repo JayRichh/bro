@@ -274,16 +274,26 @@ struct RangeDiff {
     files: Vec<git::DiffFile>,
 }
 
+/// `pr`: the pull request the range belongs to, whose `refs/pull/{pr}/merge`
+/// is fetched first so the PR's pinned SHAs are there to read.
 #[tauri::command]
 async fn diff_range(
     client: State<'_, Arc<Client>>,
     worktree: String,
     base: String,
     tip: String,
+    pr: Option<u32>,
 ) -> Res<RangeDiff> {
     let root = worktree_path(&client, &worktree)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let refs = git::prepare_range(&root, &base, &tip)?;
+        // The repo's remote (origin, else its only ADO remote), as the
+        // branch views read it.
+        let remote = Some(ado::branches::pick_remote(&root))
+            .filter(|r| !r.is_empty())
+            .unwrap_or_else(|| "origin".into());
+        let merge = pr.map(|id| format!("refs/pull/{id}/merge"));
+        let prefetch: Vec<&str> = merge.iter().map(String::as_str).collect();
+        let refs = git::prepare_range_at(&root, &remote, &base, &tip, &prefetch)?;
         let files = git::diff_files_between(&root, &refs.base, &refs.tip)?;
         Ok(RangeDiff {
             base: refs.base,
@@ -450,7 +460,8 @@ async fn ado_pr_detail(
 ) -> AdoRes<PrDetail> {
     let ctx = PrCtx::for_command(&ado, &client, &worktree).await?;
     let (pr, threads) = prs::get(&ctx.ado.client, &ctx.repo_id, id).await?;
-    let policies = prs::policies(&ctx.ado.client, &ctx.project_id, id, pr.is_draft).await?;
+    // Unreadable policies are one "unavailable" row, not a failed detail.
+    let policies = prs::policies_or_note(&ctx.ado.client, &ctx.project_id, id, pr.is_draft).await;
     Ok(PrDetail {
         pr,
         policies,
@@ -468,8 +479,11 @@ async fn ado_create_pr(
     let ctx = PrCtx::for_command(&ado, &client, &worktree).await?;
     let reviewers = pr.reviewers.clone();
     let out = prs::create(&ctx, pr).await?;
-    for r in reviewers.into_iter().rev() {
-        ctx.ado.store.remember_reviewer(&ctx.ado.key, r);
+    // An existing PR was not made with these reviewers: nothing to remember.
+    if !matches!(out.outcome, prs::CreateOutcome::Existing(_)) {
+        for r in reviewers.into_iter().rev() {
+            ctx.ado.store.remember_reviewer(&ctx.ado.key, r);
+        }
     }
     Ok(out)
 }

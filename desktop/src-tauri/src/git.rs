@@ -80,33 +80,67 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(60);
 fn git_fetch(cwd: &Path, args: &[&str]) -> Result<(), String> {
     let mut full = vec!["fetch", "--quiet", "--no-tags"];
     full.extend_from_slice(args);
-    let mut child = git_command(cwd, &full)
-        .stdout(Stdio::null())
-        .spawn()
-        .map_err(|e| format!("could not run git: {e}"))?;
-    let deadline = Instant::now() + FETCH_TIMEOUT;
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!(
-                    "git fetch timed out after {} s",
-                    FETCH_TIMEOUT.as_secs()
-                ));
-            }
-            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
-            Err(e) => return Err(format!("could not wait for git fetch: {e}")),
-        }
-    }
-    let out = child
-        .wait_with_output()
-        .map_err(|e| format!("could not read git fetch: {e}"))?;
+    let mut cmd = git_command(cwd, &full);
+    cmd.stdout(Stdio::null());
+    let out = output_within(cmd, FETCH_TIMEOUT, "git fetch")?;
     if !out.status.success() {
         return Err(git_failure(&full, &out));
     }
     Ok(())
+}
+
+/// Run `cmd` to the end, or kill it after `timeout` (`what timed out after
+/// N s`). Its stdout and stderr are drained as it runs, so a chatty
+/// process never stalls on a full pipe; on a timeout the readers are left
+/// to finish on their own, as a killed git's helpers may hold the pipes.
+pub(crate) fn output_within(
+    mut cmd: Command,
+    timeout: Duration,
+    what: &str,
+) -> Result<Output, String> {
+    use std::io::Read;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("could not run {what}: {e}"))?;
+    let drain = |pipe: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut p) = pipe {
+                let _ = p.read_to_end(&mut buf);
+            }
+            buf
+        })
+    };
+    let stdout = drain(
+        child
+            .stdout
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
+    let stderr = drain(
+        child
+            .stderr
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("{what} timed out after {} s", timeout.as_secs()));
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Err(e) => return Err(format!("could not wait for {what}: {e}")),
+        }
+    };
+    Ok(Output {
+        status,
+        stdout: stdout.join().unwrap_or_default(),
+        stderr: stderr.join().unwrap_or_default(),
+    })
 }
 
 /// `git <verb> failed: <first stderr line>`.
@@ -597,28 +631,30 @@ impl Drop for TempPatch {
     }
 }
 
-/// Brings `refs` up to date from `origin`. Present is not current: every
+/// Brings `refs` up to date from `remote`. Present is not current: every
 /// named ref is fetched again with a force refspec, so a moved
 /// `refs/pull/{id}/merge` or target branch is picked up.
 /// - `refs/...` (such as `refs/pull/12/merge`) lands under the same name.
 /// - A full SHA (40 or 64 hex) is fetched by id, only when missing.
-/// - A branch (`main`, `origin/main`) lands in `refs/remotes/origin/`.
+/// - A branch (`main`, `origin/main`) lands in `refs/remotes/<remote>/`.
+/// - A trailing `^N` / `~N` (`refs/pull/12/merge^2`) is kept for reading
+///   and dropped for the fetch.
 ///
 /// A shallow clone where the first two refs share no history is deepened by
 /// 200 commits. A failed fetch falls back to a cached copy when there is
-/// one; [`prepare_range`] reports that as `offline`.
-// Named in the plan; the desktop commands use `prepare_range` instead.
+/// one; [`prepare_range_at`] reports that as `offline`.
+// Named in the plan; the desktop commands use `prepare_range_at` instead.
 #[allow(dead_code)]
-pub fn ensure_refs(root: &Path, refs: &[&str]) -> Result<(), String> {
+pub fn ensure_refs(root: &Path, remote: &str, refs: &[&str]) -> Result<(), String> {
     let mut specs = Vec::new();
     for r in refs {
         // A failed fetch with a cached copy is tolerated here.
-        refresh_ref(root, r, &mut specs)?;
+        refresh_ref(root, remote, r, &mut specs)?;
     }
     if let [a, b, ..] = refs {
-        let a = resolve_commit(root, &commit_name(root, a, true)?)?;
-        let b = resolve_commit(root, &commit_name(root, b, true)?)?;
-        deepen_if_needed(root, &a, &b, &specs)?;
+        let a = resolve_commit(root, &commit_name(root, remote, a, true)?)?;
+        let b = resolve_commit(root, &commit_name(root, remote, b, true)?)?;
+        deepen_if_needed(root, remote, &a, &b, &specs)?;
     }
     Ok(())
 }
@@ -633,22 +669,42 @@ pub struct RangeRefs {
     pub offline: bool,
 }
 
-/// Refreshes `base` (the target) and `tip` from `origin`, then pins both:
-/// `base` becomes the merge-base. The target prefers `origin/<branch>` over
-/// a local branch of the same name, which may be stale; a tip that is a
-/// local branch is read as it is, unpushed work included, and not fetched.
-/// A failed fetch falls back to the cached ref and sets `offline`.
+/// [`prepare_range_at`] on `origin`, with nothing fetched first.
+#[cfg(test)]
 pub fn prepare_range(root: &Path, base: &str, tip: &str) -> Result<RangeRefs, String> {
-    let tip_is_local = !tip.starts_with("refs/") && has_commit(root, &format!("refs/heads/{tip}"))?;
+    prepare_range_at(root, "origin", base, tip, &[])
+}
+
+/// Refreshes `base` (the target) and `tip` from `remote`, then pins both:
+/// `base` becomes the merge-base. The target prefers `<remote>/<branch>`
+/// over a local branch of the same name, which may be stale; a tip that is
+/// a local branch is read as it is, unpushed work included, and not
+/// fetched. A failed fetch falls back to the cached ref and sets
+/// `offline`.
+///
+/// `prefetch` refs (a PR's `refs/pull/{id}/merge`) are fetched first, and
+/// their failure is no error: they only bring in commits that `base` and
+/// `tip`, given as SHAs, may name.
+pub fn prepare_range_at(
+    root: &Path,
+    remote: &str,
+    base: &str,
+    tip: &str,
+    prefetch: &[&str],
+) -> Result<RangeRefs, String> {
     let mut specs = Vec::new();
-    let mut offline = refresh_ref(root, base, &mut specs)?;
-    if !tip_is_local {
-        offline |= refresh_ref(root, tip, &mut specs)?;
+    for r in prefetch {
+        let _ = refresh_ref(root, remote, r, &mut specs);
     }
-    let base_sha = resolve_commit(root, &commit_name(root, base, true)?)?;
-    let tip_sha = resolve_commit(root, &commit_name(root, tip, false)?)?;
+    let tip_is_local = !tip.starts_with("refs/") && has_commit(root, &format!("refs/heads/{tip}"))?;
+    let mut offline = refresh_ref(root, remote, base, &mut specs)?;
+    if !tip_is_local {
+        offline |= refresh_ref(root, remote, tip, &mut specs)?;
+    }
+    let base_sha = resolve_commit(root, &commit_name(root, remote, base, true)?)?;
+    let tip_sha = resolve_commit(root, &commit_name(root, remote, tip, false)?)?;
     if !offline {
-        deepen_if_needed(root, &base_sha, &tip_sha, &specs)?;
+        deepen_if_needed(root, remote, &base_sha, &tip_sha, &specs)?;
     }
     Ok(RangeRefs {
         base: merge_base_of(root, &base_sha, &tip_sha)?,
@@ -657,51 +713,81 @@ pub fn prepare_range(root: &Path, base: &str, tip: &str) -> Result<RangeRefs, St
     })
 }
 
-/// Fetches one ref; pushes its refspec onto `specs` for a later deepen.
-/// `Ok(true)` when the fetch failed but a cached copy resolves.
-fn refresh_ref(root: &Path, r: &str, specs: &mut Vec<String>) -> Result<bool, String> {
+/// `refs/pull/7/merge^2` gives (`refs/pull/7/merge`, `^2`): the name to
+/// fetch, and the walk from it kept for reading. No walk gives an empty
+/// suffix.
+fn split_walk(r: &str) -> (&str, &str) {
+    match r.find(['^', '~']) {
+        Some(i)
+            if i > 0
+                && r[i..]
+                    .bytes()
+                    .all(|b| matches!(b, b'^' | b'~' | b'0'..=b'9')) =>
+        {
+            r.split_at(i)
+        }
+        _ => (r, ""),
+    }
+}
+
+/// Fetches one ref from `remote`; pushes its refspec onto `specs` for a
+/// later deepen. `Ok(true)` when the fetch failed but a cached copy
+/// resolves.
+fn refresh_ref(
+    root: &Path,
+    remote: &str,
+    r: &str,
+    specs: &mut Vec<String>,
+) -> Result<bool, String> {
     let r = r.trim();
     if r.is_empty() {
         return Err("an empty ref was asked for".into());
     }
-    if is_full_sha(r) {
+    let (name, _) = split_walk(r);
+    if is_full_sha(name) {
         if !has_commit(root, r)? {
-            git_fetch(root, &["origin", r])?;
+            git_fetch(root, &[remote, name])?;
             if !has_commit(root, r)? {
-                return Err(format!("{r} is not on origin"));
+                return Err(format!("{r} is not on {remote}"));
             }
         }
         return Ok(false);
     }
-    if is_short_sha(r) && has_commit(root, r)? {
+    if is_short_sha(name) && has_commit(root, r)? {
         // An abbreviated SHA this clone already has; it cannot be fetched.
         return Ok(false);
     }
-    let spec = if r.starts_with("refs/") {
-        format!("+{r}:{r}")
+    let spec = if name.starts_with("refs/") {
+        format!("+{name}:{name}")
     } else {
-        let branch = r.strip_prefix("origin/").unwrap_or(r);
-        format!("+refs/heads/{branch}:refs/remotes/origin/{branch}")
+        let branch = name.strip_prefix(&format!("{remote}/")).unwrap_or(name);
+        format!("+refs/heads/{branch}:refs/remotes/{remote}/{branch}")
     };
-    let fetched = git_fetch(root, &["origin", &spec]);
+    let fetched = git_fetch(root, &[remote, &spec]);
     specs.push(spec);
-    let cached = has_commit(root, &commit_name(root, r, true)?)?;
+    let cached = has_commit(root, &commit_name(root, remote, r, true)?)?;
     match fetched {
         Ok(()) if cached => Ok(false),
-        Ok(()) => Err(format!("{r} is not on origin")),
+        Ok(()) => Err(format!("{r} is not on {remote}")),
         Err(_) if cached => Ok(true),
         Err(e) => Err(e),
     }
 }
 
-/// In a shallow clone, fetches 200 more commits of `specs` when the two
-/// SHAs share no history yet.
-fn deepen_if_needed(root: &Path, a: &str, b: &str, specs: &[String]) -> Result<(), String> {
+/// In a shallow clone, fetches 200 more commits of `specs` from `remote`
+/// when the two SHAs share no history yet.
+fn deepen_if_needed(
+    root: &Path,
+    remote: &str,
+    a: &str,
+    b: &str,
+    specs: &[String],
+) -> Result<(), String> {
     let shallow = git_text(root, &["rev-parse", "--is-shallow-repository"])? == "true";
     if !shallow || merge_base_of(root, a, b).is_ok() {
         return Ok(());
     }
-    let mut args = vec!["--deepen=200", "origin"];
+    let mut args = vec!["--deepen=200", remote];
     args.extend(specs.iter().map(String::as_str));
     git_fetch(root, &args)
 }
@@ -712,21 +798,31 @@ fn has_commit(root: &Path, rev: &str) -> Result<bool, String> {
 }
 
 /// The name to read `rev` by after a refresh. SHAs and `refs/...` are
-/// themselves. A branch is `origin/<branch>` when `prefer_remote` (a target,
-/// where the local copy may be stale) and that exists, else the local
-/// branch if it resolves, else `origin/<branch>`.
-pub fn commit_name(root: &Path, rev: &str, prefer_remote: bool) -> Result<String, String> {
-    if rev.starts_with("refs/") || is_full_sha(rev) || is_short_sha(rev) {
+/// themselves. A branch is `<remote>/<branch>` when `prefer_remote` (a
+/// target, where the local copy may be stale) and that exists, else the
+/// local branch if it resolves, else `<remote>/<branch>`. A trailing walk
+/// (`^2`, `~1`) stays on the end.
+pub fn commit_name(
+    root: &Path,
+    remote: &str,
+    rev: &str,
+    prefer_remote: bool,
+) -> Result<String, String> {
+    let (name, walk) = split_walk(rev);
+    if name.starts_with("refs/") || is_full_sha(name) || is_short_sha(name) {
         return Ok(rev.to_string());
     }
-    let remote = format!("origin/{}", rev.strip_prefix("origin/").unwrap_or(rev));
-    if prefer_remote && has_commit(root, &remote)? {
-        return Ok(remote);
+    let tracking = format!(
+        "{remote}/{}{walk}",
+        name.strip_prefix(&format!("{remote}/")).unwrap_or(name)
+    );
+    if prefer_remote && has_commit(root, &tracking)? {
+        return Ok(tracking);
     }
     if has_commit(root, rev)? {
         return Ok(rev.to_string());
     }
-    Ok(remote)
+    Ok(tracking)
 }
 
 fn is_hex(s: &str) -> bool {
@@ -1120,13 +1216,16 @@ mod tests {
         let clone = clone_of(&origin);
         assert!(!has_commit(&clone.0, "refs/pull/7/merge").unwrap());
 
-        ensure_refs(&clone.0, &["main", "refs/pull/7/merge"]).unwrap();
+        ensure_refs(&clone.0, "origin", &["main", "refs/pull/7/merge"]).unwrap();
         assert_eq!(clone.git(&["rev-parse", "refs/pull/7/merge"]), pr);
-        assert_eq!(commit_name(&clone.0, "main", true).unwrap(), "origin/main");
+        assert_eq!(
+            commit_name(&clone.0, "origin", "main", true).unwrap(),
+            "origin/main"
+        );
         let files = diff_files_range(&clone.0, "origin/main", "refs/pull/7/merge").unwrap();
         assert_eq!(files.len(), 1);
 
-        let e = ensure_refs(&clone.0, &["refs/pull/99/merge"]).unwrap_err();
+        let e = ensure_refs(&clone.0, "origin", &["refs/pull/99/merge"]).unwrap_err();
         assert!(e.starts_with("git fetch failed: "), "{e}");
         assert!(e.contains("refs/pull/99/merge"), "{e}");
     }
@@ -1244,6 +1343,102 @@ mod tests {
         let files = diff_files_between(&clone.0, &r.base, &r.tip).unwrap();
         let paths: Vec<_> = files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(paths, vec!["t.txt"]);
+    }
+
+    /// An origin whose `refs/pull/5/merge` is a real merge commit: main
+    /// moved on (`landed.txt`) and the PR branch added `p.txt`. Returns
+    /// (origin, target sha, source sha).
+    fn origin_with_merge_ref() -> (Repo, String, String) {
+        let origin = Repo::new("merge-origin");
+        origin.write("a.txt", b"a\n");
+        origin.commit("one");
+        origin.git(&["checkout", "-q", "-b", "topic"]);
+        origin.write("p.txt", b"p\n");
+        let source = origin.commit("pr work");
+        origin.git(&["checkout", "-q", "main"]);
+        origin.write("landed.txt", b"l\n");
+        let target = origin.commit("main moves");
+        origin.git(&["checkout", "-q", "--detach", &target]);
+        origin.git(&["merge", "-q", "--no-ff", "-m", "merge pr", &source]);
+        let merge = origin.git(&["rev-parse", "HEAD"]);
+        origin.git(&["update-ref", "refs/pull/5/merge", &merge]);
+        origin.git(&["checkout", "-q", "main"]);
+        (origin, target, source)
+    }
+
+    #[test]
+    fn a_pr_diff_pins_to_its_last_merge_commits_or_the_merge_ref_parents() {
+        let (origin, target, source) = origin_with_merge_ref();
+
+        // The SHAs, with the merge ref fetched first to bring them in.
+        let clone = clone_of(&origin);
+        assert!(!has_commit(&clone.0, &source).unwrap());
+        let r =
+            prepare_range_at(&clone.0, "origin", &target, &source, &["refs/pull/5/merge"]).unwrap();
+        assert_eq!(r.tip, source);
+        let files = diff_files_between(&clone.0, &r.base, &r.tip).unwrap();
+        let paths: Vec<_> = files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, vec!["p.txt"], "only the PR's own change");
+
+        // No SHAs: the merge ref's two parents, fetched by the ref.
+        let fresh = clone_of(&origin);
+        let r = prepare_range_at(
+            &fresh.0,
+            "origin",
+            "refs/pull/5/merge^1",
+            "refs/pull/5/merge^2",
+            &[],
+        )
+        .unwrap();
+        assert_eq!(r.tip, source);
+        let files = diff_files_between(&fresh.0, &r.base, &r.tip).unwrap();
+        let paths: Vec<_> = files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, vec!["p.txt"]);
+    }
+
+    #[test]
+    fn a_range_reads_from_the_named_remote() {
+        let (origin, pr) = origin_with_pr();
+        let clone = Repo::new("upstream-clone");
+        clone.git(&["remote", "add", "upstream", &url(&origin)]);
+        clone.git(&["fetch", "-q", "upstream", "main"]);
+        let r = prepare_range_at(&clone.0, "upstream", "main", "refs/pull/7/merge", &[]).unwrap();
+        assert_eq!((r.tip.as_str(), r.offline), (pr.as_str(), false));
+        assert_eq!(
+            commit_name(&clone.0, "upstream", "main", true).unwrap(),
+            "upstream/main"
+        );
+    }
+
+    #[test]
+    fn walks_split_off_the_fetch_name() {
+        assert_eq!(
+            split_walk("refs/pull/5/merge^2"),
+            ("refs/pull/5/merge", "^2")
+        );
+        assert_eq!(split_walk("main~1"), ("main", "~1"));
+        assert_eq!(split_walk("main"), ("main", ""));
+        assert_eq!(split_walk("a^b"), ("a^b", ""));
+    }
+
+    #[test]
+    fn a_slow_command_is_killed_at_its_timeout() {
+        #[cfg(windows)]
+        let cmd = {
+            let mut c = Command::new("cmd");
+            c.args(["/C", "ping -n 30 127.0.0.1 >NUL"]);
+            c
+        };
+        #[cfg(not(windows))]
+        let cmd = {
+            let mut c = Command::new("sleep");
+            c.arg("30");
+            c
+        };
+        let started = Instant::now();
+        let e = output_within(cmd, Duration::from_millis(300), "the wait").unwrap_err();
+        assert_eq!(e, "the wait timed out after 0 s");
+        assert!(started.elapsed() < Duration::from_secs(10));
     }
 
     #[test]

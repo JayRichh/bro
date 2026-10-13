@@ -11,10 +11,10 @@ use serde_json::Value;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+use crate::ado::CONNECTION_API_VERSION;
+
 /// Policy evaluations are only offered as a preview API.
 const POLICY_API_VERSION: &str = "7.1-preview.1";
-/// `connectionData` is a preview-only resource.
-const CONNECTION_API_VERSION: &str = "7.1-preview.1";
 
 /// What a PR command needs: the repo's ADO context and its ids.
 pub struct PrCtx {
@@ -201,6 +201,11 @@ pub struct PrSummary {
     pub threads: u32,
     /// The PR's page in the browser.
     pub url: String,
+    /// `lastMergeSourceCommit`: the source tip the PR was last merged at,
+    /// which the review diff pins to.
+    pub source_commit: Option<String>,
+    /// `lastMergeTargetCommit`: the target at that merge.
+    pub target_commit: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -212,6 +217,8 @@ pub enum PolicyState {
     Running,
     NotApplicable,
     NotEvaluated,
+    /// The evaluations could not be read; the row's name says why.
+    Unavailable,
 }
 
 impl PolicyState {
@@ -311,7 +318,14 @@ fn summary_from(v: &Value, org_url: &str) -> Option<PrSummary> {
         work_items,
         threads: 0,
         url,
+        source_commit: commit_at(v, "lastMergeSourceCommit"),
+        target_commit: commit_at(v, "lastMergeTargetCommit"),
     })
+}
+
+/// `v[key].commitId`, when it is there.
+fn commit_at(v: &Value, key: &str) -> Option<String> {
+    Some(str_at(v, &[key, "commitId"])).filter(|c| !c.is_empty())
 }
 
 /// A work item ref's id, which ADO sends as a string.
@@ -396,17 +410,37 @@ pub async fn work_items(
         .unwrap_or_default())
 }
 
-/// Fill in work items and the thread count.
-/// Fill in work items and the thread count, handing back the threads.
+/// Fill in work items and the thread count, handing back the threads. A
+/// failure leaves `pr` as it was.
 async fn hydrate(
     client: &AdoClient,
     repo_id: &str,
     pr: &mut PrSummary,
 ) -> Result<Vec<Thread>, AdoError> {
-    pr.work_items = work_items(client, repo_id, pr.id).await?;
+    let w = work_items(client, repo_id, pr.id).await?;
     let ts = threads(client, repo_id, pr.id).await?;
+    pr.work_items = w;
     pr.threads = ts.len() as u32;
     Ok(ts)
+}
+
+/// PRs hydrated at once per list.
+const HYDRATE_AT_ONCE: usize = 6;
+
+/// Hydrate every PR, [`HYDRATE_AT_ONCE`] at a time, in the list's order.
+/// A PR whose hydration fails stays as the list call gave it.
+async fn hydrate_all(client: &AdoClient, repo_id: &str, prs: Vec<PrSummary>) -> Vec<PrSummary> {
+    use futures_util::stream::{self, StreamExt};
+    let mut out: Vec<(usize, PrSummary)> = stream::iter(prs.into_iter().enumerate())
+        .map(|(i, mut pr)| async move {
+            let _ = hydrate(client, repo_id, &mut pr).await;
+            (i, pr)
+        })
+        .buffer_unordered(HYDRATE_AT_ONCE)
+        .collect()
+        .await;
+    out.sort_by_key(|(i, _)| *i);
+    out.into_iter().map(|(_, pr)| pr).collect()
 }
 
 /// My active PRs (created by `mine`) and the active ones I review.
@@ -415,12 +449,12 @@ pub async fn list(
     repo_id: &str,
     mine: &str,
 ) -> Result<(Vec<PrSummary>, Vec<PrSummary>), AdoError> {
-    let mut created = query(client, repo_id, &[("creatorId", mine)]).await?;
-    let mut review = query(client, repo_id, &[("reviewerId", mine)]).await?;
-    for pr in created.iter_mut().chain(review.iter_mut()) {
-        hydrate(client, repo_id, pr).await?;
-    }
-    Ok((created, review))
+    let created = query(client, repo_id, &[("creatorId", mine)]).await?;
+    let review = query(client, repo_id, &[("reviewerId", mine)]).await?;
+    Ok((
+        hydrate_all(client, repo_id, created).await,
+        hydrate_all(client, repo_id, review).await,
+    ))
 }
 
 /// One PR, hydrated, with its threads (fetched once).
@@ -477,6 +511,24 @@ pub async fn policies(
                 .collect()
         })
         .unwrap_or_default())
+}
+
+/// [`policies`], or when they cannot be read, one row saying so: the rest
+/// of the PR detail still shows.
+pub async fn policies_or_note(
+    client: &AdoClient,
+    project_id: &str,
+    pr_id: u32,
+    is_draft: bool,
+) -> Vec<PolicyRow> {
+    match policies(client, project_id, pr_id, is_draft).await {
+        Ok(rows) => rows,
+        Err(e) => vec![PolicyRow {
+            name: format!("Policies unavailable: {}", e.user_message()),
+            state: PolicyState::Unavailable,
+            blocking: false,
+        }],
+    }
 }
 
 /// A PR's comment threads, without system threads (votes, pushes, policy
@@ -648,14 +700,19 @@ fn pushed_trailers_note(repo: &Path, base: &str, remote: &str, source: &str) -> 
     }
 }
 
-/// `git push --set-upstream <remote> <source>` in `repo`.
+/// How long the push may take before it is killed.
+const PUSH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// `git push --set-upstream <remote> <source>` in `repo`, killed after
+/// [`PUSH_TIMEOUT`].
 fn push(repo: &Path, remote: &str, source: &str) -> Result<(), AdoError> {
-    let out = git_command(repo)
-        .args(["push", "--set-upstream", remote, source])
+    let mut cmd = git_command(repo);
+    cmd.args(["push", "--set-upstream", remote, source])
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|e| AdoError::Local(format!("Could not run git: {e}")))?;
+        .stderr(Stdio::piped());
+    let out = crate::git::output_within(cmd, PUSH_TIMEOUT, "git push").map_err(|e| {
+        AdoError::Local(format!("The git push of {source} to {remote} failed: {e}"))
+    })?;
     if out.status.success() {
         return Ok(());
     }
@@ -733,7 +790,8 @@ pub async fn link_task(ctx: &PrCtx, pr_id: u32, task: u32) -> Result<(), AdoErro
 /// 3. an active PR from the branch already there is returned as `Existing`,
 /// 4. POST the PR with reviewers and the task link,
 /// 5. a create that may have landed (timeout, 409, 5xx) is reconciled by
-///    listing again, never by posting again,
+///    listing again, never by posting again; a PR found that way is this
+///    create's, so it goes on to the task link and comes back as created,
 /// 6. a task the reply does not show as linked is linked with a PATCH; if
 ///    that fails the PR is still returned, as `CreatedTaskNotLinked`.
 pub async fn create(ctx: &PrCtx, pr: NewPr) -> Result<CreateResult, AdoError> {
@@ -800,26 +858,31 @@ async fn open(
         body["workItemRefs"] = serde_json::json!([{ "id": task.to_string() }]);
     }
 
-    let reply: Value = match ctx
+    // The PR's id, and the create's reply when there is one. A create
+    // whose outcome is unknown is looked up by its source branch: found,
+    // it is this create's PR (none was there a moment ago), so the task
+    // link below still runs and the composer opens it as created.
+    let (id, reply): (u32, Option<Value>) = match ctx
         .ado
         .client
-        .post_json(&pulls_path(&ctx.repo_id), &body)
+        .post_json::<Value>(&pulls_path(&ctx.repo_id), &body)
         .await
     {
-        Ok(v) => v,
-        Err(e) if ambiguous(&e) => {
-            return match for_source(&ctx.ado.client, &ctx.repo_id, source).await {
-                Ok(found) if !found.is_empty() => Ok(CreateOutcome::Existing(found[0].id)),
-                _ => Err(e),
-            };
+        Ok(v) => {
+            let id = v
+                .get("pullRequestId")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| AdoError::Http(200, "the reply had no pull request id".into()))?
+                as u32;
+            (id, Some(v))
         }
+        Err(e) if ambiguous(&e) => match for_source(&ctx.ado.client, &ctx.repo_id, source).await {
+            Ok(found) if !found.is_empty() => (found[0].id, None),
+            _ => return Err(e),
+        },
         Err(e) => return Err(e),
     };
-    let id = reply
-        .get("pullRequestId")
-        .and_then(Value::as_u64)
-        .ok_or_else(|| AdoError::Http(200, "the reply had no pull request id".into()))?
-        as u32;
+    let reply = reply.unwrap_or(Value::Null);
 
     if let Some(task) = pr.work_item {
         let in_reply = reply
@@ -1592,11 +1655,101 @@ mod tests {
         let out = create(&ctx_for(&base, &r.work), new_pr(None, "x"))
             .await
             .unwrap();
-        assert_eq!(out.outcome, CreateOutcome::Existing(88));
+        // Found after the ambiguous POST: this create's PR, so the
+        // composer opens it.
+        assert_eq!(out.outcome, CreateOutcome::Created(88));
         let seen = server.await.unwrap();
         assert_eq!(seen.len(), 3);
         assert_eq!(seen.iter().filter(|l| l.starts_with("POST ")).count(), 1);
         assert!(seen[2].starts_with("GET "));
+    }
+
+    #[tokio::test]
+    async fn an_ambiguous_create_still_links_its_task() {
+        let r = temp_repo();
+        let (base, server) = scripted(vec![
+            Some(json!({"value": []})),
+            None,
+            Some(json!({"value": [pr_json(88, true, &[])]})),
+            // The PR's work items: not linked yet.
+            Some(json!({"value": []})),
+            // The link PATCH.
+            Some(json!({"id": 42})),
+        ])
+        .await;
+        let out = create(&ctx_for(&base, &r.work), new_pr(Some(42), "x"))
+            .await
+            .unwrap();
+        assert_eq!(out.outcome, CreateOutcome::Created(88));
+        let seen = server.await.unwrap();
+        assert_eq!(seen.len(), 5);
+        assert_eq!(seen.iter().filter(|l| l.starts_with("POST ")).count(), 1);
+        assert!(seen[3].starts_with("GET ") && seen[3].contains("/pullrequests/88/workitems"));
+        assert!(seen[4].starts_with("PATCH ") && seen[4].contains("/wit/workitems/42"));
+    }
+
+    #[tokio::test]
+    async fn one_pr_failing_to_hydrate_leaves_the_rest_of_the_list() {
+        let s = MockServer::start();
+        s.mock(|w, t| {
+            w.method(GET)
+                .path("/_apis/git/repositories/r1/pullrequests")
+                .query_param("searchCriteria.creatorId", "me-1");
+            t.status(200).json_body(
+                json!({"value":[pr_json(1, false, &[]), pr_json(2, false, &[]), pr_json(3, false, &[])]}),
+            );
+        });
+        s.mock(|w, t| {
+            w.method(GET)
+                .path("/_apis/git/repositories/r1/pullrequests")
+                .query_param("searchCriteria.reviewerId", "me-1");
+            t.status(200).json_body(json!({"value":[]}));
+        });
+        empty_hydration(&s, 1);
+        empty_hydration(&s, 3);
+        s.mock(|w, t| {
+            w.method(GET)
+                .path("/_apis/git/repositories/r1/pullrequests/2/workitems");
+            t.status(500);
+        });
+        let (m, _) = list(&client(&s), "r1", "me-1").await.unwrap();
+        let ids: Vec<u32> = m.iter().map(|p| p.id).collect();
+        assert_eq!(ids, vec![1, 2, 3], "the list keeps its order");
+        assert_eq!(m[0].work_items, vec![42]);
+        assert!(m[1].work_items.is_empty(), "PR 2 stays un-hydrated");
+        assert_eq!(m[2].work_items, vec![42]);
+    }
+
+    #[tokio::test]
+    async fn unreadable_policies_become_one_row() {
+        let s = MockServer::start();
+        s.mock(|w, t| {
+            w.method(GET).path("/p1/_apis/policy/evaluations");
+            t.status(403);
+        });
+        let rows = policies_or_note(&client(&s), "p1", 9, false).await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].state, PolicyState::Unavailable);
+        assert!(
+            rows[0].name.starts_with("Policies unavailable: "),
+            "{}",
+            rows[0].name
+        );
+        assert!(rows[0].name.contains("policies"), "{}", rows[0].name);
+    }
+
+    #[test]
+    fn the_last_merge_commits_are_carried() {
+        let mut v = pr_json(4, false, &[]);
+        v["lastMergeSourceCommit"] = json!({"commitId": "a".repeat(40)});
+        v["lastMergeTargetCommit"] = json!({"commitId": "b".repeat(40)});
+        let pr = summary_from(&v, "https://dev.azure.com/tnt").unwrap();
+        assert_eq!(pr.source_commit, Some("a".repeat(40)));
+        assert_eq!(pr.target_commit, Some("b".repeat(40)));
+        let bare = summary_from(&pr_json(5, false, &[]), "https://dev.azure.com/tnt").unwrap();
+        assert_eq!((bare.source_commit, bare.target_commit), (None, None));
+        let wire = serde_json::to_value(&pr).unwrap();
+        assert_eq!(wire["sourceCommit"], json!("a".repeat(40)));
     }
 
     #[tokio::test]

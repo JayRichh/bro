@@ -2230,6 +2230,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.22.1",
+ "futures-util",
  "httpmock",
  "nebula-core",
  "reqwest 0.12.28",

@@ -1,5 +1,27 @@
 import { describe, expect, it } from 'vitest';
-import { composeItem, parseItem, prItem } from './prs-api';
+import { composeItem, parseItem, policyMark, prItem, prRange } from './prs-api';
+
+describe('prRange', () => {
+  it('pins the review diff to the last merge commits', () => {
+    const t = 'a'.repeat(40);
+    const s = 'b'.repeat(40);
+    expect(prRange({ id: 12, targetCommit: t, sourceCommit: s })).toEqual({ base: t, tip: s, pr: 12 });
+  });
+
+  it('falls back to the merge ref parents, never a branch name', () => {
+    expect(prRange({ id: 12, targetCommit: null, sourceCommit: 'b'.repeat(40) })).toEqual({
+      base: 'refs/pull/12/merge^1',
+      tip: 'refs/pull/12/merge^2',
+      pr: 12,
+    });
+  });
+});
+
+describe('policyMark', () => {
+  it('names unreadable policies in words', () => {
+    expect(policyMark('unavailable', false)).toEqual({ square: 'border border-fail', word: 'unavailable' });
+  });
+});
 
 describe('parseItem', () => {
   it('reads the list, a PR and the composer', () => {

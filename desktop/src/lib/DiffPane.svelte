@@ -97,7 +97,7 @@
     try {
       let list: DiffFile[];
       if (r) {
-        const res = await diffApi.range(wt, r.base, r.tip);
+        const res = await diffApi.range(wt, r.base, r.tip, r.pr);
         if (mine !== loadSeq) return;
         pinned = { base: res.base, tip: res.tip };
         offline = res.offline;

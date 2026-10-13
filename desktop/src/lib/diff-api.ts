@@ -26,6 +26,9 @@ export type Blob =
 export interface DiffRange {
   base: string;
   tip: string;
+  /** The pull request the range is from: its merge ref is fetched first, so
+   *  its pinned SHAs are there to read. */
+  pr?: number;
 }
 
 /** `diff_range`: both ends pinned to SHAs; `base` is the merge-base. */
@@ -50,8 +53,8 @@ export type HunkAction = 'stage' | 'unstage' | 'discard';
 export const diffApi = {
   /** Every changed path in a worktree, against HEAD. */
   files: (worktree: string) => invoke<DiffFile[]>('diff_files', { worktree }),
-  range: (worktree: string, base: string, tip: string) =>
-    invoke<RangeDiff>('diff_range', { worktree, base, tip }),
+  range: (worktree: string, base: string, tip: string, pr?: number) =>
+    invoke<RangeDiff>('diff_range', { worktree, base, tip, pr: pr ?? null }),
   blob: (worktree: string, side: DiffSide, path: string) =>
     invoke<Blob>('diff_blob', { worktree, side, path }),
   /** Staged: index against HEAD. Not staged: worktree against index. */
