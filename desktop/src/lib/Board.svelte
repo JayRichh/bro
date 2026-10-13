@@ -2,6 +2,7 @@
   import { app, openSession, openDiff } from './store.svelte';
   import { LANES, lanes, toneOf, harnessLabel, lastPrompt, age, placeOf, type Lane } from './status';
   import Status from './Status.svelte';
+  import { retract } from './motion';
   import Empty from './Empty.svelte';
   import type { Agent } from './api';
 
@@ -101,7 +102,7 @@
               }}
               onfocus={() => (cursor = { lane: li, row: ri })}
             >
-              {#if alert}<span class="absolute inset-y-0 left-0 w-[3px] bg-ember" aria-hidden="true"></span>{/if}
+              {#if alert}<span class="absolute inset-y-0 left-0 w-[3px] origin-left bg-ember" out:retract|global aria-hidden="true"></span>{/if}
               <span class="flex min-w-0 items-baseline gap-2">
                 <span class="truncate text-[14px] font-medium {alert ? 'text-ember-ink' : 'text-ink'}">{a.name}</span>
                 <span class="ml-auto font-mono text-[12px] text-muted">{age(a.status_changed_at, app.now)}</span>

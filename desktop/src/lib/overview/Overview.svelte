@@ -1,7 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { app } from '../store.svelte';
-  import { nav } from '../shell/history.svelte';
   import Empty from '../Empty.svelte';
   import RepoRow from './RepoRow.svelte';
   import { repoRows } from './repos';
@@ -11,11 +10,20 @@
 
   const rows = $derived(repoRows(app.model));
 
-  // Picking a repo in the rail brings its row into view.
+  // Only a repo picked in the rail scrolls the overview (`revealRepo`, which
+  // nothing else sets). Session clicks, strip jumps, Esc and back/forward
+  // change `nav.current.repo` too, and must leave the scroll alone.
+  let revealed = app.reveal.seq;
   $effect(() => {
-    const repo = nav.current.repo;
-    if (!repo || !scroller) return;
-    tick().then(() => scroller.querySelector(`[data-repo="${CSS.escape(repo)}"]`)?.scrollIntoView({ block: 'start' }));
+    const { repo, seq } = app.reveal;
+    if (seq === revealed || !repo || !scroller) return;
+    revealed = seq;
+    tick().then(() => {
+      const section = scroller.querySelector(`[data-repo="${CSS.escape(repo)}"]`);
+      const selected = section?.querySelector('[data-row][aria-selected="true"]');
+      if (selected) selected.scrollIntoView({ block: 'nearest' });
+      else section?.scrollIntoView({ block: 'start' });
+    });
   });
 
   /** j/k and the arrows walk the session rows; Enter opens (on the row). */

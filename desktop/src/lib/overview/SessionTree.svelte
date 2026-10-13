@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { cubicOut } from 'svelte/easing';
+  import { retract } from '../motion';
   import { app, openSession, sessionKey } from '../store.svelte';
   import { nav } from '../shell/history.svelte';
   import { age, harnessLabel, lastPrompt, placeOf } from '../status';
@@ -45,11 +45,6 @@
       e.preventDefault();
       toggle(n, false);
     }
-  }
-
-  /** The ember bar pulls back to the left edge when the row is answered. */
-  function retract(_node: Element) {
-    return { duration: 120, easing: cubicOut, css: (t: number) => `transform: scaleX(${t})` };
   }
 
   function meta(n: Node): string {

@@ -14,6 +14,13 @@ use tauri::State;
 /// selections there, never data.
 pub const UI_MAX_BYTES: usize = 64 * 1024;
 
+/// The views that keep state, as the window names them (`Place.view` in
+/// `shell/history.svelte.ts`). Anything else is refused, so `ado.json`
+/// never collects stray keys.
+pub const VIEWS: &[&str] = &[
+    "overview", "board", "session", "diff", "tasks", "branches", "prs",
+];
+
 /// A repo's ADO remote as the window sees it, plus what it saved before.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -38,7 +45,8 @@ pub async fn ado_context(
     worktree: String,
 ) -> Result<Option<AdoContextInfo>, String> {
     let path = checkout_path(&client, &worktree)?;
-    let Ok((_, r)) = ado_remote(&path).await else {
+    // No ADO remote is None; a failed lookup is an error the window retries.
+    let Some((_, r)) = ado_remote(&path).await? else {
         return Ok(None);
     };
     let key = RepoKey {
@@ -97,9 +105,8 @@ pub fn save_ui(
     json: serde_json::Value,
 ) -> Result<(), String> {
     let key = parse_repo_key(repo_key).ok_or_else(|| format!("Not a repo key: {repo_key}"))?;
-    let view = view.trim();
-    if view.is_empty() {
-        return Err("No view named.".into());
+    if !VIEWS.contains(&view) {
+        return Err(format!("No view is called {view:?}."));
     }
     let size = serde_json::to_vec(&json).map(|v| v.len()).unwrap_or(0);
     if size > UI_MAX_BYTES {
@@ -171,6 +178,8 @@ mod tests {
         assert!(save_ui(&store, "tnt//api", "tasks", json!({})).is_err());
         assert!(save_ui(&store, "a/b/c/d", "tasks", json!({})).is_err());
         assert!(save_ui(&store, "tnt/Platform/api", " ", json!({})).is_err());
+        assert!(save_ui(&store, "tnt/Platform/api", "taskz", json!({})).is_err());
+        assert!(save_ui(&store, "tnt/Platform/api", " tasks", json!({})).is_err());
         let big = "x".repeat(UI_MAX_BYTES + 1);
         assert!(save_ui(&store, "tnt/Platform/api", "tasks", json!({ "q": big })).is_err());
     }

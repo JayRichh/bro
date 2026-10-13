@@ -29,7 +29,7 @@
   input,
   textarea,
   select {
-    @apply select-text caret-ember;
+    @apply select-text caret-ink;
     border-radius: 0;
   }
 

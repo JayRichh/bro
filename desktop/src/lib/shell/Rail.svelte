@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, focusQuickPrompt, goHome, toast, type ThemePref } from '../store.svelte';
+  import { app, focusQuickPrompt, revealRepo, toast, type ThemePref } from '../store.svelte';
   import { api } from '../api';
   import { nav, type View } from './history.svelte';
   import { repoRows, tally } from '../overview/repos';
@@ -66,23 +66,25 @@
       {@const ctx = app.adoCtx[r.project.id]}
       <button
         class="{item} {on ? 'bg-surface font-semibold text-ink' : 'bg-transparent text-ink'}"
-        onclick={() => goHome(r.project.id)}
+        onclick={() => revealRepo(r.project.id)}
         title={r.project.repo_path}
         aria-current={on ? 'true' : undefined}
       >
         <span class="min-w-0 flex-1 truncate">{r.name}</span>
         {#if needs}
-          <span class="inline-flex flex-none items-center gap-1 font-mono text-[12px] font-bold text-ember-ink" title="{needs} need you"
-            ><span class="size-1.5 bg-ember"></span>{needs}</span
+          <span class="inline-flex flex-none items-center gap-1.5 text-[12px] text-ember-ink"
+            ><span class="size-1.5 bg-ember" aria-hidden="true"></span><span class="font-bold">{needs}</span> {needs === 1 ? 'needs you' : 'need you'}</span
           >
         {:else if running}
-          <span class="flex-none font-mono text-[12px] text-muted" title="{running} running">{running}</span>
+          <span class="inline-flex flex-none items-center gap-1.5 text-[12px] font-normal text-muted"
+            ><span class="size-1.5 bg-running" aria-hidden="true"></span>{running} running</span
+          >
         {/if}
       </button>
-      {#if on && ctx}
+      {#if ctx}
         <ul class="m-0 list-none p-0" aria-label="{r.name} on Azure DevOps">
           {#each ADO_VIEWS as v (v.view)}
-            {@const cur = nav.current.view === v.view}
+            {@const cur = nav.current.view === v.view && here === r.project.id}
             <li>
               <button
                 class="{item} pl-8 text-[13px] {cur ? 'bg-surface text-ink' : 'bg-transparent text-muted hover:text-ink'}"

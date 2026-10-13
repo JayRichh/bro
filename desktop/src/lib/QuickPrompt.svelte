@@ -23,10 +23,12 @@
   const profiles = $derived(app.launch.profiles.filter((p) => p.harness === harness));
   const ready = $derived(app.model.connected && !!worktree && !busy);
 
-  // Follow the window: the repo in view, else the open session's.
+  // Follow the window (the repo in view, else the open session's) until
+  // the user picks a repo by hand; that pick holds until a session starts.
+  let picked = false;
   $effect(() => {
     const repo = nav.current.repo;
-    if (repo) project = repo;
+    if (repo && !picked) project = repo;
   });
   $effect(() => {
     if (app.model.projects.find((p) => p.id === project)) return;
@@ -48,7 +50,10 @@
     seen = n;
     const p = app.quickPreset;
     app.quickPreset = null;
-    if (p?.project) project = p.project;
+    if (p?.project) {
+      project = p.project;
+      picked = true;
+    }
     if (p?.harness) harness = p.harness;
     if (p?.profile) queueMicrotask(() => (profile = p.profile!));
     box?.focus();
@@ -66,6 +71,7 @@
         if (id) openSession({ Agent: id });
       }
       prompt = '';
+      picked = false;
       box?.blur();
     } catch (e) {
       toast(String(e));
@@ -85,8 +91,14 @@
   }
 
   const pick =
-    'h-full min-w-0 appearance-none border-0 border-r border-rule bg-transparent px-3 text-[13px] text-ink outline-none hover:bg-surface focus-visible:-outline-offset-2 disabled:text-faint';
+    'h-full w-full min-w-0 appearance-none border-0 bg-transparent pr-7 pl-3 text-[13px] text-ink outline-none hover:bg-surface focus-visible:-outline-offset-2 disabled:text-faint';
 </script>
+
+{#snippet chevron()}
+  <svg class="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-muted" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"
+    ><path d="M1.5 3.5L5 7l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.4" /></svg
+  >
+{/snippet}
 
 <form
   class="flex h-11 flex-none items-stretch border-t border-rule-strong bg-bg"
@@ -96,20 +108,32 @@
     submit();
   }}
 >
-  <select class="{pick} max-w-40" bind:value={project} aria-label="Repo">
-    {#each app.model.projects as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
-  </select>
-  <select class="{pick} max-w-44 font-mono text-[12px]" bind:value={worktree} aria-label="Worktree">
-    {#each worktrees as w (w.id)}<option value={w.id}>{w.branch}</option>{/each}
-  </select>
-  <select class="{pick} max-w-32" bind:value={harness} aria-label="Harness">
-    {#each harnesses as h (h.id)}<option value={h.id}>{h.label}</option>{/each}
-    <option value={TERMINAL}>Terminal</option>
-  </select>
-  <select class="{pick} max-w-36" bind:value={profile} disabled={harness === TERMINAL || !profiles.length} aria-label="Profile">
-    <option value="">{profiles.length ? 'No profile' : 'Default login'}</option>
-    {#each profiles as p (p.name)}<option value={p.name}>{p.name}</option>{/each}
-  </select>
+  <span class="relative flex max-w-40 min-w-0 border-r border-rule">
+    <select class="{pick}" bind:value={project} onchange={() => (picked = true)} aria-label="Repo">
+      {#each app.model.projects as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
+    </select>
+    {@render chevron()}
+  </span>
+  <span class="relative flex max-w-44 min-w-0 border-r border-rule">
+    <select class="{pick} font-mono text-[12px]" bind:value={worktree} aria-label="Worktree">
+      {#each worktrees as w (w.id)}<option value={w.id}>{w.branch}</option>{/each}
+    </select>
+    {@render chevron()}
+  </span>
+  <span class="relative flex max-w-32 min-w-0 border-r border-rule">
+    <select class="{pick}" bind:value={harness} aria-label="Harness">
+      {#each harnesses as h (h.id)}<option value={h.id}>{h.label}</option>{/each}
+      <option value={TERMINAL}>Terminal</option>
+    </select>
+    {@render chevron()}
+  </span>
+  <span class="relative flex max-w-36 min-w-0 border-r border-rule">
+    <select class="{pick}" bind:value={profile} disabled={harness === TERMINAL || !profiles.length} aria-label="Profile">
+      <option value="">{profiles.length ? 'No profile' : 'Default login'}</option>
+      {#each profiles as p (p.name)}<option value={p.name}>{p.name}</option>{/each}
+    </select>
+    {@render chevron()}
+  </span>
   <input
     class="min-w-0 flex-1 border-0 bg-transparent px-3 text-[14px] text-ink outline-none disabled:text-faint"
     bind:this={box}

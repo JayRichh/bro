@@ -48,6 +48,8 @@ export const app = $state({
   launch: { harnesses: [], profiles: [] } as Launchables,
   /** Per project id: its ADO remote, null when none, absent until asked. */
   adoCtx: {} as Record<string, AdoContextInfo | null>,
+  /** A repo picked in the rail, for the overview to scroll to; seq bumps per pick. */
+  reveal: { repo: null as string | null, seq: 0 },
 });
 
 export function sessionKey(s: SessionRef | null): string {
@@ -92,6 +94,12 @@ export function goHome(repo?: string) {
   nav.go({ view: app.home, repo });
 }
 
+/** A repo picked in the rail: go home and scroll its row into view. */
+export function revealRepo(repo: string) {
+  goHome(repo);
+  app.reveal = { repo, seq: app.reveal.seq + 1 };
+}
+
 /** Make the window's selection follow a place reached by back or forward. */
 export function follow(p: Place) {
   if (p.view === 'overview' || p.view === 'board') app.home = p.view;
@@ -118,9 +126,13 @@ export function toast(msg: string) {
 
 /** Look up each project's ADO remote once (each lookup runs git). */
 const asked = new Set<string>();
+/** A failed lookup is asked again, at most this often. */
+const RETRY_MS = 30_000;
+const failedAt = new Map<string, number>();
 function askAdo(m: Model) {
   for (const p of m.projects) {
     if (asked.has(p.id)) continue;
+    if (Date.now() - (failedAt.get(p.id) ?? 0) < RETRY_MS) continue;
     const main =
       m.worktrees.find((w) => w.project_id === p.id && w.is_main) ?? m.worktrees.find((w) => w.project_id === p.id);
     if (!main) continue;
@@ -132,6 +144,9 @@ function askAdo(m: Model) {
         if (ctx) nav.seed(p.id, ctx.ui);
       })
       .catch(() => {
+        // A failed lookup is not "no ADO remote": ask again later.
+        asked.delete(p.id);
+        failedAt.set(p.id, Date.now());
         app.adoCtx[p.id] = null;
       });
   }

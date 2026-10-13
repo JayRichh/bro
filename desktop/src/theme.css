@@ -15,7 +15,9 @@
  *   runtime through theme.ts. Write plain colours (hex or rgb()); the
  *   runtime reader paints them onto a canvas, so no light-dark() or var().
  *
- * Ember is the one accent and it means "needs you". Nothing else uses it.
+ * Ember is the one accent and it means "needs you": the needs-you bar,
+ * square, words and counts, plus the brand mark's dot. Selection, carets,
+ * cursors, syntax and hovers never use it; they take ink or ochre.
  */
 
 @import '@fontsource/jetbrains-mono/400.css';
@@ -77,7 +79,7 @@
   --color-running: #1C1917;
 
   /* Browser surfaces */
-  --color-selection: rgb(217 130 43 / 0.26);
+  --color-selection: rgb(28 25 23 / 0.16);
   --color-none: rgb(0 0 0 / 0);
 
   /* Diff file status letters and line counts */
@@ -90,7 +92,7 @@
   /* Terminal (xterm.js): the Kete Workshop scheme */
   --color-term-bg: #F4EFE6;
   --color-term-fg: #1C1917;
-  --color-term-cursor: #A9550F;
+  --color-term-cursor: #1C1917;
   --color-term-selection: #DCCFB9;
   --color-term-black: #1C1917;
   --color-term-red: #A23B22;
@@ -113,10 +115,10 @@
   --color-syn-comment: #8A8178;
   --color-syn-keyword: #6B4A7A;
   --color-syn-string: #5B6B2E;
-  --color-syn-number: #A9550F;
+  --color-syn-number: #8A6410;
   --color-syn-type: #2F6F6A;
   --color-syn-tag: #A23B22;
-  --color-syn-attr: #A9550F;
+  --color-syn-attr: #8A6410;
   --color-syn-function: #35607F;
   --color-syn-regexp: #2F6F6A;
   --color-editor-gutter: #8A8178;
@@ -157,7 +159,7 @@ html[data-theme='dark'] {
   --color-running: #EDE6DA;
 
   /* Browser surfaces */
-  --color-selection: rgb(224 138 53 / 0.3);
+  --color-selection: rgb(237 230 218 / 0.2);
   --color-none: rgb(0 0 0 / 0);
 
   /* Diff file status letters and line counts */
@@ -170,7 +172,7 @@ html[data-theme='dark'] {
   /* Terminal (xterm.js): the Kete Workshop scheme */
   --color-term-bg: #161412;
   --color-term-fg: #EDE6DA;
-  --color-term-cursor: #E08A35;
+  --color-term-cursor: #EDE6DA;
   --color-term-selection: #3A342D;
   --color-term-black: #26221E;
   --color-term-red: #D2694E;
@@ -193,10 +195,10 @@ html[data-theme='dark'] {
   --color-syn-comment: #8A8178;
   --color-syn-keyword: #B48EC2;
   --color-syn-string: #9BAA5E;
-  --color-syn-number: #F0A35A;
+  --color-syn-number: #E0B15A;
   --color-syn-type: #5FA8A0;
   --color-syn-tag: #D2694E;
-  --color-syn-attr: #F0A35A;
+  --color-syn-attr: #E0B15A;
   --color-syn-function: #9DBBD4;
   --color-syn-regexp: #5FA8A0;
   --color-editor-gutter: #6E665C;
@@ -238,7 +240,7 @@ html[data-theme='dark'] {
     --color-running: #EDE6DA;
 
     /* Browser surfaces */
-    --color-selection: rgb(224 138 53 / 0.3);
+    --color-selection: rgb(237 230 218 / 0.2);
     --color-none: rgb(0 0 0 / 0);
 
     /* Diff file status letters and line counts */
@@ -251,7 +253,7 @@ html[data-theme='dark'] {
     /* Terminal (xterm.js): the Kete Workshop scheme */
     --color-term-bg: #161412;
     --color-term-fg: #EDE6DA;
-    --color-term-cursor: #E08A35;
+    --color-term-cursor: #EDE6DA;
     --color-term-selection: #3A342D;
     --color-term-black: #26221E;
     --color-term-red: #D2694E;
@@ -274,10 +276,10 @@ html[data-theme='dark'] {
     --color-syn-comment: #8A8178;
     --color-syn-keyword: #B48EC2;
     --color-syn-string: #9BAA5E;
-    --color-syn-number: #F0A35A;
+    --color-syn-number: #E0B15A;
     --color-syn-type: #5FA8A0;
     --color-syn-tag: #D2694E;
-    --color-syn-attr: #F0A35A;
+    --color-syn-attr: #E0B15A;
     --color-syn-function: #9DBBD4;
     --color-syn-regexp: #5FA8A0;
     --color-editor-gutter: #6E665C;

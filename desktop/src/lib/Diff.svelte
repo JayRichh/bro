@@ -206,13 +206,14 @@
         </button>
       {/each}
     </div>
+    {#if loading}<span class="font-mono text-[12px] text-muted" role="status">Loading</span>{/if}
     <button
       class="grid size-7 place-items-center border-0 bg-transparent text-muted hover:bg-surface hover:text-ink"
       onclick={() => load(worktree)}
       title="Refresh (R)"
       aria-label="Refresh"
     >
-      <svg width="13" height="13" viewBox="0 0 16 16" class={loading ? 'animate-spin' : ''}
+      <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"
         ><path d="M13.5 8A5.5 5.5 0 1 1 11.8 4M13.5 2v3h-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg
       >
     </button>
