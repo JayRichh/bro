@@ -442,6 +442,7 @@ impl Daemon {
         self.kill_session(&SessionRef::Agent(id.clone()));
         self.last_cwd.lock().remove(id);
         self.pending_moves.lock().remove(id);
+        self.forget_subagents(id);
         self.store.delete_agent(id)?;
         self.broadcast(ServerEvent::EntityRemoved {
             id: EntityId::Agent(id.clone()),

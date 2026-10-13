@@ -2238,6 +2238,7 @@ mod tests {
 
     fn agent(id: &str, worktree: &str, name: &str) -> Agent {
         Agent {
+            parent: None,
             profile: None,
             id: AgentId(id.into()),
             worktree_id: WorktreeId(worktree.into()),

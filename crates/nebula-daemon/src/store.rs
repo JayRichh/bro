@@ -347,6 +347,11 @@ const MIGRATIONS: &[&str] = &[
       slot        INTEGER NOT NULL UNIQUE
     );
     ",
+    // 32: the session a `kete spawn` child was started from. No foreign
+    // key: a child outlives its parent row, and reads as a root then.
+    "
+    ALTER TABLE agents ADD COLUMN parent TEXT;
+    ",
 ];
 
 pub struct Store {
@@ -549,8 +554,8 @@ impl Store {
         issue_url: Option<&str>,
     ) -> Result<()> {
         self.conn.lock().execute(
-            "INSERT INTO agents (id, worktree_id, name, status, archived, archived_at, kind, claude_session_id, sort_order, created_at, status_changed_at, model, effort, auto_title_pending, unseen, cloud_session_id, pr_url, issue_url, custom_harness, role, profile)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+            "INSERT INTO agents (id, worktree_id, name, status, archived, archived_at, kind, claude_session_id, sort_order, created_at, status_changed_at, model, effort, auto_title_pending, unseen, cloud_session_id, pr_url, issue_url, custom_harness, role, profile, parent)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
             params![
                 a.id.as_str(),
                 a.worktree_id.as_str(),
@@ -573,6 +578,7 @@ impl Store {
                 a.custom_harness,
                 a.role.as_str(),
                 a.profile,
+                a.parent.as_ref().map(AgentId::as_str),
             ],
         )?;
         Ok(())
@@ -1167,7 +1173,7 @@ const WORKTREE_COLUMNS: &str = "id, project_id, path, branch, is_main, sort_orde
 const AGENT_COLUMNS: &str = "id, worktree_id, name, status, archived, kind, \
                              claude_session_id, sort_order, status_changed_at, model, effort, \
                              archived_at, unseen, cloud_session_id, recent_prompts, custom_harness, \
-                             issue_url, role, profile";
+                             issue_url, role, profile, parent";
 const TERMINAL_COLUMNS: &str = "id, worktree_id, name, sort_order, run_command";
 const LINK_COLUMNS: &str = "id, worktree_id, url, sort_order";
 
@@ -1195,6 +1201,7 @@ fn row_to_worktree(r: &rusqlite::Row) -> rusqlite::Result<Worktree> {
 /// its session table after the read.
 fn row_to_agent(r: &rusqlite::Row) -> rusqlite::Result<Agent> {
     Ok(Agent {
+        parent: r.get::<_, Option<String>>(19)?.map(AgentId),
         profile: r.get(18)?,
         id: AgentId(r.get(0)?),
         worktree_id: WorktreeId(r.get(1)?),
@@ -1298,6 +1305,7 @@ mod tests {
         };
         store.insert_worktree(&worktree).unwrap();
         let agent = Agent {
+            parent: None,
             profile: None,
             id: AgentId::generate(),
             worktree_id: worktree.id.clone(),
@@ -1324,6 +1332,7 @@ mod tests {
             .insert_agent_with_launch_context(&agent, false, Some(pr_url), None)
             .unwrap();
         let codex_agent = Agent {
+            parent: None,
             profile: None,
             id: AgentId::generate(),
             worktree_id: worktree.id.clone(),
@@ -1347,6 +1356,7 @@ mod tests {
         };
         store.insert_agent(&codex_agent).unwrap();
         let cursor_agent = Agent {
+            parent: None,
             profile: None,
             id: AgentId::generate(),
             worktree_id: worktree.id.clone(),
@@ -1371,6 +1381,7 @@ mod tests {
         store.insert_agent(&cursor_agent).unwrap();
         let issue_url = "https://github.com/AgentSystemLabs/nebula/issues/15";
         let issue_agent = Agent {
+            parent: None,
             profile: None,
             id: AgentId::generate(),
             worktree_id: worktree.id.clone(),
@@ -1415,6 +1426,7 @@ mod tests {
         // A Custom row round-trips its registry id beside the kind, so
         // respawns find the same entry (migration 27).
         let custom = Agent {
+            parent: None,
             profile: None,
             id: AgentId::generate(),
             worktree_id: worktree.id.clone(),
@@ -1461,6 +1473,67 @@ mod tests {
     /// Read marks are keyed by PR URL and outlive the worktree they were
     /// noticed on, so they live in their own table with no foreign key: no
     /// row here is ever cascaded away by a checkout being deleted.
+    /// A `kete spawn` child keeps the session that started it across a
+    /// reload; a row a person started has none.
+    #[test]
+    fn an_agent_row_keeps_its_parent() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .insert_project(&Project {
+                id: ProjectId("p".into()),
+                name: "p".into(),
+                repo_path: "/tmp/p".into(),
+                sort_order: 0,
+            })
+            .unwrap();
+        store
+            .insert_worktree(&Worktree {
+                id: WorktreeId("w".into()),
+                project_id: ProjectId("p".into()),
+                path: "/tmp/p".into(),
+                branch: "main".into(),
+                is_main: true,
+                sort_order: 0,
+            })
+            .unwrap();
+        let row = |id: &str, parent: Option<&str>| Agent {
+            parent: parent.map(|p| AgentId(p.into())),
+            profile: None,
+            id: AgentId(id.into()),
+            worktree_id: WorktreeId("w".into()),
+            name: id.into(),
+            status: AgentStatus::Fresh,
+            archived: false,
+            archived_at: 0,
+            unseen: false,
+            kind: AgentKind::Claude,
+            custom_harness: None,
+            model: None,
+            effort: None,
+            session_id: None,
+            cloud_session_id: None,
+            sort_order: 0,
+            status_changed_at: 0,
+            alive: false,
+            issue_url: None,
+            role: nebula_core::AgentRole::Worker,
+            recent_prompts: Vec::new(),
+        };
+        store.insert_agent(&row("caller", None)).unwrap();
+        store
+            .insert_agent_with_auto_title(&row("child", Some("caller")), true)
+            .unwrap();
+        let child = store.get_agent(&AgentId("child".into())).unwrap().unwrap();
+        assert_eq!(child.parent, Some(AgentId("caller".into())));
+        let (_, _, agents, _) = store.load_tree().unwrap();
+        let caller = agents.iter().find(|a| a.id.0 == "caller").unwrap();
+        assert_eq!(caller.parent, None);
+        // No foreign key: deleting the parent leaves the child's link,
+        // which a client draws as a root once the parent row is gone.
+        store.delete_agent(&AgentId("caller".into())).unwrap();
+        assert!(store.get_agent(&AgentId("child".into())).unwrap().is_some());
+    }
+
     #[test]
     fn pr_seen_marks_roundtrip_and_overwrite() {
         let store = Store::open_in_memory().unwrap();
@@ -1967,6 +2040,7 @@ mod tests {
         };
         store.insert_worktree(&wt).unwrap();
         let agent = |id: &str| Agent {
+            parent: None,
             profile: None,
             id: AgentId(id.into()),
             worktree_id: wt.id.clone(),
@@ -2057,6 +2131,7 @@ mod tests {
         store
             .insert_agent_with_auto_title(
                 &Agent {
+                    parent: None,
                     profile: None,
                     id: id.clone(),
                     worktree_id: wt.id.clone(),
@@ -2188,6 +2263,7 @@ mod tests {
         ] {
             store
                 .insert_agent(&Agent {
+                    parent: None,
                     profile: None,
                     id: AgentId(format!("agent-{name}")),
                     worktree_id: wt.id.clone(),
@@ -2254,6 +2330,7 @@ mod tests {
         for name in ["kept", "gone"] {
             store
                 .insert_agent(&Agent {
+                    parent: None,
                     profile: None,
                     id: AgentId(format!("agent-{name}")),
                     worktree_id: wt.id.clone(),
@@ -2317,6 +2394,7 @@ mod tests {
         store.insert_worktree(&worktree).unwrap();
         let seed = |name: &str, status: AgentStatus| {
             let agent = Agent {
+                parent: None,
                 profile: None,
                 id: AgentId::generate(),
                 worktree_id: worktree.id.clone(),
@@ -2419,6 +2497,7 @@ mod tests {
         let id = AgentId("a1".into());
         store
             .insert_agent(&Agent {
+                parent: None,
                 profile: None,
                 id: id.clone(),
                 worktree_id: WorktreeId("w1".into()),

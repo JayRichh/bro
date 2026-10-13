@@ -216,10 +216,12 @@ async fn serve(opts: DaemonOpts) -> Result<()> {
                 cwd,
                 transcript,
                 prompt,
+                subagent,
             }) = hook_rx.recv().await
             {
                 let captures_session = event.captures_session();
                 daemon.apply_hook_event(&agent_id, event.clone(), session_id.clone());
+                daemon.track_subagent(&agent_id, &event, subagent);
                 // The prompt itself, for the row's RECENT PROMPTS. After
                 // the status step so the row it upserts already reads
                 // `running`.

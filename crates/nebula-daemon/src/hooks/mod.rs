@@ -23,6 +23,7 @@ pub mod installer;
 pub mod opencode_plugin;
 pub mod pi_extension;
 
+use crate::registry::SubagentHookInfo;
 use crate::session_title::TranscriptRef;
 use crate::status::HookEvent;
 use crate::store::Store;
@@ -150,6 +151,9 @@ pub struct HookDelivery {
     /// (`prompt_history::condense`). Only a `UserPromptSubmit` carries
     /// one, and only when the payload had a non-blank, user-written one.
     pub prompt: Option<String>,
+    /// Subagent news riding the event: its type, or a Task / Agent tool
+    /// call's description (`registry::subagents`).
+    pub subagent: SubagentHookInfo,
 }
 
 /// Permissive payload: every field optional, unknown fields ignored. Hook
@@ -177,6 +181,12 @@ pub struct HookPayload {
     #[serde(alias = "toolName")]
     pub tool_name: Option<String>,
     pub agent_id: Option<String>,
+    /// The subagent's type on SubagentStart / SubagentStop (`Explore`,
+    /// `general-purpose`, a custom agent's name).
+    pub agent_type: Option<String>,
+    /// A tool call's input. Read only for the Task / Agent tool's
+    /// `description`: the task a subagent is about to be given.
+    pub tool_input: Option<serde_json::Value>,
     /// Cursor's name for the subagent id in subagentStart/subagentStop.
     pub subagent_id: Option<String>,
     pub source: Option<String>,
@@ -450,6 +460,15 @@ async fn receive_hook(
             .and_then(crate::prompt_history::condense),
         _ => None,
     };
+    let subagent = SubagentHookInfo {
+        kind: payload.agent_type.clone().filter(|k| !k.is_empty()),
+        task: payload
+            .tool_input
+            .as_ref()
+            .and_then(|input| input.get("description"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+    };
     let _ = state
         .tx
         .send(HookDelivery {
@@ -459,6 +478,7 @@ async fn receive_hook(
             cwd,
             transcript,
             prompt,
+            subagent,
         })
         .await;
 
@@ -551,6 +571,7 @@ mod tests {
             })
             .unwrap();
         let agent = |id: &str| Agent {
+            parent: None,
             profile: None,
             id: AgentId(id.into()),
             worktree_id: WorktreeId("w1".into()),
@@ -579,6 +600,7 @@ mod tests {
         // A row the user (or AUTO-TITLE) named, that Claude doesn't hold yet.
         store
             .insert_agent(&Agent {
+                parent: None,
                 name: "Fix Login".into(),
                 ..agent("named")
             })
@@ -802,6 +824,70 @@ mod tests {
         assert_eq!(status, 200);
         let delivery = rx.recv().await.unwrap();
         assert!(delivery.cwd.is_none(), "subagent cwd: {:?}", delivery.cwd);
+    }
+
+    /// Claude's subagent lifecycle, from the payloads its hooks reference
+    /// documents: the parent's Agent tool call names the task, then
+    /// SubagentStart and SubagentStop carry `agent_id` and `agent_type`.
+    /// Fed through the daemon's book in order, the subagent reads running
+    /// and then done.
+    #[tokio::test]
+    async fn subagent_hooks_carry_the_id_type_and_task_through_to_the_book() {
+        let store = seeded_store();
+        let (env, mut rx, _) = start_hook_server(store.clone(), None).await.unwrap();
+        let daemon = crate::registry::Daemon::new(store, env.clone());
+        let mut events = daemon.events.subscribe();
+        let posts = [
+            (
+                "PreToolUse",
+                r#"{"session_id":"s1","hook_event_name":"PreToolUse","tool_name":"Agent",
+                    "tool_input":{"description":"Find the hook fixtures","prompt":"...","subagent_type":"Explore"},
+                    "tool_use_id":"toolu_01"}"#,
+            ),
+            (
+                "SubagentStart",
+                r#"{"session_id":"s1","hook_event_name":"SubagentStart",
+                    "agent_id":"agent-abc123","agent_type":"Explore"}"#,
+            ),
+            (
+                "SubagentStop",
+                r#"{"session_id":"s1","hook_event_name":"SubagentStop","stop_hook_active":false,
+                    "agent_id":"agent-abc123","agent_type":"Explore",
+                    "agent_transcript_path":"/t/s1/subagents/agent-abc123.jsonl",
+                    "last_assistant_message":"Found 3"}"#,
+            ),
+        ];
+        let mut seen = Vec::new();
+        for (event, body) in posts {
+            let (status, _) = http_post(
+                env.port,
+                &format!("/api/hooks/claude?agentId=titled&hookEvent={event}"),
+                &env.token,
+                body,
+            )
+            .await;
+            assert_eq!(status, 200);
+            let delivery = rx.recv().await.unwrap();
+            daemon.track_subagent(&delivery.agent_id, &delivery.event, delivery.subagent);
+            seen.extend(
+                std::iter::from_fn(|| events.try_recv().ok()).filter_map(|e| match e {
+                    nebula_core::ServerEvent::SubagentChanged { sub } => Some(sub),
+                    _ => None,
+                }),
+            );
+        }
+        let statuses: Vec<_> = seen.iter().map(|s| s.status).collect();
+        assert_eq!(
+            statuses,
+            [
+                nebula_core::SubagentStatus::Running,
+                nebula_core::SubagentStatus::Done
+            ]
+        );
+        assert_eq!(seen[0].id, "agent-abc123");
+        assert_eq!(seen[0].parent_agent, AgentId("titled".into()));
+        assert_eq!(seen[0].kind, "Explore");
+        assert_eq!(seen[0].description, "Find the hook fixtures");
     }
 
     /// The prompt reaches the drain loop condensed, on its own event

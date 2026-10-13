@@ -209,6 +209,7 @@ mod tests {
         let id = AgentId("a1".into());
         store
             .insert_agent(&Agent {
+                parent: None,
                 profile: None,
                 id: id.clone(),
                 worktree_id: WorktreeId("w1".into()),

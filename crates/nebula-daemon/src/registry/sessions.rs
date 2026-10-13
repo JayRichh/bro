@@ -345,6 +345,7 @@ impl Daemon {
             links: self.store.load_links()?,
             pr_seen: self.store.load_pr_seen()?,
             ui_state: self.store.load_ui_state()?,
+            subagents: self.subagent_rows(),
         })
     }
 

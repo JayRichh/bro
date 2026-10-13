@@ -6304,6 +6304,7 @@ mod tests {
             .collect();
         app.tree.agents = (0..3)
             .map(|i| Agent {
+                parent: None,
                 profile: None,
                 id: AgentId(format!("a{i}")),
                 worktree_id: WorktreeId(format!("w{i}")),
@@ -6598,6 +6599,7 @@ mod tests {
     fn links_sit_between_terminals_and_archived_sessions() {
         let (mut app, wt) = link_app();
         app.tree.agents.push(Agent {
+            parent: None,
             profile: None,
             id: AgentId("a1".into()),
             worktree_id: wt.clone(),
@@ -6620,6 +6622,7 @@ mod tests {
             recent_prompts: Vec::new(),
         });
         app.tree.agents.push(Agent {
+            parent: None,
             id: AgentId("a2".into()),
             name: "old".into(),
             archived: true,
@@ -6829,6 +6832,7 @@ mod tests {
         // (which count as interacting NOW, the tie the raw stamp breaks).
         for (i, wt) in ["p0w0", "p0w0", "p0w1", "p1w2", "p2w0"].iter().enumerate() {
             tree.agents.push(Agent {
+                parent: None,
                 profile: None,
                 id: AgentId(format!("a{i}")),
                 worktree_id: WorktreeId((*wt).into()),

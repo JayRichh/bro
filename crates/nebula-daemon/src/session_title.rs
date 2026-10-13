@@ -380,6 +380,7 @@ mod tests {
         store
             .insert_agent_with_auto_title(
                 &Agent {
+                    parent: None,
                     profile: None,
                     id: id.clone(),
                     worktree_id: WorktreeId("w1".into()),

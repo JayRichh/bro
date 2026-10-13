@@ -39,6 +39,7 @@ impl Daemon {
             issue_url,
             role,
             profile,
+            parent,
         } = spec;
         let cloud_prompt = match cloud_prompt {
             Some(_) if kind != AgentKind::Claude => {
@@ -126,6 +127,7 @@ impl Daemon {
             bail!("{}", cli_missing_message(&program));
         }
         let agent = Agent {
+            parent,
             profile,
             id: adopted
                 .as_ref()

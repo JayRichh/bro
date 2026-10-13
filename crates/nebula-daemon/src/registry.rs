@@ -110,6 +110,9 @@ pub(crate) struct CreateAgentSpec {
     pub role: nebula_core::AgentRole,
     /// The PROFILE asked for; None = the harness's default.
     pub profile: Option<String>,
+    /// The session that asked for this one (`kete spawn`, an orchestrator
+    /// spawn); persisted as the row's `parent`. None for a person's launch.
+    pub parent: Option<AgentId>,
 }
 
 /// A pre-spawned agent CLI waiting to be adopted by the next CreateAgent for
@@ -231,6 +234,8 @@ pub struct Daemon {
     /// — so an attach replays how the run ended instead of running it
     /// again. Dropped when the run starts again, is stopped, or its row goes.
     finished_runs: Mutex<HashMap<TerminalId, FinishedRun>>,
+    /// Claude subagents per parent session (`subagents.rs`), taken alone.
+    subagents: Mutex<subagents::SubagentBook>,
 }
 
 mod exit;
@@ -241,7 +246,10 @@ mod projects;
 mod sessions;
 mod spawn;
 mod status;
+mod subagents;
 mod terminals;
+
+pub use subagents::SubagentHookInfo;
 
 impl Daemon {
     pub fn new(store: Arc<Store>, hook_env: HookEnv) -> Arc<Self> {
@@ -268,6 +276,7 @@ impl Daemon {
             prewarm_sweep: Mutex::new(None),
             resumes: Mutex::new(HashMap::new()),
             finished_runs: Mutex::new(HashMap::new()),
+            subagents: Mutex::new(subagents::SubagentBook::default()),
         })
     }
 
@@ -2569,6 +2578,7 @@ mod tests {
 
         let empty = daemon
             .create_agent(CreateAgentSpec {
+                parent: None,
                 profile: None,
                 worktree: worktree.clone(),
                 name: "cloud".into(),
@@ -2589,6 +2599,7 @@ mod tests {
 
         let nul = daemon
             .create_agent(CreateAgentSpec {
+                parent: None,
                 profile: None,
                 worktree: worktree.clone(),
                 name: "cloud".into(),
@@ -2609,6 +2620,7 @@ mod tests {
 
         let too_long = daemon
             .create_agent(CreateAgentSpec {
+                parent: None,
                 profile: None,
                 worktree: worktree.clone(),
                 name: "cloud".into(),
@@ -2629,6 +2641,7 @@ mod tests {
 
         let wrong_kind = daemon
             .create_agent(CreateAgentSpec {
+                parent: None,
                 profile: None,
                 worktree,
                 name: "cloud".into(),
@@ -2652,6 +2665,7 @@ mod tests {
     async fn pr_launch_context_is_accepted_for_every_kind_but_never_with_cloud() {
         let daemon = test_daemon();
         let spec = |kind: AgentKind, cloud: Option<&str>| CreateAgentSpec {
+            parent: None,
             profile: None,
             worktree: WorktreeId("unused".into()),
             name: "pr".into(),
@@ -2687,6 +2701,7 @@ mod tests {
             .unwrap_err();
         assert!(cloud.to_string().contains("not supported for Claude Cloud"));
         let not_a_pr = CreateAgentSpec {
+            parent: None,
             pr_url: Some("https://github.com/o/r/issues/7".into()),
             ..spec(AgentKind::Codex, None)
         };
@@ -2820,6 +2835,7 @@ mod tests {
     async fn issue_launch_context_is_accepted_for_every_kind_but_never_with_cloud() {
         let daemon = test_daemon();
         let spec = |kind: AgentKind, cloud: Option<&str>| CreateAgentSpec {
+            parent: None,
             profile: None,
             worktree: WorktreeId("unused".into()),
             name: "issue".into(),
@@ -2848,6 +2864,7 @@ mod tests {
         }
         let cloud = daemon
             .create_agent(CreateAgentSpec {
+                parent: None,
                 starting_prompt: None,
                 ..spec(AgentKind::Claude, Some("Fix auth"))
             })
@@ -2855,6 +2872,7 @@ mod tests {
             .unwrap_err();
         assert!(cloud.to_string().contains("not supported for Claude Cloud"));
         let not_an_issue = CreateAgentSpec {
+            parent: None,
             issue_url: Some("https://github.com/o/r/pull/7".into()),
             role: nebula_core::AgentRole::Worker,
             ..spec(AgentKind::Codex, None)
@@ -2867,6 +2885,7 @@ mod tests {
     async fn starting_prompt_is_validated_and_never_adopts_a_warm_cli() {
         let daemon = test_daemon();
         let spec = |kind: AgentKind, cloud: Option<&str>, starting: Option<&str>| CreateAgentSpec {
+            parent: None,
             profile: None,
             worktree: WorktreeId("unused".into()),
             name: "preset".into(),
@@ -2979,6 +2998,7 @@ mod tests {
         // the PTY instead of running anything.
         let _cmd = EnvGuard::set(env::AGENT_CMD, "/bin/cat");
         let spec = |name: &str, task: Option<&str>| CreateAgentSpec {
+            parent: None,
             worktree: worktree.id.clone(),
             name: name.into(),
             kind: AgentKind::Claude,
@@ -3031,6 +3051,67 @@ mod tests {
         let events = daemon.events.subscribe();
         daemon.create_agent(spec("bare", None)).await.unwrap();
         assert_eq!(created(events).status, AgentStatus::Fresh);
+        drop(dir);
+    }
+
+    /// `kete spawn` from inside a session: the new row records the caller
+    /// as its parent, persisted and on the row every client is sent.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_spawn_records_the_calling_session_as_parent() {
+        let daemon = test_daemon();
+        let (dir, worktree) = run_worktree(&daemon);
+        let _cmd = EnvGuard::set(env::AGENT_CMD, "/bin/cat");
+        let caller = AgentId("caller".into());
+        daemon
+            .store
+            .insert_agent(&Agent {
+                parent: None,
+                profile: None,
+                id: caller.clone(),
+                worktree_id: worktree.id.clone(),
+                name: "caller".into(),
+                status: AgentStatus::Running,
+                archived: false,
+                archived_at: 0,
+                unseen: false,
+                kind: AgentKind::Claude,
+                custom_harness: None,
+                model: None,
+                effort: None,
+                session_id: None,
+                cloud_session_id: None,
+                sort_order: 0,
+                status_changed_at: 0,
+                alive: false,
+                issue_url: None,
+                role: nebula_core::AgentRole::Worker,
+                recent_prompts: Vec::new(),
+            })
+            .unwrap();
+
+        let events = daemon.events.subscribe();
+        let EntityId::Agent(child) = daemon
+            .spawn_sibling_agent(&caller, None, None, "Write the tests")
+            .await
+            .unwrap()
+        else {
+            panic!("a spawn makes an agent");
+        };
+        let mut events = events;
+        let sent = std::iter::from_fn(|| events.try_recv().ok())
+            .find_map(|e| match e {
+                ServerEvent::EntityUpserted {
+                    entity: Entity::Agent(a),
+                } if a.id == child => Some(a),
+                _ => None,
+            })
+            .expect("the spawn broadcasts its row");
+        assert_eq!(sent.parent, Some(caller.clone()));
+        assert_eq!(
+            daemon.store.get_agent(&child).unwrap().unwrap().parent,
+            Some(caller)
+        );
         drop(dir);
     }
 
@@ -3119,6 +3200,7 @@ mod tests {
         daemon
             .store
             .insert_agent(&Agent {
+                parent: None,
                 profile: None,
                 id: AgentId(id.into()),
                 worktree_id: WorktreeId(worktree.into()),
@@ -3276,6 +3358,7 @@ mod tests {
         let _cmd = EnvGuard::set(env::AGENT_CMD, "/bin/cat");
         let EntityId::Agent(id) = daemon
             .create_agent(CreateAgentSpec {
+                parent: None,
                 worktree: main.id.clone(),
                 name: "a".into(),
                 kind: AgentKind::Claude,
@@ -3420,6 +3503,7 @@ mod tests {
         let _cmd = EnvGuard::set(env::AGENT_CMD, "/bin/cat");
         let EntityId::Agent(id) = daemon
             .create_agent(CreateAgentSpec {
+                parent: None,
                 worktree: main.id.clone(),
                 name: "a".into(),
                 kind: AgentKind::Claude,
@@ -3518,6 +3602,7 @@ mod tests {
             .store
             .insert_agent_with_auto_title(
                 &Agent {
+                    parent: None,
                     profile: None,
                     id: AgentId(id.into()),
                     worktree_id: WorktreeId(worktree.into()),

@@ -292,6 +292,12 @@ pub struct Agent {
     /// no profile: the daemon's own environment, as before profiles.
     #[serde(default)]
     pub profile: Option<String>,
+    /// The session that started this one with `kete spawn` (or an
+    /// orchestrator spawn); None for every session a person started.
+    /// Last on purpose: the codec is positional, so a peer that predates
+    /// the field still reads every field before it.
+    #[serde(default)]
+    pub parent: Option<AgentId>,
 }
 
 impl Agent {
@@ -369,6 +375,10 @@ pub struct Link {
     pub sort_order: i64,
 }
 
+/// One row on the wire. Agent is by far the largest variant; it is not
+/// boxed because every upsert is built, sent and dropped at once, and a
+/// box would reach into every construction site for no measurable gain.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Entity {
     Project(Project),

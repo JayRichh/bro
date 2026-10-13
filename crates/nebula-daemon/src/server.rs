@@ -866,6 +866,7 @@ impl ClientConnection {
         let result = self
             .daemon
             .create_agent(CreateAgentSpec {
+                parent: None,
                 profile,
                 worktree: worktree.clone(),
                 name,
@@ -1184,6 +1185,7 @@ fn empty_snapshot() -> ServerEvent {
         links: vec![],
         pr_seen: vec![],
         ui_state: None,
+        subagents: vec![],
     }
 }
 
