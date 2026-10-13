@@ -2124,7 +2124,10 @@ mod tests {
         // Under the hide switch an entry survives only when its program
         // is on PATH, built-ins and customs alike.
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("agy"), "").unwrap();
+        // Windows finds a program through PATHEXT, as a spawn does: a bare
+        // extensionless file is not one there.
+        let on_disk = if cfg!(windows) { "agy.exe" } else { "agy" };
+        std::fs::write(dir.path().join(on_disk), "").unwrap();
         // No other test may spawn a program while PATH points here.
         let _env = crate::test_env::changing_path();
         let prior = std::env::var_os("PATH");
