@@ -12,6 +12,7 @@
     type ThemePref,
   } from './lib/store.svelte';
   import { api } from './lib/api';
+  import { isDiffMode } from './lib/diff-api';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { nav } from './lib/shell/history.svelte';
   import Rail from './lib/shell/Rail.svelte';
@@ -133,7 +134,7 @@
     const s = await api.startup().catch(() => null);
     if (!s) return;
     if (s.theme === 'light' || s.theme === 'dark' || s.theme === 'system') app.themePref = s.theme;
-    if (s.diff_mode === 'inline' || s.diff_mode === 'side') app.diffMode = s.diff_mode;
+    if (isDiffMode(s.diff_mode)) app.diffMode = s.diff_mode;
     if (s.view === 'board') {
       app.home = 'board';
       nav.replace({ view: 'board' });
