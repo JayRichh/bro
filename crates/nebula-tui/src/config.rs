@@ -46,6 +46,10 @@ pub const PANE_SIDES: &[&str] = &[
 /// COLUMNS: projects, worktrees and sessions beside the pane.
 pub const WORKTREE_LAYOUTS: &[&str] = &["cards", "list", "nested", "columns"];
 
+/// What **Diff context** cycles through: the three lines git gives each
+/// side of a change, or the whole file.
+pub const DIFF_CONTEXTS: &[&str] = &["collapsed", "full"];
+
 /// Inline graphics choices (Settings → Appearance).
 pub const INLINE_GRAPHICS: &[&str] = crate::graphics::INLINE_GRAPHICS_MODES;
 
@@ -407,6 +411,8 @@ pub enum SettingKind {
     HideCardMarks,
     HighlightCurrentCard,
     SourceControlGraph,
+    DiffMode,
+    DiffContext,
     SessionPane,
     WorktreeLayout,
     InlineGraphics,
@@ -518,6 +524,7 @@ impl SettingKind {
             SettingKind::AskBeforeArchive => (2026, 10, 3),
             SettingKind::ConfirmDragMove => (2026, 10, 2),
             SettingKind::SourceControlGraph | SettingKind::InlineGraphics => (2026, 10, 9),
+            SettingKind::DiffMode | SettingKind::DiffContext => (2026, 10, 13),
         }
     }
 
@@ -731,6 +738,18 @@ pub const SETTINGS_TABS: &[SettingsTab] = &[
                 kind: SettingKind::HideDraftPrs,
                 label: "Draft pull requests",
                 hint: "Show or hide draft pull requests in / search; checkouts always stay",
+                group: "",
+            },
+            SettingSpec {
+                kind: SettingKind::DiffMode,
+                label: "Diff layout",
+                hint: "How the g diff viewer lays a diff out: side by side, inline with two line-number gutters, or the new text alone (Ctrl+s in the viewer)",
+                group: "",
+            },
+            SettingSpec {
+                kind: SettingKind::DiffContext,
+                label: "Diff context",
+                hint: "The unchanged lines around a change: three each side with the rest folded, or the whole file (Ctrl+o in the viewer)",
                 group: "",
             },
             SettingSpec {
@@ -1167,6 +1186,18 @@ pub struct Config {
     /// read-only commit graph under the changed files. Off by default, and
     /// with it off the DIFF VIEWER does not run `git log` or `rev-list`.
     pub source_control_graph: bool,
+    /// The DIFF LAYOUT the `g` DIFF VIEWER opens in: `side-by-side`,
+    /// `inline` or `replacement` (`crate::diff_layout::DiffMode`), which
+    /// `Ctrl+s` in the viewer cycles and writes back. Empty — a config
+    /// that never set it — reads as side by side, unless the side-by-side
+    /// switch older builds kept in state.json says unified
+    /// ([`Config::diff_mode`]).
+    pub diff_mode: String,
+    /// UNCHANGED CONTEXT in the DIFF VIEWER: `collapsed` (three lines each
+    /// side of a change, the rest folded into the hunk's row) or `full`
+    /// (the whole file). `Ctrl+o` in the viewer flips it and writes it
+    /// back. Anything else reads as collapsed.
+    pub diff_context: String,
     /// RETIRED with the line counts always drawn. Through 0.37 the **Card
     /// line counts** SETTING (Settings → Appearance, off by default)
     /// switched each card's `+3 files` to `+3 files +120 -45`. Every card
@@ -1512,6 +1543,8 @@ impl Default for Config {
             card_issue_number: true,
             hide_draft_prs: false,
             source_control_graph: false,
+            diff_mode: String::new(),
+            diff_context: DIFF_CONTEXTS[0].into(),
             card_line_changes: false,
             skip_session_naming: false,
             confirm_on_archive: false,
@@ -1684,6 +1717,23 @@ impl Config {
     /// out on.
     pub fn pane_side(&self) -> crate::launcher::PaneSide {
         crate::launcher::PaneSide::parse(&self.session_pane)
+    }
+
+    /// The DIFF LAYOUT `diff_mode` names; None while the file has not set
+    /// one (or names one this build does not know), when the side-by-side
+    /// switch an older build kept in state.json decides.
+    pub fn diff_mode(&self) -> Option<crate::diff_layout::DiffMode> {
+        crate::diff_layout::DiffMode::parse(&self.diff_mode)
+    }
+
+    /// `diff_context` as one of [`DIFF_CONTEXTS`].
+    pub fn diff_context_word(&self) -> &'static str {
+        let stored = self.diff_context.trim();
+        DIFF_CONTEXTS
+            .iter()
+            .copied()
+            .find(|w| w.eq_ignore_ascii_case(stored))
+            .unwrap_or(DIFF_CONTEXTS[0])
     }
 
     /// `worktree_layout` says the compact LIST rather than the cards.
@@ -2368,6 +2418,8 @@ impl Config {
             SettingKind::CardIssueNumber => on_off(self.card_issue_number).into(),
             SettingKind::HideDraftPrs => shown_hidden(self.hide_draft_prs).into(),
             SettingKind::SourceControlGraph => on_off(self.source_control_graph).into(),
+            SettingKind::DiffMode => self.diff_mode().unwrap_or_default().as_str().into(),
+            SettingKind::DiffContext => self.diff_context_word().into(),
             // A project row with no project to speak of: what one without
             // an entry would show.
             SettingKind::RunCommand | SettingKind::OpenCommand => {
@@ -2497,6 +2549,15 @@ impl Config {
             }
             SettingKind::SourceControlGraph => {
                 self.source_control_graph = !self.source_control_graph;
+            }
+            SettingKind::DiffMode => {
+                let modes = crate::diff_layout::DiffMode::ALL.map(|m| m.as_str());
+                let now = self.diff_mode().unwrap_or_default().as_str();
+                self.diff_mode = cycle_choice(now, &modes, step).into();
+            }
+            SettingKind::DiffContext => {
+                let now = self.diff_context_word();
+                self.diff_context = cycle_choice(now, DIFF_CONTEXTS, step).into();
             }
             // One project's, not the file's, and typed: see `set_project_text`.
             SettingKind::RunCommand | SettingKind::OpenCommand => {}

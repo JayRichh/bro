@@ -79,6 +79,13 @@ pub enum Answer {
         diff: String,
         prefetch: bool,
     },
+    /// What is read beside one file's diff (`git_diff::request_aux`): its
+    /// FULL CONTEXT text and its unstaged hunks.
+    DiffAux {
+        /// The `DiffView::id` that asked.
+        view: u64,
+        aux: crate::app::DiffAux,
+    },
     Preview {
         ticket: u64,
         preview: Box<crate::tree_browser::Preview>,

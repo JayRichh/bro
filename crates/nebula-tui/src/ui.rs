@@ -2503,6 +2503,68 @@ mod tests {
         );
     }
 
+    /// The DIFF VIEWER in each layout, drawn: a replaced line wears its
+    /// side's wash and its changed word the stronger one, in the theme's
+    /// own colors; the replacement layout shows no removed line, only the
+    /// new one and a marker for what was removed outright.
+    #[test]
+    fn the_diff_viewer_paints_line_and_word_washes_in_every_layout() {
+        use crate::diff_layout::DiffMode;
+        let diff = "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n\
+                    @@ -1,4 +1,3 @@\n fn keep() {}\n-let x = old;\n+let x = new;\n-gone();\n fn tail() {}\n";
+        let th = crate::theme::ONE_DARK;
+        for mode in DiffMode::ALL {
+            let mut app = App::new();
+            app.chrome.theme = th;
+            let files = vec![crate::git_diff::DiffFile {
+                path: "a.rs".into(),
+                orig_path: None,
+                xy: [' ', 'M'],
+            }];
+            let mut view = crate::app::DiffView::new("/no-such".into(), "main".into(), files, true);
+            view.mode = mode;
+            view.show_diff(Some("a.rs"), diff.into(), false);
+            app.modals.overlay = Some(Overlay::Diff(view));
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(200, 30)).unwrap();
+            terminal.draw(|f| draw(f, &mut app)).unwrap();
+            let buf = terminal.backend().buffer().clone();
+            let find = |needle: &str| -> Option<(u16, u16)> {
+                (0..buf.area.height).find_map(|y| {
+                    let row: String = (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect();
+                    let col = row.find(needle)?;
+                    Some((row[..col].chars().count() as u16, y))
+                })
+            };
+            let (x, y) = find("new;").unwrap_or_else(|| panic!("{mode:?}: the new line"));
+            assert_eq!(
+                buf[(x, y)].bg,
+                th.diff_add_word,
+                "{mode:?}: the changed word"
+            );
+            assert_eq!(
+                buf[(x.saturating_sub(4), y)].bg,
+                th.diff_add_bg,
+                "{mode:?}: the rest of the line"
+            );
+            assert_eq!(
+                buf[(x - 8, y)].fg,
+                th.syn_keyword,
+                "{mode:?}: `let` is still a keyword"
+            );
+            match mode {
+                DiffMode::Replacement => {
+                    assert!(find("old;").is_none(), "no removed line");
+                    assert!(find("1 line removed").is_some(), "the marker");
+                }
+                _ => {
+                    let (x, y) = find("old;").unwrap();
+                    assert_eq!(buf[(x, y)].bg, th.diff_del_word, "{mode:?}");
+                }
+            }
+        }
+    }
+
     /// A TRUECOLOR PRESET paints its canvas under every default cell and
     /// its text over every default glyph, BLACK BACKGROUND or not — and,
     /// as with the black, a fill something else drew stays on top.

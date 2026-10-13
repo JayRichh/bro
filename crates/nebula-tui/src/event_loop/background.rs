@@ -1219,7 +1219,8 @@ pub(crate) fn open_pr_diff_view(
     view.prefetched = Some(chunks.into_iter().collect());
     view.pr_url = Some(url.to_string());
     view.files_width = app.modals.diff_files_width;
-    view.split = app.modals.diff_split;
+    view.mode = app.modals.diff_mode;
+    view.full_context = app.modals.diff_full_context;
     if app.modals.diff_tree {
         view.toggle_tree();
     }

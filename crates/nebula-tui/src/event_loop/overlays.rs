@@ -492,6 +492,17 @@ fn handle_diff_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) {
             let half = (view.list_area.height / 2).max(1) as i64;
             let page = view.view_height.max(1) as i32;
             let at = view.side_cursor() as i64;
+            // A discard waiting on its answer takes this key, whatever it
+            // is: `y` or `Enter` discards, anything else keeps the change.
+            if let Some(change) = view.confirm_discard.take() {
+                if matches!(key.code, KeyCode::Char('y') | KeyCode::Enter) && !ctrl {
+                    let said = diff_discard(view, change);
+                    app.chrome.flash = Some(said);
+                } else {
+                    app.chrome.flash = Some("kept the change".into());
+                }
+                return;
+            }
             match key.code {
                 // Two-stage escape: an active filter is cleared before the
                 // second Esc closes the modal.
@@ -527,11 +538,58 @@ fn handle_diff_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) {
                     activate::diff_tree_toggled(view);
                     app.modals.diff_tree = view.tree.is_some();
                 }
-                // Ctrl+s flips the diff side by side, or unified;
-                // remembered for the next open, like the tree and width.
+                // Ctrl+s cycles the DIFF LAYOUT — side by side, inline,
+                // replacement — and writes it to Settings → Appearance →
+                // **Diff layout**, so the next open and the next run start
+                // on it.
                 KeyCode::Char('s') if ctrl => {
-                    view.toggle_split();
-                    app.modals.diff_split = view.split;
+                    view.cycle_mode();
+                    let mode = view.mode;
+                    app.modals.diff_mode = mode;
+                    app.modals.diff_mode_configured = true;
+                    let mut cfg = crate::config::Config::load();
+                    cfg.diff_mode = mode.as_str().into();
+                    save_config(app, &cfg);
+                    app.chrome.flash = Some(format!("diff layout: {}", mode.label()));
+                }
+                // Ctrl+o shows the unchanged lines in full, or folds them
+                // back to three each side of a change: **Diff context**.
+                KeyCode::Char('o') if ctrl => {
+                    view.full_context = !view.full_context;
+                    let full = view.full_context;
+                    view.relayout();
+                    view.scroll = view.scroll.min(view.max_scroll());
+                    crate::git_diff::request_aux(view);
+                    let worktree = view.stageable().is_some();
+                    app.modals.diff_full_context = full;
+                    let mut cfg = crate::config::Config::load();
+                    cfg.diff_context = if full { "full" } else { "collapsed" }.into();
+                    save_config(app, &cfg);
+                    app.chrome.flash = Some(
+                        match (full, worktree) {
+                            (true, true) => "unchanged lines: the whole file",
+                            (true, false) => {
+                                "unchanged lines: the whole file, for a working-tree diff"
+                            }
+                            (false, _) => "unchanged lines: folded",
+                        }
+                        .into(),
+                    );
+                }
+                // Ctrl+n / Ctrl+p (and VS Code's F7 / Shift+F7) step to the
+                // next or previous CHANGE in the file.
+                KeyCode::Char('n') if ctrl => diff_step(app, true),
+                KeyCode::Char('p') if ctrl => diff_step(app, false),
+                KeyCode::F(7) => diff_step(app, !shift),
+                // Ctrl+y ACCEPTS the change: stages it. Ctrl+x REJECTS it:
+                // discards it from the worktree, once `y` confirms.
+                KeyCode::Char('y') if ctrl => {
+                    let said = diff_stage(view);
+                    app.chrome.flash = Some(said);
+                }
+                KeyCode::Char('x') if ctrl => {
+                    let said = diff_ask_discard(view);
+                    app.chrome.flash = Some(said);
                 }
                 KeyCode::Down if shift => view.scroll_by(1),
                 KeyCode::Up if shift => view.scroll_by(-1),
@@ -558,6 +616,138 @@ fn handle_diff_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) {
             }
         }
         _ => unreachable!("overlay dispatcher passed the wrong overlay"),
+    }
+}
+
+/// `Ctrl+n` / `Ctrl+p` in the DIFF VIEWER: the next or previous CHANGE of
+/// the file on screen, scrolled near the top and marked in the gutter;
+/// the footer counts where it is (`change 2/5`).
+fn diff_step(app: &mut App, forward: bool) {
+    let Some(Overlay::Diff(view)) = &mut app.modals.overlay else {
+        return;
+    };
+    let total = view.change_count();
+    let said = match view.step_change(forward) {
+        Some(c) => format!("change {}/{total}", c + 1),
+        None if total == 0 => "no changes in this diff".into(),
+        None if forward => format!("last change ({total})"),
+        None => "first change".into(),
+    };
+    app.chrome.flash = Some(said);
+}
+
+/// The CHANGE `Ctrl+y`/`Ctrl+x` act on, with the file it is in — or what
+/// to say instead.
+fn diff_target(
+    view: &crate::app::DiffView,
+) -> Result<(usize, crate::git_diff::DiffFile, crate::diff_layout::Change), String> {
+    let Some(file) = view.stageable().cloned() else {
+        return Err(if view.prefetched.is_some() {
+            "a pull request's diff can't be staged here".into()
+        } else if view.selected_file().is_some_and(|f| f.is_untracked()) {
+            "an untracked file is one change: stage it whole with git add".into()
+        } else {
+            "nothing to stage here: pick a changed file".into()
+        });
+    };
+    let c = view
+        .current_change()
+        .ok_or_else(|| "no change on screen".to_string())?;
+    let change = view
+        .laid
+        .as_ref()
+        .and_then(|l| l.doc.changes.get(c).cloned())
+        .ok_or_else(|| "no change on screen".to_string())?;
+    Ok((c, file, change))
+}
+
+/// ACCEPT (`Ctrl+y`): stage the CHANGE on screen. Its diff against HEAD
+/// does not move — staging is not committing — so the pane marks it
+/// `staged` instead; and once nothing of the file is left unstaged, the
+/// file takes its REVIEWED ✓, accepting every change being reading it.
+fn diff_stage(view: &mut crate::app::DiffView) -> String {
+    let (c, file, change) = match diff_target(view) {
+        Ok(target) => target,
+        Err(said) => return said,
+    };
+    view.change_cursor = Some(c);
+    let total = view.change_count();
+    match crate::git_diff::stage_change(&view.root, &file, &change) {
+        Ok(false) => format!("change {}/{total} is already staged", c + 1),
+        Err(err) => err,
+        Ok(true) => {
+            let rest = crate::git_diff::unstaged_hunks(&view.root, &file);
+            let all_staged = rest.as_ref().is_some_and(Vec::is_empty);
+            view.aux = Some(crate::app::DiffAux {
+                path: file.path.clone(),
+                full: view.aux.take().and_then(|a| a.full),
+                unstaged: rest,
+            });
+            if all_staged && !view.reviewed.contains_key(&file.path) {
+                view.reviewed
+                    .insert(file.path.clone(), crate::review::fingerprint(&view.diff));
+                view.recompute_matches();
+                crate::review::store_marks(&view.root, &view.head_key, &view.reviewed);
+                format!(
+                    "staged change {}/{total}; all of {} staged ✓",
+                    c + 1,
+                    file.path
+                )
+            } else {
+                format!("staged change {}/{total}", c + 1)
+            }
+        }
+    }
+}
+
+/// REJECT (`Ctrl+x`), first press: ask before anything is thrown away.
+fn diff_ask_discard(view: &mut crate::app::DiffView) -> String {
+    match diff_target(view) {
+        Ok((c, file, _)) => {
+            view.change_cursor = Some(c);
+            view.confirm_discard = Some(c);
+            format!(
+                "discard change {}/{} from {}? y/Enter discards · any other key keeps it",
+                c + 1,
+                view.change_count(),
+                file.path
+            )
+        }
+        Err(said) => said
+            .replace("stage", "discard")
+            .replace("staged", "discarded"),
+    }
+}
+
+/// REJECT, confirmed: put the worktree's lines of CHANGE `c` back as HEAD
+/// has them (`git apply -R`), and read the file's diff again.
+fn diff_discard(view: &mut crate::app::DiffView, c: usize) -> String {
+    let (now, file, change) = match diff_target(view) {
+        Ok(target) => target,
+        Err(said) => return said,
+    };
+    // The change asked about is the one discarded, wherever the cursor
+    // has scrolled to since.
+    let change = if now == c {
+        change
+    } else {
+        match view
+            .laid
+            .as_ref()
+            .and_then(|l| l.doc.changes.get(c).cloned())
+        {
+            Some(change) => change,
+            None => return "that change is gone".into(),
+        }
+    };
+    match crate::git_diff::discard_change(&view.root, &file, view.head_ok, &change) {
+        Ok(true) => {
+            view.change_cursor = None;
+            crate::git_diff::load_selected_diff(view);
+            format!("discarded the change from {}", file.path)
+        }
+        Ok(false) => "nothing of that change is left in the worktree".into(),
+        Err(err) => err,
     }
 }
 

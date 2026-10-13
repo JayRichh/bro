@@ -60,7 +60,9 @@ pub(crate) fn ui_state_json(app: &App) -> String {
         issues_collapsed: app.launcher.issues_collapsed,
         diff_files_width: Some(app.modals.diff_files_width),
         diff_tree: app.modals.diff_tree,
-        diff_unified: !app.modals.diff_split,
+        // Still written for an older build sharing the file, which reads
+        // anything but side by side as its unified diff.
+        diff_unified: app.modals.diff_mode != crate::diff_layout::DiffMode::SideBySide,
         launcher_pane_h: app.launcher.launcher_pane_h,
         launcher_pane_w: app.launcher.launcher_pane_w,
         launcher_pane_hidden: app.launcher.launcher_pane_hidden,
@@ -150,7 +152,15 @@ pub(crate) fn restore_ui_state(app: &mut App, json: &str) -> bool {
         app.modals.diff_files_width = w.clamp(crate::app::MIN_DIFF_FILES_W, MAX_RESTORED_WIDTH);
     }
     app.modals.diff_tree = state.diff_tree;
-    app.modals.diff_split = !state.diff_unified;
+    // The layout is a setting now (`diff_mode`); a config that has not
+    // set it yet takes what the old `Ctrl+s` toggle left here.
+    if !app.modals.diff_mode_configured {
+        app.modals.diff_mode = if state.diff_unified {
+            crate::diff_layout::DiffMode::Inline
+        } else {
+            crate::diff_layout::DiffMode::SideBySide
+        };
+    }
     // The next draw re-fits it to the body actually on screen
     // (`launcher::pane_height`); the cap here only keeps a nonsense blob
     // from carrying a wild number around.

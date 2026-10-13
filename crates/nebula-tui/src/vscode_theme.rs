@@ -353,7 +353,36 @@ pub fn derive(data: &ThemeData, light: bool) -> Theme {
         nested_bright: blend(text, bg, 1.15),
         nested_dim: dim,
         link: get(&["textLink.foreground"]).unwrap_or(accent),
+        // VS Code's own diff editor keys; a word's background is drawn
+        // over its line's, as the editor composites them.
+        diff_add_bg: base.diff_add_bg,
+        diff_del_bg: base.diff_del_bg,
+        diff_add_word: base.diff_add_word,
+        diff_del_word: base.diff_del_word,
     };
+    let diff = |line: &str, word: &str, fallback: (Color, Color)| {
+        let l = data
+            .colors
+            .get(line)
+            .and_then(|c| parse_color(c, bg))
+            .unwrap_or(fallback.0);
+        let w = data
+            .colors
+            .get(word)
+            .and_then(|c| parse_color(c, Some(l)))
+            .unwrap_or(fallback.1);
+        (l, w)
+    };
+    (th.diff_add_bg, th.diff_add_word) = diff(
+        "diffEditor.insertedLineBackground",
+        "diffEditor.insertedTextBackground",
+        (blend(ok, bg, 0.16), blend(ok, bg, 0.35)),
+    );
+    (th.diff_del_bg, th.diff_del_word) = diff(
+        "diffEditor.removedLineBackground",
+        "diffEditor.removedTextBackground",
+        (blend(err, bg, 0.16), blend(err, bg, 0.35)),
+    );
     repair(&mut th, &base);
     th
 }

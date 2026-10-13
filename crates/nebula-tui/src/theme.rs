@@ -193,6 +193,15 @@ pub struct Theme {
     pub nested_bright: Color,
     pub nested_dim: Color,
     pub link: Color,
+    /// The DIFF VIEWER's backgrounds, VS Code's way: an added or removed
+    /// line wears a faint wash of the add green or the remove red, and the
+    /// words that changed within it a stronger one — the line says what
+    /// kind of change, the words say where. Truecolor in every preset: the
+    /// 256 palette has no faint shade of either.
+    pub diff_add_bg: Color,
+    pub diff_del_bg: Color,
+    pub diff_add_word: Color,
+    pub diff_del_word: Color,
 }
 
 /// `c` taken `level` of the way from the canvas toward itself: at 0 the
@@ -336,6 +345,10 @@ impl Default for Theme {
             nested_bright: nested::BRIGHT,
             nested_dim: nested::DIM,
             link: nested::LINK,
+            diff_add_bg: Color::Rgb(18, 42, 22),
+            diff_del_bg: Color::Rgb(52, 18, 22),
+            diff_add_word: Color::Rgb(36, 86, 44),
+            diff_del_word: Color::Rgb(104, 34, 42),
         }
     }
 }
@@ -377,6 +390,12 @@ pub const ONE_DARK: Theme = Theme {
     nested_bright: hex("#D7DAE0"),
     nested_dim: hex("#7F848E"),
     link: hex("#61AFEF"),
+    // #98C379 and #E06C75 over #282C34: a sixth for the line, a third
+    // for the words.
+    diff_add_bg: hex("#3A443F"),
+    diff_del_bg: hex("#45363E"),
+    diff_add_word: hex("#4F614C"),
+    diff_del_word: hex("#68424B"),
 };
 
 /// Atom One Light, One Dark's standard counterpart: `#383A42` on
@@ -415,6 +434,11 @@ pub const ONE_LIGHT: Theme = Theme {
     nested_bright: hex("#202227"),
     nested_dim: hex("#8A8C93"),
     link: hex("#4078F2"),
+    // #50A14F and #E45649 over #FAFAFA, the same way.
+    diff_add_bg: hex("#E1EDE0"),
+    diff_del_bg: hex("#F7E1DF"),
+    diff_add_word: hex("#C4DEC3"),
+    diff_del_word: hex("#F3C6C1"),
 };
 
 impl Theme {
@@ -1000,6 +1024,38 @@ mod tests {
             assert_eq!(th.syn_string, th.ok, "{name}");
             assert_eq!(th.syn_comment, th.dim, "{name}");
             assert_eq!(th.syn_number, th.warn, "{name}");
+        }
+    }
+
+    /// The DIFF VIEWER's washes: an added line reads green and a removed
+    /// one red (their strongest channel says so), the changed words stand
+    /// further off the canvas than their line does, and neither wash is
+    /// the canvas itself or the selection fill a row may also wear.
+    #[test]
+    fn diff_washes_are_green_and_red_and_the_words_stand_out() {
+        for name in PRESETS {
+            let th = Theme::by_name(name);
+            let canvas = th.bg.unwrap_or(Color::Rgb(0, 0, 0));
+            let rgb = |c: Color| color_rgb(c).unwrap();
+            for (role, c) in [("add", th.diff_add_bg), ("add word", th.diff_add_word)] {
+                let (r, g, b) = rgb(c);
+                assert!(g > r && g >= b, "{name}: the {role} wash is green");
+            }
+            for (role, c) in [("del", th.diff_del_bg), ("del word", th.diff_del_word)] {
+                let (r, g, b) = rgb(c);
+                assert!(r > g && r >= b, "{name}: the {role} wash is red");
+            }
+            for (line, word) in [
+                (th.diff_add_bg, th.diff_add_word),
+                (th.diff_del_bg, th.diff_del_word),
+            ] {
+                assert!(
+                    contrast(word, canvas) > contrast(line, canvas),
+                    "{name}: the words stand further off the canvas than the line"
+                );
+                assert_ne!(line, canvas, "{name}");
+                assert_ne!(line, th.sel_bg, "{name}");
+            }
         }
     }
 

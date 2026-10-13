@@ -1164,13 +1164,50 @@ pub struct DiffView {
     /// The reader has moved the cursor: what lands from now on leaves it
     /// where they put it (`settle`).
     pub touched: bool,
-    /// Diffs side by side (`Ctrl+s` flips it), remembered across opens.
-    /// A narrow pane falls back to the unified diff.
-    pub split: bool,
-    /// `diff` laid out side by side, while `split` is on and it has hunks.
-    pub split_rows: Option<std::sync::Arc<[crate::git_diff::SplitRow]>>,
-    /// The last draw showed the diff side by side, written back by it.
-    pub split_shown: bool,
+    /// The DIFF LAYOUT (`Ctrl+s` cycles it; Settings → Appearance →
+    /// **Diff layout**): side by side, inline or replacement. A pane too
+    /// narrow for two sides reads side by side as inline.
+    pub mode: crate::diff_layout::DiffMode,
+    /// UNCHANGED CONTEXT shown in full (`Ctrl+o`; **Diff context**): the
+    /// whole file, read for display by [`DiffView::aux`]. Off, the three
+    /// lines git gives each side of a change, the rest folded into the
+    /// `⋯ 42 unchanged lines` a hunk's row says.
+    pub full_context: bool,
+    /// The diff on screen read into hunks and CHANGES and laid out
+    /// ([`LaidDiff`]); None for text with no hunk in it, shown as it is.
+    pub laid: Option<std::sync::Arc<LaidDiff>>,
+    /// The last draw laid the diff out in `mode` itself rather than the
+    /// inline fallback a narrow pane takes, written back by it.
+    pub wide_shown: bool,
+    /// What is read beside the diff of the file on screen: its whole-file
+    /// text for FULL CONTEXT, and what of it is still unstaged.
+    pub aux: Option<DiffAux>,
+    /// The CHANGE `Ctrl+n`/`Ctrl+p` last stepped to — what `Ctrl+y` and
+    /// `Ctrl+x` act on while it is on screen, marked in the gutter.
+    pub change_cursor: Option<usize>,
+    /// `Ctrl+x` asked to discard this CHANGE from the worktree, and the
+    /// pane is waiting on `y`/`Enter` to do it; any other key keeps it.
+    pub confirm_discard: Option<usize>,
+}
+
+/// A diff read and laid out: the document, its rows in the view's DIFF
+/// LAYOUT, and — side by side being that layout — its inline rows too,
+/// for a pane too narrow for two sides.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LaidDiff {
+    pub doc: crate::diff_layout::DiffDoc,
+    pub rows: Vec<crate::diff_layout::LaidRow>,
+    pub inline: Option<Vec<crate::diff_layout::LaidRow>>,
+}
+
+/// What [`DiffView::aux`] holds for one file: its FULL CONTEXT diff, and
+/// the zero-context hunks of it still unstaged — the STAGED badge a
+/// CHANGE none of them covers wears. Either may be unknown.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DiffAux {
+    pub path: String,
+    pub full: Option<String>,
+    pub unstaged: Option<Vec<crate::diff_layout::RawHunk>>,
 }
 
 /// The most diff text a DIFF VIEWER keeps beyond the one on screen. Two
@@ -1182,6 +1219,9 @@ pub const DIFF_CACHE_ENTRY_MAX: usize = 512 * 1024;
 /// Narrower diff panes show the unified diff: two numbered sides below
 /// this width are too clipped to read.
 pub const MIN_SPLIT_W: u16 = 90;
+/// Rows of what leads into a CHANGE kept above it when `Ctrl+n`/`Ctrl+p`
+/// scroll to it.
+pub const CHANGE_LEAD: usize = 3;
 
 /// Where the DIFF VIEWER's cursor is in its SOURCE CONTROL sidebar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1360,35 +1400,160 @@ impl DiffView {
     pub fn show_diff(&mut self, path: Option<&str>, diff: String, keep_scroll: bool) {
         self.diff_line_count = diff.lines().count();
         self.diff = diff;
+        let moved = self.shown.as_deref() != path;
         self.shown = path.map(str::to_string);
-        self.refresh_split();
+        if moved {
+            self.change_cursor = None;
+            self.confirm_discard = None;
+            if self.aux.as_ref().map(|a| a.path.as_str()) != path {
+                self.aux = None;
+            }
+        }
+        self.relayout();
         if !keep_scroll {
             self.scroll = 0;
         }
     }
 
-    /// Lay `diff` out side by side again, if `split` wants it.
-    fn refresh_split(&mut self) {
-        self.split_rows = if self.split {
-            crate::git_diff::split_rows(&self.diff).map(Into::into)
-        } else {
-            None
+    /// Read the diff on screen into hunks and changes and lay it out
+    /// again: after new text, a new DIFF LAYOUT, FULL CONTEXT turned on or
+    /// off, or the full-context text landing.
+    pub fn relayout(&mut self) {
+        use crate::diff_layout::{layout, DiffDoc, DiffMode};
+        let path = self.shown.clone().unwrap_or_default();
+        let full = self
+            .full_context
+            .then_some(self.aux.as_ref())
+            .flatten()
+            .filter(|a| a.path == path)
+            .and_then(|a| a.full.as_deref());
+        let doc = match full {
+            Some(text) => DiffDoc::parse(text, &path, true),
+            None => DiffDoc::parse(&self.diff, &path, false),
         };
+        self.laid = doc.map(|doc| {
+            let rows = layout(&doc, self.mode);
+            let inline =
+                (self.mode == DiffMode::SideBySide).then(|| layout(&doc, DiffMode::Inline));
+            std::sync::Arc::new(LaidDiff { doc, rows, inline })
+        });
     }
 
-    /// `Ctrl+s`: side by side, or unified.
-    pub fn toggle_split(&mut self) {
-        self.split = !self.split;
-        self.refresh_split();
+    /// `Ctrl+s`: the next DIFF LAYOUT.
+    pub fn cycle_mode(&mut self) {
+        self.set_mode(self.mode.next());
+    }
+
+    pub fn set_mode(&mut self, mode: crate::diff_layout::DiffMode) {
+        if self.mode != mode {
+            self.mode = mode;
+            self.relayout();
+            self.scroll = 0;
+        }
     }
 
     /// The rows the diff pane scrolls over, in the layout the last draw
-    /// used.
+    /// used: the laid-out diff's, the inline fallback's for a pane too
+    /// narrow for two sides, or the raw text's lines.
     pub fn shown_rows(&self) -> usize {
-        match &self.split_rows {
-            Some(rows) if self.split_shown => rows.len(),
-            _ => self.diff_line_count,
+        self.layout_rows().map_or(self.diff_line_count, <[_]>::len)
+    }
+
+    /// The laid-out rows the last draw showed, if the diff is laid out.
+    pub fn layout_rows(&self) -> Option<&[crate::diff_layout::LaidRow]> {
+        let laid = self.laid.as_deref()?;
+        Some(match &laid.inline {
+            Some(inline) if !self.wide_shown => inline,
+            _ => &laid.rows,
+        })
+    }
+
+    /// Does this pane read a working-tree file whose changes can be
+    /// staged and discarded? Not a pull request's diff, a commit's, an
+    /// untracked file, nor one cut short at [`crate::git_diff::MAX_DIFF_LINES`].
+    pub fn stageable(&self) -> Option<&DiffFile> {
+        if self.prefetched.is_some() || self.place != Place::Changes {
+            return None;
         }
+        let file = self.selected_file()?;
+        (!file.is_untracked()
+            && self.shown.as_deref() == Some(file.path.as_str())
+            && !self.diff.ends_with(crate::git_diff::TRUNCATED_MARK))
+        .then_some(file)
+    }
+
+    /// The CHANGE `Ctrl+y` and `Ctrl+x` act on: the one `Ctrl+n`/`Ctrl+p`
+    /// last stepped to while it is on screen, else the first one that
+    /// starts on screen, else the one the top row is in.
+    pub fn current_change(&self) -> Option<usize> {
+        let rows = self.layout_rows()?;
+        let top = self.scroll as usize;
+        let bottom = top + self.view_height.max(1) as usize;
+        let starts = crate::diff_layout::change_starts(rows);
+        if let Some(c) = self.change_cursor {
+            let on_screen = rows
+                .iter()
+                .enumerate()
+                .skip(top)
+                .take(bottom - top)
+                .any(|(_, r)| r.change == Some(c));
+            if on_screen {
+                return Some(c);
+            }
+        }
+        starts
+            .iter()
+            .find(|&&s| (top..bottom).contains(&s))
+            .and_then(|&s| rows[s].change)
+            .or_else(|| rows.get(top).and_then(|r| r.change))
+    }
+
+    /// `Ctrl+n` / `Ctrl+p`: step to the next or previous CHANGE and scroll
+    /// it near the top, a few rows of what leads into it above. Returns
+    /// the change landed on; None at the end of the file's changes.
+    pub fn step_change(&mut self, forward: bool) -> Option<usize> {
+        let rows = self.layout_rows()?;
+        let starts = crate::diff_layout::change_starts(rows);
+        let changes: Vec<usize> = starts.iter().filter_map(|&s| rows[s].change).collect();
+        let at = match self.change_cursor {
+            Some(c) => changes.iter().position(|&x| x == c),
+            None => None,
+        };
+        let next = match (at, forward) {
+            (Some(i), true) => i + 1,
+            (Some(0), false) => return None,
+            (Some(i), false) => i - 1,
+            // No change stepped to yet: the first one below the top row,
+            // or the last one above it.
+            (None, true) => starts.iter().position(|&s| s >= self.scroll as usize)?,
+            (None, false) => starts.iter().rposition(|&s| s < self.scroll as usize)?,
+        };
+        let (&start, &change) = (starts.get(next)?, changes.get(next)?);
+        self.change_cursor = Some(change);
+        self.scroll = (start.saturating_sub(CHANGE_LEAD) as u16).min(self.max_scroll());
+        Some(change)
+    }
+
+    /// How many changes the diff on screen has, for the `change 2/5` the
+    /// pane says.
+    pub fn change_count(&self) -> usize {
+        self.laid.as_ref().map_or(0, |l| l.doc.changes.len())
+    }
+
+    /// Is CHANGE `c` staged in full: known unstaged hunks, none of which
+    /// covers it? None while that is not known.
+    pub fn change_staged(&self, c: usize) -> Option<bool> {
+        let aux = self.aux.as_ref()?;
+        if Some(aux.path.as_str()) != self.shown.as_deref() {
+            return None;
+        }
+        let unstaged = aux.unstaged.as_ref()?;
+        let change = self.laid.as_ref()?.doc.changes.get(c)?;
+        Some(
+            !unstaged
+                .iter()
+                .any(|h| crate::diff_layout::covers(h, change)),
+        )
     }
 
     pub fn new(root: PathBuf, branch: String, files: Vec<DiffFile>, head_ok: bool) -> Self {
@@ -1424,9 +1589,13 @@ impl DiffView {
             changes_open: true,
             graph_open: true,
             touched: false,
-            split: true,
-            split_rows: None,
-            split_shown: false,
+            mode: crate::diff_layout::DiffMode::default(),
+            full_context: false,
+            laid: None,
+            wide_shown: true,
+            aux: None,
+            change_cursor: None,
+            confirm_discard: None,
         };
         view.apply_filter();
         view
@@ -3951,9 +4120,15 @@ pub struct ModalState {
     /// The diff modal lists its files as a directory tree (`Ctrl+t` inside
     /// it), remembered across opens and launches like the width.
     pub diff_tree: bool,
-    /// The diff modal shows diffs side by side (`Ctrl+s` inside it),
-    /// remembered the same way.
-    pub diff_split: bool,
+    /// The DIFF LAYOUT every diff modal opens in: Settings → Appearance →
+    /// **Diff layout** (`diff_mode`), which `Ctrl+s` inside one cycles.
+    pub diff_mode: crate::diff_layout::DiffMode,
+    /// `diff_mode` came from the config file, which outranks the
+    /// side-by-side flag older builds kept in state.json.
+    pub diff_mode_configured: bool,
+    /// UNCHANGED CONTEXT in full: **Diff context** (`diff_context`),
+    /// which `Ctrl+o` inside a diff modal flips.
+    pub diff_full_context: bool,
     /// Selected tab of the settings modal, remembered across opens.
     pub settings_tab: usize,
     /// Cursor row of the settings modal, one per tab, remembered across
@@ -3995,7 +4170,9 @@ impl Default for ModalState {
             follow_up: None,
             diff_files_width: DEFAULT_DIFF_FILES_W,
             diff_tree: false,
-            diff_split: true,
+            diff_mode: crate::diff_layout::DiffMode::SideBySide,
+            diff_mode_configured: false,
+            diff_full_context: false,
             settings_tab: 0,
             settings_selected: vec![0; crate::config::tab_count()],
             settings_on_tabs: true,

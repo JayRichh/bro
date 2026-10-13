@@ -421,6 +421,11 @@ pub(crate) fn apply_config(app: &mut App, cfg: &crate::config::Config) {
     app.chrome.theme = app.chrome.live_theme.resolve(&cfg.theme);
     app.chrome.animations = cfg.animations;
     app.chrome.black_background = cfg.black_background;
+    if let Some(mode) = cfg.diff_mode() {
+        app.modals.diff_mode = mode;
+    }
+    app.modals.diff_mode_configured = cfg.diff_mode().is_some();
+    app.modals.diff_full_context = cfg.diff_context_word() == "full";
     app.launcher.card_issue_number = cfg.card_issue_number;
     app.launcher.show_all_worktrees = cfg.show_all_worktrees;
     app.launcher.auto_cleanup_merged = cfg.auto_cleanup_merged;
