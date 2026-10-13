@@ -1273,7 +1273,7 @@ pub async fn ado_start_task(
         repo: row.path,
         remote_name: ctx.remote_name.clone(),
     };
-    Ok(start_task(&ctx, &ws, req).await?)
+    start_task(&ctx, &ws, req).await
 }
 
 // ---- HTML to markdown ----
