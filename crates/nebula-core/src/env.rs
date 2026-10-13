@@ -64,6 +64,9 @@ pub const CLAUDE_CONFIG_DIR: &str = "CLAUDE_CONFIG_DIR";
 /// Codex's own override of its home (`~/.codex`), where nebula installs
 /// its hooks.
 pub const CODEX_HOME: &str = "CODEX_HOME";
+/// GitHub Copilot CLI's own override of its home (`~/.copilot`), where
+/// nebula installs its hooks file.
+pub const COPILOT_HOME: &str = "COPILOT_HOME";
 
 /// Windows only: the shell plain terminals and RUN TERMINALs use, ahead of
 /// the pwsh → powershell → `%COMSPEC%` search (`shell::user_shell`).

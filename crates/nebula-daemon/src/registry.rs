@@ -1515,6 +1515,44 @@ mod tests {
     }
 
     #[test]
+    fn copilot_spawn_rides_its_prompt_on_dash_i_and_resumes_by_flag() {
+        let copilot = nebula_core::harness::builtin("copilot").unwrap();
+        assert_eq!(
+            agent_spawn_command_with(&copilot, None, None, None, None, None, None, None, false),
+            ("copilot".into(), vec![], false)
+        );
+        // Its positional is a subcommand: a trailing prompt would be read
+        // as one, so the first turn rides `-i`.
+        let (program, args, resumed) = agent_spawn_command_with(
+            &copilot,
+            Some("7ca4e4d4-9b63-4d30-ab86-7bd455ab60c0"),
+            Some(Path::new(TEST_CWD)),
+            Some("auto"),
+            Some("high"),
+            None,
+            Some("fix the bug; keep this as one argument"),
+            None,
+            false,
+        );
+        assert_eq!(program, "copilot");
+        assert!(resumed);
+        assert_eq!(
+            args,
+            vec![
+                "--resume",
+                "7ca4e4d4-9b63-4d30-ab86-7bd455ab60c0",
+                "--model",
+                "auto",
+                "--reasoning-effort",
+                "high",
+                "-i",
+                "fix the bug; keep this as one argument",
+            ]
+        );
+        assert_eq!(copilot.hook_dialect(), Some(AgentKind::Copilot));
+    }
+
+    #[test]
     fn spawn_command_initial_prompt_is_the_trailing_positional_argument() {
         let all = test_registry();
         let claude = test_harness(&all, AgentKind::Claude);

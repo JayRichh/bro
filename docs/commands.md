@@ -69,7 +69,7 @@ bro worktree [name] [--base <ref>]  # move the current session into a worktree o
                           # a branch name meaning origin's fetched copy — main is origin/main —
                           # but is ignored when the branch already exists; without it the
                           # worktree_base_branch setting applies, else origin's default)
-bro spawn <task> [--kind <claude|codex|cursor|pi|muse|grok|opencode>] [--worktree <branch> [--base <ref>]]
+bro spawn <task> [--kind <claude|codex|cursor|pi|muse|grok|opencode|copilot>] [--worktree <branch> [--base <ref>]]
                           # start a new agent session beside the current one, in the same worktree,
                           # opening on <task> (agents run this when you ask for a new bro session;
                           # --kind defaults to this session's harness; custom harnesses launch from

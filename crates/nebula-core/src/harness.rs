@@ -1,6 +1,6 @@
 //! The harness registry: one behavior descriptor per agent CLI.
 //!
-//! The seven known harnesses ship as a compiled-in table ([`builtin`]);
+//! The eight known harnesses ship as a compiled-in table ([`builtin`]);
 //! the user's config adds a `harnesses` map of [`HarnessOverride`]s over
 //! it — disable one, repoint a program, rename a flag, or define a whole
 //! new CLI — and [`registry`] merges the two (plus the legacy
@@ -280,6 +280,7 @@ impl HarnessDescriptor {
             Some("cursor") => Some(crate::AgentKind::Cursor),
             Some("pi") => Some(crate::AgentKind::Pi),
             Some("opencode") => Some(crate::AgentKind::OpenCode),
+            Some("copilot") => Some(crate::AgentKind::Copilot),
             _ => None,
         }
     }
@@ -339,10 +340,10 @@ impl HarnessDescriptor {
         }
         if let Some(dialect) = self.hooks.as_deref().map(str::trim) {
             match dialect {
-                "claude" | "codex" | "cursor" | "pi" | "opencode" => {}
+                "claude" | "codex" | "cursor" | "pi" | "opencode" | "copilot" => {}
                 _ => {
                     return Some(format!(
-                        "harness `{}` hooks `{dialect}`: name a built-in dialect (claude, codex, cursor, pi, opencode)",
+                        "harness `{}` hooks `{dialect}`: name a built-in dialect (claude, codex, cursor, pi, opencode, copilot)",
                         self.id.trim()
                     ));
                 }
@@ -565,6 +566,44 @@ pub fn builtin(id: &str) -> Option<HarnessDescriptor> {
                 ..ResumeSpec::default()
             },
             hooks: Some("opencode".into()),
+            ..base
+        },
+        // GitHub Copilot CLI (verified on 1.0.96). Its positional is a
+        // subcommand (`copilot login`, `copilot sessions`), so a first
+        // prompt rides `-i` ("start interactive mode and run this prompt").
+        // `--model auto` lets Copilot route; any other id the account has
+        // passes verbatim. No system-prompt flag: a launch rule opens the
+        // first prompt, as on Codex. No permission flag either: its
+        // `permissionRequest` hook drives NEEDS FEEDBACK (`--yolo` is one
+        // `permissions_flag` override away, and with it the hook fires for
+        // every tool, approved or not). Hooks are its own camelCase dialect
+        // in `$COPILOT_HOME/hooks/`, Claude-shaped payloads under other
+        // names (`sessionId`, `toolName`), so it reports like Claude does.
+        "copilot" => HarnessDescriptor {
+            label: "Copilot".into(),
+            program: "copilot".into(),
+            model: ModelSpec {
+                flag: Some("--model".into()),
+                default: default_model_choice(),
+                models: models(&["auto"]),
+                catalog: None,
+            },
+            effort: EffortSpec {
+                flag: Some("--reasoning-effort".into()),
+                default: default_model_choice(),
+                efforts: ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
+                offered: true,
+                ..EffortSpec::default()
+            },
+            prompt_flag: Some("-i".into()),
+            resume: ResumeSpec {
+                flag: Some("--resume".into()),
+                ..ResumeSpec::default()
+            },
+            hooks: Some("copilot".into()),
             ..base
         },
         _ => return None,
@@ -975,7 +1014,7 @@ mod tests {
     #[test]
     fn builtins_cover_every_builtin_kind() {
         let all = builtins();
-        assert_eq!(all.len(), 7);
+        assert_eq!(all.len(), 8);
         for kind in AgentKind::ALL {
             if kind == AgentKind::Custom {
                 continue;
@@ -1020,6 +1059,22 @@ mod tests {
         assert!(!opencode.effort.offered, "no effort flag, no Effort row");
         assert!(!opencode.relocation_prompt);
         assert!(!opencode.claude_like());
+        let copilot = builtin("copilot").unwrap();
+        assert_eq!(copilot.program, "copilot");
+        assert_eq!(
+            copilot.prompt_flag.as_deref(),
+            Some("-i"),
+            "its positional is a subcommand"
+        );
+        assert_eq!(copilot.resume.flag.as_deref(), Some("--resume"));
+        assert_eq!(copilot.effort.flag.as_deref(), Some("--reasoning-effort"));
+        assert_eq!(copilot.hook_dialect(), Some(AgentKind::Copilot));
+        assert_eq!(
+            copilot.permissions_flag, None,
+            "its permission hook drives red"
+        );
+        assert_eq!(copilot.system_append_flag(), None);
+        assert!(!copilot.claude_like());
     }
 
     #[test]
@@ -1079,13 +1134,16 @@ mod tests {
         let ids: Vec<&str> = all.iter().map(|entry| entry.id.as_str()).collect();
         assert_eq!(
             ids,
-            vec!["claude", "codex", "cursor", "pi", "muse", "grok", "opencode", "zed", "agy"]
+            vec![
+                "claude", "codex", "cursor", "pi", "muse", "grok", "opencode", "copilot", "zed",
+                "agy"
+            ]
         );
         assert!(!all[0].enabled, "the claude override applied");
-        assert_eq!(all[7].program, "agy", "legacy entry converts");
-        assert_eq!(all[8].program, "agy", "map-only entry resolves");
+        assert_eq!(all[8].program, "agy", "legacy entry converts");
+        assert_eq!(all[9].program, "agy", "map-only entry resolves");
         assert!(
-            !all[8].effort.offered,
+            !all[9].effort.offered,
             "a bare program stays Model-only like a legacy custom"
         );
     }
@@ -1148,7 +1206,7 @@ mod tests {
         broken.program = "  ".into();
         let all = registry(&BTreeMap::new(), &[broken]);
         assert!(resolve(&all, AgentKind::Custom, Some("broken")).is_err());
-        assert_eq!(usable(&all).len(), 7, "the broken entry is hidden");
+        assert_eq!(usable(&all).len(), 8, "the broken entry is hidden");
     }
 
     #[test]
@@ -1159,6 +1217,7 @@ mod tests {
         assert!(custom("muse").problem().is_some());
         assert!(custom("grok").problem().is_some());
         assert!(custom("opencode").problem().is_some());
+        assert!(custom("copilot").problem().is_some());
         let claude_hooks = CustomHarness {
             hooks: Some("claude".into()),
             ..custom("agy")

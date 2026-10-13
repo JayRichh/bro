@@ -5,7 +5,7 @@
 **Sweet as agent management.**
 
 Mission control for your coding agents, native on Windows. Run **Claude Code**, **Codex**, **Cursor**,
-**Pi**, **Muse**, **Grok Build** and **OpenCode** across every project and git worktree you own, from one
+**Pi**, **Muse**, **Grok Build**, **OpenCode** and **Copilot** across every project and git worktree you own, from one
 terminal, one keyboard, one grid. They keep working when you close it.
 
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
@@ -65,6 +65,7 @@ anything.
 | [Muse](https://developer.meta.com/ai/lp/muse-code) | `muse` |
 | [OpenCode](https://opencode.ai/docs/) | `opencode` |
 | [Grok Build](https://github.com/xai-org/grok-build) | `grok` |
+| [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli) | `copilot` |
 
 Install the CLI, pick it in the quick prompt's `Tab` picker, done. More can be added from
 `config.json`; see [Configuration](docs/configuration.md).

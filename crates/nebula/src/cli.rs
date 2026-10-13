@@ -178,7 +178,7 @@ pub(crate) enum Command {
         #[arg(required = true, num_args = 1..)]
         task: Vec<String>,
         /// Harness for the new session: claude, codex, cursor, pi, muse,
-        /// grok or opencode.
+        /// grok, opencode or copilot.
         ///
         /// Defaults to the harness this session is running.
         #[arg(long, value_name = "KIND", value_parser = parse_agent_kind)]
@@ -408,7 +408,7 @@ pub(crate) enum Command {
     /// does. Inert outside a bro agent session; always exits 0.
     #[command(hide = true, name = "_hook")]
     Hook {
-        /// The receiver route: claude, codex, cursor, pi or opencode.
+        /// The receiver route: claude, codex, cursor, pi, opencode or copilot.
         endpoint: String,
         /// The hook event, as the daemon names it (`Stop`, …).
         event: String,

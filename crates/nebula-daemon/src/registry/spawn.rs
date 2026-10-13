@@ -441,6 +441,11 @@ impl Daemon {
             Some(AgentKind::OpenCode) => {
                 hooks::opencode_plugin::install(&hooks::opencode_plugin::opencode_config_dir())
             }
+            // Copilot loads every file in its home's `hooks/` dir, trust
+            // dialog or not: one managed file there serves every worktree.
+            Some(AgentKind::Copilot) => {
+                hooks::installer::install_copilot_hooks(&hooks::installer::copilot_home())
+            }
             _ => Ok(()),
         };
         if let Err(e) = install_result {

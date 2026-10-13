@@ -21,9 +21,12 @@ const TIMEOUT: Duration = Duration::from_secs(3);
 
 pub fn run_hook(endpoint: &str, event: &str) -> anyhow::Result<()> {
     let cursor = endpoint == "cursor";
+    // Copilot's route answers with diagnostics only, and Copilot has no
+    // use for a hook's stdout on these events: keep it empty.
+    let silent = cursor || endpoint == "copilot";
     let reply = post(endpoint, event);
     let mut out = std::io::stdout().lock();
-    if event == "UserPromptSubmit" && !cursor {
+    if event == "UserPromptSubmit" && !silent {
         if let Some(body) = reply {
             let _ = out.write_all(body.as_bytes());
         }
