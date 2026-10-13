@@ -263,10 +263,12 @@ async fn diff_pair(
 }
 
 /// A range diff pinned to SHAs: `base` is the merge-base, not the target.
+/// `offline` means a fetch failed and cached refs were used.
 #[derive(Serialize)]
 struct RangeDiff {
     base: String,
     tip: String,
+    offline: bool,
     files: Vec<git::DiffFile>,
 }
 
@@ -279,11 +281,14 @@ async fn diff_range(
 ) -> Res<RangeDiff> {
     let root = worktree_path(&client, &worktree)?;
     tauri::async_runtime::spawn_blocking(move || {
-        git::ensure_refs(&root, &[&base, &tip])?;
-        let tip = git::resolve_commit(&root, &git::commit_name(&root, &tip)?)?;
-        let base = git::merge_base(&root, &git::commit_name(&root, &base)?, &tip)?;
-        let files = git::diff_files_range(&root, &base, &tip)?;
-        Ok(RangeDiff { base, tip, files })
+        let refs = git::prepare_range(&root, &base, &tip)?;
+        let files = git::diff_files_between(&root, &refs.base, &refs.tip)?;
+        Ok(RangeDiff {
+            base: refs.base,
+            tip: refs.tip,
+            offline: refs.offline,
+            files,
+        })
     })
     .await
     .map_err(err)?
