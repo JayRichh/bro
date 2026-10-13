@@ -14,7 +14,7 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const INSTALL_URL: &str = "https://raw.githubusercontent.com/JayRichh/bro/main/install.sh";
+const INSTALL_URL: &str = "https://raw.githubusercontent.com/JayRichh/kete/main/install.sh";
 
 /// The published install script, with `NEBULA_INSTALL_URL` as the override
 /// hook (tests point it at a file:// URL). Shared with `nebula ssh`.
@@ -27,11 +27,11 @@ pub(crate) fn install_url() -> String {
 /// the only way onto the new code is a restart, and a restart takes the
 /// sessions.
 pub(crate) const KILL_HINT: &str =
-    "      run 'bro kill' to restart onto the new binary (stops all sessions).";
+    "      run 'kete kill' to restart onto the new binary (stops all sessions).";
 
 /// Printed for a stale daemon that can move onto the new binary in place.
 pub(crate) const RELOAD_HINT: &str =
-    "      run 'bro reload' to move it onto the new binary (sessions keep running).";
+    "      run 'kete reload' to move it onto the new binary (sessions keep running).";
 
 /// `nebula reload`: restart the daemon in place onto the binary this
 /// command runs from.
@@ -40,11 +40,11 @@ pub fn run_reload() -> Result<()> {
     let exe = std::env::current_exe().context("resolve current_exe")?;
     match request_restart(&exe)? {
         Restart::NoDaemon => {
-            println!("no bro daemon running — the next launch starts this binary");
+            println!("no kete daemon running, the next launch starts this binary");
         }
         Restart::Unsupported => bail!(
             "the running daemon predates in-place restarts, so it can't move onto this \
-             binary with its sessions.\nRun 'bro kill' to restart it (stops all sessions)."
+             binary with its sessions.\nRun 'kete kill' to restart it (stops all sessions)."
         ),
         Restart::Restarted { sessions } => println!("{}", restarted_note(sessions)),
     }
@@ -54,14 +54,17 @@ pub fn run_reload() -> Result<()> {
 fn restarted_note(sessions: usize) -> String {
     let plural = if sessions == 1 { "" } else { "s" };
     format!(
-        "the daemon now runs the new binary — {sessions} live session{plural} kept running.\n\
-         relaunch bro to pick them back up."
+        "the daemon now runs the new binary: {sessions} live session{plural} kept running.\n\
+         relaunch kete to pick them back up."
     )
 }
 
 pub fn run_upgrade(force: bool) -> Result<()> {
     if cfg!(windows) {
-        bail!("`bro upgrade` is not supported on Windows yet");
+        bail!(
+            "`kete upgrade` is not supported on Windows yet. To update, run the installer \
+             again: irm https://raw.githubusercontent.com/JayRichh/kete/main/install.ps1 | iex"
+        );
     }
     let url = install_url();
     // The runtime dir is already the 0700 auth boundary; staging the script
@@ -90,7 +93,7 @@ fn finish_daemon_handoff() {
         Ok(IdleShutdown::NoDaemon) => {}
         Ok(IdleShutdown::ShutDown) => {
             println!(
-                "old daemon had no live sessions — shut it down; \
+                "old daemon had no live sessions: shut it down; \
                  the new binary starts on the next launch"
             );
         }
@@ -147,7 +150,7 @@ fn restart_onto_installed() -> bool {
 #[cfg(windows)]
 fn nebula_on_path(path: &OsStr) -> Option<PathBuf> {
     let pathext = nebula_core::env::non_empty("PATHEXT").unwrap_or_else(|| ".EXE".into());
-    nebula_core::shell::resolve_program_in("bro", path, &pathext)
+    nebula_core::shell::resolve_program_in("kete", path, &pathext)
 }
 
 /// The first executable `nebula` on `path` — the one the user runs next.
@@ -155,7 +158,7 @@ fn nebula_on_path(path: &OsStr) -> Option<PathBuf> {
 fn nebula_on_path(path: &OsStr) -> Option<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
     std::env::split_paths(path)
-        .map(|dir| dir.join("bro"))
+        .map(|dir| dir.join("kete"))
         .find(|p| {
             p.metadata()
                 .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
@@ -166,7 +169,7 @@ fn nebula_on_path(path: &OsStr) -> Option<PathBuf> {
 fn protocol_change_note(installed: u32) -> String {
     format!(
         "      the new build speaks protocol v{installed} and the daemon v{PROTOCOL_VERSION}, \
-         so `bro` won't open until the daemon restarts."
+         so `kete` won't open until the daemon restarts."
     )
 }
 
@@ -278,7 +281,7 @@ fn stage_script(url: &str, dir: &Path) -> Result<PathBuf> {
         .args(["-fsSL", url, "-o"])
         .arg(&path)
         .output()
-        .context("run curl — is it installed?")?;
+        .context("run curl: is it installed?")?;
     if !output.status.success() {
         let _ = std::fs::remove_file(&path);
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -406,7 +409,7 @@ mod tests {
     #[cfg(unix)]
     fn fake_nebula(dir: &Path, body: &str) {
         use std::os::unix::fs::PermissionsExt;
-        let exe = dir.join("bro");
+        let exe = dir.join("kete");
         std::fs::write(&exe, body).unwrap();
         std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
     }

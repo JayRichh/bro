@@ -40,10 +40,10 @@ use tokio::sync::mpsc;
 /// carries it uses: the UserPromptSubmit context injection (claude/codex)
 /// and cursor's always-on project rule. Repeats on every prompt until a
 /// title sticks, so it has to read sanely on a session that already has one.
-pub const AUTO_TITLE_INSTRUCTION: &str = "[bro] Before addressing the \
-user's request, run this shell command exactly once:\n\n  bro rename \
+pub const AUTO_TITLE_INSTRUCTION: &str = "[kete] Before addressing the \
+user's request, run this shell command exactly once:\n\n  kete rename \
 <title>\n\nReplace <title> with 3-4 Title Case words describing the user's \
-request, unquoted (example: bro rename Fix Login Redirect). If it reports \
+request, unquoted (example: kete rename Fix Login Redirect). If it reports \
 the session is already titled, accept that and move on. Then continue with \
 the request. Don't mention the rename to the user.";
 
@@ -693,7 +693,7 @@ mod tests {
         // reads as the documented equivalent of bare text.
         assert_eq!(body, auto_title_injection());
         assert!(body.contains("hookSpecificOutput"), "envelope: {body}");
-        assert!(body.contains("bro rename"), "instruction: {body}");
+        assert!(body.contains("kete rename"), "instruction: {body}");
         let delivery = rx.recv().await.unwrap();
         assert_eq!(delivery.agent_id.as_str(), "pending");
         assert_eq!(delivery.event, HookEvent::UserPromptSubmit);
@@ -839,7 +839,7 @@ mod tests {
         for body in [
             r#"{"session_id":"s1","prompt":"   "}"#,
             r#"{"session_id":"s1"}"#,
-            r#"{"session_id":"s1","prompt":"[bro] This session now runs inside a worktree"}"#,
+            r#"{"session_id":"s1","prompt":"[kete] This session now runs inside a worktree"}"#,
         ] {
             post("UserPromptSubmit", body).await;
             let delivery = rx.recv().await.unwrap();

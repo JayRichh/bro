@@ -48,9 +48,9 @@ const POLL_INTERVAL: Duration = Duration::from_millis(50);
 const FONT_SIZE: u16 = 13;
 
 const MISSING_TTYD: &str = "\
-bro browser needs ttyd, and it is not on your PATH.
+kete browser needs ttyd, and it is not on your PATH.
 
-ttyd serves a command's terminal over HTTP; `bro browser` points it at this
+ttyd serves a command's terminal over HTTP; `kete browser` points it at this
 binary so the TUI renders in a browser tab. Install it, then try again:
 
   macOS          brew install ttyd
@@ -88,7 +88,7 @@ impl Default for BrowserOpts {
 pub fn run_browser(opts: BrowserOpts) -> Result<()> {
     // ttyd has no Windows build that can host a ConPTY client like this.
     if cfg!(windows) {
-        anyhow::bail!("`bro browser` is not supported on Windows yet");
+        anyhow::bail!("`kete browser` is not supported on Windows yet");
     }
     let port = resolve_port(opts.port, opts.bind)?;
     warn_if_exposed(&opts);
@@ -97,12 +97,12 @@ pub fn run_browser(opts: BrowserOpts) -> Result<()> {
 
     let url = url_for(reachable_addr(opts.bind), port);
     if opts.open && open_url(&url) {
-        println!("bro browser: serving on {url}");
+        println!("kete browser: serving on {url}");
     } else {
-        println!("bro browser: serving on {url} (open it yourself — no browser launched)");
+        println!("kete browser: serving on {url} (open it yourself, no browser launched)");
     }
     if opts.bind.is_unspecified() {
-        println!("bro browser: reachable on every interface of this host at port {port}.");
+        println!("kete browser: reachable on every interface of this host at port {port}.");
     }
     println!("Ctrl+C to stop.");
 
@@ -139,9 +139,9 @@ fn warn_if_exposed(opts: &BrowserOpts) {
     if opts.bind.is_loopback() {
         return;
     }
-    eprintln!("bro browser: WARNING — binding {} serves a live, writable terminal on this machine to the network.", opts.bind);
+    eprintln!("kete browser: WARNING: binding {} serves a live, writable terminal on this machine to the network.", opts.bind);
     if opts.credential.is_none() {
-        eprintln!("bro browser: there is no password on it. Restrict the port (firewall, security group, VPN) or pass --credential USER:PASSWORD.");
+        eprintln!("kete browser: there is no password on it. Restrict the port (firewall, security group, VPN) or pass --credential USER:PASSWORD.");
     }
 }
 
@@ -170,7 +170,7 @@ fn resolve_port(requested: Option<u16>, bind: IpAddr) -> Result<u16> {
         None if probe(DEFAULT_PORT, bind).is_ok() => Ok(DEFAULT_PORT),
         None => {
             let port = free_port(bind)?;
-            println!("bro browser: {DEFAULT_PORT} is busy — serving on {port} instead");
+            println!("kete browser: {DEFAULT_PORT} is busy: serving on {port} instead");
             Ok(port)
         }
     }
@@ -265,7 +265,7 @@ fn ttyd_args(port: u16, opts: &BrowserOpts) -> Vec<String> {
 fn nebula_exe() -> OsString {
     std::env::current_exe()
         .map(OsString::from)
-        .unwrap_or_else(|_| "bro".into())
+        .unwrap_or_else(|_| "kete".into())
 }
 
 /// Block until the address accepts a connection, so the browser never opens
@@ -276,7 +276,7 @@ fn wait_until_serving(child: &mut Child, addr: SocketAddr) -> Result<()> {
         // A ttyd that already exited will never bind. The usual cause is the
         // port being taken, and it has printed the reason itself.
         if let Some(status) = child.try_wait().context("failed to poll ttyd")? {
-            bail!("ttyd exited before it started serving ({status}) — see its output above");
+            bail!("ttyd exited before it started serving ({status}), see its output above");
         }
         if TcpStream::connect_timeout(&addr, POLL_INTERVAL).is_ok() {
             return Ok(());

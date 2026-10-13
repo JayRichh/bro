@@ -243,7 +243,7 @@ fn dispatch_prompt(
             let intent = PendingIntent::ReopenPromptOnError {
                 kind: PromptKind::CloudMessage { id: id.clone() },
                 text: value.clone(),
-                note: "Sent to the cloud session — the reply lands on its page".into(),
+                note: "Sent to the cloud session, the reply lands on its page".into(),
             };
             send_with(app, out, intent, |req_id| ClientRequest::SendCloudMessage {
                 req_id,

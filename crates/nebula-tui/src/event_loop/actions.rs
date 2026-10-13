@@ -82,14 +82,14 @@ pub(crate) fn thread_cards(
 pub(crate) fn confirm_archive_thread(band: &crate::launcher::Band) -> ConfirmDialog {
     let (agents, terminals, names) = thread_cards(band);
     let mut message = format!(
-        "Archive '{}' and everything nested under it?\n{} archived — u brings {} back.",
+        "Archive '{}' and everything nested under it?\n{} archived: u brings {} back.",
         names[0],
         count_of(agents.len(), "session"),
         if agents.len() == 1 { "it" } else { "them" },
     );
     if !terminals.is_empty() {
         message.push_str(&format!(
-            "\n{} closed — their shells are killed.",
+            "\n{} closed: their shells are killed.",
             count_of(terminals.len(), "terminal")
         ));
     }
@@ -330,7 +330,7 @@ pub(crate) fn confirm_close_terminal(name: &str, id: TerminalId) -> ConfirmDialo
 /// it is cheap — the daemon keeps every session running.
 pub(crate) fn confirm_quit() -> ConfirmDialog {
     ConfirmDialog {
-        title: "Quit bro".into(),
+        title: "Quit kete".into(),
         // Sized to the longest line, never wrapped: keep both under 52.
         message: "Leave the TUI?\nSessions keep running in the daemon.".into(),
         action: PendingAction::Quit,
@@ -342,7 +342,7 @@ pub(crate) fn confirm_quit() -> ConfirmDialog {
 pub(crate) fn confirm_remove_project(name: &str, id: ProjectId) -> ConfirmDialog {
     ConfirmDialog {
         title: "Remove project".into(),
-        message: format!("Remove '{name}' from bro? Nothing on disk is touched."),
+        message: format!("Remove '{name}' from kete? Nothing on disk is touched."),
         action: PendingAction::RemoveProject(id),
         area: ratatui::layout::Rect::default(),
     }
@@ -364,8 +364,7 @@ pub(crate) fn edit_link(app: &mut App, row: &LinkRow) {
 /// lookup.
 pub(crate) fn delete_link(app: &mut App, row: &LinkRow) {
     let Some(id) = row.id() else {
-        app.chrome.flash =
-            Some("the pull request link can't be deleted — it comes from git".into());
+        app.chrome.flash = Some("the pull request link can't be deleted, it comes from git".into());
         return;
     };
     app.modals.overlay = Some(Overlay::Confirm(ConfirmDialog {

@@ -379,7 +379,7 @@ fn handle_navigation_action(
         // where there are no cards to have a pane under.
         Action::ToggleLauncherPane if app.launcher_active() => launcher::toggle_pane(app),
         Action::ToggleLauncherPane => {
-            app.chrome.flash = Some("no cards to fold a pane under — add a project first".into())
+            app.chrome.flash = Some("no cards to fold a pane under: add a project first".into())
         }
         // Full-screen, and back down. The grid takes this key itself
         // (`launcher::handle_action`), as does a LOCKED PANE; it reaches
@@ -389,7 +389,7 @@ fn handle_navigation_action(
             launcher::toggle_full_screen(app, out);
         }
         Action::ToggleFullScreen => {
-            app.chrome.flash = Some("no session to full-screen — add a project first".into())
+            app.chrome.flash = Some("no session to full-screen: add a project first".into())
         }
         // The strip across the LAUNCHER PANE's header. The grid takes this
         // key itself (`launcher::handle_action`); it reaches here over a
@@ -398,7 +398,7 @@ fn handle_navigation_action(
         Action::PaneTabs if app.launcher_active() => {
             app.chrome.flash = Some(launcher::NO_PANE_HERE.into())
         }
-        Action::PaneTabs => app.chrome.flash = Some("no pane here — add a project first".into()),
+        Action::PaneTabs => app.chrome.flash = Some("no pane here: add a project first".into()),
         // The header's PROJECT TABS. The grid takes these keys itself
         // (`launcher::handle_action`); they reach here with a session
         // full-screen over it, where the header is not on screen.
@@ -554,10 +554,10 @@ fn handle_session_state_action(
                     }
                     Some(SessionRow::Terminal(_)) => {
                         app.chrome.flash =
-                            Some("terminals can't be archived — d closes them".into());
+                            Some("terminals can't be archived: d closes them".into());
                     }
                     Some(SessionRow::Link(_)) => {
-                        app.chrome.flash = Some("links can't be archived — d deletes them".into());
+                        app.chrome.flash = Some("links can't be archived: d deletes them".into());
                     }
                     _ => {}
                 }

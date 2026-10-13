@@ -215,7 +215,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::FocusNext,
         id: "focus_next",
         label: "Open / fold checkout",
-        hint: "Open every card of the checkout under the cursor in place, or fold it back to one row — one checkout open at a time",
+        hint: "Open every card of the checkout under the cursor in place, or fold it back to one row: one checkout open at a time",
         group: "NAVIGATE",
         scope: Scope::Global,
         defaults: &["tab"],
@@ -341,7 +341,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::CloseProjectTab,
         id: "close_project_tab",
         label: "Close project tab",
-        hint: "Drop this project's tab from the header and open the tab beside it. Nothing is deleted — + opens it again",
+        hint: "Drop this project's tab from the header and open the tab beside it. Nothing is deleted: + opens it again",
         group: "NAVIGATE",
         scope: Scope::Global,
         defaults: &["x"],
@@ -350,7 +350,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::ProjectDropdown,
         id: "project_dropdown",
         label: "Switch project",
-        hint: "Drop the list of every project under the + in the header — type to narrow it, Enter or a click opens one. + is the header's own button and arrives in every terminal and in bro browser; ⌘P does the same from inside the pane, where the terminal sends ⌘ at all (Ghostty/kitty do, Terminal.app and the browser never do)",
+        hint: "Drop the list of every project under the + in the header: type to narrow it, Enter or a click opens one. + is the header's own button and arrives in every terminal and in kete browser; ⌘P does the same from inside the pane, where the terminal sends ⌘ at all (Ghostty/kitty do, Terminal.app and the browser never do)",
         group: "NAVIGATE",
         scope: Scope::Global,
         // `+`, the header button's own glyph, is the key the app shows —
@@ -364,7 +364,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::AddProject,
         id: "add_project",
         label: "Open a folder as a project",
-        hint: "Open a folder as a project in bro, from anywhere; ⇧O opens a checkout outside it, in your editor",
+        hint: "Open a folder as a project in kete, from anywhere; ⇧O opens a checkout outside it, in your editor",
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
         defaults: &["o"],
@@ -382,7 +382,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::GitDiff,
         id: "git_diff",
         label: "Git diff",
-        hint: "Open the diff viewer for the checkout under the cursor — or, with the pane reading a pull request, that pull request's diff",
+        hint: "Open the diff viewer for the checkout under the cursor, or, with the pane reading a pull request, that pull request's diff",
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
         defaults: &["g"],
@@ -400,7 +400,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::OpenPullRequest,
         id: "open_pull_request",
         label: "Open pull request in browser",
-        hint: "Send the pull request of the session card under the cursor — its checkout's branch — to your browser, as a click on the card's #42 line does. v lists the pull requests in bro; ⇧V goes to GitHub",
+        hint: "Send the pull request of the session card under the cursor (its checkout's branch) to your browser, as a click on the card's #42 line does. v lists the pull requests in kete; ⇧V goes to GitHub",
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
         defaults: &["shift+v"],
@@ -409,7 +409,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::OpenIssue,
         id: "open_issue",
         label: "Open issue in browser",
-        hint: "Send the GitHub issue the session card under the cursor was started from to your browser. i lists the issues in bro; ⇧I goes to GitHub",
+        hint: "Send the GitHub issue the session card under the cursor was started from to your browser. i lists the issues in kete; ⇧I goes to GitHub",
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
         defaults: &["shift+i"],
@@ -427,7 +427,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::CommentPullRequest,
         id: "comment_pull_request",
         label: "Comment on pull request",
-        hint: "Open a box to type a comment and post it through gh on the card's pull request — the one ⇧V opens — or, with the pane reading a pull request (a / jump lands on one), on that one",
+        hint: "Open a box to type a comment and post it through gh on the card's pull request (the one ⇧V opens) or, with the pane reading a pull request (a / jump lands on one), on that one",
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
         defaults: &["y"],
@@ -463,7 +463,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::OpenWorktree,
         id: "open_worktree",
         label: "Open checkout in editor",
-        hint: "Open the selected checkout outside bro, usually in your editor: its project's Open command (Settings → Project), else .bro.json \"open\" — e.g. open http://localhost:3000 (⇧Enter needs the kitty protocol; ⇧O arrives everywhere; ⌥Enter is the ESC CR that VS Code's Shift+Enter setup sends and tmux passes through)",
+        hint: "Open the selected checkout outside kete, usually in your editor: its project's Open command (Settings → Project), else .kete.json \"open\", e.g. open http://localhost:3000 (⇧Enter needs the kitty protocol; ⇧O arrives everywhere; ⌥Enter is the ESC CR that VS Code's Shift+Enter setup sends and tmux passes through)",
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
         defaults: &["shift+enter", "shift+o", "alt+enter"],
@@ -491,7 +491,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::NewTerminal,
         id: "new_terminal",
         label: "New shell terminal",
-        hint: "Spawn a plain shell inside bro, in the selected worktree's directory; ⇧T opens one outside it, in a Ghostty tab",
+        hint: "Spawn a plain shell inside kete, in the selected worktree's directory; ⇧T opens one outside it, in a Ghostty tab",
         group: "SESSIONS",
         scope: Scope::Global,
         defaults: &["t"],
@@ -501,7 +501,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::OpenGhosttyTab,
         id: "open_ghostty_tab",
         label: "Terminal in a Ghostty tab",
-        hint: "Open a new Ghostty tab in the selected worktree's directory — t's terminal, outside bro; does nothing without Ghostty.app",
+        hint: "Open a new Ghostty tab in the selected worktree's directory: t's terminal, outside kete; does nothing without Ghostty.app",
         group: "SESSIONS",
         scope: Scope::Global,
         defaults: &["shift+t"],
@@ -546,7 +546,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::Delete,
         id: "delete",
         label: "Delete selected",
-        hint: "Remove the selected row, behind a confirmation. With the PROJECT TABS holding the keys, close the tab under their cursor, behind the same kind of confirmation — x closes it outright",
+        hint: "Remove the selected row, behind a confirmation. With the PROJECT TABS holding the keys, close the tab under their cursor, behind the same kind of confirmation: x closes it outright",
         group: "SESSIONS",
         scope: Scope::Global,
         defaults: &["d", "delete", "backspace"],
@@ -591,7 +591,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::DuplicateSession,
         id: "duplicate_session",
         label: "Duplicate session",
-        hint: "Open the quick prompt set to launch what the selected card runs — the same harness, model, effort and worktree — so only the task is left to type. p opens the box on the defaults; ⇧P on the card",
+        hint: "Open the quick prompt set to launch what the selected card runs (the same harness, model, effort and worktree) so only the task is left to type. p opens the box on the defaults; ⇧P on the card",
         group: "SESSIONS",
         scope: Scope::Global,
         defaults: &["shift+p"],
@@ -648,7 +648,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::ToggleLauncherPane,
         id: "toggle_launcher_pane",
         label: "Launcher session pane",
-        hint: "Fold the pane under the cards away — which also unselects the card it was reading — or bring it back. From inside the pane the ctrl chords take two presses: the first hands the keys back to the card, the second folds the pane. ^` and ^~ need the kitty protocol; ~ is bound alongside them, the shift of the ` that walks the pane's tabs",
+        hint: "Fold the pane under the cards away (which also unselects the card it was reading) or bring it back. From inside the pane the ctrl chords take two presses: the first hands the keys back to the card, the second folds the pane. ^` and ^~ need the kitty protocol; ~ is bound alongside them, the shift of the ` that walks the pane's tabs",
         group: "GENERAL",
         scope: Scope::Global,
         // `^`` is the chord to reach for — out of the pane, then the pane
@@ -664,7 +664,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::ToggleKanban,
         id: "toggle_kanban",
         label: "Kanban board",
-        hint: "Lay the grid out as lanes by status — Needs input, Running, Unseen, Done, PR open — or back to a band per worktree. On the board h/l walk the lanes, j/k the cards, Tab flips between this project and every project",
+        hint: "Lay the grid out as lanes by status (Needs input, Running, Unseen, Done, PR open) or back to a band per worktree. On the board h/l walk the lanes, j/k the cards, Tab flips between this project and every project",
         group: "GENERAL",
         scope: Scope::Global,
         defaults: &["shift+k"],
@@ -682,7 +682,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::ToggleFullScreen,
         id: "toggle_full_screen",
         label: "Full-screen session",
-        hint: "Give the session in the pane the whole screen, or bring it back down beside the cards — from inside the pane too, where it is never forwarded to the agent. From the cards it full-screens the one under the cursor. ^q and ^` also bring a full-screen session back down",
+        hint: "Give the session in the pane the whole screen, or bring it back down beside the cards, from inside the pane too, where it is never forwarded to the agent. From the cards it full-screens the one under the cursor. ^q and ^` also bring a full-screen session back down",
         group: "GENERAL",
         scope: Scope::Global,
         defaults: &["ctrl+f"],
@@ -691,7 +691,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::PaneTabs,
         id: "pane_tabs",
         label: "Terminals in the pane",
-        hint: "Walk the cursor through the terminal cards of its checkout, one after another and back round to the first — the pane reads each",
+        hint: "Walk the cursor through the terminal cards of its checkout, one after another and back round to the first, the pane reads each",
         group: "GENERAL",
         scope: Scope::Global,
         defaults: &["`"],
@@ -700,7 +700,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::Hosts,
         id: "hosts",
         label: "SSH hosts",
-        hint: "Connect to a saved ssh host (restarts bro over ssh)",
+        hint: "Connect to a saved ssh host (restarts kete over ssh)",
         group: "GENERAL",
         scope: Scope::Global,
         defaults: &["shift+h"],
@@ -718,7 +718,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::Metrics,
         id: "metrics",
         label: "Memory usage",
-        hint: "RAM used by bro and every live agent's process tree",
+        hint: "RAM used by kete and every live agent's process tree",
         group: "GENERAL",
         scope: Scope::Global,
         defaults: &["shift+m"],
@@ -735,7 +735,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         action: Action::Quit,
         id: "quit",
-        label: "Quit bro",
+        label: "Quit kete",
         hint: "Leave the TUI (sessions keep running in the daemon)",
         group: "GENERAL",
         scope: Scope::Global,
@@ -1034,7 +1034,7 @@ pub fn host_warning(chord: &KeyChord) -> (Reach, Option<&'static str>) {
     if m.contains(KeyModifiers::SUPER) {
         return (
             Reach::Blocked,
-            Some("⌘ chords never reach a TUI — Terminal.app swallows them, Ghostty binds its own"),
+            Some("⌘ chords never reach a TUI: Terminal.app swallows them, Ghostty binds its own"),
         );
     }
     // Mission Control owns these on stock macOS (they switch Spaces).
@@ -1049,15 +1049,13 @@ pub fn host_warning(chord: &KeyChord) -> (Reach, Option<&'static str>) {
     if shift && !ctrl && !alt && chord.code == KeyCode::Enter {
         return (
             Reach::Risky,
-            Some("⇧Enter needs the kitty keyboard protocol — Ghostty/kitty send it, Terminal.app sends a plain Enter and tmux flattens it to one; ⇧O and ⌥Enter arrive everywhere"),
+            Some("⇧Enter needs the kitty keyboard protocol: Ghostty/kitty send it, Terminal.app sends a plain Enter and tmux flattens it to one; ⇧O and ⌥Enter arrive everywhere"),
         );
     }
     if ctrl && shift {
         return (
             Reach::Risky,
-            Some(
-                "^⇧ needs the kitty keyboard protocol — Ghostty/kitty send it, Terminal.app won't",
-            ),
+            Some("^⇧ needs the kitty keyboard protocol: Ghostty/kitty send it, Terminal.app won't"),
         );
     }
     if ctrl {
@@ -1106,7 +1104,7 @@ pub fn host_warning(chord: &KeyChord) -> (Reach, Option<&'static str>) {
 
 /// What an action with no chord shows in place of one, everywhere a chord
 /// list is rendered — the hotkeys tab and the help labels must agree.
-pub const UNBOUND: &str = "—";
+pub const UNBOUND: &str = "-";
 
 /// Resolved bindings: one chord list per entry of [`ACTIONS`], in the same
 /// order, so an index is a stable handle for both the UI and the config.
@@ -1585,7 +1583,7 @@ mod tests {
     fn an_empty_override_means_unbound() {
         let map = Keymap::from_overrides(&BTreeMap::from([("help".into(), String::new())]));
         assert!(map.chords(Action::Help).is_empty());
-        assert_eq!(map.label(Action::Help), "—");
+        assert_eq!(map.label(Action::Help), "-");
     }
 
     #[test]

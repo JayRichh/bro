@@ -71,7 +71,7 @@ pub const THEMES: &[&str] = &[
     VSCODE,
 ];
 
-/// The theme a fresh config starts on: One Dark on Windows, where Bro sits
+/// The theme a fresh config starts on: One Dark on Windows, where Kete sits
 /// beside a VS Code that most likely wears it; the classic look elsewhere,
 /// as upstream nebula ships it.
 pub const DEFAULT_THEME: &str = if cfg!(windows) { "one-dark" } else { "default" };

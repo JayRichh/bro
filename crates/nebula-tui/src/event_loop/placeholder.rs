@@ -742,7 +742,7 @@ mod tests {
             assert_eq!(term.sref, SessionRef::Agent(rows.agent.clone()));
             assert!(
                 !term.painted,
-                "nothing has come off a PTY — it reads as booting"
+                "nothing has come off a PTY, it reads as booting"
             );
             assert!(
                 app.pane.attached_sref.is_none(),

@@ -1,5 +1,6 @@
 use crate::env;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The settings files' names in the data dir. Their loaders, the SETTINGS
 /// BUNDLE and `nebula config path` all spell them from here.
@@ -21,13 +22,16 @@ pub fn runtime_dir() -> PathBuf {
     if let Some(dir) = env::non_empty(env::RUNTIME_DIR) {
         return PathBuf::from(dir);
     }
+    if legacy_in_use() {
+        return legacy_runtime_dir();
+    }
     if let Some(dir) = xdg_runtime_dir() {
-        return dir.join("bro");
+        return dir.join("kete");
     }
     fallback_runtime_dir()
 }
 
-/// Runtime dir holding the pidfile and buildstamp: `%LOCALAPPDATA%\bro\run`.
+/// Runtime dir holding the pidfile and buildstamp: `%LOCALAPPDATA%\kete\run`.
 /// The daemon's endpoint is a named pipe, not a file in here, but its name
 /// is derived from this dir ([`pipe_name`]), so `NEBULA_RUNTIME_DIR` still
 /// isolates tests and parallel instances. The per-user profile is the
@@ -40,20 +44,261 @@ pub fn runtime_dir() -> PathBuf {
     windows_app_dir().join("run")
 }
 
-/// `%LOCALAPPDATA%\bro`, the root of everything the Windows build keeps.
+/// `%LOCALAPPDATA%\kete`, the root of everything the Windows build keeps.
 /// Local rather than roaming: the database, logs and pidfile describe this
 /// machine's sessions and must not follow a roaming profile elsewhere.
 #[cfg(windows)]
 fn windows_app_dir() -> PathBuf {
+    if legacy_in_use() {
+        return windows_local_dir().join(LEGACY_NAME);
+    }
+    windows_local_dir().join("kete")
+}
+
+/// `%LOCALAPPDATA%`.
+#[cfg(windows)]
+fn windows_local_dir() -> PathBuf {
     env::non_empty("LOCALAPPDATA")
         .map(PathBuf::from)
         .or_else(|| env::home_dir().map(|home| home.join("AppData").join("Local")))
         .unwrap_or_else(std::env::temp_dir)
-        .join("bro")
+}
+
+/// Kete's old name. Its dirs are carried over by [`migrate_legacy_dirs`].
+pub const LEGACY_NAME: &str = "bro";
+
+/// Set when Bro's daemon is still up over Bro's dirs and they have not
+/// moved yet: this process then uses those dirs (and that daemon's pipe)
+/// rather than start a second daemon beside it.
+static LEGACY_IN_USE: AtomicBool = AtomicBool::new(false);
+
+fn legacy_in_use() -> bool {
+    LEGACY_IN_USE.load(Ordering::Relaxed)
+}
+
+/// One of Bro's dirs and where Kete keeps it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LegacyDir {
+    pub old: PathBuf,
+    pub new: PathBuf,
+    /// A file only a used dir has (the database, the pidfile). A `new`
+    /// without it is fresh, made by something that ran before the move (a
+    /// `kete setup terminal`, a test), and Bro's dir still moves into it.
+    pub marker: &'static str,
+}
+
+impl LegacyDir {
+    fn pending(&self) -> bool {
+        self.old.is_dir() && !self.new.join(self.marker).exists()
+    }
+
+    /// Rename `old` to `new`; into a fresh `new` that exists already, merge
+    /// `old` in, Bro's files winning (nothing in a fresh dir is real data),
+    /// and `old` goes once empty.
+    fn carry_over(&self) -> std::io::Result<()> {
+        if !self.new.exists() {
+            if let Some(parent) = self.new.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            return std::fs::rename(&self.old, &self.new);
+        }
+        merge_into(&self.old, &self.new)
+    }
+}
+
+/// Move every entry of `from` into `to`: a file replaces one of its name, a
+/// dir merges into one of its name, and `from` is removed once empty. A
+/// file and a dir of one name stay as they are.
+fn merge_into(from: &Path, to: &Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let dest = to.join(entry.file_name());
+        let is_dir = entry.file_type()?.is_dir();
+        if is_dir && dest.is_dir() {
+            merge_into(&entry.path(), &dest)?;
+        } else if is_dir == dest.is_dir() || !dest.exists() {
+            std::fs::rename(entry.path(), dest)?;
+        }
+    }
+    let _ = std::fs::remove_dir(from);
+    Ok(())
+}
+
+/// What [`migrate_dirs`] did.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Migration {
+    /// Nothing to move: no old dir, or the new one is in use already.
+    Nothing,
+    /// The old daemon holds its lock, so nothing moved.
+    InUse,
+    /// These dirs moved, and these failed to (with why).
+    Moved {
+        moved: Vec<LegacyDir>,
+        failed: Vec<(LegacyDir, String)>,
+    },
+}
+
+/// Carry over each of `dirs` still to move, unless the daemon lock at
+/// `legacy_lock` is held (that daemon still has files open in them). The
+/// first is the data dir: when it fails to move, nothing after it is
+/// tried, so the data and runtime dirs never end up under different names.
+pub fn migrate_dirs(dirs: &[LegacyDir], legacy_lock: &Path) -> Migration {
+    let pending: Vec<&LegacyDir> = dirs.iter().filter(|d| d.pending()).collect();
+    if pending.is_empty() {
+        return Migration::Nothing;
+    }
+    if lock_held(legacy_lock) {
+        return Migration::InUse;
+    }
+    let mut moved = Vec::new();
+    let mut failed = Vec::new();
+    for dir in pending {
+        match dir.carry_over() {
+            Ok(()) => moved.push(dir.clone()),
+            Err(e) => {
+                failed.push((dir.clone(), e.to_string()));
+                if moved.is_empty() {
+                    break;
+                }
+            }
+        }
+    }
+    Migration::Moved { moved, failed }
+}
+
+/// Whether some process holds the daemon lock on `lockfile`. Opening and
+/// trying it is the whole test; a file that isn't there is held by no one.
+fn lock_held(lockfile: &Path) -> bool {
+    let Ok(file) = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(lockfile)
+    else {
+        return false;
+    };
+    matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock))
+}
+
+/// Kete was called Bro. On first start, move Bro's data and runtime dirs
+/// to Kete's names, unless Kete's are in use already. While Bro's daemon
+/// still runs over the old dirs, nothing moves: this process uses the old
+/// dirs and reaches that daemon instead, and the move happens on a start
+/// after it has stopped (`kete kill`, or a reboot). Skipped when either dir
+/// is overridden (tests, parallel instances). Returns a line per dir moved
+/// or left behind, for the caller to show once.
+pub fn migrate_legacy_dirs() -> Vec<String> {
+    if env::non_empty(env::DATA_DIR).is_some() || env::non_empty(env::RUNTIME_DIR).is_some() {
+        return Vec::new();
+    }
+    let Some((dirs, legacy_run)) = legacy_dirs() else {
+        return Vec::new();
+    };
+    // The daemon's lock: on Windows a file beside the pidfile, on unix the
+    // pidfile itself.
+    #[cfg(windows)]
+    let lock = lock_path_for(&legacy_run.join("daemon.pid"));
+    #[cfg(unix)]
+    let lock = legacy_run.join("daemon.pid");
+    match migrate_dirs(&dirs, &lock) {
+        Migration::Nothing => Vec::new(),
+        Migration::InUse => {
+            // Only while the data has not moved: Kete's data dir, once in
+            // use, wins.
+            if dirs.first().is_some_and(LegacyDir::pending) {
+                LEGACY_IN_USE.store(true, Ordering::Relaxed);
+            }
+            Vec::new()
+        }
+        Migration::Moved { moved, failed } => {
+            if moved.is_empty() {
+                // The data stayed put, so keep reading it where it is.
+                LEGACY_IN_USE.store(true, Ordering::Relaxed);
+            }
+            let mut notes: Vec<String> = moved
+                .iter()
+                .map(|d| format!("moved {} to {}", d.old.display(), d.new.display()))
+                .collect();
+            notes.extend(failed.iter().map(|(d, err)| {
+                format!(
+                    "couldn't move {} ({err}); using it where it is",
+                    d.old.display()
+                )
+            }));
+            // On the record too: the TUI's screen and the desktop window
+            // hide stderr.
+            for note in &notes {
+                crate::crashlog::append(&daemon_log_path(), &format!("migration: {note}"));
+            }
+            notes
+        }
+    }
+}
+
+/// Bro's dirs beside Kete's, data dir first, and Bro's runtime dir (where
+/// its daemon's lock lives).
+#[cfg(windows)]
+fn legacy_dirs() -> Option<(Vec<LegacyDir>, PathBuf)> {
+    let old = windows_local_dir().join(LEGACY_NAME);
+    let new = windows_local_dir().join("kete");
+    let dirs = vec![
+        LegacyDir {
+            old: old.join("data"),
+            new: new.join("data"),
+            marker: "nebula.db",
+        },
+        LegacyDir {
+            old: old.join("run"),
+            new: new.join("run"),
+            marker: "daemon.pid",
+        },
+    ];
+    Some((dirs, old.join("run")))
+}
+
+#[cfg(unix)]
+fn legacy_dirs() -> Option<(Vec<LegacyDir>, PathBuf)> {
+    let old = legacy_project_dirs()?;
+    let new = project_dirs()?;
+    let mut dirs = vec![LegacyDir {
+        old: old.data_dir().to_path_buf(),
+        new: new.data_dir().to_path_buf(),
+        marker: "nebula.db",
+    }];
+    if let (Some(old_state), Some(new_state)) = (old.state_dir(), new.state_dir()) {
+        dirs.push(LegacyDir {
+            old: old_state.to_path_buf(),
+            new: new_state.to_path_buf(),
+            marker: "daemon.log",
+        });
+    }
+    let new_run = match xdg_runtime_dir() {
+        Some(dir) => dir.join("kete"),
+        None => fallback_runtime_dir(),
+    };
+    dirs.push(LegacyDir {
+        old: legacy_runtime_dir(),
+        new: new_run,
+        marker: "daemon.pid",
+    });
+    Some((dirs, legacy_runtime_dir()))
+}
+
+/// Bro's runtime dir: `$XDG_RUNTIME_DIR/bro`, else `/tmp/bro-<uid>`.
+#[cfg(unix)]
+fn legacy_runtime_dir() -> PathBuf {
+    match xdg_runtime_dir() {
+        Some(dir) => dir.join(LEGACY_NAME),
+        None => Path::new(FALLBACK_RUNTIME_ROOT).join(format!("{LEGACY_NAME}-{}", libc_geteuid())),
+    }
+}
+
+#[cfg(unix)]
+fn legacy_project_dirs() -> Option<directories::ProjectDirs> {
+    directories::ProjectDirs::from("dev", LEGACY_NAME, LEGACY_NAME)
 }
 
 /// The named pipe the daemon listens on for `runtime_dir`, as `user`:
-/// `\\.\pipe\bro-<user>-<hash>`. Pipe names are machine-global, so the user
+/// `\\.\pipe\kete-<user>-<hash>`. Pipe names are machine-global, so the user
 /// keeps two accounts apart and the hash of the runtime dir keeps apart two
 /// instances one user runs (`NEBULA_RUNTIME_DIR`). The hash is FNV-1a over
 /// the path's bytes: fixed across builds and toolchains, so a client and a
@@ -76,7 +321,9 @@ pub fn pipe_name_for(user: &str, runtime_dir: &Path) -> String {
             }
         })
         .collect();
-    format!(r"\\.\pipe\bro-{user}-{:08x}", hash as u32)
+    // Bro's daemon, still up over Bro's dirs, listens under Bro's prefix.
+    let app = if legacy_in_use() { LEGACY_NAME } else { "kete" };
+    format!(r"\\.\pipe\{app}-{user}-{:08x}", hash as u32)
 }
 
 /// [`pipe_name_for`] the current user and a socket path: the pipe stands in
@@ -107,7 +354,7 @@ fn xdg_runtime_dir() -> Option<PathBuf> {
 #[cfg(unix)]
 fn fallback_runtime_dir() -> PathBuf {
     let uid = libc_geteuid();
-    Path::new(FALLBACK_RUNTIME_ROOT).join(format!("bro-{uid}"))
+    Path::new(FALLBACK_RUNTIME_ROOT).join(format!("kete-{uid}"))
 }
 
 // Avoid a libc dependency in this dep-light crate for one call.
@@ -192,7 +439,10 @@ pub fn restart_state_path() -> PathBuf {
 /// Support/dev.nebula.nebula` on macOS, `~/.local/share/nebula` on Linux).
 #[cfg(unix)]
 fn project_dirs() -> Option<directories::ProjectDirs> {
-    directories::ProjectDirs::from("dev", "bro", "bro")
+    if legacy_in_use() {
+        return legacy_project_dirs();
+    }
+    directories::ProjectDirs::from("dev", "kete", "kete")
 }
 
 #[cfg(unix)]
@@ -202,10 +452,10 @@ pub fn data_dir() -> PathBuf {
     }
     project_dirs()
         .map(|d| d.data_dir().to_path_buf())
-        .unwrap_or_else(|| env::home_dir().unwrap_or_default().join(".bro"))
+        .unwrap_or_else(|| env::home_dir().unwrap_or_default().join(".kete"))
 }
 
-/// `%LOCALAPPDATA%\bro\data`, beside the runtime dir, rather than the
+/// `%LOCALAPPDATA%\kete\data`, beside the runtime dir, rather than the
 /// roaming `%APPDATA%` dir `ProjectDirs` would pick: the database holds
 /// this machine's sessions and checkouts.
 #[cfg(windows)]
@@ -366,17 +616,17 @@ mod tests {
             let xdg = std::env::temp_dir().join(format!("nebula-paths-xdg-{}", std::process::id()));
             std::fs::create_dir_all(&xdg).unwrap();
             std::env::set_var("XDG_RUNTIME_DIR", &xdg);
-            assert_eq!(runtime_dir(), xdg.join("bro"));
+            assert_eq!(runtime_dir(), xdg.join("kete"));
 
             std::fs::remove_dir_all(&xdg).unwrap();
             assert_eq!(runtime_dir(), fallback_runtime_dir());
         }
         #[cfg(windows)]
         {
-            // Both defaults sit side by side under one `bro` dir.
+            // Both defaults sit side by side under one `kete` dir.
             assert_eq!(runtime_dir().parent(), data_dir().parent());
             assert!(
-                runtime_dir().ends_with(r"bro\run"),
+                runtime_dir().ends_with(r"kete\run"),
                 "{}",
                 runtime_dir().display()
             );
@@ -402,18 +652,18 @@ mod tests {
 
     #[test]
     fn pipe_name_is_per_user_and_per_runtime_dir() {
-        let a = Path::new(r"C:\Users\jay\AppData\Local\bro\run");
+        let a = Path::new(r"C:\Users\jay\AppData\Local\kete\run");
         let b = Path::new(r"C:\Temp\test-run");
         let name = pipe_name_for("jay", a);
-        assert!(name.starts_with(r"\\.\pipe\bro-jay-"), "{name}");
-        assert_eq!(name.len(), r"\\.\pipe\bro-jay-".len() + 8, "{name}");
+        assert!(name.starts_with(r"\\.\pipe\kete-jay-"), "{name}");
+        assert_eq!(name.len(), r"\\.\pipe\kete-jay-".len() + 8, "{name}");
         // Stable for the same inputs, so client and daemon agree.
         assert_eq!(name, pipe_name_for("jay", a));
         assert_ne!(name, pipe_name_for("jay", b), "runtime dirs isolate");
         assert_ne!(name, pipe_name_for("ann", a), "users isolate");
         // A user name with characters a pipe listing would mangle.
         let odd = pipe_name_for(r"DOMAIN\Jay Smith", a);
-        assert!(odd.starts_with(r"\\.\pipe\bro-DOMAIN_Jay_Smith-"), "{odd}");
+        assert!(odd.starts_with(r"\\.\pipe\kete-DOMAIN_Jay_Smith-"), "{odd}");
         assert_eq!(odd.matches('\\').count(), 4, "only the prefix's: {odd}");
         // The socket path's dir picks the pipe: tests that put a socket in
         // a temp dir get a pipe of their own.
@@ -421,5 +671,136 @@ mod tests {
             pipe_name_for_socket(&b.join("daemon.sock")),
             pipe_name_for_socket(&b.join("other.sock"))
         );
+    }
+
+    /// A Bro install's dirs laid out under `root`: `bro/data` holding the
+    /// database and a profile, `bro/run` holding a pidfile and the lock.
+    fn bro_install(root: &Path) -> Vec<LegacyDir> {
+        let old = root.join(LEGACY_NAME);
+        let new = root.join("kete");
+        let profile = old.join("data").join("profiles").join("jayrich");
+        std::fs::create_dir_all(&profile).unwrap();
+        std::fs::write(profile.join(".claude.json"), b"{}").unwrap();
+        std::fs::write(old.join("data").join("nebula.db"), b"db").unwrap();
+        std::fs::create_dir_all(old.join("run")).unwrap();
+        std::fs::write(old.join("run").join("daemon.pid"), b"42\n").unwrap();
+        std::fs::write(old.join("run").join("daemon.lock"), b"").unwrap();
+        vec![
+            LegacyDir {
+                old: old.join("data"),
+                new: new.join("data"),
+                marker: "nebula.db",
+            },
+            LegacyDir {
+                old: old.join("run"),
+                new: new.join("run"),
+                marker: "daemon.pid",
+            },
+        ]
+    }
+
+    fn lock_of(root: &Path) -> PathBuf {
+        root.join(LEGACY_NAME).join("run").join("daemon.lock")
+    }
+
+    #[test]
+    fn bro_dirs_move_to_kete_once() {
+        let root = tempfile::tempdir().unwrap();
+        let dirs = bro_install(root.path());
+
+        let Migration::Moved { moved, failed } = migrate_dirs(&dirs, &lock_of(root.path())) else {
+            panic!("nothing moved");
+        };
+        assert_eq!(moved, dirs);
+        assert!(failed.is_empty(), "{failed:?}");
+        let kete = root.path().join("kete");
+        let profile = kete.join("data").join("profiles").join("jayrich");
+        assert!(profile.join(".claude.json").is_file());
+        assert_eq!(
+            std::fs::read(kete.join("data").join("nebula.db")).unwrap(),
+            b"db"
+        );
+        assert!(kete.join("run").join("daemon.pid").is_file());
+        assert!(!root.path().join(LEGACY_NAME).join("data").exists());
+
+        // Moved is moved: the next start finds nothing to do.
+        assert_eq!(
+            migrate_dirs(&dirs, &lock_of(root.path())),
+            Migration::Nothing
+        );
+    }
+
+    /// Something that ran before the move made a Kete data dir with no
+    /// database in it (a setup step's icon, a stray file): Bro's data still
+    /// moves in, around what is there.
+    #[test]
+    fn bro_data_moves_into_a_fresh_kete_dir() {
+        let root = tempfile::tempdir().unwrap();
+        let dirs = bro_install(root.path());
+        let data = root.path().join("kete").join("data");
+        std::fs::create_dir_all(data.join("profiles")).unwrap();
+        std::fs::write(data.join("kete-256.png"), b"png").unwrap();
+        // A file of the same name on both sides: Bro's is the real one.
+        let old_data = root.path().join(LEGACY_NAME).join("data");
+        std::fs::write(old_data.join("reviewed.json"), b"bro's").unwrap();
+        std::fs::write(data.join("reviewed.json"), b"stray").unwrap();
+
+        assert!(matches!(
+            migrate_dirs(&dirs, &lock_of(root.path())),
+            Migration::Moved { ref moved, .. } if moved.len() == 2
+        ));
+        assert!(data.join("nebula.db").is_file());
+        let profile = data.join("profiles").join("jayrich");
+        assert!(profile.join(".claude.json").is_file());
+        assert_eq!(std::fs::read(data.join("reviewed.json")).unwrap(), b"bro's");
+        assert_eq!(std::fs::read(data.join("kete-256.png")).unwrap(), b"png");
+        assert!(!old_data.exists());
+    }
+
+    /// Kete's data dir in use (it has its database) is Kete's: Bro's is left
+    /// alone, never merged into it.
+    #[test]
+    fn a_kete_dir_in_use_wins_and_bro_is_left_alone() {
+        let root = tempfile::tempdir().unwrap();
+        let dirs = bro_install(root.path());
+        let data = root.path().join("kete").join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(data.join("nebula.db"), b"kete's").unwrap();
+
+        // Only the runtime dir is still to move.
+        let Migration::Moved { moved, .. } = migrate_dirs(&dirs, &lock_of(root.path())) else {
+            panic!("the runtime dir should move");
+        };
+        assert_eq!(moved, dirs[1..]);
+        assert_eq!(std::fs::read(data.join("nebula.db")).unwrap(), b"kete's");
+        assert!(root
+            .path()
+            .join(LEGACY_NAME)
+            .join("data")
+            .join("profiles")
+            .is_dir());
+    }
+
+    #[test]
+    fn nothing_moves_while_the_bro_daemon_holds_its_lock() {
+        let root = tempfile::tempdir().unwrap();
+        let dirs = bro_install(root.path());
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(lock_of(root.path()))
+            .unwrap();
+        held.try_lock().unwrap();
+
+        assert_eq!(migrate_dirs(&dirs, &lock_of(root.path())), Migration::InUse);
+        assert!(root.path().join(LEGACY_NAME).join("data").is_dir());
+        assert!(!root.path().join("kete").exists());
+
+        // Once the daemon is gone, the next start moves them.
+        drop(held);
+        assert!(matches!(
+            migrate_dirs(&dirs, &lock_of(root.path())),
+            Migration::Moved { ref moved, .. } if moved.len() == 2
+        ));
     }
 }

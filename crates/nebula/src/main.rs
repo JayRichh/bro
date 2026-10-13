@@ -9,12 +9,18 @@ mod tunnel;
 mod upgrade;
 
 use anyhow::Result;
-use clap::Parser;
-use cli::{Cli, Command, ConfigCommand, OrchestratorCommand, ProfileCommand, SetupCommand};
+use cli::{Command, ConfigCommand, OrchestratorCommand, ProfileCommand, SetupCommand};
 use std::path::Path;
 
 fn main() -> Result<()> {
-    let cli = Cli::parse();
+    let cli = cli::parse_as_invoked();
+    // Kete was Bro: carry Bro's data and runtime dirs over before anything
+    // opens a file in them. A no-op once moved, so the note shows once.
+    if opens_state(&cli.command) {
+        for note in nebula_core::paths::migrate_legacy_dirs() {
+            eprintln!("kete: {note}");
+        }
+    }
     // A `nebula ssh` / `nebula tunnel` from another machine may have sent its
     // settings along. Merge them before anything reads a setting, and before
     // a thread or a child exists to inherit the variable.
@@ -199,7 +205,7 @@ fn main() -> Result<()> {
                     // terminal so a fresh `nebula ssh` can exec over us (the
                     // local daemon and its sessions stay up).
                     Some(entry) => {
-                        eprintln!("bro: connecting to {}…", entry.host);
+                        eprintln!("kete: connecting to {}…", entry.host);
                         ssh::run_ssh(&entry.host, entry.path.as_deref(), true)
                     }
                     None => Ok(()),
@@ -207,6 +213,27 @@ fn main() -> Result<()> {
             }
         },
     }
+}
+
+/// Whether `command` reads or writes the data or runtime dirs itself, so
+/// Bro's must be carried over first. The rest (a remote's, the desktop
+/// window's, a hook relaying to the daemon over its endpoint) leave them
+/// to whichever process does.
+fn opens_state(command: &Option<Command>) -> bool {
+    !matches!(
+        command,
+        Some(
+            Command::Browser { .. }
+                | Command::Ssh { .. }
+                | Command::Tunnel { .. }
+                | Command::Setup { .. }
+                | Command::Desktop { .. }
+                | Command::Hook { .. }
+                | Command::ProtocolVersion
+                | Command::ProtocolMinCompatibleVersion
+                | Command::RestartVersion
+        )
+    )
 }
 
 /// Record a fatal top-level error in the log file before it goes to stderr —

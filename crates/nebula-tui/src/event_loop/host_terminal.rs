@@ -535,7 +535,7 @@ mod tests {
             for needle in needles {
                 assert!(
                     !src.contains(needle),
-                    "{name} calls Terminal::clear — use host_terminal::repaint (Terminal::resize)"
+                    "{name} calls Terminal::clear: use host_terminal::repaint (Terminal::resize)"
                 );
             }
         }

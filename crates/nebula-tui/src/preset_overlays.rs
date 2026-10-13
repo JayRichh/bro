@@ -845,7 +845,7 @@ pub(crate) fn open_agent_preset_task(
     out: &mut Vec<ClientRequest>,
 ) {
     let Some(preset) = view.presets.get(view.selected).cloned() else {
-        app.chrome.flash = Some("no preset selected — Ctrl+a creates one".into());
+        app.chrome.flash = Some("no preset selected: Ctrl+a creates one".into());
         return;
     };
     if !crate::config::Config::load().preset_harness_usable(&preset) {
@@ -972,7 +972,7 @@ pub(crate) fn handle_list_key(app: &mut App, key: KeyEvent, out: &mut Vec<Client
         }
         KeyCode::Char('e') if ctrl => {
             if view.presets.is_empty() {
-                app.chrome.flash = Some("no preset selected — Ctrl+a creates one".into());
+                app.chrome.flash = Some("no preset selected: Ctrl+a creates one".into());
             } else {
                 let (worktree, quick) = (view.worktree.clone(), view.aimed_quick());
                 let index = view.selected;
@@ -999,7 +999,7 @@ pub(crate) fn handle_list_key(app: &mut App, key: KeyEvent, out: &mut Vec<Client
             let query = format!("{}{c}", view.filter);
             if !view.type_filter(c) {
                 app.chrome.flash = Some(if view.presets.is_empty() {
-                    "no presets yet — Ctrl+a creates one".into()
+                    "no presets yet: Ctrl+a creates one".into()
                 } else {
                     format!("no preset matches '{query}'")
                 });
@@ -1267,7 +1267,7 @@ pub(crate) fn draw_list(f: &mut Frame, app: &mut App, view: &AgentPresetsView, t
     );
 
     if total == 0 {
-        empty_list_row(f, inner, "no presets yet — Ctrl+a creates one", th);
+        empty_list_row(f, inner, "no presets yet: Ctrl+a creates one", th);
     }
     let start = window_start(cursor, inner.height as usize);
     for (pos, (i, lit)) in visible.iter().enumerate().skip(start) {
@@ -1410,7 +1410,7 @@ pub(crate) fn draw_editor(f: &mut Frame, app: &mut App, editor: &AgentPresetEdit
         " Tab: field  ←/→ or type: choose  Enter: save  Esc "
     };
     let title = if editor.is_edit() {
-        format!(" Edit preset — {} ", editor.name.trim())
+        format!(" Edit preset: {} ", editor.name.trim())
     } else {
         " New preset ".to_string()
     };

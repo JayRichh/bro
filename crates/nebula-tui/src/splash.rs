@@ -34,11 +34,12 @@ const DUST: &[u8] = &[17, 54, 55, 92, 93, 129, 135, 177];
 /// Wordmark gradient, swept left to right.
 const MARK: &[u8] = &[99, 105, 141, 177, 213, 219];
 
-/// 5-row block bitmaps for B R O.
+/// 5-row block bitmaps for K E T E.
 const LETTERS: &[&[&str; 5]] = &[
-    &["###.", "#..#", "###.", "#..#", "###."],
-    &["###.", "#..#", "###.", "#.#.", "#..#"],
-    &[".##.", "#..#", "#..#", "#..#", ".##."],
+    &["#..#", "#.#.", "##..", "#.#.", "#..#"],
+    &["####", "#...", "###.", "#...", "####"],
+    &["#####", "..#..", "..#..", "..#..", "..#.."],
+    &["####", "#...", "###.", "#...", "####"],
 ];
 
 fn hash(x: i32, y: i32, salt: u32) -> u32 {
@@ -187,7 +188,7 @@ pub fn draw_splash(f: &mut Frame, app: &mut App, area: Rect) {
         lines.push(Line::from(vec![
             Span::styled("◆ ", Style::default().fg(th.accent)),
             Span::styled(
-                "bro",
+                "kete",
                 Style::default().fg(th.text).add_modifier(Modifier::BOLD),
             ),
         ]));

@@ -136,7 +136,7 @@ pub(crate) fn run_settings_cmd(app: &mut App, cmd: SettingsCmd) {
         SettingsCmd::ClearHotkey => {
             if edit_keymap(app, |keymap| keymap.clear(selected)) {
                 if let Some(view) = settings_mut(app) {
-                    view.warn("unbound — ⌫ puts the default back");
+                    view.warn("unbound: ⌫ puts the default back");
                 }
             }
         }
@@ -229,7 +229,7 @@ pub(crate) fn capture_hotkey(app: &mut App, key: KeyEvent) {
             .join(", ");
         if let Some(view) = settings_mut(app) {
             view.warn(format!(
-                "{chord} is already {owners} — Enter to move it here, Esc to keep it there"
+                "{chord} is already {owners}: Enter to move it here, Esc to keep it there"
             ));
             if let Some(c) = &mut view.capture {
                 c.pending = Some((chord, conflicts));
@@ -356,7 +356,7 @@ pub(crate) fn apply_setting_at(app: &mut App, tab: usize, index: usize, delta: i
         let project = if spec.kind.is_project() {
             let Some(path) = app.selected_project().map(|p| p.repo_path.clone()) else {
                 if let Some(view) = settings_mut(app) {
-                    view.warn("no project selected — this tab edits the one under the cursor");
+                    view.warn("no project selected, this tab edits the one under the cursor");
                 }
                 return;
             };

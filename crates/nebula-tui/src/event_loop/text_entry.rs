@@ -274,7 +274,7 @@ pub(crate) fn send_turn(
     if !agent.alive {
         attach_now(app, sref, out);
         app.chrome.flash = Some(format!(
-            "starting {} — press Enter again once it is up",
+            "starting {}: press Enter again once it is up",
             agent.name
         ));
         return TurnSent::Booting;

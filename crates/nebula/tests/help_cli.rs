@@ -33,14 +33,14 @@ const VISIBLE: &[&[&str]] = &[
 ];
 
 fn help_at(columns: &str, args: &[&str]) -> String {
-    let out = Command::new(env!("CARGO_BIN_EXE_bro"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kete"))
         .args(args)
         .env("COLUMNS", columns)
         .output()
-        .unwrap_or_else(|e| panic!("failed to run bro {}: {e}", args.join(" ")));
+        .unwrap_or_else(|e| panic!("failed to run kete {}: {e}", args.join(" ")));
     assert!(
         out.status.success(),
-        "`bro {}` exited {:?}: {}",
+        "`kete {}` exited {:?}: {}",
         args.join(" "),
         out.status.code(),
         String::from_utf8_lossy(&out.stderr)
@@ -58,15 +58,15 @@ fn every_visible_command_has_its_own_help_page() {
         let mut with_help = args.to_vec();
         with_help.push("--help");
         let help = help_at("100", &with_help);
-        let usage = format!("Usage: bro {}", args.join(" "));
+        let usage = format!("Usage: kete {}", args.join(" "));
         assert!(
             help.contains(&usage),
-            "`bro {} --help` is missing `{usage}`:\n{help}",
+            "`kete {} --help` is missing `{usage}`:\n{help}",
             args.join(" ")
         );
         assert!(
             help.contains("Example:\n") || help.contains("Examples:\n"),
-            "`bro {} --help` shows no example:\n{help}",
+            "`kete {} --help` shows no example:\n{help}",
             args.join(" ")
         );
     }
@@ -84,9 +84,9 @@ fn a_subcommand_page_is_about_that_subcommand_only() {
         "the root command index leaked into `browser --help`:\n{help}"
     );
     for summary in [
-        "Terminal multiplexer for Claude Code agents",
-        "Open bro on a remote host over ssh",
-        "Install the latest published bro over this one",
+        "Run your coding agents side by side, in one place",
+        "Open kete on a remote host over ssh",
+        "Install the latest published kete over this one",
         "Register a git checkout as a project",
     ] {
         assert!(
@@ -137,12 +137,12 @@ fn help_wraps_to_the_width_it_is_given() {
         let narrow = widest(&help_at("60", &with_help));
         assert!(
             wide <= 100,
-            "`bro {} --help` runs {wide} columns wide at 100",
+            "`kete {} --help` runs {wide} columns wide at 100",
             args.join(" ")
         );
         assert!(
             narrow <= 60,
-            "`bro {} --help` runs {narrow} columns wide on a 60-column terminal",
+            "`kete {} --help` runs {narrow} columns wide on a 60-column terminal",
             args.join(" ")
         );
     }
@@ -153,8 +153,8 @@ fn help_wraps_to_the_width_it_is_given() {
     let narrow = widest(&help_at("60", &["tunnel", "--help"]));
     assert!(
         narrow < wide,
-        "`bro tunnel --help` did not reflow ({narrow} vs {wide}) \
-         — has clap's `wrap_help` feature been dropped?"
+        "`kete tunnel --help` did not reflow ({narrow} vs {wide}):\
+  has clap's `wrap_help` feature been dropped?"
     );
 }
 
@@ -183,7 +183,7 @@ fn short_help_is_terser_than_long_help() {
         let long = help_at("100", &[args[0], "--help"]);
         assert!(
             short.lines().count() < long.lines().count(),
-            "`bro {} -h` is no shorter than its --help",
+            "`kete {} -h` is no shorter than its --help",
             args[0]
         );
     }

@@ -56,13 +56,13 @@ pub(crate) fn rule(scope: &PrScope<'_>) -> String {
     } = scope;
     let elsewhere = match root {
         Some(root) => format!(
-            " — never in the main checkout at {} or any other checkout",
+            " never in the main checkout at {} or any other checkout",
             root.display()
         ),
         None => String::new(),
     };
     format!(
-        "[bro] This session was created from the OPEN PRS row for {url}. All work in this \
+        "[kete] This session was created from the OPEN PRS row for {url}. All work in this \
          session must be scoped to that pull request. It runs in the worktree at {wt}, checked \
          out on the PR's head branch `{branch}`: do every edit, test, commit and push there{elsewhere}. \
          Other sessions may share this worktree, so pull before you push. Inspect the PR before \
@@ -98,7 +98,7 @@ pub(crate) fn issue_rule(scope: &IssueScope<'_>) -> String {
         .map(|n| format!("#{n}"))
         .unwrap_or_default();
     format!(
-        "[bro] This session was created for the GitHub issue {url}. The user wants that issue \
+        "[kete] This session was created for the GitHub issue {url}. The user wants that issue \
          {number} investigated and fixed: read it first (`gh issue view {url} --comments`), then \
          keep the work in this session to what resolves it. The session runs in the worktree at \
          {wt} on branch `{branch}`: do every edit, test and commit there. Reference the issue in \

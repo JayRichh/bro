@@ -1374,7 +1374,7 @@ mod tests {
         std::fs::create_dir(&repo).unwrap();
         run_git(&repo, &["init", "-b", "main"]);
         run_git(&repo, &["config", "user.email", "nebula@example.invalid"]);
-        run_git(&repo, &["config", "user.name", "Bro Tests"]);
+        run_git(&repo, &["config", "user.name", "Kete Tests"]);
         run_git(&repo, &["commit", "--allow-empty", "-m", "init"]);
         run_git(&repo, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
         run_git(

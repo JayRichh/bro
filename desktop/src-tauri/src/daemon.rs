@@ -1,4 +1,4 @@
-//! The desktop window's client of the Bro daemon.
+//! The desktop window's client of the Kete daemon.
 //!
 //! The wire format is nebula-core's: `codec` frames `ClientRequest` /
 //! `ServerEvent` as length-prefixed MessagePack, and `paths` names the
@@ -126,7 +126,7 @@ impl Client {
         let tx = self.tx.lock().expect("tx lock");
         let tx = tx
             .as_ref()
-            .ok_or_else(|| anyhow!("not connected to the bro daemon"))?;
+            .ok_or_else(|| anyhow!("not connected to the kete daemon"))?;
         tx.send(req)
             .map_err(|_| anyhow!("the daemon connection closed"))
     }
@@ -353,40 +353,46 @@ async fn connect() -> std::io::Result<Stream> {
     ))
 }
 
-/// The `bro` binary that runs the daemon: `BRO_BIN`, else the one beside
-/// this exe, else the first on PATH.
-pub fn find_bro() -> Option<PathBuf> {
-    let exe = if cfg!(windows) { "bro.exe" } else { "bro" };
-    if let Some(p) = std::env::var_os("BRO_BIN").map(PathBuf::from) {
-        if p.is_file() {
-            return Some(p);
+/// The `kete` binary that runs the daemon: `KETE_BIN` (or the older
+/// `BRO_BIN`), else a `kete` beside this exe, else one on PATH; `bro`, the
+/// old name of the same program, after each `kete`.
+pub fn find_kete() -> Option<PathBuf> {
+    for var in ["KETE_BIN", "BRO_BIN"] {
+        if let Some(p) = std::env::var_os(var).map(PathBuf::from) {
+            if p.is_file() {
+                return Some(p);
+            }
         }
     }
-    if let Some(dir) = std::env::current_exe()
+    let names: &[&str] = if cfg!(windows) {
+        &["kete.exe", "bro.exe"]
+    } else {
+        &["kete", "bro"]
+    };
+    let beside = std::env::current_exe()
         .ok()
-        .and_then(|p| p.parent().map(PathBuf::from))
-    {
-        let p = dir.join(exe);
-        if p.is_file() {
-            return Some(p);
-        }
-    }
-    std::env::split_paths(&std::env::var_os("PATH")?)
-        .map(|d| d.join(exe))
+        .and_then(|p| p.parent().map(PathBuf::from));
+    let on_path = std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
+        .unwrap_or_default();
+    beside
+        .into_iter()
+        .chain(on_path)
+        .flat_map(|dir| names.iter().map(move |name| dir.join(name)))
         .find(|p| p.is_file())
 }
 
-/// Start `bro daemon` detached, the way the TUI does: no console, its own
+/// Start `kete daemon` detached, the way the TUI does: no console, its own
 /// process group, out of this process's job when the job allows it.
 #[cfg(windows)]
-fn spawn_daemon(bro: &std::path::Path) -> Result<()> {
+fn spawn_daemon(kete: &std::path::Path) -> Result<()> {
     use std::os::windows::process::CommandExt;
     use windows_sys::Win32::System::Threading::{
         CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW, DETACHED_PROCESS,
     };
     let flags = CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS | CREATE_NO_WINDOW;
     let spawn = |flags: u32| {
-        std::process::Command::new(bro)
+        std::process::Command::new(kete)
             .arg("daemon")
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
@@ -396,14 +402,14 @@ fn spawn_daemon(bro: &std::path::Path) -> Result<()> {
     };
     spawn(flags | CREATE_BREAKAWAY_FROM_JOB)
         .or_else(|_| spawn(flags))
-        .context("start the bro daemon")?;
+        .context("start the kete daemon")?;
     Ok(())
 }
 
 #[cfg(unix)]
-fn spawn_daemon(bro: &std::path::Path) -> Result<()> {
+fn spawn_daemon(kete: &std::path::Path) -> Result<()> {
     use std::os::unix::process::CommandExt;
-    let mut cmd = std::process::Command::new(bro);
+    let mut cmd = std::process::Command::new(kete);
     cmd.arg("daemon")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -420,7 +426,7 @@ fn spawn_daemon(bro: &std::path::Path) -> Result<()> {
             Ok(())
         });
     }
-    cmd.spawn().context("start the bro daemon")?;
+    cmd.spawn().context("start the kete daemon")?;
     Ok(())
 }
 
@@ -429,12 +435,12 @@ async fn connect_or_spawn(spawn: bool) -> Result<Stream> {
         return Ok(s);
     }
     if !spawn {
-        bail!("the bro daemon is not running");
+        bail!("the kete daemon is not running");
     }
-    let bro = find_bro().ok_or_else(|| {
-        anyhow!("no bro daemon is running, and no bro binary was found beside this app or on PATH to start one")
+    let kete = find_kete().ok_or_else(|| {
+        anyhow!("no kete daemon is running, and no kete binary was found beside this app or on PATH to start one")
     })?;
-    spawn_daemon(&bro)?;
+    spawn_daemon(&kete)?;
     let deadline = tokio::time::Instant::now() + BOOT_WAIT;
     loop {
         match connect().await {
@@ -474,7 +480,7 @@ async fn handshake(stream: &mut Stream) -> Result<(u32, u32)> {
             daemon_protocol_version: protocol_version,
         }) => bail!(
             "the running daemon speaks protocol {protocol_version}, this app speaks {PROTOCOL_VERSION}; \
-             run `bro kill` and reopen, or update the older side"
+             run `kete kill` and reopen, or update the older side"
         ),
         other => bail!("unexpected handshake reply: {other:?}"),
     }
@@ -518,7 +524,7 @@ async fn session(client: &Arc<Client>, spawn: bool) -> Result<()> {
 
 /// Keep a connection up for the life of the app. The daemon is started
 /// only on the first try (and when the user asks): a daemon someone
-/// stopped with `bro kill` stays stopped until then.
+/// stopped with `kete kill` stays stopped until then.
 pub async fn run(client: Arc<Client>) {
     let mut spawn = true;
     loop {

@@ -69,7 +69,7 @@ pub struct HookContext<'a> {
     pub branch: &'a str,
     pub id: &'a WorktreeId,
     /// The worktree's PORT BLOCK, handed to the script as `PORT`,
-    /// `BRO_PORT` and `BRO_PORT_1…` so it can provision what listens there.
+    /// `KETE_PORT` and `KETE_PORT_1…` (and the same under `BRO_PORT`) so it can provision what listens there.
     pub ports: Option<nebula_core::ports::PortBlock>,
 }
 
@@ -329,7 +329,7 @@ mod tests {
         let hook = script(
             &root,
             &format!(
-                "printf '%s %s %s %s' \"$PORT\" \"$BRO_PORT\" \"$BRO_PORT_1\" \"$BRO_PORT_9\" > '{}'",
+                "printf '%s %s %s %s' \"$PORT\" \"$KETE_PORT\" \"$KETE_PORT_1\" \"$KETE_PORT_9\" > '{}'",
                 out.display()
             ),
         );
@@ -339,7 +339,7 @@ mod tests {
             std::fs::write(
                 &path,
                 format!(
-                    "@echo off\r\necho %PORT% %BRO_PORT% %BRO_PORT_1% %BRO_PORT_9%> \"{}\"\r\n",
+                    "@echo off\r\necho %PORT% %KETE_PORT% %KETE_PORT_1% %KETE_PORT_9%> \"{}\"\r\n",
                     out.display()
                 ),
             )

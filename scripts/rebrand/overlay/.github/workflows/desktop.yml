@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   build:
-    name: bro-desktop (${{ matrix.os }})
+    name: kete-desktop (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -69,7 +69,7 @@ jobs:
       - name: Type-check the frontend
         run: npm run check
 
-      - name: Build bro-desktop
+      - name: Build kete-desktop
         run: npm run tauri build
 
       - name: Check clippy
@@ -78,10 +78,10 @@ jobs:
       - name: Test the backend
         run: cargo test --release --locked
 
-      - name: Upload bro-desktop.exe
+      - name: Upload kete-desktop.exe
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: bro-desktop-windows-x64
-          path: desktop/target/release/bro-desktop.exe
+          name: kete-desktop-windows-x64
+          path: desktop/target/release/kete-desktop.exe
           if-no-files-found: error

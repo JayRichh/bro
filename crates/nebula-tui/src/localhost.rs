@@ -221,7 +221,7 @@ fn target(app: &mut App) -> Option<(nebula_core::Worktree, PathBuf, String)> {
     };
     let Some(port) = app.tree.browse_port(&worktree.id) else {
         app.chrome.flash = Some(format!(
-            "nothing is listening in {} yet — start its dev server (PORT is set in its sessions)",
+            "nothing is listening in {} yet: start its dev server (PORT is set in its sessions)",
             worktree.branch
         ));
         return None;
@@ -355,7 +355,7 @@ fn shoot(browser: &Path, url: &str, dir: &Path, file: &Path) -> Result<PathBuf, 
     // A throwaway profile: with the user's own, a headless run hands the
     // job to the browser already open and exits with nothing written.
     let profile = std::env::temp_dir().join(format!(
-        "bro-shot-{}-{}",
+        "kete-shot-{}-{}",
         std::process::id(),
         nebula_core::clock::now_ms()
     ));

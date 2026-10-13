@@ -1,5 +1,5 @@
 //! The `vscode` THEME SOURCE: the palette VS Code itself is wearing, read
-//! off the machine, so Bro beside it looks like the rest of the editor.
+//! off the machine, so Kete beside it looks like the rest of the editor.
 //!
 //! Three reads, each of which may come up empty — and then the theme is
 //! One Dark, as with nothing to read at all:
@@ -14,7 +14,7 @@
 //!    themes are extensions too, under its install ([`find_theme`]).
 //!    A theme file may `include` another it builds on, followed here.
 //! 3. Its `colors` (the workbench) and `tokenColors` (the editor's
-//!    syntax): mapped onto Bro's roles by [`derive`], over One Dark or One
+//!    syntax): mapped onto Kete's roles by [`derive`], over One Dark or One
 //!    Light as the base, and then held to the rules every preset keeps —
 //!    a derived role that would break one (a `merged` that is not purple,
 //!    a `done` that reads as a status) gives way to the base's.
@@ -261,7 +261,7 @@ fn token_color(data: &ThemeData, scopes: &[&str], bg: Option<Color>) -> Option<C
     None
 }
 
-/// Bro's palette, from a VS Code theme's colors over the One preset of the
+/// Kete's palette, from a VS Code theme's colors over the One preset of the
 /// same lightness. Every role has a VS Code key it is read from (the
 /// terminal's ANSI colors for the statuses, the list and editor keys for
 /// the surfaces, the token colors for the syntax) and keeps the base's

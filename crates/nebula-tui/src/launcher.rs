@@ -2045,7 +2045,7 @@ pub fn flipped_target(
     }
     launch_checkout(app, &project)
         .map(QuickTarget::Worktree)
-        .ok_or("no checkout to launch on — keeping the new worktree")
+        .ok_or("no checkout to launch on: keeping the new worktree")
 }
 
 /// Is a launch into `project` a BACKGROUND LAUNCH — one that lands

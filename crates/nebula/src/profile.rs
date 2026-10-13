@@ -1,8 +1,8 @@
-//! `bro profile`: the PROFILES list from the command line — list, add,
+//! `kete profile`: the PROFILES list from the command line — list, add,
 //! remove, pick the default, and sign one in.
 //!
 //! The list is `config.json`'s `profiles` key (`nebula_core::profiles`),
-//! edited as raw JSON so every other key, and every field a newer bro
+//! edited as raw JSON so every other key, and every field a newer kete
 //! wrote, survives. Nothing here talks to the daemon: it reads the list
 //! fresh at each spawn. `login` runs the harness's own sign-in in this
 //! terminal with the profile's environment applied, so the credentials it
@@ -12,7 +12,7 @@ use anyhow::{bail, Context, Result};
 use nebula_core::profiles::{self, Profile};
 use std::collections::BTreeMap;
 
-/// What `bro profile` was asked to do.
+/// What `kete profile` was asked to do.
 pub enum ProfileOp {
     List,
     Add {
@@ -49,7 +49,7 @@ pub fn run_profile(op: ProfileOp) -> Result<()> {
             let registry = nebula_tui::config::Config::load().harness_registry();
             if !registry.iter().any(|h| h.id == harness.trim()) {
                 bail!(
-                    "unknown harness `{harness}` — expected one of {}",
+                    "unknown harness `{harness}`: expected one of {}",
                     registry
                         .iter()
                         .map(|h| h.id.as_str())
@@ -84,7 +84,7 @@ pub fn run_profile(op: ProfileOp) -> Result<()> {
                         home.display()
                     );
                     if login_args(&profile.harness).is_some() {
-                        println!("sign it in with: bro profile login {}", profile.name);
+                        println!("sign it in with: kete profile login {}", profile.name);
                     }
                 }
                 None => println!(
@@ -111,7 +111,7 @@ pub fn run_profile(op: ProfileOp) -> Result<()> {
                     println!("deleted {}", home.display());
                 } else if home.exists() {
                     println!(
-                        "its home stays at {} (bro profile remove --purge deletes it)",
+                        "its home stays at {} (kete profile remove --purge deletes it)",
                         home.display()
                     );
                 }
@@ -131,7 +131,7 @@ fn list() -> Result<()> {
     let all = profiles::load();
     if all.is_empty() {
         println!(
-            "no profiles — add one with: bro profile add <name> --harness <claude|codex|copilot>"
+            "no profiles: add one with: kete profile add <name> --harness <claude|codex|copilot>"
         );
         return Ok(());
     }
@@ -181,14 +181,14 @@ fn login_args(harness: &str) -> Option<&'static [&'static str]> {
 fn login(name: &str, extra: &[String]) -> Result<()> {
     let all = profiles::load();
     let Some(profile) = all.iter().find(|p| p.name.trim() == name.trim()) else {
-        bail!("no profile named `{name}` — bro profile list shows them");
+        bail!("no profile named `{name}`: kete profile list shows them");
     };
     if let Some(problem) = profile.problem() {
         bail!("{problem}");
     }
     let Some(args) = login_args(&profile.harness) else {
         bail!(
-            "bro knows no sign-in command for `{}` — sign in from a session under the profile instead",
+            "kete knows no sign-in command for `{}`: sign in from a session under the profile instead",
             profile.harness
         );
     };
@@ -208,13 +208,13 @@ fn login(name: &str, extra: &[String]) -> Result<()> {
         .collect();
     match profile.home() {
         Some(home) => eprintln!(
-            "bro: signing `{}` in with `{program} {}` (home {})",
+            "kete: signing `{}` in with `{program} {}` (home {})",
             profile.name,
             args.join(" "),
             home.display()
         ),
         None => eprintln!(
-            "bro: signing `{}` in with `{program} {}` (the CLI's default login)",
+            "kete: signing `{}` in with `{program} {}` (the CLI's default login)",
             profile.name,
             args.join(" ")
         ),
@@ -226,7 +226,7 @@ fn login(name: &str, extra: &[String]) -> Result<()> {
     command.envs(env.set.iter().map(|(k, v)| (k, v)));
     let status = command
         .status()
-        .with_context(|| format!("run {program} — is it installed?"))?;
+        .with_context(|| format!("run {program}: is it installed?"))?;
     if !status.success() {
         bail!("{program} exited with {status}");
     }

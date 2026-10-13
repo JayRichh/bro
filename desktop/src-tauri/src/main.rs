@@ -1,4 +1,4 @@
-//! bro-desktop: Bro's native window over the same daemon the TUI drives.
+//! kete-desktop: Kete's native window over the same daemon the TUI drives.
 //! The Rust side owns the daemon connection (`daemon`) and the git reads
 //! (`git`); the web view draws the kanban, the live terminals and the
 //! diffs, and talks to this side through the commands below.
@@ -365,11 +365,15 @@ async fn emit_state(app: tauri::AppHandle, client: Arc<Client>) {
     loop {
         client.changed.notified().await;
         tokio::time::sleep(Duration::from_millis(50)).await;
-        let _ = app.emit("bro://state", client.snapshot());
+        let _ = app.emit("kete://state", client.snapshot());
     }
 }
 
 fn main() {
+    // Kete was Bro: carry Bro's dirs over (or keep using them while Bro's
+    // daemon runs) before the client works out where the daemon is. This
+    // window has no console to say so on; `kete` says it when it moves them.
+    let _ = nebula_core::paths::migrate_legacy_dirs();
     let client = Client::new();
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -380,7 +384,7 @@ fn main() {
             tauri::async_runtime::spawn(emit_state(handle, client.clone()));
             tauri::async_runtime::spawn(poll_prs(client.clone()));
             if let Some(w) = app.get_webview_window("main") {
-                let _ = w.set_title("bro");
+                let _ = w.set_title("kete");
             }
             Ok(())
         })
@@ -403,5 +407,5 @@ fn main() {
             startup,
         ])
         .run(tauri::generate_context!())
-        .expect("bro-desktop failed to start");
+        .expect("kete-desktop failed to start");
 }

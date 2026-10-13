@@ -754,7 +754,7 @@ pub(crate) fn zoom_pane(app: &mut App, out: &mut Vec<ClientRequest>) -> bool {
 }
 
 /// What `^F` says with nothing in the pane to full-screen.
-pub(crate) const NOTHING_TO_FULL_SCREEN: &str = "no session in the pane — j/k onto one, then ^F";
+pub(crate) const NOTHING_TO_FULL_SCREEN: &str = "no session in the pane: j/k onto one, then ^F";
 
 /// Leave a locked pane for the cards (`Focus::Sessions`). Also ends a
 /// full screen, so there is something on screen to land in — which is

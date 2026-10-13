@@ -43,7 +43,7 @@ impl TestEnv {
     /// The `nebula` binary under test, pointed at this env's runtime and
     /// data dirs — the base every daemon spawn and one-shot CLI run shares.
     fn cli(&self) -> std::process::Command {
-        let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_bro"));
+        let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_kete"));
         cmd.env(env::RUNTIME_DIR, &self.runtime_dir)
             .env(env::DATA_DIR, self.tmp.path().join("data"));
         cmd
@@ -1364,7 +1364,7 @@ async fn claude_session_title_and_row_name_stay_tied() {
         &ClientRequest::CreateAgent {
             req_id: 2,
             worktree: worktree.id.clone(),
-            name: "Typed In Bro".into(),
+            name: "Typed In Kete".into(),
             kind: AgentKind::Claude,
             custom_harness: None,
             model: None,
@@ -1435,7 +1435,7 @@ async fn claude_session_title_and_row_name_stay_tied() {
     .await;
     let output = String::from_utf8_lossy(&collected_output(&events)).to_string();
     assert!(
-        output.contains(r#""sessionTitle":"Typed In Bro""#),
+        output.contains(r#""sessionTitle":"Typed In Kete""#),
         "reply carries the row name: {output}"
     );
 
@@ -2209,7 +2209,7 @@ async fn reload_and_upgrade_restart_the_daemon_without_stopping_sessions() {
     assert!(stdout.contains("2 live sessions kept running"), "{stdout}");
     assert!(
         daemon.try_wait().unwrap().is_none(),
-        "the daemon restarts in place — same process"
+        "the daemon restarts in place, same process"
     );
     read_until_closed(&mut c).await;
 
@@ -2262,7 +2262,7 @@ async fn reload_and_upgrade_restart_the_daemon_without_stopping_sessions() {
     std::fs::write(&script, "#!/bin/sh\nexit 0\n").unwrap();
     let bin = env.tmp.path().join("bin");
     std::fs::create_dir_all(&bin).unwrap();
-    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_bro"), bin.join("bro")).unwrap();
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_kete"), bin.join("kete")).unwrap();
     let out = env
         .cli()
         .args(["upgrade", "--force"])
@@ -4285,7 +4285,7 @@ async fn nebula_open_cli_hands_the_files_to_every_subscriber() {
     std::fs::write(&main_rs, "fn main() {}\n").unwrap();
 
     // Relative paths resolve against the CLI's cwd — the agent's.
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_bro"))
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_kete"))
         .args(["open", "docs/notes.md", "main.rs"])
         .current_dir(&repo)
         .env(env::RUNTIME_DIR, &env.runtime_dir)
@@ -4353,7 +4353,7 @@ async fn nebula_open_cli_hands_the_files_to_every_subscriber() {
     );
 
     // Outside a session there is no row to open for.
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_bro"))
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_kete"))
         .args(["open", main_rs.to_str().unwrap()])
         .env(env::RUNTIME_DIR, &env.runtime_dir)
         .env_remove(env::AGENT_ID)
@@ -4491,7 +4491,7 @@ async fn nebula_worktree_cli_relocates_the_session_when_the_turn_ends() {
     // The model obeys the guidance — `nebula worktree feat x` (the space
     // slugifies) with the session's env.
     let out = agent_cli(&env, &agent_id, &["worktree", "feat", "x"]);
-    assert!(out.status.success(), "bro worktree failed: {out:?}");
+    assert!(out.status.success(), "kete worktree failed: {out:?}");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.contains("feat-x") && stdout.contains("this turn ends"),
@@ -4517,7 +4517,7 @@ async fn nebula_worktree_cli_relocates_the_session_when_the_turn_ends() {
         .expect("feat-x worktree upsert");
     assert!(
         feat.path.ends_with("repo-worktrees/feat-x"),
-        "bro's sibling layout: {:?}",
+        "kete's sibling layout: {:?}",
         feat.path
     );
     assert!(feat.path.join(".git").exists(), "a real checkout");
@@ -4742,7 +4742,7 @@ async fn nebula_spawn_cli_starts_a_sibling_session_in_the_same_worktree() {
     // The model obeys the guidance — `nebula spawn fix the login redirect`
     // (the words join) with the session's env.
     let out = agent_cli(&env, &caller, &["spawn", "fix", "the", "login", "redirect"]);
-    assert!(out.status.success(), "bro spawn failed: {out:?}");
+    assert!(out.status.success(), "kete spawn failed: {out:?}");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.contains("started a new session") && stdout.contains("carry on"),
@@ -4786,7 +4786,7 @@ async fn nebula_spawn_cli_starts_a_sibling_session_in_the_same_worktree() {
         &caller,
         &["spawn", "--kind", "codex", "run the tests"],
     );
-    assert!(out.status.success(), "bro spawn --kind failed: {out:?}");
+    assert!(out.status.success(), "kete spawn --kind failed: {out:?}");
     assert!(
         String::from_utf8_lossy(&out.stdout).contains("new codex session"),
         "stdout names the harness"
@@ -4807,7 +4807,10 @@ async fn nebula_spawn_cli_starts_a_sibling_session_in_the_same_worktree() {
         &caller,
         &["spawn", "--worktree", "feat login", "port the tests"],
     );
-    assert!(out.status.success(), "bro spawn --worktree failed: {out:?}");
+    assert!(
+        out.status.success(),
+        "kete spawn --worktree failed: {out:?}"
+    );
     assert!(
         String::from_utf8_lossy(&out.stdout).contains("branch \"feat-login\""),
         "stdout names the branch: {out:?}"
@@ -5090,7 +5093,7 @@ fn agent_cli(
     agent_id: &nebula_core::AgentId,
     args: &[&str],
 ) -> std::process::Output {
-    std::process::Command::new(env!("CARGO_BIN_EXE_bro"))
+    std::process::Command::new(env!("CARGO_BIN_EXE_kete"))
         .args(args)
         .env(env::RUNTIME_DIR, &env.runtime_dir)
         .env(env::AGENT_ID, &agent_id.0)
@@ -5315,7 +5318,7 @@ exit 0
     assert_eq!(
         runs(),
         "1",
-        "the create is the only CLI run — no attach, no teleport"
+        "the create is the only CLI run, no attach, no teleport"
     );
     assert!(
         !events.iter().any(|e| matches!(

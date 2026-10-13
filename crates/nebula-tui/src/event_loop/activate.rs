@@ -253,14 +253,14 @@ pub(super) fn no_follow_up(app: &App, row: &SessionRow) -> Option<String> {
     }
     Some(match row {
         SessionRow::Agent(a) if a.archived => {
-            "archived sessions take no follow-up — u brings it back".into()
+            "archived sessions take no follow-up: u brings it back".into()
         }
         SessionRow::Agent(a) if a.cloud_session_id.is_some() => {
-            "cloud sessions take a queued message — right-click, then Send to cloud session".into()
+            "cloud sessions take a queued message: right-click, then Send to cloud session".into()
         }
         SessionRow::Agent(_) => "the session is still starting".into(),
-        SessionRow::Terminal(_) => "terminals take typing in the pane — Enter attaches".into(),
-        SessionRow::Link(_) => "a pull request takes a comment — y".into(),
+        SessionRow::Terminal(_) => "terminals take typing in the pane: Enter attaches".into(),
+        SessionRow::Link(_) => "a pull request takes a comment: y".into(),
     })
 }
 

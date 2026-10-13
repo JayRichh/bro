@@ -368,7 +368,7 @@ impl Daemon {
             if base.is_some() && refuse_existing_branch_with_base {
                 bail!(
                     "branch `{branch}` already has a worktree at {}; --base only applies to a new \
-                     branch — run it again without --base to use that worktree",
+                     branch: run it again without --base to use that worktree",
                     existing.path.display()
                 );
             }
@@ -382,7 +382,7 @@ impl Daemon {
                 .context("project not found")?;
             if git::local_branch(&project.repo_path, branch).await {
                 bail!(
-                    "branch `{branch}` already exists; --base only applies to a new branch — run \
+                    "branch `{branch}` already exists; --base only applies to a new branch: run \
                      it again without --base to use the branch as it is"
                 );
             }
@@ -462,7 +462,7 @@ impl Daemon {
             .await?
             .context("worktree not found")?;
         if worktree.is_main {
-            bail!("cannot delete the main checkout — remove the project instead");
+            bail!("cannot delete the main checkout: remove the project instead");
         }
         let project_lookup = worktree.project_id.clone();
         let project = self

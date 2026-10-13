@@ -302,7 +302,7 @@ impl Daemon {
             SessionRef::Agent(id) => {
                 let agent = self.store.get_agent(id)?.context("agent not found")?;
                 if agent.archived {
-                    bail!("agent is archived — unarchive it first");
+                    bail!("agent is archived: unarchive it first");
                 }
                 // A Cloud row's only PTY is the `claude --cloud <task>`
                 // create, gone seconds after it prints the session id. There
@@ -504,7 +504,7 @@ impl Daemon {
                     && claude_transcript_exists(&self.claude_projects_dirs(), sid)
                         == Some(false) =>
             {
-                tracing::info!(agent = %agent.id, session = %sid, "no Claude transcript for the session — spawning fresh");
+                tracing::info!(agent = %agent.id, session = %sid, "no Claude transcript for the session: spawning fresh");
                 if let Err(e) = self.store.set_agent_session_id(&agent.id, None) {
                     tracing::warn!(agent = %agent.id, error = %e, "clear session id failed");
                 }
@@ -565,7 +565,7 @@ impl Daemon {
             // row's session id, and the pane keeps the CLI's reason.
             (None, Some(id)) => {
                 if prompts.initial.is_some() {
-                    tracing::warn!(agent = %agent.id, "backgrounded Claude session — `claude attach` takes no prompt, dropping the initial one");
+                    tracing::warn!(agent = %agent.id, "backgrounded Claude session: `claude attach` takes no prompt, dropping the initial one");
                 }
                 (
                     harness.program.trim().to_string(),
@@ -724,7 +724,7 @@ impl Daemon {
                 let Ok(Some(worktree)) = self.store.get_worktree(&agent.worktree_id) else {
                     return;
                 };
-                tracing::info!(agent = %id, attach = %attach, "resume refused for a backgrounded session — attaching");
+                tracing::info!(agent = %id, attach = %attach, "resume refused for a backgrounded session: attaching");
                 if self
                     .spawn_agent_pty(&agent, &worktree, cols, rows, None, None, Some(&attach))
                     .is_ok()
@@ -736,13 +736,13 @@ impl Daemon {
                 }
                 return;
             }
-            tracing::info!(agent = %id, "resume failed fast with its transcript intact — keeping the session id");
+            tracing::info!(agent = %id, "resume failed fast with its transcript intact: keeping the session id");
             return;
         }
         let Ok(Some(worktree)) = self.store.get_worktree(&agent.worktree_id) else {
             return;
         };
-        tracing::info!(agent = %id, "resume failed fast — respawning fresh");
+        tracing::info!(agent = %id, "resume failed fast: respawning fresh");
         if let Err(e) = self.store.set_agent_session_id(id, None) {
             tracing::warn!(agent = %id, error = %e, "clear session id failed");
         }

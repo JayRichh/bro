@@ -79,7 +79,7 @@ impl TuiHarness {
                 pixel_height: 0,
             })
             .unwrap();
-        let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_bro"));
+        let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_kete"));
         cmd.env(nebula_core::env::RUNTIME_DIR, &runtime_dir);
         cmd.env(nebula_core::env::DATA_DIR, &data_dir);
         cmd.env(nebula_core::env::AGENT_CMD, "/bin/sh"); // stand-in for claude
@@ -247,7 +247,7 @@ impl Drop for TuiHarness {
     fn drop(&mut self) {
         let _ = self.child.kill();
         // Stop the auto-spawned daemon and clean the short-lived dirs.
-        let _ = std::process::Command::new(env!("CARGO_BIN_EXE_bro"))
+        let _ = std::process::Command::new(env!("CARGO_BIN_EXE_kete"))
             .arg("kill")
             .env(nebula_core::env::RUNTIME_DIR, &self.runtime_dir)
             .env(nebula_core::env::DATA_DIR, &self.data_dir)
@@ -420,7 +420,7 @@ fn host_working_directory_follows_project_switches_and_restores_on_exit() {
     tui.wait_for_working_directory(&second);
 
     tui.send(b"q");
-    tui.wait_for_text("Quit bro");
+    tui.wait_for_text("Quit kete");
     tui.send(ENTER);
     tui.wait_for_working_directory(&tui._repos.path().canonicalize().unwrap());
 }
@@ -465,7 +465,7 @@ fn nebula_open_from_inside_a_session_raises_the_file_tabs() {
     // ---- what the model runs, typed at the shell inside the session ----
     tui.type_str(&format!(
         "{} open {} {}",
-        env!("CARGO_BIN_EXE_bro"),
+        env!("CARGO_BIN_EXE_kete"),
         alpha.display(),
         beta.display()
     ));
@@ -592,12 +592,12 @@ fn tui_issues_are_prefetched_before_the_modal_opens() {
     // The modal opens on the prefetched row — and spends no second process
     // on a list that just landed (or is still landing).
     tui.send(b"i");
-    tui.wait_for_text("Issues — issues-proj (1)");
+    tui.wait_for_text("Issues: issues-proj (1)");
     tui.wait_for_text("#15 Fix login redirect");
     let asks = std::fs::read_to_string(&calls).unwrap().lines().count();
     assert_eq!(asks, 1, "opening on a fresh list asks GitHub again");
     tui.send(ESC);
-    tui.wait_for_gone("Issues — issues-proj");
+    tui.wait_for_gone("Issues: issues-proj");
 }
 
 /// `Ctrl+e` in the ISSUES MODAL edits the issue in place: the reading pane
@@ -680,9 +680,9 @@ fn tui_issues_modal_edits_the_issue_in_place() {
     tui.wait_for_text("Edit issue #15");
     tui.send(ESC);
     tui.wait_for_gone("Edit issue #15");
-    tui.wait_for_text("Issues — issues-proj");
+    tui.wait_for_text("Issues: issues-proj");
     tui.send(ESC);
-    tui.wait_for_gone("Issues — issues-proj");
+    tui.wait_for_gone("Issues: issues-proj");
 }
 
 #[test]
@@ -784,19 +784,19 @@ fn tui_branch_switcher_moves_the_root_checkout() {
 
     // ---- a clean checkout switches on Enter ----
     tui.send(b"c");
-    tui.wait_for_text("Switch branch — switch-proj");
+    tui.wait_for_text("Switch branch: switch-proj");
     tui.wait_for_text("release-2");
     tui.type_str("login");
     tui.wait_for_gone("release-2");
     tui.send(ENTER);
     tui.wait_for_text("⌂ root is on feature-login");
-    tui.wait_for_gone("Switch branch —");
+    tui.wait_for_gone("Switch branch");
     assert_eq!(head(&repo), "feature-login");
 
     // ---- a dirty one asks first; s stashes and switches ----
     std::fs::write(repo.join(".keep"), "edited\n").unwrap();
     tui.send(b"c");
-    tui.wait_for_text("Switch branch — switch-proj");
+    tui.wait_for_text("Switch branch: switch-proj");
     tui.wait_for_text("on feature-login");
     // The switch dropped the cached listing: Enter needs the fresh one.
     tui.wait_for_text("release-2");
@@ -819,7 +819,7 @@ fn tui_branch_switcher_moves_the_root_checkout() {
         .unwrap();
     assert!(
         String::from_utf8_lossy(&stashes.stdout)
-            .contains("bro: feature-login before switching to main"),
+            .contains("kete: feature-login before switching to main"),
         "{}",
         String::from_utf8_lossy(&stashes.stdout)
     );

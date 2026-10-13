@@ -20,7 +20,7 @@ Developers who run several AI coding agents in parallel across projects and git 
 
 ## Product Purpose
 
-Bro is mission control for coding agents on Windows: one daemon owns every agent session (Claude Code, Codex, Copilot, Cursor, OpenCode, Pi, Grok, Muse), sessions survive closing the UI, and every session's state is readable without opening it. Success: you never tab through terminals to find which agent is waiting on you.
+Kete holds your coding agents in one place. One daemon owns every agent session (Claude Code, Codex, Copilot, Cursor, OpenCode, Pi, Grok, Muse), sessions survive closing the UI, and every session's state is readable without opening it. Success: you never tab through terminals to find which agent is waiting on you.
 
 ## Positioning
 
@@ -31,11 +31,11 @@ Bro is mission control for coding agents on Windows: one daemon owns every agent
 
 ## Operating Context
 
-- Windows Terminal, the VS Code integrated terminal, or Bro's own desktop window.
+- Windows Terminal, the VS Code integrated terminal, or Kete's own desktop window.
 - PowerShell 7 / 5.1, Git Bash optional.
 - `git`, `gh`, `git worktree`.
 - Dev servers on localhost (Next.js, Vite and similar), opened in Chrome, Edge or Firefox.
-- Works next to VS Code. The user's VS Code uses Atom One Dark, JetBrains Mono, and Material Icon Theme; Bro should feel at home beside it.
+- Works next to VS Code. The user's VS Code uses Atom One Dark, JetBrains Mono, and Material Icon Theme; Kete should feel at home beside it.
 
 ## Capabilities and Constraints
 
@@ -45,25 +45,28 @@ Bro is mission control for coding agents on Windows: one daemon owns every agent
   - diff viewer, file finder, grep, tree browser
   - PR and issue views via `gh`
   - harness table configured from `config.json`
-- **New in Bro:**
+- **Added in Kete:**
+  - **Windows port:** ConPTY sessions, a named-pipe daemon, `%LOCALAPPDATA%\kete`.
   - **Profiles:** accounts per harness (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GH_CONFIG_DIR`).
-  - **Kanban:** layout by status.
-  - **Diff:** VS Code-grade, with side-by-side, inline and replacement modes, and per-hunk accept/reject.
-  - **File icons:** in the explorer, matching the active theme.
-  - **Theme:** light and dark awareness.
-  - **Localhost previews:**
-    - ports per worktree
-    - port allocation per worktree
-    - open in a chosen browser (Chrome, Edge or Firefox, with a browser profile each)
-    - headless screenshots shown inline
   - **Copilot:** as a harness.
-- **CLI:** `bro`. The command `bro` must not collide with nebula's `nebula`; config lives in `%LOCALAPPDATA%\bro`.
+  - **Kanban:** sessions in lanes by status (`Shift+K`).
+  - **Diff:** three layouts (side by side, inline, replacement), word highlights, per-change stage and discard.
+  - **File icons:** Material Icon Theme colours, Nerd Font glyphs with an ASCII fallback.
+  - **Themes:** One Dark and One Light, following the OS on request, or imported from the VS Code theme.
+  - **Localhost previews:**
+    - a port block per worktree, allocated by the daemon
+    - live ports on each worktree's band
+    - open in a chosen browser (Chrome, Edge or Firefox)
+    - headless screenshots
+  - **`kete setup terminal`:** JetBrainsMono Nerd Font and a Kete profile in Windows Terminal.
+  - **Desktop window:** board, live sessions, read-only diff.
+- **CLI:** `kete`, with `bro` kept as an alias (Kete's old name). It must not collide with nebula's `nebula`; data lives in `%LOCALAPPDATA%\kete`, moved over from `%LOCALAPPDATA%\bro` on first start.
 - **Optional:** agent-office runs alongside as a demo; it is not a dependency.
 
 ## Brand Commitments
 
-- **Name:** Bro.
-- **Voice:** Kiwi. "Bro" is camaraderie: a sidekick crew that has your back. Friendly, plain, never cutesy.
+- **Name:** Kete, from te reo Māori for a woven flax basket. The basket holds your agents, their work and its scope. Written `kete` as a command and wordmark, Kete in a sentence.
+- **Voice:** plain, warm and direct, a little kiwi. Short sentences, concrete verbs. Never cutesy, never salesy. No em dashes in user-facing copy.
 - **Tagline:** "Sweet as agent management."
 - **Attribution:** keep nebula's MIT notice and credit.
 

@@ -712,7 +712,7 @@ pub fn lines(
                 Line::from(""),
             ];
             let message = if failed {
-                "couldn't read this pull request — is gh installed and logged in? o still opens it in the browser."
+                "couldn't read this pull request: is gh installed and logged in? o still opens it in the browser."
             } else {
                 "reading it…"
             };
@@ -828,7 +828,7 @@ pub(crate) fn draw(
         rows.len().to_string()
     };
     let title = format!(
-        "Pull requests — {} ({}{})",
+        "Pull requests: {} ({}{})",
         view.project_name,
         count,
         if inflight { ", refreshing…" } else { "" }
@@ -1392,7 +1392,7 @@ mod tests {
             let buf = term.backend().buffer();
             let screen: String = buf.content().iter().map(|c| c.symbol()).collect();
             assert!(
-                screen.contains("Pull requests — demo"),
+                screen.contains("Pull requests: demo"),
                 "the modal under the box"
             );
             assert!(screen.contains("New session · PR #41"), "the box over it");
@@ -1458,7 +1458,7 @@ mod tests {
         );
         open(&mut app);
         let before = screen(&mut app, 120, 30);
-        assert!(before.contains("Pull requests — demo (3)"), "{before}");
+        assert!(before.contains("Pull requests: demo (3)"), "{before}");
         assert!(before.contains("#42 Fix login"), "{before}");
         assert!(before.contains("failing"), "{before}");
         assert!(before.contains("draft"), "{before}");

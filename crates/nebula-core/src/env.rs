@@ -70,7 +70,9 @@ pub const COPILOT_HOME: &str = "COPILOT_HOME";
 
 /// Windows only: the shell plain terminals and RUN TERMINALs use, ahead of
 /// the pwsh → powershell → `%COMSPEC%` search (`shell::user_shell`).
-pub const SHELL_OVERRIDE: &str = "BRO_SHELL";
+pub const SHELL_OVERRIDE: &str = "KETE_SHELL";
+/// [`SHELL_OVERRIDE`] under Kete's old name, read when that one is unset.
+pub const LEGACY_SHELL_OVERRIDE: &str = "BRO_SHELL";
 
 /// Env vars that identify an agent session to the daemon. They are set on
 /// every agent PTY and must never leak into plain terminals.

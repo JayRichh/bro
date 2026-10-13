@@ -640,7 +640,7 @@ pub fn switch(root: &Path, from: &str, target: &Branch, carry: &Carry) -> Outcom
     let to = target.local_name().to_string();
     if let Some(what) = in_progress(root) {
         return Outcome::Failed(format!(
-            "the checkout is in the middle of {what} — finish or abort it first"
+            "the checkout is in the middle of {what}: finish or abort it first"
         ));
     }
     let all = match crate::git_diff::changed_files(root) {
@@ -649,7 +649,7 @@ pub fn switch(root: &Path, from: &str, target: &Branch, carry: &Carry) -> Outcom
     };
     if let Some(file) = all.iter().find(|f| unmerged(f)) {
         return Outcome::Failed(format!(
-            "{} has unresolved conflicts — resolve them first",
+            "{} has unresolved conflicts: resolve them first",
             file.path
         ));
     }
@@ -680,13 +680,13 @@ pub fn switch(root: &Path, from: &str, target: &Branch, carry: &Carry) -> Outcom
                 .find(|r| !r.is_empty() && target.name.starts_with(&prefix(r)))
             {
                 return Outcome::Failed(format!(
-                    "a branch named {} would be mistaken for {remote}'s — pick another name",
+                    "a branch named {} would be mistaken for {remote}'s: pick another name",
                     target.name
                 ));
             }
         }
         Carry::Stash => {
-            let message = format!("bro: {from} before switching to {to}");
+            let message = format!("kete: {from} before switching to {to}");
             match stash_push(root, &message) {
                 Ok(entry) => {
                     if entry.is_some() {
@@ -700,7 +700,7 @@ pub fn switch(root: &Path, from: &str, target: &Branch, carry: &Carry) -> Outcom
         Carry::Commit(message) => {
             if head.is_none() {
                 return Outcome::Failed(
-                    "HEAD is detached — a commit here would belong to no branch; stash instead"
+                    "HEAD is detached, a commit here would belong to no branch; stash instead"
                         .into(),
                 );
             }
@@ -771,7 +771,7 @@ pub fn switch(root: &Path, from: &str, target: &Branch, carry: &Carry) -> Outcom
         };
     }
     let mut error = if error.contains("would be overwritten") {
-        format!("files in the checkout collide with {to} — stash or commit them instead")
+        format!("files in the checkout collide with {to}: stash or commit them instead")
     } else {
         error
     };
@@ -783,7 +783,7 @@ pub fn switch(root: &Path, from: &str, target: &Branch, carry: &Carry) -> Outcom
         } else {
             changed = true;
             error = format!(
-                "{error} — git stopped part-way and left files from {to} in the checkout; check git status"
+                "{error}: git stopped part-way and left files from {to} in the checkout; check git status"
             );
         }
     }
@@ -916,8 +916,8 @@ impl Choice {
 
     fn detail(self, from: &str, to: &str, detached: bool) -> String {
         match self {
-            Choice::Stash => "stash them in a bro entry — git stash list shows it".into(),
-            Choice::Bring => format!("keep them on {to} — refused if they collide with it"),
+            Choice::Stash => "stash them in a kete entry: git stash list shows it".into(),
+            Choice::Bring => format!("keep them on {to}: refused if they collide with it"),
             Choice::Commit if detached => {
                 "unavailable: HEAD is detached, the commit would belong to no branch".into()
             }
@@ -1133,7 +1133,7 @@ pub(crate) fn open_branch_switch(app: &mut App) {
     let target = match app.selected_worktree().filter(|_| on_checkout) {
         Some(w) if !w.is_main => {
             app.chrome.flash = Some(
-                "switch branch is for the ⌂ root checkout — a worktree stays on the branch it was cut for"
+                "switch branch is for the ⌂ root checkout, a worktree stays on the branch it was cut for"
                     .into(),
             );
             return;
@@ -1405,7 +1405,7 @@ fn land_switch(app: &mut App, worktree: WorktreeId, request: u64, outcome: Outco
                 view.changes = Some(files.len());
                 if matches!(job.carry, Carry::Discard(_)) {
                     view.status = Some(Status::error(
-                        "the changes moved since the prompt opened — look again before discarding",
+                        "the changes moved since the prompt opened: look again before discarding",
                     ));
                 }
                 view.stage = Stage::Dirty {
@@ -1419,7 +1419,7 @@ fn land_switch(app: &mut App, worktree: WorktreeId, request: u64, outcome: Outco
         }
         Outcome::Dirty { files, .. } => {
             app.chrome.flash = Some(format!(
-                "not switched: {from} has {} — c to choose what happens to them",
+                "not switched: {from} has {}: c to choose what happens to them",
                 changes_text(files.len())
             ));
         }
@@ -1552,7 +1552,7 @@ fn activate_selected(app: &mut App) {
     }
     if let Some(path) = &branch.checked_out_at {
         view.status = Some(Status::error(format!(
-            "{} is checked out in {} — git keeps a branch in one checkout",
+            "{} is checked out in {}: git keeps a branch in one checkout",
             branch.name,
             path.display()
         )));
@@ -1597,7 +1597,7 @@ fn choose(app: &mut App, choice: Choice) {
         Choice::Bring => start_switch(app, target, Carry::Bring, files, keys),
         Choice::Commit if detached => {
             view.status = Some(Status::error(
-                "HEAD is detached — a commit here would belong to no branch; stash instead",
+                "HEAD is detached, a commit here would belong to no branch; stash instead",
             ));
         }
         Choice::Commit => {
@@ -1718,7 +1718,7 @@ pub(crate) fn handle_key(app: &mut App, key: KeyEvent) {
             if key.code == KeyCode::Esc {
                 app.modals.overlay = None;
                 app.chrome.flash =
-                    Some("still switching — c shows it, the result lands here".into());
+                    Some("still switching: c shows it, the result lands here".into());
             }
         }
     }
@@ -1909,7 +1909,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App, view: &BranchSwitchView, th: Th
     let area = centered_rect(f.area(), SIZE.0, SIZE.1);
     f.render_widget(Clear, area);
     let title = format!(
-        " Switch branch — {} ⌂ root · on {} ",
+        " Switch branch: {} ⌂ root · on {} ",
         view.project_name, view.current
     );
     let block = modal_block(title, th).title_bottom(
@@ -2029,7 +2029,7 @@ fn draw_list(f: &mut Frame, view: &BranchSwitchView, body: Rect, th: Theme) -> R
             (Some(e), _) if view.list.items.is_empty() => format!("couldn't list branches: {e}"),
             (_, false) => "reading branches…".into(),
             _ if !query.is_empty() => format!(
-                "{NO_MATCHES} — Enter creates \"{query}\" off {}",
+                "{NO_MATCHES}: Enter creates \"{query}\" off {}",
                 view.current
             ),
             _ => NO_MATCHES.into(),
@@ -2124,7 +2124,7 @@ fn draw_dirty(
     let detached = view.detached();
     if let Some(row) = row_rect(body, 0) {
         let question = format!(
-            " {} has {} — how should they travel to {to}?",
+            " {} has {}: how should they travel to {to}?",
             view.current,
             changes_text(files.len())
         );
@@ -2535,7 +2535,7 @@ mod tests {
         );
         let stashes = git(&repo, &["stash", "list"]);
         assert!(
-            stashes.contains("bro: main before switching to feature"),
+            stashes.contains("kete: main before switching to feature"),
             "{stashes}"
         );
     }
@@ -2637,7 +2637,7 @@ mod tests {
             "feature\n",
             "no stash popped onto feature"
         );
-        assert!(git(&repo, &["stash", "list"]).contains("bro: main"));
+        assert!(git(&repo, &["stash", "list"]).contains("kete: main"));
     }
 
     #[test]
@@ -3226,7 +3226,7 @@ mod tests {
         assert!(app.jobs.branch_switch.switching.is_empty());
         assert_eq!(
             app.chrome.flash.as_deref(),
-            Some("not switched: main has 1 uncommitted change — c to choose what happens to them")
+            Some("not switched: main has 1 uncommitted change: c to choose what happens to them")
         );
     }
 
@@ -3297,7 +3297,7 @@ mod tests {
         open_for(&mut app, &w1());
         let text = screen(&mut app, 120, 30);
         assert!(
-            text.contains("Switch branch — demo ⌂ root · on main"),
+            text.contains("Switch branch: demo ⌂ root · on main"),
             "{text}"
         );
         let current = text

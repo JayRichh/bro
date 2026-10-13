@@ -2,7 +2,7 @@
 
 <sub>[← README](../README.md) · [Keys](keys.md) · [Commands](commands.md) · [Sessions](sessions.md) · [Configuration](configuration.md) · [How it works](how-it-works.md)</sub>
 
-Two checkouts of one app both running `npm run dev` fight over `:3000`. Bro gives every WORKTREE a
+Two checkouts of one app both running `npm run dev` fight over `:3000`. Kete gives every WORKTREE a
 PORT BLOCK of its own, tells each session in it which ports those are, watches what actually starts
 listening, and opens or screenshots it from the grid.
 
@@ -20,12 +20,13 @@ environment:
 | Variable | Value (slot 1) |
 |---|---|
 | `PORT` | `3010`, the block's first port |
-| `BRO_PORT` | `3010`, the same, under a name nothing else sets |
-| `BRO_PORT_1` … `BRO_PORT_9` | `3011` … `3019`, the rest of the block |
+| `KETE_PORT` | `3010`, the same, under a name nothing else sets |
+| `KETE_PORT_1` … `KETE_PORT_9` | `3011` … `3019`, the rest of the block |
+| `BRO_PORT`, `BRO_PORT_1` … | the same again under Kete's old name, so a config written for Bro still works |
 
 Dev servers that read `PORT` (Next.js, Express, Remix, most of the Node world) bind there without
 being told. Vite does not read it; point it there in `vite.config.ts` with
-`server: { port: Number(process.env.PORT) }`, or run `vite --port $PORT`. Use `BRO_PORT_1` and up for
+`server: { port: Number(process.env.PORT) }`, or run `vite --port $PORT`. Use `KETE_PORT_1` and up for
 a second server, an API beside a frontend, a Storybook.
 
 The WORKTREE HOOK gets the same variables, so a create hook can write the port into a `.env` file,
@@ -41,13 +42,13 @@ Every three seconds the daemon reads which TCP sockets are in LISTEN state on th
 process owns each one. A port counts for a worktree when its owner is inside the process tree of one
 of that worktree's sessions: the agent, the shell, the RUN TERMINAL, or anything they started.
 
-- **Windows:** `GetExtendedTcpTable` for both IPv4 and IPv6, so a server bound only to `::1` (Vite and Next.js often are) is found too. The process tree comes from the toolhelp snapshot bro already uses for memory readouts.
+- **Windows:** `GetExtendedTcpTable` for both IPv4 and IPv6, so a server bound only to `::1` (Vite and Next.js often are) is found too. The process tree comes from the toolhelp snapshot kete already uses for memory readouts.
 - **macOS and Linux:** `lsof -nP -iTCP -sTCP:LISTEN`, best effort, with `ps` for the tree. Without `lsof` installed nothing is listed.
 
 The worktree's band rule on the grid shows each live port with a green dot, `:3010 ●`, before the
 session counts. Clients hear about a change when it happens, not on every sweep.
 
-`bro sessions` adds `port=3010 listening=3010,3011` to each line, and `bro sessions --json` carries
+`kete sessions` adds `port=3010 listening=3010,3011` to each line, and `kete sessions --json` carries
 `port` (the block's first port, or `null`) and `live_ports` (a list) on every row.
 
 ## Open in a browser

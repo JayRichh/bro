@@ -116,7 +116,7 @@ export interface Startup {
 
 export const api = {
   state: () => invoke<Model>('get_state'),
-  onState: (f: (m: Model) => void) => listen<Model>('bro://state', (e) => f(e.payload)),
+  onState: (f: (m: Model) => void) => listen<Model>('kete://state', (e) => f(e.payload)),
   retry: () => invoke<void>('retry_connect'),
   attach: (session: SessionRef, cols: number, rows: number, onEvent: Channel<PtyEvent>) =>
     invoke<void>('attach', { session, cols, rows, onEvent }),

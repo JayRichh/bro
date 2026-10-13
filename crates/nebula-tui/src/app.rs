@@ -210,7 +210,7 @@ pub const MIN_DIFF_PANE_W: u16 = 24;
 /// `x` closes the project's tab, `⇧M` opens the memory modal — and the
 /// one thing it must not be is quiet.
 pub const TERMINAL_RELEASED: &str =
-    "the keys are the grid's again — Enter steps back into the session";
+    "the keys are the grid's again: Enter steps back into the session";
 
 // ---- list-view arithmetic shared by every overlay with a cursor ----
 
@@ -1822,7 +1822,7 @@ impl DiffView {
         }
         let under = tree.files_under(row.node);
         let plural = if under.len() == 1 { "" } else { "s" };
-        let mut out = format!("{}/ — {} changed file{plural}\n", dir.path, under.len());
+        let mut out = format!("{}/: {} changed file{plural}\n", dir.path, under.len());
         for file in under.into_iter().map(|f| &self.files[f]) {
             let name = file
                 .path
@@ -4007,7 +4007,7 @@ pub struct LauncherState {
     /// startup and when the settings overlay applies a change.
     pub highlight_current_card: bool,
     /// The PROFILES list (`profiles` in config.json), mirrored at startup
-    /// and whenever a QUICK PROMPT opens — `bro profile add` runs outside
+    /// and whenever a QUICK PROMPT opens — `kete profile add` runs outside
     /// the TUI — so the box's profile field and the cards read it without
     /// a file read per frame.
     pub profiles: Vec<nebula_core::profiles::Profile>,

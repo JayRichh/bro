@@ -15,11 +15,14 @@ pub fn user_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into())
 }
 
-/// The user's shell: `BRO_SHELL`, else PowerShell 7 (`pwsh.exe`) when it is
-/// on PATH, else Windows PowerShell, else `%COMSPEC%` (`cmd.exe`).
+/// The user's shell: `KETE_SHELL` (or the older `BRO_SHELL`), else
+/// PowerShell 7 (`pwsh.exe`) when it is on PATH, else Windows PowerShell,
+/// else `%COMSPEC%` (`cmd.exe`).
 #[cfg(windows)]
 pub fn user_shell() -> String {
-    if let Some(shell) = crate::env::non_empty(crate::env::SHELL_OVERRIDE) {
+    if let Some(shell) = crate::env::non_empty(crate::env::SHELL_OVERRIDE)
+        .or_else(|| crate::env::non_empty(crate::env::LEGACY_SHELL_OVERRIDE))
+    {
         return shell;
     }
     for candidate in ["pwsh", "powershell"] {
@@ -90,7 +93,7 @@ pub fn interactive_shell_args(shell: &str) -> Vec<String> {
 /// Env var that carries a `cmd.exe` command line past the argv quoting
 /// every spawn applies (see [`launch`]).
 #[cfg(windows)]
-pub const CMD_LINE_VAR: &str = "BRO_CMDLINE";
+pub const CMD_LINE_VAR: &str = "KETE_CMDLINE";
 
 /// The extensions a script launch understands beyond `%PATHEXT%`, which
 /// leaves out PowerShell scripts.
@@ -172,7 +175,7 @@ pub struct Launch {
 /// - a `.cmd`/`.bat` runs under `cmd.exe /d /s /c`. Every spawn quotes its
 ///   argv the MSVCRT way (`\"` for a quote), which `cmd.exe` does not read,
 ///   so the command line rides in [`CMD_LINE_VAR`] instead and the argv
-///   only names it (`%BRO_CMDLINE%`): cmd expands it once and parses the
+///   only names it (`%KETE_CMDLINE%`): cmd expands it once and parses the
 ///   result with its own quoting. Each word is double-quoted there, which
 ///   makes `&`, `|`, `<`, `>` and `^` literal. What cmd cannot carry
 ///   literally — `%` (expanded again by the script), `"`, and line breaks —
@@ -246,7 +249,7 @@ pub fn launch(program: &str, args: &[String]) -> Result<Launch, String> {
     }
 }
 
-/// `cmd.exe /d /s /c %BRO_CMDLINE%` with `line` in that variable. `/s`
+/// `cmd.exe /d /s /c %KETE_CMDLINE%` with `line` in that variable. `/s`
 /// strips quotes only when the text after `/c` opens with one, and here it
 /// opens with `%`, so the expanded line is run exactly as written.
 #[cfg(windows)]
@@ -367,7 +370,7 @@ mod tests {
             ],
         )
         .unwrap();
-        assert_eq!(launch.args, ["/d", "/s", "/c", "%BRO_CMDLINE%"]);
+        assert_eq!(launch.args, ["/d", "/s", "/c", "%KETE_CMDLINE%"]);
         assert_eq!(
             launch.env,
             [(

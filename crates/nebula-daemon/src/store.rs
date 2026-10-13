@@ -2102,13 +2102,13 @@ mod tests {
 
         // `r` in nebula: the row changes, Claude's title is unchanged, so
         // re-reading it must not revert the row — and the name is due a push.
-        store.rename_agent(&id, "From Bro").unwrap();
+        store.rename_agent(&id, "From Kete").unwrap();
         assert!(!store.adopt_claude_title(&id, "From Claude").unwrap());
-        assert_eq!(store.get_agent(&id).unwrap().unwrap().name, "From Bro");
-        assert_eq!(state(&store).to_push(), Some("From Bro"));
+        assert_eq!(store.get_agent(&id).unwrap().unwrap().name, "From Kete");
+        assert_eq!(state(&store).to_push(), Some("From Kete"));
 
         // Claude took the push (or the user typed the same name there).
-        assert!(store.adopt_claude_title(&id, "From Bro").unwrap());
+        assert!(store.adopt_claude_title(&id, "From Kete").unwrap());
         assert_eq!(state(&store).to_push(), None);
 
         // Unknown ids read as nothing rather than erroring.

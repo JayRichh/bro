@@ -180,9 +180,9 @@ pub use ipc::RenameMode;
 pub fn run_kill() -> Result<()> {
     runtime()?.block_on(async {
         if ipc::kill_daemon().await? {
-            println!("bro daemon shut down");
+            println!("kete daemon shut down");
         } else {
-            println!("no bro daemon running");
+            println!("no kete daemon running");
         }
         Ok(())
     })

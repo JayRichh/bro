@@ -7,7 +7,7 @@
 //! its slot the lowest free one when it was first asked for, persisted by
 //! the DAEMON so the block never moves — and every session and RUN
 //! TERMINAL in it starts with the block in its environment ([`PortBlock::env`]):
-//! `PORT` and `BRO_PORT` name the first port, `BRO_PORT_1` … the rest. Dev
+//! `PORT`, `KETE_PORT` and `BRO_PORT` name the first port, `KETE_PORT_1` … the rest. Dev
 //! servers that read `PORT` (Next.js, Express, most of the Node world) bind
 //! there without being told; a Vite config can read it too. The WORKTREE
 //! HOOK gets the same variables, so a create hook can write the port into
@@ -16,7 +16,7 @@
 //! What is *live* is read off the machine, not assumed: the TCP sockets in
 //! LISTEN state ([`listening`]) whose owner is in one of a worktree's
 //! session process trees ([`live_ports`]). The worktree band's rule draws
-//! them (`:3010 ●`), `bro sessions --json` lists them, and the browser and
+//! them (`:3010 ●`), `kete sessions --json` lists them, and the browser and
 //! screenshot keys open them.
 
 use std::collections::{HashMap, HashSet};
@@ -25,7 +25,10 @@ use serde::{Deserialize, Serialize};
 
 /// `PORT`: what most dev servers bind when it is set.
 pub const PORT: &str = "PORT";
-/// `BRO_PORT`: the block's first port, under a name nothing else uses.
+/// `KETE_PORT`: the block's first port, under a name nothing else uses.
+pub const KETE_PORT: &str = "KETE_PORT";
+/// `BRO_PORT`: the same, under Kete's old name, so a dev config written
+/// for Bro keeps finding its port.
 pub const BRO_PORT: &str = "BRO_PORT";
 
 /// The first port of slot 0, unless `port_base` says otherwise.
@@ -54,15 +57,18 @@ impl PortBlock {
     }
 
     /// The environment a session in the worktree starts with: `PORT` and
-    /// `BRO_PORT` on the first port, `BRO_PORT_1` … `BRO_PORT_<size-1>` on
-    /// the rest.
+    /// `KETE_PORT` on the first port, `KETE_PORT_1` … `KETE_PORT_<size-1>`
+    /// on the rest, and the same again under `BRO_PORT`.
     pub fn env(&self) -> Vec<(String, String)> {
         let mut out = vec![
             (PORT.to_string(), self.first.to_string()),
+            (KETE_PORT.to_string(), self.first.to_string()),
             (BRO_PORT.to_string(), self.first.to_string()),
         ];
         for i in 1..self.size {
-            out.push((format!("{BRO_PORT}_{i}"), (self.first + i).to_string()));
+            for name in [KETE_PORT, BRO_PORT] {
+                out.push((format!("{name}_{i}"), (self.first + i).to_string()));
+            }
         }
         out
     }
@@ -211,8 +217,11 @@ mod tests {
         );
         let env = block.env();
         assert_eq!(env[0], ("PORT".to_string(), "3010".to_string()));
-        assert_eq!(env[1], ("BRO_PORT".to_string(), "3010".to_string()));
-        assert_eq!(env[2], ("BRO_PORT_1".to_string(), "3011".to_string()));
+        assert_eq!(env[1], ("KETE_PORT".to_string(), "3010".to_string()));
+        assert_eq!(env[2], ("BRO_PORT".to_string(), "3010".to_string()));
+        assert_eq!(env[3], ("KETE_PORT_1".to_string(), "3011".to_string()));
+        assert_eq!(env[4], ("BRO_PORT_1".to_string(), "3011".to_string()));
+        assert!(env.contains(&("KETE_PORT_9".to_string(), "3019".to_string())));
         assert_eq!(
             env.last().unwrap(),
             &("BRO_PORT_9".to_string(), "3019".to_string())
