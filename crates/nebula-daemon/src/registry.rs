@@ -236,6 +236,9 @@ pub struct Daemon {
     finished_runs: Mutex<HashMap<TerminalId, FinishedRun>>,
     /// Claude subagents per parent session (`subagents.rs`), taken alone.
     subagents: Mutex<subagents::SubagentBook>,
+    /// Where an orchestrator started without a project runs, when not the
+    /// data dir's `orchestrator` folder: tests point it at a temp dir.
+    orchestrator_home: Mutex<Option<PathBuf>>,
 }
 
 mod exit;
@@ -277,7 +280,17 @@ impl Daemon {
             resumes: Mutex::new(HashMap::new()),
             finished_runs: Mutex::new(HashMap::new()),
             subagents: Mutex::new(subagents::SubagentBook::default()),
+            orchestrator_home: Mutex::new(None),
         })
+    }
+
+    /// Point the orchestrator workspace somewhere other than the data dir.
+    pub fn set_orchestrator_home(&self, dir: PathBuf) {
+        *self.orchestrator_home.lock() = Some(dir);
+    }
+
+    pub(crate) fn orchestrator_home_override(&self) -> Option<PathBuf> {
+        self.orchestrator_home.lock().clone()
     }
 
     pub(crate) async fn store_blocking<T, F>(self: &Arc<Self>, f: F) -> Result<T>
@@ -561,6 +574,31 @@ fn agent_spawn_command_with(
         args.push(p);
     }
     (program, args, resumed)
+}
+
+/// A spawn's prompts once the row's launch rule (the PR / issue scope) and
+/// its role are folded in. The ORCHESTRATOR's guidance rides with the role
+/// on every cold spawn: the system-prompt flag where the harness maps one,
+/// the opening of the first prompt where it prepends (a resume's
+/// transcript already holds it). Never into a Cloud dispatch.
+pub(super) fn agent_launch_prompts(
+    agent: &Agent,
+    harness: &nebula_core::harness::HarnessDescriptor,
+    rule: Option<String>,
+    cloud: bool,
+    initial_prompt: Option<&str>,
+) -> crate::pr_scope::LaunchPrompts {
+    let rule = if cloud {
+        rule
+    } else {
+        crate::orchestrator::launch_rule(agent.role, rule)
+    };
+    crate::pr_scope::launch_prompts(
+        harness.system.append_flag.is_some(),
+        agent.session_id.is_some(),
+        rule.as_deref(),
+        initial_prompt,
+    )
 }
 
 /// One system-prompt flag carrying nebula's guidance (worktree, spawn,
@@ -1050,7 +1088,7 @@ fn cli_probe_line(program: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// Claude argv: `args`, then nebula's appended guidance (worktree and
@@ -1410,6 +1448,93 @@ mod tests {
             true,
         );
         assert_eq!(args, vec!["-m", "flash"]);
+    }
+
+    /// The orchestrator's guidance is injected by role on both launch
+    /// paths: Claude's system-prompt flag, and the opening of a Codex cold
+    /// spawn's first prompt. A resumed Codex session's transcript already
+    /// holds it, a worker never gets it, and a Cloud dispatch never does.
+    #[test]
+    fn the_orchestrator_guidance_is_injected_by_role_on_both_launch_paths() {
+        use crate::orchestrator::CLAUDE_ORCHESTRATOR_GUIDANCE as GUIDANCE;
+        let agent = |role, session_id: Option<&str>| Agent {
+            parent: None,
+            profile: None,
+            id: AgentId("o".into()),
+            worktree_id: WorktreeId("w".into()),
+            name: "orchestrator".into(),
+            status: AgentStatus::Fresh,
+            archived: false,
+            archived_at: 0,
+            unseen: false,
+            kind: AgentKind::Claude,
+            custom_harness: None,
+            model: None,
+            effort: None,
+            session_id: session_id.map(str::to_string),
+            cloud_session_id: None,
+            sort_order: 0,
+            status_changed_at: 0,
+            alive: false,
+            issue_url: None,
+            role,
+            recent_prompts: Vec::new(),
+        };
+        let orchestrator = agent(nebula_core::AgentRole::Orchestrator, None);
+        let worker = agent(nebula_core::AgentRole::Worker, None);
+        let all = test_registry();
+        let launch = |harness: &nebula_core::harness::HarnessDescriptor,
+                      a: &Agent,
+                      rule: Option<&str>,
+                      cloud: bool| {
+            let prompts = agent_launch_prompts(a, harness, rule.map(str::to_string), cloud, None);
+            agent_spawn_command_with(
+                harness,
+                a.session_id.as_deref(),
+                Some(Path::new(TEST_CWD)),
+                None,
+                None,
+                None,
+                prompts.initial.as_deref(),
+                prompts.system.as_deref(),
+                true,
+            )
+            .1
+        };
+
+        let claude = test_harness(&all, AgentKind::Claude);
+        let flag = claude.system.append_flag.clone().expect("claude appends");
+        let args = launch(&claude, &orchestrator, Some("PR RULE"), false);
+        let system = &args[args.iter().position(|a| *a == flag).unwrap() + 1];
+        assert!(system.contains(GUIDANCE), "{system}");
+        assert!(
+            system.contains("PR RULE"),
+            "the launch rule still rides along"
+        );
+        assert!(!launch(&claude, &worker, None, false)
+            .iter()
+            .any(|a| a.contains(GUIDANCE)));
+        assert!(!launch(&claude, &orchestrator, None, true)
+            .iter()
+            .any(|a| a.contains(GUIDANCE)));
+
+        let codex = test_harness(&all, AgentKind::Codex);
+        assert!(
+            codex.system.append_flag.is_none(),
+            "codex has no system flag"
+        );
+        let args = launch(&codex, &orchestrator, None, false);
+        assert!(
+            args.last().is_some_and(|first| first.starts_with(GUIDANCE)),
+            "{args:?}"
+        );
+        assert!(!launch(&codex, &worker, None, false)
+            .iter()
+            .any(|a| a.contains(GUIDANCE)));
+        let resumed = agent(nebula_core::AgentRole::Orchestrator, Some("sid"));
+        assert!(!launch(&codex, &resumed, None, false)
+            .iter()
+            .any(|a| a.contains(GUIDANCE)));
     }
 
     #[test]
@@ -3119,14 +3244,14 @@ mod tests {
     /// a lock for its life: tests run on parallel threads, and one guard's
     /// drop restoring "unset" mid-way through another's run made that run
     /// spawn the real `claude` (absent on CI, so the create failed).
-    struct EnvGuard {
+    pub(crate) struct EnvGuard {
         key: &'static str,
         was: Option<String>,
         _lock: std::sync::MutexGuard<'static, ()>,
     }
 
     impl EnvGuard {
-        fn set(key: &'static str, value: &str) -> Self {
+        pub(crate) fn set(key: &'static str, value: &str) -> Self {
             static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
             // A test that panicked holding the lock left the env restored
             // (drop still ran), so its poison means nothing here.

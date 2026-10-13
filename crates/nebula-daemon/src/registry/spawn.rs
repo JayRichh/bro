@@ -105,10 +105,12 @@ impl Daemon {
         // name, so the create feels instant. A starting prompt rides the
         // CLI's argv, and a spare already booted bare cannot be handed one;
         // neither can it be handed a PR or issue rule.
+        // Nor the orchestrator's guidance: a spare booted as a worker.
         let adopted = (cloud_prompt.is_none()
             && pr_url.is_none()
             && issue_url.is_none()
-            && starting_prompt.is_none())
+            && starting_prompt.is_none()
+            && !role.is_orchestrator())
         .then(|| {
             self.take_prewarmed(
                 &worktree_id,
@@ -557,12 +559,8 @@ impl Daemon {
             branch: &worktree.branch,
         });
         let rule = crate::pr_scope::combined_rule(scope.as_ref(), issue_scope.as_ref());
-        let prompts = crate::pr_scope::launch_prompts(
-            harness.system.append_flag.is_some(),
-            agent.session_id.is_some(),
-            rule.as_deref(),
-            initial_prompt,
-        );
+        let prompts =
+            agent_launch_prompts(agent, &harness, rule, cloud_task.is_some(), initial_prompt);
         let (program, args, resumed) = match (cloud_task, attach) {
             (Some(task), _) => claude_cloud_spawn_command(
                 &harness,

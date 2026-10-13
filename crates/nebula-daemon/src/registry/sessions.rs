@@ -358,7 +358,7 @@ impl Daemon {
     /// Push the agent's current row — liveness included —
     /// to every subscriber. The tail of every mutation that changes how
     /// the row renders; fails only when the row is gone.
-    pub(super) fn broadcast_agent(&self, id: &AgentId) -> Result<()> {
+    pub(crate) fn broadcast_agent(&self, id: &AgentId) -> Result<()> {
         let agent = self.agent_entity(id)?;
         self.broadcast(ServerEvent::EntityUpserted {
             entity: Entity::Agent(agent),

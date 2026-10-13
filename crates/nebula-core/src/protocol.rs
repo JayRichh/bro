@@ -10,7 +10,7 @@ use std::path::PathBuf;
 ///
 /// Bump on every protocol change. Additive changes keep
 /// [`MIN_COMPATIBLE_PROTOCOL`] where it is; breaking changes bump both.
-pub const PROTOCOL_VERSION: u32 = 53;
+pub const PROTOCOL_VERSION: u32 = 54;
 
 /// Oldest IPC protocol this build can safely talk to.
 ///
@@ -515,6 +515,83 @@ pub enum ClientRequest {
     },
 
     Shutdown,
+
+    // -- protocol 54: orchestrator provisioning and the richer verbs. --
+    // Appended after `Shutdown` so every older variant keeps its place.
+    /// Start the machine's one ORCHESTRATOR session. With `project` it
+    /// runs in that project's root worktree; without, in the dedicated
+    /// orchestrator workspace under the data dir (`<data>/orchestrator`,
+    /// registered as a project named `orchestrator`). A live orchestrator
+    /// already pinned refuses the start unless `replace`, which demotes it.
+    /// Refused from inside an agent session. Answered with
+    /// `Ack { created: Some(EntityId::Agent(..)) }`.
+    StartOrchestrator {
+        req_id: u64,
+        kind: AgentKind,
+        custom_harness: Option<String>,
+        model: Option<String>,
+        effort: Option<String>,
+        profile: Option<String>,
+        project: Option<ProjectId>,
+        name: Option<String>,
+        replace: bool,
+    },
+    /// Pin an existing agent as the ORCHESTRATOR, demoting any other row
+    /// that held the role. Refused from inside an agent session.
+    SetOrchestrator {
+        req_id: u64,
+        agent: AgentId,
+    },
+    /// Demote whichever row holds the ORCHESTRATOR role; none is not an
+    /// error. Refused from inside an agent session.
+    ClearOrchestrator {
+        req_id: u64,
+    },
+    /// Privileged: every live session in attention order, with role,
+    /// parent and subagents. Answered by `ServerEvent::OrchestratorSessions`.
+    OrchestratorSessions {
+        req_id: u64,
+        caller: AgentId,
+    },
+    /// Privileged: deliver a follow-up to another agent, named by id or
+    /// unambiguous fuzzy name, labelled `[from orchestrator]`. With
+    /// `wait` a busy target is waited on until idle (bounded by
+    /// `timeout_ms`, 0 = the default); without, a busy target refuses.
+    /// The caller can never target itself. Answered with `Ack`, whose
+    /// `created` names the agent it went to.
+    OrchestratorTell {
+        req_id: u64,
+        caller: AgentId,
+        target: String,
+        message: String,
+        timeout_ms: u64,
+        wait: bool,
+    },
+    /// Privileged: transcript-aware recent context for a session named by
+    /// id or fuzzy name, falling back to the cleaned PTY tail. Answered by
+    /// `ServerEvent::SessionText`.
+    OrchestratorReadSession {
+        req_id: u64,
+        caller: AgentId,
+        target: String,
+        max_lines: u32,
+    },
+    /// Privileged: `OrchestratorSpawn` with a PROFILE.
+    OrchestratorSpawnWith {
+        req_id: u64,
+        caller: AgentId,
+        project: ProjectId,
+        worktree: Option<WorktreeId>,
+        branch: Option<String>,
+        base: Option<String>,
+        name: String,
+        kind: AgentKind,
+        custom_harness: Option<String>,
+        model: Option<String>,
+        effort: Option<String>,
+        profile: Option<String>,
+        starting_prompt: String,
+    },
 }
 
 /// How much of a pull request's conversation the user had already seen the
@@ -800,6 +877,33 @@ pub enum ServerEvent {
     SubagentChanged {
         sub: SubagentSummary,
     },
+
+    // -- protocol 54, appended so every older variant keeps its place. --
+    /// Reply to `OrchestratorSessions`.
+    OrchestratorSessions {
+        req_id: u64,
+        sessions: Vec<OrchestratorSession>,
+    },
+}
+
+/// One row of `ServerEvent::OrchestratorSessions`: the `kete sessions`
+/// row plus what the orchestrator needs to triage it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OrchestratorSession {
+    pub summary: SessionSummary,
+    /// Position in attention order, 0 = most in need of the user:
+    /// needs_feedback, then running, then finished-unread, then the rest,
+    /// most recently changed first within each.
+    pub attention: u32,
+    /// `needs_feedback`, `running`, `unread`, `idle`, `terminated`,
+    /// `disconnected`: `SessionSummary::status` with a finished turn
+    /// nobody has looked at yet split out as `unread`.
+    pub state: String,
+    pub role: AgentRole,
+    pub parent: Option<AgentId>,
+    pub status_changed_at: i64,
+    /// Claude subagents open or recently ended inside this session.
+    pub subagents: Vec<SubagentSummary>,
 }
 
 /// Ended subagents kept per parent session; beyond it the oldest ended
@@ -872,6 +976,105 @@ mod tests {
             52,
             52
         ));
+    }
+
+    /// The codec names enum variants on the wire, so the protocol-54
+    /// variants appended at the end leave every 53 variant's frame
+    /// byte-for-byte what a 53 peer sends and expects.
+    #[test]
+    fn variants_travel_by_name_so_appending_is_additive() {
+        let bytes = encode(&ClientRequest::Shutdown);
+        assert!(
+            bytes.windows(8).any(|w| w == b"Shutdown"),
+            "variant encoded by index: appending variants would not be additive"
+        );
+    }
+
+    #[test]
+    fn protocol_54_is_additive_over_53() {
+        assert!(protocol_ranges_overlap(
+            MIN_COMPATIBLE_PROTOCOL,
+            PROTOCOL_VERSION,
+            53,
+            53
+        ));
+        assert!(protocol_compatible_with(53));
+    }
+
+    #[test]
+    fn protocol_54_requests_and_replies_round_trip() {
+        let start = ClientRequest::StartOrchestrator {
+            req_id: 3,
+            kind: AgentKind::Codex,
+            custom_harness: None,
+            model: Some("gpt-5".into()),
+            effort: None,
+            profile: Some("work".into()),
+            project: None,
+            name: None,
+            replace: true,
+        };
+        let back: ClientRequest = rmp_serde::from_slice(&encode(&start)).unwrap();
+        let ClientRequest::StartOrchestrator {
+            kind,
+            profile,
+            replace,
+            ..
+        } = back
+        else {
+            panic!("not a StartOrchestrator");
+        };
+        assert_eq!(kind, AgentKind::Codex);
+        assert_eq!(profile.as_deref(), Some("work"));
+        assert!(replace);
+
+        let tell = ClientRequest::OrchestratorTell {
+            req_id: 4,
+            caller: AgentId("o".into()),
+            target: "fix-login".into(),
+            message: "status?".into(),
+            timeout_ms: 0,
+            wait: true,
+        };
+        let back: ClientRequest = rmp_serde::from_slice(&encode(&tell)).unwrap();
+        assert!(
+            matches!(back, ClientRequest::OrchestratorTell { target, .. } if target == "fix-login")
+        );
+
+        let row = OrchestratorSession {
+            summary: SessionSummary {
+                session: SessionRef::Agent(AgentId("child".into())),
+                id: "child".into(),
+                name: "agent-2".into(),
+                project_id: ProjectId("p".into()),
+                project: "demo".into(),
+                worktree_id: WorktreeId("w".into()),
+                worktree: PathBuf::from("/w"),
+                branch: "main".into(),
+                harness: "claude".into(),
+                status: "idle".into(),
+                alive: true,
+                summary: "fix it".into(),
+                profile: None,
+                port: None,
+                live_ports: Vec::new(),
+            },
+            attention: 0,
+            state: "unread".into(),
+            role: AgentRole::Worker,
+            parent: Some(AgentId("o".into())),
+            status_changed_at: 9,
+            subagents: vec![sample_subagent()],
+        };
+        let reply = ServerEvent::OrchestratorSessions {
+            req_id: 5,
+            sessions: vec![row.clone()],
+        };
+        let back: ServerEvent = rmp_serde::from_slice(&encode(&reply)).unwrap();
+        let ServerEvent::OrchestratorSessions { sessions, .. } = back else {
+            panic!("not OrchestratorSessions");
+        };
+        assert_eq!(sessions, vec![row]);
     }
 
     fn sample_agent(parent: Option<&str>) -> Agent {

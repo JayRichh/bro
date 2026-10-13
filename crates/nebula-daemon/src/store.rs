@@ -352,6 +352,19 @@ const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE agents ADD COLUMN parent TEXT;
     ",
+    // 33: at most one ORCHESTRATOR per machine. Rows minted before the
+    // daemon enforced it keep the newest live one; the rest go back to
+    // workers, and a partial unique index makes a second impossible from
+    // any path.
+    "
+    UPDATE agents SET role = 'worker'
+      WHERE role = 'orchestrator' AND id NOT IN (
+        SELECT id FROM agents WHERE role = 'orchestrator'
+        ORDER BY archived ASC, created_at DESC, id DESC LIMIT 1
+      );
+    CREATE UNIQUE INDEX agents_one_orchestrator ON agents(role)
+      WHERE role = 'orchestrator';
+    ",
 ];
 
 pub struct Store {
@@ -608,6 +621,60 @@ impl Store {
 
     /// User rename: always applies, and retires any pending auto-title so a
     /// late agent attempt can't clobber the user's choice.
+    /// Pin `id` as the one ORCHESTRATOR — or, with None, nobody — in one
+    /// transaction: every other row holding the role (archived ones too, so
+    /// an unarchive can never bring back a second) is demoted first.
+    /// Returns every row whose role changed, for the caller to broadcast.
+    pub fn set_orchestrator(&self, id: Option<&AgentId>) -> Result<Vec<AgentId>> {
+        let keep = id.map(|i| i.as_str());
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        if let Some(id) = id {
+            let exists: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM agents WHERE id = ?1)",
+                params![id.as_str()],
+                |r| r.get(0),
+            )?;
+            if !exists {
+                anyhow::bail!("agent not found");
+            }
+        }
+        let mut changed = Vec::new();
+        {
+            let mut stmt =
+                tx.prepare("SELECT id FROM agents WHERE role = 'orchestrator' AND id IS NOT ?1")?;
+            let rows = stmt.query_map(params![keep], |r| r.get::<_, String>(0))?;
+            for row in rows {
+                changed.push(AgentId(row?));
+            }
+        }
+        tx.execute(
+            "UPDATE agents SET role = 'worker' WHERE role = 'orchestrator' AND id IS NOT ?1",
+            params![keep],
+        )?;
+        if let Some(id) = id {
+            let promoted = tx.execute(
+                "UPDATE agents SET role = 'orchestrator' WHERE id = ?1 AND role != 'orchestrator'",
+                params![id.as_str()],
+            )?;
+            if promoted == 1 {
+                changed.push(id.clone());
+            }
+        }
+        tx.commit()?;
+        Ok(changed)
+    }
+
+    /// The row holding the ORCHESTRATOR role, archived or not.
+    pub fn orchestrator(&self) -> Result<Option<Agent>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {AGENT_COLUMNS} FROM agents WHERE role = 'orchestrator'"
+        ))?;
+        let mut rows = stmt.query([])?;
+        Ok(rows.next()?.map(row_to_agent).transpose()?)
+    }
+
     pub fn rename_agent(&self, id: &AgentId, name: &str) -> Result<()> {
         self.conn.lock().execute(
             "UPDATE agents SET name = ?2, auto_title_pending = 0 WHERE id = ?1",
@@ -1284,6 +1351,156 @@ fn row_to_link(r: &rusqlite::Row) -> rusqlite::Result<Link> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A store holding one project and worktree (`w`) for agent rows.
+    fn store_with_worktree() -> Store {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .insert_project(&Project {
+                id: ProjectId("p".into()),
+                name: "demo".into(),
+                repo_path: "/tmp/demo".into(),
+                sort_order: 0,
+            })
+            .unwrap();
+        store
+            .insert_worktree(&Worktree {
+                id: WorktreeId("w".into()),
+                project_id: ProjectId("p".into()),
+                path: "/tmp/demo".into(),
+                branch: "main".into(),
+                is_main: true,
+                sort_order: 0,
+            })
+            .unwrap();
+        store
+    }
+
+    fn role_agent(id: &str, role: nebula_core::AgentRole) -> Agent {
+        Agent {
+            parent: None,
+            profile: None,
+            id: AgentId(id.into()),
+            worktree_id: WorktreeId("w".into()),
+            name: id.into(),
+            status: AgentStatus::Fresh,
+            archived: false,
+            archived_at: 0,
+            unseen: false,
+            kind: AgentKind::Claude,
+            custom_harness: None,
+            model: None,
+            effort: None,
+            session_id: None,
+            cloud_session_id: None,
+            sort_order: 0,
+            status_changed_at: 0,
+            alive: false,
+            issue_url: None,
+            role,
+            recent_prompts: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn set_orchestrator_demotes_every_other_holder_and_reports_the_changes() {
+        use nebula_core::AgentRole;
+        let store = store_with_worktree();
+        store
+            .insert_agent(&role_agent("old", AgentRole::Orchestrator))
+            .unwrap();
+        store
+            .insert_agent(&role_agent("new", AgentRole::Worker))
+            .unwrap();
+        store
+            .set_agent_archived(&AgentId("old".into()), true)
+            .unwrap();
+
+        let changed = store
+            .set_orchestrator(Some(&AgentId("new".into())))
+            .unwrap();
+        assert_eq!(changed, vec![AgentId("old".into()), AgentId("new".into())]);
+        let old = store.get_agent(&AgentId("old".into())).unwrap().unwrap();
+        assert_eq!(
+            old.role,
+            AgentRole::Worker,
+            "archived holders are demoted too"
+        );
+        assert_eq!(store.orchestrator().unwrap().unwrap().id.0, "new");
+
+        assert!(
+            store
+                .set_orchestrator(Some(&AgentId("new".into())))
+                .unwrap()
+                .is_empty(),
+            "pinning the pinned row changes nothing"
+        );
+        assert_eq!(
+            store.set_orchestrator(None).unwrap(),
+            vec![AgentId("new".into())]
+        );
+        assert!(store.orchestrator().unwrap().is_none());
+
+        store
+            .set_orchestrator(Some(&AgentId("old".into())))
+            .unwrap();
+        assert!(store
+            .set_orchestrator(Some(&AgentId("ghost".into())))
+            .is_err());
+        assert_eq!(
+            store.orchestrator().unwrap().unwrap().id.0,
+            "old",
+            "a missing row demotes nobody"
+        );
+    }
+
+    #[test]
+    fn a_second_orchestrator_row_is_refused_by_the_schema() {
+        use nebula_core::AgentRole;
+        let store = store_with_worktree();
+        store
+            .insert_agent(&role_agent("one", AgentRole::Orchestrator))
+            .unwrap();
+        assert!(store
+            .insert_agent(&role_agent("two", AgentRole::Orchestrator))
+            .is_err());
+        store
+            .insert_agent(&role_agent("w1", AgentRole::Worker))
+            .unwrap();
+        store
+            .insert_agent(&role_agent("w2", AgentRole::Worker))
+            .unwrap();
+    }
+
+    #[test]
+    fn migration_33_keeps_only_the_newest_live_orchestrator() {
+        let conn = Connection::open_in_memory().unwrap();
+        for (i, migration) in MIGRATIONS.iter().take(32).enumerate() {
+            conn.execute_batch(&format!(
+                "BEGIN; {migration}; PRAGMA user_version = {}; COMMIT;",
+                i + 1
+            ))
+            .unwrap();
+        }
+        conn.execute_batch(
+            "INSERT INTO projects (id, name, repo_path, sort_order, created_at)
+               VALUES ('p', 'demo', '/tmp/demo', 0, 0);
+             INSERT INTO worktrees (id, project_id, path, branch, is_main, sort_order, created_at)
+               VALUES ('w', 'p', '/tmp/demo', 'main', 1, 0, 0);
+             INSERT INTO agents (id, worktree_id, name, created_at, role, archived)
+               VALUES ('a', 'w', 'a', 1, 'orchestrator', 0);
+             INSERT INTO agents (id, worktree_id, name, created_at, role, archived)
+               VALUES ('b', 'w', 'b', 2, 'orchestrator', 0);
+             INSERT INTO agents (id, worktree_id, name, created_at, role, archived)
+               VALUES ('c', 'w', 'c', 3, 'orchestrator', 1);",
+        )
+        .unwrap();
+        let store = Store {
+            conn: Mutex::new(conn),
+        };
+        store.migrate().unwrap();
+        assert_eq!(store.orchestrator().unwrap().unwrap().id.0, "b");
+    }
 
     #[test]
     fn roundtrip_tree() {

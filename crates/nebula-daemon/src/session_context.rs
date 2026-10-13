@@ -281,7 +281,7 @@ fn terminal_summary(
     })
 }
 
-fn public_status(status: AgentStatus) -> &'static str {
+pub(crate) fn public_status(status: AgentStatus) -> &'static str {
     match status {
         AgentStatus::Fresh | AgentStatus::Finished => "idle",
         AgentStatus::Running => "running",
@@ -291,7 +291,7 @@ fn public_status(status: AgentStatus) -> &'static str {
     }
 }
 
-fn is_idle(status: AgentStatus) -> bool {
+pub(crate) fn is_idle(status: AgentStatus) -> bool {
     matches!(
         status,
         AgentStatus::Fresh
@@ -490,7 +490,7 @@ fn bracketed(text: &str) -> Vec<u8> {
     data
 }
 
-async fn wait_until_idle(
+pub(crate) async fn wait_until_idle(
     rx: &mut tokio::sync::broadcast::Receiver<ServerEvent>,
     target: &AgentId,
     deadline: tokio::time::Instant,
