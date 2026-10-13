@@ -177,7 +177,8 @@
 
   // ---- Create ----
   async function create() {
-    if (!check.ok || d.busy || !d.title.trim()) return;
+    // A PR exists once there is an outcome: never create twice.
+    if (!check.ok || d.busy || !d.title.trim() || d.outcome) return;
     d.busy = true;
     d.error = null;
     d.outcome = null;
@@ -421,7 +422,7 @@
         <button
           type="submit"
           class="inline-flex h-8 items-center border-0 bg-ink px-3.5 text-[13px] font-medium text-bg enabled:hover:bg-muted disabled:bg-raised disabled:text-faint"
-          disabled={!check.ok || d.busy || !d.title.trim()}
+          disabled={!check.ok || d.busy || !d.title.trim() || !!d.outcome}
           >{d.busy ? 'Pushing and creating' : d.draft ? 'Create draft pull request' : 'Create pull request'}</button
         >
         {#if !d.title.trim()}<span class="text-[12px] text-muted">Add a title</span>{/if}
