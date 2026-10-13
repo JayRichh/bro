@@ -79,9 +79,11 @@ impl AdoStore {
         nebula_core::paths::data_dir().join("ado.json")
     }
 
-    /// Load `path`. A missing file is empty. An unreadable one is moved to
+    /// Load `path`. A missing file is empty. A corrupt one is moved to
     /// `ado.json.bad` and the store starts empty; if that move fails, the
-    /// store keeps its data in memory only and records the error.
+    /// store keeps its data in memory only and records the error. Any
+    /// other read failure (locked, denied, a passing I/O error) holds the
+    /// same way: the file may be fine, so it is never overwritten.
     pub fn open(path: impl AsRef<Path>) -> Self {
         let path = path.as_ref().to_path_buf();
         let mut hold = None;
@@ -97,7 +99,14 @@ impl AdoStore {
                 }
                 StoreData::default()
             }),
-            Err(_) => StoreData::default(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => StoreData::default(),
+            Err(e) => {
+                hold = Some(format!(
+                    "{} could not be read: {e}. Changes are kept in memory only.",
+                    path.display()
+                ));
+                StoreData::default()
+            }
         };
         Self {
             path,
@@ -342,6 +351,31 @@ mod tests {
             s.read_repo(&key(), |r| r.team.clone()).as_deref(),
             Some("b")
         );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A directory where the file should be: reading fails with something
+    /// other than NotFound, on every platform.
+    #[test]
+    fn a_failed_read_holds_instead_of_wiping_the_file() {
+        let dir = temp_dir();
+        let path = dir.join("ado.json");
+        std::fs::create_dir(&path).unwrap();
+        std::fs::write(path.join("keep"), "x").unwrap();
+        let s = AdoStore::open(&path);
+        let why = s.take_last_error().expect("the read failure is surfaced");
+        assert!(why.contains("could not be read"), "{why}");
+        assert!(s
+            .try_with_repo(&key(), |r| r.team = Some("a".into()))
+            .is_err());
+        // Memory only: the change is there, the path is untouched.
+        assert_eq!(
+            s.read_repo(&key(), |r| r.team.clone()).as_deref(),
+            Some("a")
+        );
+        assert!(path.is_dir());
+        assert!(path.join("keep").exists());
+        assert!(!dir.join("ado.json.bad").exists());
         let _ = std::fs::remove_dir_all(dir);
     }
 
