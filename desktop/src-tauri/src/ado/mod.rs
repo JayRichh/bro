@@ -5,5 +5,6 @@
 pub mod auth;
 pub mod client;
 pub mod naming;
+pub mod prs;
 pub mod remote;
 pub mod store;
