@@ -783,16 +783,9 @@ fn resolve_worktree_or_branch(
 /// The protocol that grew orchestrator provisioning and the richer verbs.
 const ORCHESTRATOR_PROTOCOL: u32 = 54;
 
-/// What an orchestrator-only one-shot needs: a daemon on protocol 54.
-async fn orchestrator_connection_54(verb: &str) -> Result<(AgentId, Connection)> {
-    let (caller, conn) = orchestrator_connection().await?;
-    require_protocol(
-        &conn,
-        ORCHESTRATOR_PROTOCOL,
-        &format!("orchestrator {verb}"),
-    )?;
-    Ok((caller, conn))
-}
+/// What `kete orchestrator read` asks a protocol-53 daemon for: its raw
+/// bounded tail, the only read it has.
+const LEGACY_READ_BYTES: u32 = 8192;
 
 async fn fetch_orchestrator_sessions(
     caller: &AgentId,
@@ -862,7 +855,12 @@ pub async fn orchestrator_read(session: &str, lines: u32, bytes: Option<u32>) ->
     if let Some(bytes) = bytes {
         return orchestrator_read_tail(session, bytes).await;
     }
-    let (caller, mut conn) = orchestrator_connection_54("read").await?;
+    let (caller, mut conn) = orchestrator_connection().await?;
+    // A 53 daemon has no transcript-aware read: its raw tail, by id.
+    if conn.protocol_version < ORCHESTRATOR_PROTOCOL {
+        drop(conn);
+        return orchestrator_read_tail(session, LEGACY_READ_BYTES).await;
+    }
     let req_id = ONE_SHOT_REQ_ID;
     write_frame(
         &mut conn.stream,
@@ -953,8 +951,24 @@ pub async fn orchestrator_send(
     timeout_secs: u64,
     wait: bool,
 ) -> Result<()> {
-    let (caller, mut conn) = orchestrator_connection_54("send").await?;
+    let (caller, mut conn) = orchestrator_connection().await?;
     let req_id = ONE_SHOT_REQ_ID;
+    // A 53 daemon only knows the id-addressed send, without waiting.
+    if conn.protocol_version < ORCHESTRATOR_PROTOCOL {
+        write_frame(
+            &mut conn.stream,
+            &ClientRequest::OrchestratorSend {
+                req_id,
+                caller,
+                target: AgentId(session.to_string()),
+                message: prompt.to_string(),
+            },
+        )
+        .await?;
+        await_ack(&mut conn, req_id).await?;
+        println!("sent to {session} (older daemon: by id, without waiting for idle)");
+        return Ok(());
+    }
     write_frame(
         &mut conn.stream,
         &ClientRequest::OrchestratorTell {

@@ -10,7 +10,7 @@
 //! [`Daemon::set_orchestrator`] — demotes whichever row held it before.
 //! `CreateAgent` cannot grant it at all (see `server.rs`).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -710,7 +710,11 @@ fn attention_ordered(
 /// Whether `pid` is one of `roots` or descends from one, walking `parents`
 /// (pid → ppid) upward. Bounded, so a cycle in a racy snapshot ends.
 #[cfg(test)]
-fn descends_from(parents: &HashMap<u32, u32>, pid: u32, roots: &HashSet<u32>) -> bool {
+fn descends_from(
+    parents: &HashMap<u32, u32>,
+    pid: u32,
+    roots: &std::collections::HashSet<u32>,
+) -> bool {
     let roots: HashMap<u32, ()> = roots.iter().map(|r| (*r, ())).collect();
     owning_session(parents, pid, &roots).is_some()
 }

@@ -3,6 +3,7 @@ use crate::hooks::HookEnv;
 use crate::registry::tests::EnvGuard;
 use crate::store::Store;
 use nebula_core::{AgentStatus, Entity, ProjectId};
+use std::collections::HashSet;
 
 fn daemon() -> Arc<Daemon> {
     daemon_at("/tmp/demo")

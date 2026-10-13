@@ -69,9 +69,13 @@ tabbed modal over one or more sessions:
 under review, `↑`/`↓` and `PgUp`/`PgDn` scroll, `Esc` closes. The title names
 the session, not its id.
 
-A review the orchestrator opens while you are typing into another session (or
-with another modal up) does not take the screen: a toast says so, and `F10`
-shows it.
+A review the orchestrator opens while you are typing into any session, the
+orchestrator itself included (or with another modal up), does not take the
+screen: a toast says so, and `F10` shows it (`^q` then `F10` from a terminal
+tab). One that opens at once ignores `Enter` and a click on the screen for
+three quarters of a second, so a keystroke meant for something else never
+drops you into a worker. Closing a review puts the pane back on what it showed,
+or empties it if it showed nothing.
 
 ## Agent-facing commands
 
@@ -130,9 +134,18 @@ Granting the role is guarded too:
   runs inside a live agent session (the daemon walks the process table from the
   client's pid up to a session's PTY child), so a worker cannot mint or become
   the orchestrator through its own shell. A kete terminal tab is your own shell
-  and may.
+  and may. Provisioning is serialized, so two starts cannot both win.
+- The orchestrator verbs trust the caller id the client sends, so the same
+  process check backs them: a verb whose client runs inside a *different*
+  agent's session than the orchestrator it names (a worker that set
+  `NEBULA_AGENT_ID` to the orchestrator's id) is refused.
 - A partial unique index on the role makes a second orchestrator row impossible
   from any path.
+
+These checks are **defence in depth**, not a sealed boundary: the socket is
+same-user, a process the OS reports no pid for passes, and a same-user process
+outside every session (your own shell) is trusted, as it could drive any session
+anyway.
 
 The orchestrator does not approve permission prompts for other agents. Its loop
 is tell-then-ask: report that a session is waiting and offer to open it in
