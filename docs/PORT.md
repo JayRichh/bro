@@ -43,7 +43,7 @@ Bro is a cross-platform fork of [nebula](https://github.com/AgentSystemLabs/nebu
 - **Theme:** derived from the user's VS Code theme (One Dark by default), with dark/light awareness.
 - **File icons:** Material Icon Theme mapping. Nerd Font glyphs in the TUI with an ASCII fallback; SVGs in the GUI.
 - **Localhost:**
-  - ports per worktree, allocated through the existing WORKTREE HOOK
+  - ports per worktree, allocated by the daemon and handed to sessions and the WORKTREE HOOK (see [ports.md](ports.md))
   - open in Chrome, Edge or Firefox
   - headless screenshots
 - **Desktop GUI:** Tauri v2, a client of the daemon protocol over the named pipe.

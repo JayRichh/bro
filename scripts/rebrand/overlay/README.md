@@ -122,6 +122,14 @@ bro profile login max2                                           # sign it in
 
 In the quick prompt, `^A` steps through the harness's profiles. See [Profiles](docs/profiles.md).
 
+## Ports per worktree
+
+Every worktree gets its own block of localhost ports (`3000`, `3010`, `3020`, …), handed to its
+sessions as `PORT`, `BRO_PORT` and `BRO_PORT_1…`, so two checkouts' dev servers never collide. Ports
+a session is listening on show on its worktree's band as `:3010 ●`. `w` opens one in Chrome, Edge,
+Firefox or the default browser, and `Shift+W` takes a headless screenshot of it. See
+[Localhost ports](docs/ports.md).
+
 ## Where things live
 
 | | Windows | macOS | Linux |
@@ -139,7 +147,6 @@ These are planned and not in Bro yet:
 - **Kanban:** sessions laid out by status.
 - **A VS Code-grade diff:** side-by-side, inline and replacement modes, with per-hunk accept and reject.
 - **Theme and file icons:** follows your VS Code theme, light or dark, with Material-style file icons.
-- **Ports per worktree:** dev server ports allocated and shown per worktree, opened in Chrome, Edge or Firefox.
 - **A desktop GUI:** a Tauri window over the same daemon.
 
 ## Building
