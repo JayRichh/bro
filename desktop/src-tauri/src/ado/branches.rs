@@ -547,20 +547,41 @@ pub async fn ado_checkout_worktree(
     .await?;
     let req_id = client.req_id();
     let created = client
-        .rpc(
+        .rpc_within(
             req_id,
             ClientRequest::CreateWorktree {
                 req_id,
-                project,
-                branch,
+                project: project.clone(),
+                branch: branch.clone(),
                 base,
             },
+            super::tasks::CREATE_WORKTREE_TIMEOUT,
         )
-        .await
-        .map_err(|e| e.to_string())?;
+        .await;
     match created {
-        Some(EntityId::Worktree(WorktreeId(id))) => Ok(id),
-        _ => Err("the daemon did not say which worktree it made".into()),
+        Ok(Some(EntityId::Worktree(WorktreeId(id)))) => Ok(id),
+        Ok(_) => Err("the daemon did not say which worktree it made".into()),
+        // A big repo's checkout can outlast the wait: look for it.
+        Err(e) if e.is::<crate::daemon::RpcTimeout>() => {
+            let deadline = tokio::time::Instant::now() + super::tasks::RECONCILE_WAIT;
+            loop {
+                if let Some(w) = client
+                    .snapshot()
+                    .worktrees
+                    .iter()
+                    .find(|w| w.project_id == project && w.branch == branch)
+                {
+                    return Ok(w.id.0.clone());
+                }
+                if tokio::time::Instant::now() >= deadline {
+                    return Err(format!(
+                        "the daemon did not answer in time, and no worktree on {branch} showed up"
+                    ));
+                }
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+        }
+        Err(e) => Err(e.to_string()),
     }
 }
 

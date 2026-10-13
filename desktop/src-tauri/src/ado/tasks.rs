@@ -4,7 +4,7 @@
 use crate::ado::client::{AdoError, CmdError, ErrorKind};
 use crate::ado::naming::validate_branch_name;
 use crate::ado::{enc, git_out, AdoContext, AdoState, Me, WitState};
-use crate::daemon::Client;
+use crate::daemon::{Client, RpcTimeout};
 use crate::NewAgent;
 use nebula_core::{ClientRequest, EntityId, ProjectId};
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::State;
 
 /// Work items hydrated per `workitemsbatch` call (the API's limit).
@@ -823,16 +824,62 @@ pub struct StepProblem {
     pub message: String,
 }
 
+/// What asking the daemon for a worktree came to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NewWorktree {
+    /// Made; its id.
+    Made(String),
+    /// No answer in time. The daemon may still be making it (a big repo's
+    /// checkout), so the caller looks for it.
+    NoAnswer,
+}
+
+/// How long the daemon gets to make a worktree before Start looks for it.
+pub const CREATE_WORKTREE_TIMEOUT: Duration = Duration::from_secs(180);
+/// How long Start then looks for the worktree to appear.
+pub const RECONCILE_WAIT: Duration = Duration::from_secs(60);
+const RECONCILE_STEP: Duration = Duration::from_millis(500);
+
 /// What starting a task needs from git and the daemon.
 #[async_trait::async_trait]
 pub trait Workspace: Send + Sync {
     /// Branch names already taken: local branches, and branches checked
     /// out in one of the project's worktrees.
     async fn taken_branches(&self) -> Result<Vec<String>, String>;
-    /// Cut a worktree on the new `branch` from `base`; its id.
-    async fn create_worktree(&self, branch: &str, base: Option<&str>) -> Result<String, String>;
+    /// Ask for a worktree on the new `branch`, cut from `base`.
+    async fn create_worktree(
+        &self,
+        branch: &str,
+        base: Option<&str>,
+    ) -> Result<NewWorktree, String>;
+    /// The id of the project's worktree on `branch`, if the daemon has one.
+    fn worktree_on(&self, branch: &str) -> Option<String>;
+    /// How long to look for a worktree the daemon did not answer for.
+    fn reconcile_wait(&self) -> Duration {
+        RECONCILE_WAIT
+    }
+    /// Finish a new worktree on `branch`, however it was found.
+    async fn settle_worktree(&self, branch: &str, base: Option<&str>);
     /// Start an agent; its id.
     async fn create_agent(&self, spec: NewAgent) -> Result<String, String>;
+}
+
+/// Look for the worktree on `branch` until it shows or `wait` runs out.
+pub async fn reconcile_worktree(
+    ws: &dyn Workspace,
+    branch: &str,
+    wait: Duration,
+) -> Option<String> {
+    let deadline = tokio::time::Instant::now() + wait;
+    loop {
+        if let Some(id) = ws.worktree_on(branch) {
+            return Some(id);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return None;
+        }
+        tokio::time::sleep(RECONCILE_STEP).await;
+    }
 }
 
 /// The agent's opening prompt: the task's title, description and
@@ -884,7 +931,21 @@ pub async fn start_task(
             ),
         })?,
     };
-    let worktree_id = ws.create_worktree(&req.branch, base.as_deref()).await?;
+    let worktree_id = match ws.create_worktree(&req.branch, base.as_deref()).await? {
+        NewWorktree::Made(id) => id,
+        // The daemon may still be checking out a big repo: wait for the
+        // worktree to show, then carry on as if it had answered.
+        NewWorktree::NoAnswer => reconcile_worktree(ws, &req.branch, ws.reconcile_wait())
+            .await
+            .ok_or_else(|| {
+                format!(
+                    "The daemon did not answer in time, and no worktree on {} showed up after another {} s.",
+                    req.branch,
+                    ws.reconcile_wait().as_secs()
+                )
+            })?,
+    };
+    ws.settle_worktree(&req.branch, base.as_deref()).await;
     let mut out = StartedTask {
         worktree_id,
         ..Default::default()
@@ -1076,11 +1137,15 @@ impl Workspace for DaemonWorkspace {
         Ok(taken)
     }
 
-    async fn create_worktree(&self, branch: &str, base: Option<&str>) -> Result<String, String> {
+    async fn create_worktree(
+        &self,
+        branch: &str,
+        base: Option<&str>,
+    ) -> Result<NewWorktree, String> {
         let req_id = self.client.req_id();
         let created = self
             .client
-            .rpc(
+            .rpc_within(
                 req_id,
                 ClientRequest::CreateWorktree {
                     req_id,
@@ -1088,20 +1153,33 @@ impl Workspace for DaemonWorkspace {
                     branch: branch.to_string(),
                     base: base.map(str::to_string),
                 },
+                CREATE_WORKTREE_TIMEOUT,
             )
-            .await
-            .map_err(|e| e.to_string())?;
-        let id = match created {
-            Some(EntityId::Worktree(id)) => id.0,
-            _ => return Err("The daemon did not report the new worktree.".into()),
-        };
+            .await;
+        match created {
+            Ok(Some(EntityId::Worktree(id))) => Ok(NewWorktree::Made(id.0)),
+            Ok(_) => Err("The daemon did not report the new worktree.".into()),
+            Err(e) if e.is::<RpcTimeout>() => Ok(NewWorktree::NoAnswer),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    fn worktree_on(&self, branch: &str) -> Option<String> {
+        self.client
+            .snapshot()
+            .worktrees
+            .iter()
+            .find(|w| w.project_id == self.project && w.branch == branch)
+            .map(|w| w.id.0.clone())
+    }
+
+    async fn settle_worktree(&self, branch: &str, base: Option<&str>) {
         // The daemon cuts from an already-qualified `origin/main` with
         // tracking on, which would make main the task branch's upstream.
         // The branch is new work: it gets its own upstream when pushed.
         if base.is_some_and(|b| b.starts_with(&format!("{}/", self.remote_name))) {
             let _ = git_out(&self.repo, &["branch", "--unset-upstream", branch]).await;
         }
-        Ok(id)
     }
 
     async fn create_agent(&self, spec: NewAgent) -> Result<String, String> {
@@ -1898,6 +1976,12 @@ mod tests {
         calls: std::sync::Mutex<Vec<String>>,
         agents: std::sync::Mutex<Vec<NewAgent>>,
         fail_agent: bool,
+        /// The daemon does not answer the worktree request in time.
+        no_answer: bool,
+        /// The look at which the worktree shows up in the model.
+        appears_on: Option<usize>,
+        looks: std::sync::Mutex<usize>,
+        settled: std::sync::Mutex<Vec<String>>,
     }
 
     #[async_trait::async_trait]
@@ -1910,12 +1994,28 @@ mod tests {
             &self,
             branch: &str,
             base: Option<&str>,
-        ) -> Result<String, String> {
+        ) -> Result<NewWorktree, String> {
             self.calls
                 .lock()
                 .unwrap()
                 .push(format!("worktree {branch} {}", base.unwrap_or("-")));
-            Ok("wt-9".into())
+            Ok(if self.no_answer {
+                NewWorktree::NoAnswer
+            } else {
+                NewWorktree::Made("wt-9".into())
+            })
+        }
+        fn reconcile_wait(&self) -> Duration {
+            Duration::from_secs(2)
+        }
+        fn worktree_on(&self, _branch: &str) -> Option<String> {
+            let mut looks = self.looks.lock().unwrap();
+            *looks += 1;
+            // Shows on the `appears_on`th look, if ever.
+            (self.appears_on.is_some_and(|n| *looks >= n)).then(|| "wt-late".to_string())
+        }
+        async fn settle_worktree(&self, branch: &str, _base: Option<&str>) {
+            self.settled.lock().unwrap().push(branch.to_string());
         }
         async fn create_agent(&self, spec: NewAgent) -> Result<String, String> {
             self.calls.lock().unwrap().push("agent".into());
@@ -2121,6 +2221,58 @@ mod tests {
             ws.agents.lock().unwrap()[0].prompt.as_deref(),
             Some("Use my words")
         );
+    }
+
+    /// The worktree request times out on a big repo, but the daemon makes
+    /// it anyway: Start finds it and goes on to link, assign, activate and
+    /// spawn in it.
+    #[tokio::test]
+    async fn a_worktree_that_shows_after_the_timeout_is_picked_up() {
+        let s = MockServer::start();
+        let (assign, activate) = start_mocks(&s, 200);
+        let store = testing::temp_store();
+        let ctx = testing::context(&s.base_url(), store.clone());
+        let ws = FakeWs {
+            no_answer: true,
+            // The third look, a second into the wait.
+            appears_on: Some(3),
+            ..Default::default()
+        };
+        let mut req = start(101, "jari/big-repo");
+        req.base = Some("main".into());
+        req.spawn = Some(spawn_spec());
+        let out = start_task(&ctx, &ws, req).await.unwrap();
+        assert_eq!(out.worktree_id, "wt-late");
+        assert_eq!(out.agent_id.as_deref(), Some("ag-1"));
+        assert!(out.problems.is_empty(), "{:?}", out.problems);
+        assign.assert();
+        activate.assert();
+        assert_eq!(*ws.settled.lock().unwrap(), vec!["jari/big-repo"]);
+        assert_eq!(ws.agents.lock().unwrap()[0].worktree, "wt-late");
+        assert_eq!(
+            store.read_repo(&ctx.key, |r| r.branch_tasks.get("jari/big-repo").copied()),
+            Some(101)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_worktree_that_never_shows_fails_the_start() {
+        let s = MockServer::start();
+        start_mocks(&s, 200);
+        let ctx = testing::context(&s.base_url(), testing::temp_store());
+        let ws = FakeWs {
+            no_answer: true,
+            ..Default::default()
+        };
+        let mut req = start(101, "jari/lost");
+        req.base = Some("main".into());
+        req.spawn = Some(spawn_spec());
+        let e = start_task(&ctx, &ws, req).await.unwrap_err();
+        assert!(e.message.contains("no worktree on jari/lost"), "{e}");
+        // Looked for the whole wait, then stopped; nothing after ran.
+        assert!(*ws.looks.lock().unwrap() >= 3);
+        assert!(ws.settled.lock().unwrap().is_empty());
+        assert!(ws.agents.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

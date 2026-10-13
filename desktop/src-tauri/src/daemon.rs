@@ -93,6 +93,19 @@ type Answers = HashMap<u64, oneshot::Sender<Result<String, String>>>;
 /// How long the daemon may wait for an asked session to answer.
 const ASK_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// An RPC whose Ack did not come in time. The request may still be done
+/// by the daemon, so a caller can look for its result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RpcTimeout;
+
+impl std::fmt::Display for RpcTimeout {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the daemon did not answer in time")
+    }
+}
+
+impl std::error::Error for RpcTimeout {}
+
 /// Shared between the Tauri commands and the connection task.
 pub struct Client {
     pub model: Mutex<Model>,
@@ -148,6 +161,18 @@ impl Client {
 
     /// Send a request carrying `req_id` and wait for its Ack.
     pub async fn rpc(&self, req_id: u64, req: ClientRequest) -> Result<Option<EntityId>> {
+        self.rpc_within(req_id, req, RPC_TIMEOUT).await
+    }
+
+    /// [`rpc`](Self::rpc) with its own wait, for requests that can take
+    /// long (a worktree of a big repo). Running out of time is an
+    /// [`RpcTimeout`] error: the daemon may still finish the work.
+    pub async fn rpc_within(
+        &self,
+        req_id: u64,
+        req: ClientRequest,
+        timeout: Duration,
+    ) -> Result<Option<EntityId>> {
         let (done_tx, done_rx) = oneshot::channel();
         self.pending
             .lock()
@@ -157,13 +182,13 @@ impl Client {
             self.pending.lock().expect("pending lock").remove(&req_id);
             return Err(e);
         }
-        match tokio::time::timeout(RPC_TIMEOUT, done_rx).await {
+        match tokio::time::timeout(timeout, done_rx).await {
             Ok(Ok(Ok(created))) => Ok(created),
             Ok(Ok(Err(message))) => Err(anyhow!(message)),
             Ok(Err(_)) => bail!("the daemon connection closed before it answered"),
             Err(_) => {
                 self.pending.lock().expect("pending lock").remove(&req_id);
-                bail!("the daemon did not answer in time")
+                Err(RpcTimeout.into())
             }
         }
     }
