@@ -359,9 +359,38 @@ pub fn fetch(repo: &Path, remote: &str) -> Result<()> {
     Ok(())
 }
 
-/// `git branch -d <branch>`: refuses an unmerged branch, as git does.
-pub fn delete_local(repo: &Path, branch: &str) -> Result<()> {
-    git(repo, &["branch", "-d", "--", branch]).map(|_| ())
+/// What a local delete came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Deleted {
+    Deleted,
+    /// `git branch -d` refused: the branch has commits its upstream (or
+    /// HEAD) lacks. A squash-merged branch looks like this. Only an
+    /// explicit "Delete anyway" (`force`) removes it.
+    Unmerged,
+}
+
+/// `git branch -d <branch>`, which refuses an unmerged branch as git does
+/// (that is `Unmerged`, not an error); with `force`, `git branch -D`.
+pub fn delete_local(repo: &Path, branch: &str, force: bool) -> Result<Deleted> {
+    let flag = if force { "-D" } else { "-d" };
+    let out = git_cmd(repo)
+        // git's own words decide "unmerged", so read them untranslated.
+        .env("LC_ALL", "C")
+        .args(["branch", flag, "--", branch])
+        .output()
+        .map_err(|e| anyhow!("could not run git: {e}"))?;
+    if out.status.success() {
+        return Ok(Deleted::Deleted);
+    }
+    let why = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    if !force && why.contains("not fully merged") {
+        return Ok(Deleted::Unmerged);
+    }
+    if why.is_empty() {
+        bail!("git branch failed");
+    }
+    bail!("git branch failed: {why}")
 }
 
 /// Fill worktree and session from the daemon model: a worktree of the
@@ -591,7 +620,8 @@ pub async fn ado_delete_local(
     client: State<'_, Arc<Client>>,
     worktree: String,
     branch: String,
-) -> std::result::Result<(), String> {
+    force: Option<bool>,
+) -> std::result::Result<Deleted, String> {
     let (repo, project) = locate(&client, &worktree)?;
     if client
         .snapshot()
@@ -603,7 +633,8 @@ pub async fn ado_delete_local(
             "{branch} is checked out in a worktree. Remove the worktree first."
         ));
     }
-    blocking(move || delete_local(&repo, &branch)).await
+    let force = force.unwrap_or(false);
+    blocking(move || delete_local(&repo, &branch, force)).await
 }
 
 #[cfg(test)]
@@ -753,11 +784,26 @@ mod tests {
         run(&work, &["checkout", "-q", "-b", "jari/unmerged"]);
         commit(&work, "one");
         run(&work, &["checkout", "-q", "main"]);
-        assert!(delete_local(&work, "jari/unmerged").is_err());
-        delete_local(&work, "jari/merged").unwrap();
+        assert_eq!(
+            delete_local(&work, "jari/unmerged", false).unwrap(),
+            Deleted::Unmerged
+        );
+        assert_eq!(
+            delete_local(&work, "jari/merged", false).unwrap(),
+            Deleted::Deleted
+        );
         let rows = collect(&work, "origin").unwrap();
         assert!(!rows.iter().any(|r| r.name == "jari/merged"));
         assert!(rows.iter().any(|r| r.name == "jari/unmerged"));
+        // "Delete anyway" takes it.
+        assert_eq!(
+            delete_local(&work, "jari/unmerged", true).unwrap(),
+            Deleted::Deleted
+        );
+        let rows = collect(&work, "origin").unwrap();
+        assert!(!rows.iter().any(|r| r.name == "jari/unmerged"));
+        // A branch that is not there is still an error.
+        assert!(delete_local(&work, "jari/none", false).is_err());
     }
 
     #[test]

@@ -49,7 +49,9 @@ export const branchesApi = {
   fetch: (worktree: string) => invoke<void>('ado_fetch', { worktree }),
   /** The worktree's id (an existing one when the branch is checked out). */
   checkout: (worktree: string, branch: string) => invoke<string>('ado_checkout_worktree', { worktree, branch }),
-  deleteLocal: (worktree: string, branch: string) => invoke<void>('ado_delete_local', { worktree, branch }),
+  /** `unmerged`: git refused (`branch -d`), as for a squash-merged branch; `force` deletes it anyway (`branch -D`). */
+  deleteLocal: (worktree: string, branch: string, force = false) =>
+    invoke<'deleted' | 'unmerged'>('ado_delete_local', { worktree, branch, force }),
   diffRange: (worktree: string, base: string, tip: string) => invoke<RangeDiff>('diff_range', { worktree, base, tip }),
 };
 

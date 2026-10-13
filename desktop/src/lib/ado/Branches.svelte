@@ -6,6 +6,7 @@
   import Chip from './Chip.svelte';
   import { composeItem } from './prs-api';
   import { branchesApi, filterBranches, shortAge, syncWords, type BranchRow, type BranchTree } from './branches-api';
+  import { errText } from './errors';
 
   let { repo }: { repo: string } = $props();
 
@@ -33,6 +34,8 @@
   let busy = $state<{ branch: string; action: 'checkout' | 'delete' } | null>(null);
   let actionError = $state<{ branch: string; message: string } | null>(null);
   let confirmDelete = $state<string | null>(null);
+  /** The branch `git branch -d` refused as unmerged: "Delete anyway" asks here. */
+  let unmerged = $state<string | null>(null);
 
   async function load() {
     if (!worktree) return;
@@ -41,7 +44,7 @@
     try {
       tree = await branchesApi.list(worktree);
     } catch (e) {
-      error = String(e);
+      error = errText(e);
     } finally {
       loading = false;
     }
@@ -60,7 +63,7 @@
       await branchesApi.fetch(worktree);
       await load();
     } catch (e) {
-      fetchError = String(e);
+      fetchError = errText(e);
     } finally {
       fetching = false;
     }
@@ -85,6 +88,7 @@
   function select(name: string) {
     nav.replace({ view: 'branches', repo, item: name });
     confirmDelete = null;
+    if (unmerged !== name) unmerged = null;
     if (actionError?.branch !== name) actionError = null;
   }
 
@@ -132,7 +136,7 @@
     try {
       await work();
     } catch (e) {
-      actionError = { branch, message: String(e) };
+      actionError = { branch, message: errText(e) };
     } finally {
       busy = null;
     }
@@ -148,10 +152,15 @@
       else openDiff(id);
     });
 
-  const deleteLocal = (r: BranchRow) =>
+  const deleteLocal = (r: BranchRow, force = false) =>
     run(r.name, 'delete', async () => {
-      await branchesApi.deleteLocal(worktree!, r.name);
+      const done = await branchesApi.deleteLocal(worktree!, r.name, force);
       confirmDelete = null;
+      if (done === 'unmerged') {
+        unmerged = r.name;
+        return;
+      }
+      unmerged = null;
       await load();
       if (!allRows.some((x) => x.name === r.name)) nav.replace({ view: 'branches', repo });
     });
@@ -356,7 +365,10 @@
             {#if r.local}
               <button
                 class="{action} {confirmDelete === r.name ? 'border-fail text-fail' : ''}"
-                onclick={() => (confirmDelete = confirmDelete === r.name ? null : r.name)}
+                onclick={() => {
+                  unmerged = null;
+                  confirmDelete = confirmDelete === r.name ? null : r.name;
+                }}
                 disabled={!!busy || !!r.worktree}
                 title={r.worktree ? 'Checked out in a worktree: remove the worktree first' : 'Delete the local branch; the remote copy stays'}>Delete local</button
               >
@@ -374,6 +386,21 @@
                   >{doing === 'delete' ? 'Deleting' : 'Delete local branch'}</button
                 >
                 <button class="h-7 border border-rule bg-transparent px-2.5 text-[13px] text-ink hover:border-rule-strong" onclick={() => (confirmDelete = null)}>Keep it</button>
+              </div>
+            </div>
+          {/if}
+
+          {#if unmerged === r.name}
+            <div class="mt-3 border border-fail px-3 py-2.5" role="alertdialog" aria-label="Delete anyway">
+              <p class="m-0 text-[13px] text-ink">
+                Git kept <span class="font-mono text-[12px]">{r.name}</span>: it has commits that are not merged into its upstream or HEAD. A branch
+                that was squash-merged looks like this. Deleting it anyway drops any commits that exist only here.
+              </p>
+              <div class="mt-2 flex gap-2">
+                <button class="h-7 border-0 bg-fail px-2.5 text-[13px] font-medium text-bg disabled:bg-raised disabled:text-faint" onclick={() => deleteLocal(r, true)} disabled={!!busy}
+                  >{doing === 'delete' ? 'Deleting' : 'Delete anyway'}</button
+                >
+                <button class="h-7 border border-rule bg-transparent px-2.5 text-[13px] text-ink hover:border-rule-strong" onclick={() => (unmerged = null)}>Keep it</button>
               </div>
             </div>
           {/if}
