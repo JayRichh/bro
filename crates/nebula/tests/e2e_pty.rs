@@ -5478,7 +5478,14 @@ async fn orchestrator_start_status_gating_and_escalation() {
     let (ok, text) = run(&["orchestrator", "list", "--json"], Some(&orch));
     assert!(ok, "{text}");
     let listed: serde_json::Value = serde_json::from_str(&text).unwrap();
-    for field in ["projects", "worktrees", "agents", "terminals", "links", "sessions"] {
+    for field in [
+        "projects",
+        "worktrees",
+        "agents",
+        "terminals",
+        "links",
+        "sessions",
+    ] {
         assert!(listed.get(field).is_some(), "--json lost {field}: {text}");
     }
     let (ok, text) = run(&["orchestrator", "send", &orch, "hello"], Some(&orch));

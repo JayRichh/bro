@@ -136,6 +136,48 @@ fn f10_with_no_orchestrator_opens_the_start_prompt_and_enter_starts_one() {
     });
 }
 
+/// A protocol-53 daemon (the one `kete upgrade` leaves running while
+/// sessions are live) cannot decode the provisioning requests and would drop
+/// the connection: F10 and the card menu say so and send nothing.
+#[test]
+fn an_older_daemon_is_never_sent_a_provisioning_request() {
+    with_default_config(|| {
+        let mut app = App::new();
+        seed_tree(&mut app);
+        app.orch.daemon_protocol = Some(53);
+        let mut out = Vec::new();
+        key(&mut app, KeyCode::F(10), &mut out);
+        assert!(app.modals.overlay.is_none(), "no start prompt");
+        assert_eq!(
+            app.chrome.flash.as_deref(),
+            Some(crate::orchestrator_view::DAEMON_TOO_OLD)
+        );
+        run_menu_action(
+            &mut app,
+            MenuAction::MakeOrchestrator(AgentId("a1".into())),
+            &mut out,
+        );
+        run_menu_action(&mut app, MenuAction::ClearOrchestrator, &mut out);
+        assert!(
+            !out.iter().any(|r| matches!(
+                r,
+                ClientRequest::StartOrchestrator { .. }
+                    | ClientRequest::SetOrchestrator { .. }
+                    | ClientRequest::ClearOrchestrator { .. }
+            )),
+            "{out:?}"
+        );
+
+        // On 54 the prompt opens.
+        app.orch.daemon_protocol = Some(54);
+        key(&mut app, KeyCode::F(10), &mut out);
+        assert!(matches!(
+            app.modals.overlay,
+            Some(Overlay::OrchestratorStart(_))
+        ));
+    });
+}
+
 #[test]
 fn f10_opens_the_view_on_the_orchestrator_and_again_from_inside_it_leaves() {
     with_default_config(|| {

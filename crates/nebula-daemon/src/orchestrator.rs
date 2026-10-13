@@ -283,7 +283,10 @@ impl Daemon {
         for agent in &changed {
             let _ = self.broadcast_agent(agent);
         }
-        if changed.contains(id) && crate::session_context::is_idle(agent.status) {
+        // Only a CLI sitting at its prompt: never a dead or disconnected pane,
+        // where the text would land in whatever is left of it.
+        let at_prompt = matches!(agent.status, AgentStatus::Fresh | AgentStatus::Finished);
+        if changed.contains(id) && at_prompt {
             if let Some(session) = self.session(&SessionRef::Agent(id.clone())) {
                 let note = format!(
                     "{CLAUDE_ORCHESTRATOR_GUIDANCE}\n\nThe user just made this session the \

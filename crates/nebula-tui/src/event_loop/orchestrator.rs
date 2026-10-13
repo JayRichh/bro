@@ -47,7 +47,22 @@ fn leave_view(app: &mut App) {
     leave_terminal_lock(app);
 }
 
+/// Flash why not, when the daemon is too old to take a provisioning
+/// request: a protocol-53 daemon cannot decode one and would drop the
+/// connection.
+fn refuse_old_daemon(app: &mut App) -> bool {
+    if view::daemon_provisions(app) {
+        return false;
+    }
+    app.chrome.flash = Some(view::DAEMON_TOO_OLD.into());
+    app.chrome.dirty = true;
+    true
+}
+
 fn open_start(app: &mut App) {
+    if refuse_old_daemon(app) {
+        return;
+    }
     let profiles = crate::config::Config::load().profiles;
     app.modals.overlay = Some(Overlay::OrchestratorStart(StartView::new(profiles)));
 }
@@ -79,6 +94,9 @@ fn start_orchestrator(app: &mut App, start: &StartView, out: &mut Vec<ClientRequ
     let kind = start.kind();
     let profile = start.profile_name();
     app.modals.overlay = None;
+    if refuse_old_daemon(app) {
+        return;
+    }
     app.chrome.flash = Some(format!("starting the orchestrator on {}…", kind.as_str()));
     send_with(app, out, PendingIntent::OpenOrchestrator, |req_id| {
         ClientRequest::StartOrchestrator {
@@ -145,6 +163,9 @@ pub(crate) fn click_chip(app: &mut App, sref: SessionRef, out: &mut Vec<ClientRe
 
 /// "Make orchestrator" on a card.
 pub(crate) fn make_orchestrator(app: &mut App, id: AgentId, out: &mut Vec<ClientRequest>) {
+    if refuse_old_daemon(app) {
+        return;
+    }
     let name = app
         .tree
         .agents
@@ -161,6 +182,9 @@ pub(crate) fn make_orchestrator(app: &mut App, id: AgentId, out: &mut Vec<Client
 
 /// "Unpin orchestrator" on the orchestrator's card.
 pub(crate) fn clear_orchestrator(app: &mut App, out: &mut Vec<ClientRequest>) {
+    if refuse_old_daemon(app) {
+        return;
+    }
     send(app, out, |req_id| ClientRequest::ClearOrchestrator {
         req_id,
     });

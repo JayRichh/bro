@@ -33,6 +33,25 @@ pub struct OrchState {
     /// What the pane showed before a review moved it onto the session
     /// under review: put back when the review closes, however it closes.
     pub review_restore: Option<SessionRef>,
+    /// The protocol the daemon answered the handshake with; None before
+    /// one (tests). Below [`ORCHESTRATOR_PROTOCOL`] it cannot decode the
+    /// provisioning requests, and sending one would drop the connection.
+    pub daemon_protocol: Option<u32>,
+}
+
+/// The protocol that grew `StartOrchestrator`, `SetOrchestrator` and
+/// `ClearOrchestrator`.
+pub const ORCHESTRATOR_PROTOCOL: u32 = 54;
+
+/// What F10 and the card menu say to a daemon too old for provisioning.
+pub const DAEMON_TOO_OLD: &str =
+    "the running daemon predates the orchestrator: `kete reload` moves it onto this build, keeping every session";
+
+/// Can the daemon take the provisioning requests?
+pub fn daemon_provisions(app: &App) -> bool {
+    app.orch
+        .daemon_protocol
+        .is_none_or(|v| v >= ORCHESTRATOR_PROTOCOL)
 }
 
 /// The pinned orchestrator, when one is live (archived rows never count).
