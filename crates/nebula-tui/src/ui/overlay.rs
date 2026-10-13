@@ -60,7 +60,7 @@ fn draw_review_overlay(f: &mut Frame, app: &mut App, mut view: crate::review_mod
         inner.x,
         view.tabs
             .iter()
-            .map(|tab| crate::review_modal::tab_label(*tab)),
+            .map(|tab| (crate::review_modal::tab_label(*tab), None)),
         view.tab,
         true,
         th,
@@ -659,7 +659,7 @@ fn draw_settings_overlay(f: &mut Frame, app: &mut App, view: crate::app::Setting
     // ---- tab strip ----
     let (strip, hits) = tab_strip(
         inner.x,
-        crate::config::SETTINGS_TABS.iter().map(|t| t.title),
+        crate::config::SETTINGS_TABS.iter().map(|t| (t.title, None)),
         tab,
         view.on_tabs,
         th,
@@ -1257,7 +1257,7 @@ fn draw_diff_overlay(f: &mut Frame, app: &mut App, view: crate::app::DiffView) {
     ])
     .areas(area);
 
-    let list_inner = draw_diff_file_list(f, &view, files_a, th);
+    let list_inner = draw_diff_file_list(f, &view, files_a, app.chrome.icons, th);
 
     // Right: the selected file's diff, scrolled — or, on a tree
     // directory's row, the list of what changed under it.
@@ -1762,6 +1762,7 @@ fn change_row_spans(
     i: usize,
     done: Option<&[bool]>,
     width: u16,
+    icons: crate::icons::IconStyle,
     th: Theme,
 ) -> Vec<Span<'static>> {
     let Some(tree) = &view.tree else {
@@ -1769,8 +1770,10 @@ fn change_row_spans(
             return Vec::new();
         };
         let file = &view.files[m.file];
-        let budget = (width as usize).saturating_sub(5);
+        let icon = crate::icons::file_span(&file.path, icons, th.light);
+        let budget = (width as usize).saturating_sub(5 + icon.as_ref().map_or(0, |s| s.width()));
         let mut spans = change_gutter(Some(file), view.reviewed.contains_key(&file.path), th);
+        spans.extend(icon);
         let shown = truncate(&file.path, budget);
         let used = shown.chars().count();
         spans.extend(fuzzy_highlight_spans(&shown, &m.positions, th));
@@ -1798,12 +1801,20 @@ fn change_row_spans(
     } else {
         "▸ "
     };
-    let budget = (width as usize).saturating_sub(5 + indent.chars().count() + 2);
+    let icon = if node.is_dir {
+        let open = tree.is_open(r.node, !view.filter.is_empty());
+        crate::icons::folder_span(&node.name, open, icons, th.light)
+    } else {
+        crate::icons::file_span(&node.name, icons, th.light)
+    };
+    let icon_w = icon.as_ref().map_or(0, |s| s.width());
+    let budget = (width as usize).saturating_sub(5 + indent.chars().count() + 2 + icon_w);
     let shown = truncate(&node.name, budget);
     let reviewed = done.is_some_and(|d| d[r.node]);
     let mut spans = change_gutter(file, reviewed, th);
     spans.push(Span::raw(indent));
     spans.push(Span::styled(marker, Style::default().fg(th.accent)));
+    spans.extend(icon);
     if node.is_dir {
         spans.push(Span::styled(shown, Style::default().fg(th.accent)));
     } else {
@@ -1910,6 +1921,7 @@ fn draw_diff_file_list(
     f: &mut Frame,
     view: &crate::app::DiffView,
     files_a: Rect,
+    icons: crate::icons::IconStyle,
     th: Theme,
 ) -> Rect {
     // Left: changed-file list — flat paths, or the directory tree
@@ -1964,7 +1976,7 @@ fn draw_diff_file_list(
             let spans = match place {
                 crate::app::Place::ChangesHeader => changes_header_spans(view, th),
                 crate::app::Place::Changes => {
-                    change_row_spans(view, inner, done.as_deref(), list_inner.width, th)
+                    change_row_spans(view, inner, done.as_deref(), list_inner.width, icons, th)
                 }
                 crate::app::Place::GraphHeader => graph_header_spans(view, th),
                 crate::app::Place::Graph => view
@@ -1988,7 +2000,7 @@ fn draw_diff_file_list(
                     let Some(row_area) = row_rect(list_inner, row) else {
                         break;
                     };
-                    let spans = change_row_spans(view, i, None, list_inner.width, th);
+                    let spans = change_row_spans(view, i, None, list_inner.width, icons, th);
                     render_row(f, row_area, spans, i == view.selected, true, th);
                 }
             }
@@ -1998,7 +2010,7 @@ fn draw_diff_file_list(
                     let Some(row_area) = row_rect(list_inner, row) else {
                         break;
                     };
-                    let spans = change_row_spans(view, i, Some(&done), list_inner.width, th);
+                    let spans = change_row_spans(view, i, Some(&done), list_inner.width, icons, th);
                     render_row(f, row_area, spans, i == tree.selected, true, th);
                 }
             }
@@ -2244,10 +2256,14 @@ fn draw_files_overlay(f: &mut Frame, app: &mut App, finder: crate::app::FileFind
             break;
         };
         let path = &finder.list.items[m.item];
-        let budget = (list_inner.width as usize).saturating_sub(2);
+        // The FILE ICON ahead of the path, as VS Code's quick open has it.
+        let icon = crate::icons::file_span(path, app.chrome.icons, th.light);
+        let icon_w = icon.as_ref().map_or(0, |s| s.width());
+        let budget = (list_inner.width as usize).saturating_sub(2 + icon_w);
         let shown = truncate(path, budget);
         let positions = visible_positions(&m.positions, &shown, path);
         let mut spans = vec![Span::raw(" ")];
+        spans.extend(icon);
         spans.extend(fuzzy_highlight_spans(&shown, positions, th));
         render_row(f, row_area, spans, i == finder.list.cursor, true, th);
     }
@@ -2472,7 +2488,13 @@ fn draw_file_tabs_overlay(f: &mut Frame, app: &mut App, mut view: crate::file_ta
     // ---- tab strip and its rule ----
     let (strip, hits) = tab_strip(
         inner.x,
-        view.tabs.iter().map(|t| t.label.as_str()),
+        view.tabs.iter().map(|t| {
+            let path = t.path.to_string_lossy();
+            (
+                t.label.as_str(),
+                crate::icons::file_span(&path, app.chrome.icons, th.light),
+            )
+        }),
         view.tab,
         view.on_tabs,
         th,
@@ -2647,13 +2669,25 @@ fn draw_tree_overlay(f: &mut Frame, app: &mut App, mut view: crate::tree_browser
         } else {
             "▸ "
         };
-        let budget = (list_inner.width as usize).saturating_sub(indent.chars().count() + 3);
+        // The FILE ICON between the fold marker and the name, as VS
+        // Code's explorer draws it: the folder's own (open or folded),
+        // or the file type's.
+        let open = !view.list.query.is_empty() || view.expanded[r.node];
+        let icon = if node.is_dir {
+            crate::icons::folder_span(&node.name, open, app.chrome.icons, th.light)
+        } else {
+            crate::icons::file_span(&node.name, app.chrome.icons, th.light)
+        };
+        let icon_w = icon.as_ref().map_or(0, |s| s.width());
+        let budget =
+            (list_inner.width as usize).saturating_sub(indent.chars().count() + 3 + icon_w);
         let shown = truncate(&node.name, budget);
         let positions = visible_positions(&r.positions, &shown, &node.name);
         let mut spans = vec![
             Span::raw(format!(" {indent}")),
             Span::styled(marker, Style::default().fg(th.accent)),
         ];
+        spans.extend(icon);
         if node.is_dir {
             spans.push(Span::styled(shown, Style::default().fg(th.accent)));
         } else {

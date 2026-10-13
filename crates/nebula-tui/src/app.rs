@@ -4039,6 +4039,9 @@ pub struct ChromeState {
     /// What `theme` was resolved from, re-checked on a beat and on focus
     /// while it is one of the two names that follow the machine.
     pub live_theme: crate::appearance::LiveTheme,
+    /// How the FILE ICONS are drawn, the `icons` setting resolved
+    /// (`auto` against the terminal's font) when it is applied.
+    pub icons: crate::icons::IconStyle,
     /// Hotkeys as the panels dispatch them: `config.keymap()`, cached here
     /// because a keymap lookup happens on every single key press. The
     /// event loop refreshes it at startup and whenever a binding changes.
@@ -4132,6 +4135,7 @@ impl Default for ChromeState {
             is_remote: nebula_core::host::is_remote_session(),
             theme: crate::theme::Theme::default(),
             live_theme: crate::appearance::LiveTheme::default(),
+            icons: crate::icons::IconStyle::default(),
             keymap: crate::keymap::Keymap::default(),
             pointer_shape: PointerShape::default(),
             key_combo: None,

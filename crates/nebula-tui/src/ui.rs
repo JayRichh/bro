@@ -719,10 +719,12 @@ fn markdown_toggle_hint(key: &str, markdown: bool, pretty: bool) -> String {
 /// The tab strip the SETTINGS OVERLAY and the FILE TABS share: labels laid
 /// out left to right from `x`, the active one lit — and reversed while the
 /// cursor is parked on the strip, so ←/→ visibly belong to it — returning
-/// the spans and each label's screen x-range for click hit-testing.
+/// the spans and each label's screen x-range for click hit-testing. A
+/// label may lead with an icon (the FILE TABS' FILE ICONS), drawn inside
+/// the tab in its own color on the tab's fill.
 fn tab_strip<'a>(
     x: u16,
-    labels: impl Iterator<Item = &'a str>,
+    labels: impl Iterator<Item = (&'a str, Option<Span<'static>>)>,
     active: usize,
     on_tabs: bool,
     th: Theme,
@@ -730,10 +732,13 @@ fn tab_strip<'a>(
     let mut strip: Vec<Span> = Vec::new();
     let mut hits: Vec<(u16, u16)> = Vec::new();
     let mut x = x;
-    for (i, t) in labels.enumerate() {
+    for (i, (t, icon)) in labels.enumerate() {
         strip.push(Span::raw(" "));
         x += 1;
-        let label = format!(" {t} ");
+        let label = match &icon {
+            Some(_) => format!("{t} "),
+            None => format!(" {t} "),
+        };
         let mut style = Style::default().fg(th.dim);
         if i == active {
             style = Style::default()
@@ -744,7 +749,19 @@ fn tab_strip<'a>(
                 style = style.add_modifier(Modifier::REVERSED);
             }
         }
-        let w = label.chars().count() as u16;
+        let mut w = label.chars().count() as u16;
+        if let Some(icon) = icon {
+            let lead = Span::styled(" ", style);
+            let icon = Span {
+                style: icon
+                    .style
+                    .patch(Style::default().bg(style.bg.unwrap_or_default())),
+                ..icon
+            };
+            w += 1 + icon.width() as u16;
+            strip.push(lead);
+            strip.push(icon);
+        }
         hits.push((x, x + w));
         x += w;
         strip.push(Span::styled(label, style));

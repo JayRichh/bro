@@ -409,6 +409,7 @@ pub enum SettingKind {
     AutoCleanupMerged,
     ShowAllWorktrees,
     Theme,
+    Icons,
     Animations,
     BlackBackground,
     HideCardMarks,
@@ -532,7 +533,8 @@ impl SettingKind {
             SettingKind::DiffMode
             | SettingKind::DiffContext
             | SettingKind::Kanban
-            | SettingKind::KanbanScope => (2026, 10, 13),
+            | SettingKind::KanbanScope
+            | SettingKind::Icons => (2026, 10, 13),
         }
     }
 
@@ -686,6 +688,12 @@ pub const SETTINGS_TABS: &[SettingsTab] = &[
                 kind: SettingKind::Theme,
                 label: "Color theme",
                 hint: "Colors across the grid, overlays, previews and diffs. one-dark / one-light paint their own canvas; auto follows the OS light or dark; vscode reads the theme VS Code is set to",
+                group: "",
+            },
+            SettingSpec {
+                kind: SettingKind::Icons,
+                label: "File icons",
+                hint: "Per-file-type icons where files are listed: nerd (Nerd Font glyphs), ascii (a two-letter tag), off; auto picks nerd when the Windows Terminal profile's font is a Nerd Font (bro setup terminal installs one)",
                 group: "",
             },
             SettingSpec {
@@ -1127,6 +1135,12 @@ pub struct Config {
     /// Color theme name (see `theme::THEMES`). Unknown names fall back to
     /// the default theme.
     pub theme: String,
+    /// The ICON STYLE of the FILE ICONS (`crate::icons`): `nerd`,
+    /// `ascii`, `off`, or `auto` — the default — which picks `nerd` when
+    /// the Windows Terminal profile Bro runs in names a Nerd Font, else
+    /// `ascii`. Resolved when the setting is applied; the file keeps the
+    /// word, so `auto` looks again on the next start.
+    pub icons: String,
     /// Master switch for the TUI's animations (the running/needs-feedback
     /// status-text sweep and the splash's motion). Off trades them for
     /// fewer repaints on constrained machines.
@@ -1588,6 +1602,7 @@ impl Default for Config {
             auto_cleanup_merged: false,
             show_all_worktrees: true,
             theme: crate::theme::DEFAULT_THEME.into(),
+            icons: crate::icons::ICON_STYLES[0].into(),
             animations: true,
             black_background: true,
             hide_card_marks: false,
@@ -1778,6 +1793,17 @@ impl Config {
     /// out on.
     pub fn pane_side(&self) -> crate::launcher::PaneSide {
         crate::launcher::PaneSide::parse(&self.session_pane)
+    }
+
+    /// `icons` as one of [`crate::icons::ICON_STYLES`]; anything else is
+    /// `auto`.
+    pub fn icons_word(&self) -> &'static str {
+        let stored = self.icons.trim();
+        crate::icons::ICON_STYLES
+            .iter()
+            .copied()
+            .find(|w| w.eq_ignore_ascii_case(stored))
+            .unwrap_or(crate::icons::ICON_STYLES[0])
     }
 
     /// `kanban_scope` says every project rather than the one on screen.
@@ -2473,6 +2499,7 @@ impl Config {
             SettingKind::ShowAllWorktrees => on_off(self.show_all_worktrees).into(),
             SettingKind::AskBeforeArchive => on_off(self.ask_before_archive).into(),
             SettingKind::Theme => self.theme.clone(),
+            SettingKind::Icons => self.icons_word().into(),
             SettingKind::Animations => on_off(self.animations).into(),
             SettingKind::BlackBackground => on_off(self.black_background).into(),
             SettingKind::HideCardMarks => shown_hidden(self.hide_card_marks).into(),
@@ -2583,6 +2610,10 @@ impl Config {
             }
             SettingKind::AskBeforeArchive => {
                 self.ask_before_archive = !self.ask_before_archive;
+            }
+            SettingKind::Icons => {
+                self.icons =
+                    cycle_choice(self.icons_word(), crate::icons::ICON_STYLES, step).into();
             }
             SettingKind::Theme => {
                 self.theme = cycle_choice(&self.theme, crate::theme::THEMES, step).into();
