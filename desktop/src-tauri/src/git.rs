@@ -1503,3 +1503,25 @@ mod tests {
         assert_eq!(hunk_starts("@@ -0,0 +1,2 @@"), (0, 1));
     }
 }
+
+/// The URL of the remote a repo's web page follows: `origin` when there
+/// is one, else the first remote git lists (as the TUI's `G` picks).
+pub fn remote_url(root: &Path) -> Result<String, String> {
+    let get = |name: &str| {
+        git(root, &["remote", "get-url", name])
+            .ok()
+            .map(|out| String::from_utf8_lossy(&out).trim().to_string())
+            .filter(|url| !url.is_empty())
+    };
+    if let Some(url) = get("origin") {
+        return Ok(url);
+    }
+    let names = git(root, &["remote"])?;
+    let names = String::from_utf8_lossy(&names);
+    let first = names
+        .lines()
+        .map(str::trim)
+        .find(|n| !n.is_empty())
+        .ok_or_else(|| "This repo has no git remote.".to_string())?;
+    get(first).ok_or_else(|| format!("No URL is set for the remote {first}."))
+}

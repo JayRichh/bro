@@ -9,6 +9,7 @@ mod ado;
 mod attribution;
 mod daemon;
 mod git;
+mod projects;
 mod sessions;
 mod settings;
 
@@ -746,6 +747,14 @@ fn main() {
             sessions::rename_terminal,
             sessions::close_terminal,
             sessions::follow_up,
+            projects::suggest_branch,
+            projects::create_worktree,
+            projects::delete_worktree,
+            projects::rename_project,
+            projects::remove_project,
+            projects::set_project_path,
+            projects::open_worktree,
+            projects::open_remote,
             settings::settings_schema,
             settings::settings_set,
             settings::settings_reset,
