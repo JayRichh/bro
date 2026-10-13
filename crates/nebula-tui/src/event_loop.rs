@@ -147,6 +147,11 @@ const GIT_POLL: Duration = Duration::from_secs(2);
 /// under the resolution anyone can see.
 const AGO_REFRESH: Duration = Duration::from_secs(30);
 
+/// The THEME BEAT: how often a theme that follows the machine (`auto`,
+/// `vscode`) looks at it again — the OS flipping to dark at sunset, a
+/// theme picked in VS Code. Focus coming back checks at once as well.
+const THEME_RECHECK: Duration = Duration::from_secs(3);
+
 /// How long the worktree selection must rest before asking the daemon to
 /// pre-spawn that worktree's dead sessions — long enough that walking the
 /// list doesn't boot every CLI passed, short enough that the sessions are

@@ -3816,8 +3816,12 @@ pub struct ChromeState {
     /// colors the hostname as a remote warning.
     pub is_remote: bool,
     /// Active color theme. From config (`theme`); the event loop refreshes
-    /// it when the setting changes.
+    /// it when the setting changes, and — for `auto` and `vscode` — when
+    /// the machine it was read off changes ([`ChromeState::live_theme`]).
     pub theme: crate::theme::Theme,
+    /// What `theme` was resolved from, re-checked on a beat and on focus
+    /// while it is one of the two names that follow the machine.
+    pub live_theme: crate::appearance::LiveTheme,
     /// Hotkeys as the panels dispatch them: `config.keymap()`, cached here
     /// because a keymap lookup happens on every single key press. The
     /// event loop refreshes it at startup and whenever a binding changes.
@@ -3910,6 +3914,7 @@ impl Default for ChromeState {
             hostname: nebula_core::host::hostname(),
             is_remote: nebula_core::host::is_remote_session(),
             theme: crate::theme::Theme::default(),
+            live_theme: crate::appearance::LiveTheme::default(),
             keymap: crate::keymap::Keymap::default(),
             pointer_shape: PointerShape::default(),
             key_combo: None,

@@ -670,7 +670,7 @@ pub const SETTINGS_TABS: &[SettingsTab] = &[
             SettingSpec {
                 kind: SettingKind::Theme,
                 label: "Color theme",
-                hint: "Accent colors used across the grid and overlays",
+                hint: "Colors across the grid, overlays, previews and diffs. one-dark / one-light paint their own canvas; auto follows the OS light or dark; vscode reads the theme VS Code is set to",
                 group: "",
             },
             SettingSpec {
@@ -1499,7 +1499,7 @@ impl Default for Config {
             delete_empty_worktree: false,
             auto_cleanup_merged: false,
             show_all_worktrees: true,
-            theme: "default".into(),
+            theme: crate::theme::DEFAULT_THEME.into(),
             animations: true,
             black_background: true,
             hide_card_marks: false,
@@ -1672,9 +1672,12 @@ impl Config {
         Ok(())
     }
 
-    /// `theme` resolved to the palette the UI draws with.
+    /// `theme` resolved to a palette without asking the machine: a preset
+    /// as it is, `auto` and `vscode` as One Dark. The running UI resolves
+    /// through its LIVE THEME instead (`crate::appearance::LiveTheme`),
+    /// which does ask.
     pub fn theme(&self) -> crate::theme::Theme {
-        crate::theme::Theme::by_name(&self.theme)
+        crate::theme::resolve(&self.theme, &crate::theme::Machine::default())
     }
 
     /// `session_pane` resolved to the side the LAUNCHER VIEW lays its pane
@@ -3709,7 +3712,13 @@ mod tests {
     #[test]
     fn theme_cycles_through_presets_and_resolves() {
         let mut cfg = Config::default();
-        assert_eq!(cfg.theme, "default");
+        // One Dark out of the box on Windows, the classic look elsewhere.
+        assert_eq!(cfg.theme, crate::theme::DEFAULT_THEME);
+        assert_eq!(
+            cfg.theme(),
+            crate::theme::Theme::by_name(crate::theme::DEFAULT_THEME)
+        );
+        cfg.theme = "default".into();
         assert_eq!(cfg.theme(), crate::theme::Theme::default());
         let (tab, theme_row) = locate(SettingKind::Theme).unwrap();
         cfg.cycle(tab, theme_row, 1);

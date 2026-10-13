@@ -253,6 +253,8 @@ pub(crate) fn dispatch_input(app: &mut App, event: Event, out: &mut Vec<ClientRe
         Event::FocusGained => {
             app.chrome.window_focused = true;
             schedule_pull_request_refresh(app);
+            // Back from VS Code, maybe with another theme picked there.
+            recheck_theme(app);
         }
         // …and left it: from here until it is back, a session that stops
         // to ask gets a desktop notification, since the pane can't be seen.

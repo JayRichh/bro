@@ -111,7 +111,7 @@ mod tests {
     /// draft look like it needs someone.
     #[test]
     fn a_draft_is_dimmed_where_an_open_pull_request_is_accented() {
-        for name in crate::theme::THEMES {
+        for name in crate::theme::PRESETS {
             let th = Theme::by_name(name);
             let open = look(Standing::Open, None, th);
             let draft = look(Standing::Draft, None, th);
@@ -142,7 +142,7 @@ mod tests {
     /// needs someone.
     #[test]
     fn merged_and_closed_rows_wear_the_preview_state_colors() {
-        for name in crate::theme::THEMES {
+        for name in crate::theme::PRESETS {
             let th = Theme::by_name(name);
             let merged = look(Standing::Merged, None, th);
             assert_eq!(merged.glyph, th.merged, "{name}");
@@ -169,7 +169,7 @@ mod tests {
     /// and keeps its own look.
     #[test]
     fn a_pull_request_in_trouble_is_red_end_to_end() {
-        for name in crate::theme::THEMES {
+        for name in crate::theme::PRESETS {
             let th = Theme::by_name(name);
             let red = Look {
                 glyph: th.err,
