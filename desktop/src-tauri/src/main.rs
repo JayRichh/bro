@@ -6,6 +6,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod ado;
+// Not called yet: the delivery commands that publish commits use it.
+#[allow(dead_code)]
+mod attribution;
 mod daemon;
 mod git;
 

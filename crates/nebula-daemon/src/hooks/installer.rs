@@ -335,7 +335,8 @@ fn managed_group(endpoint: &str, event: &str, matcher: Option<&str>) -> Value {
 
 /// Merge nebula's managed hooks for Claude Code into
 /// `<cwd>/.claude/settings.local.json`, plus the permission rule that lets
-/// the auto-title `nebula rename` run unprompted.
+/// the auto-title `nebula rename` run unprompted, and attribution off: no
+/// co-author trailer on its commits, no footer on its PRs.
 pub fn install_claude_hooks(cwd: &Path) -> Result<()> {
     install_managed_hooks(
         &cwd.join(CLAUDE_DIR),
@@ -343,7 +344,80 @@ pub fn install_claude_hooks(cwd: &Path) -> Result<()> {
         "claude",
         CLAUDE_EVENTS,
         CLAUDE_ALLOW_RULES,
+        claude_attribution_off,
     )
+}
+
+/// Claude Code's two attribution switches, forced off on every spawn
+/// whatever the file said: the legacy boolean and the newer per-surface
+/// text (an empty string writes nothing).
+fn claude_attribution_off(root_obj: &mut Map<String, Value>) {
+    root_obj.insert("includeCoAuthoredBy".into(), json!(false));
+    root_obj.insert("attribution".into(), json!({ "commit": "", "pr": "" }));
+}
+
+/// Copilot's per-checkout settings, relative to the worktree root.
+const COPILOT_WORKTREE_SETTINGS_DIR: &str = ".github/copilot";
+const COPILOT_WORKTREE_SETTINGS_FILE: &str = "settings.local.json";
+/// The same path as a line of `info/exclude`.
+const COPILOT_WORKTREE_SETTINGS_EXCLUDE: &str = ".github/copilot/settings.local.json";
+
+/// Turn Copilot's co-author trailer off in `<cwd>/.github/copilot/
+/// settings.local.json` (merged: anything else the user set stays), and
+/// keep that file out of `git status` through the repository's shared
+/// `info/exclude`, so it never rides an agent's commit.
+pub fn install_copilot_worktree_settings(cwd: &Path) -> Result<()> {
+    let dir = cwd.join(COPILOT_WORKTREE_SETTINGS_DIR);
+    let path = dir.join(COPILOT_WORKTREE_SETTINGS_FILE);
+    let mut root = load_hooks_root(&path)?;
+    let root_obj = root_object_mut(&mut root, &path)?;
+    if root_obj.get("includeCoAuthoredBy") != Some(&json!(false)) {
+        root_obj.insert("includeCoAuthoredBy".into(), json!(false));
+        write_hooks_root(&dir, COPILOT_WORKTREE_SETTINGS_FILE, &root)?;
+    }
+    ensure_excluded(&git_common_dir(cwd)?, COPILOT_WORKTREE_SETTINGS_EXCLUDE)
+}
+
+/// The repository's shared git dir for the checkout at `cwd`, read off the
+/// filesystem: `.git` itself in a main checkout, else the `gitdir:` a
+/// linked worktree's `.git` file names, followed through its `commondir`.
+fn git_common_dir(cwd: &Path) -> Result<PathBuf> {
+    let dot_git = cwd.join(".git");
+    if dot_git.is_dir() {
+        return Ok(dot_git);
+    }
+    let text =
+        std::fs::read_to_string(&dot_git).with_context(|| format!("read {}", dot_git.display()))?;
+    let Some(gitdir) = text.trim().strip_prefix("gitdir:") else {
+        bail!("{} names no gitdir", dot_git.display());
+    };
+    let gitdir = cwd.join(gitdir.trim());
+    match std::fs::read_to_string(gitdir.join("commondir")) {
+        Ok(common) => Ok(gitdir.join(common.trim())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(gitdir),
+        Err(e) => Err(e).with_context(|| format!("read {}", gitdir.join("commondir").display())),
+    }
+}
+
+/// Add `line` to `<common_dir>/info/exclude` unless it is already there.
+fn ensure_excluded(common_dir: &Path, line: &str) -> Result<()> {
+    let info = common_dir.join("info");
+    let path = info.join("exclude");
+    let existing = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e).with_context(|| format!("read {}", path.display())),
+    };
+    if existing.lines().any(|l| l.trim() == line) {
+        return Ok(());
+    }
+    let mut text = existing;
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text.push_str(line);
+    text.push('\n');
+    write_text_atomic(&info, "exclude", &text)
 }
 
 /// Idempotently add one entry to `permissions.allow`, preserving everything
@@ -413,7 +487,7 @@ pub fn codex_home() -> PathBuf {
 
 /// Merge nebula's managed hooks for Codex into `<codex_home>/hooks.json`.
 pub fn install_codex_hooks(codex_home: &Path) -> Result<()> {
-    install_managed_hooks(codex_home, HOOKS_FILE, "codex", CODEX_EVENTS, &[])
+    install_managed_hooks(codex_home, HOOKS_FILE, "codex", CODEX_EVENTS, &[], |_| {})
 }
 
 /// Drop the per-worktree `.codex/hooks.json` groups an older nebula wrote:
@@ -588,13 +662,15 @@ pub(super) fn write_text_atomic(dir: &Path, file_name: &str, text: &str) -> Resu
 /// in the Claude/Codex dialect, make sure each of `allow_rules` is in
 /// `permissions.allow`, and write it back. Claude's settings file carries
 /// hooks and permissions both, so the one pass serves it and codex's
-/// hooks-only file alike (codex passes no rules).
+/// hooks-only file alike (codex passes no rules). `settings` sets any
+/// further top-level keys in the same pass (Claude's attribution switches).
 fn install_managed_hooks(
     dir: &Path,
     file_name: &str,
     endpoint: &str,
     events: &[(&str, Option<&str>)],
     allow_rules: &[&str],
+    settings: impl FnOnce(&mut Map<String, Value>),
 ) -> Result<()> {
     let path = dir.join(file_name);
     let mut root = load_hooks_root(&path)?;
@@ -604,6 +680,7 @@ fn install_managed_hooks(
     for rule in allow_rules {
         ensure_permission_allow(root_obj, rule, &path)?;
     }
+    settings(root_obj);
     write_hooks_root(dir, file_name, &root)
 }
 
@@ -984,6 +1061,55 @@ mod tests {
         std::fs::write(&legacy, &before).unwrap();
         install_copilot_hooks(tmp.path()).unwrap();
         assert!(!legacy.exists());
+    }
+
+    #[test]
+    fn worktree_settings_turn_attribution_off() {
+        // Claude: both switches, forced off over whatever the user had.
+        let tmp = tempfile::tempdir().unwrap();
+        let claude = tmp.path().join(".claude");
+        std::fs::create_dir_all(&claude).unwrap();
+        std::fs::write(
+            claude.join("settings.local.json"),
+            r#"{"includeCoAuthoredBy": true, "attribution": {"commit": "x"}, "model": "opus"}"#,
+        )
+        .unwrap();
+        install_claude_hooks(tmp.path()).unwrap();
+        let settings = read_settings(tmp.path());
+        assert_eq!(settings["includeCoAuthoredBy"], json!(false));
+        assert_eq!(settings["attribution"], json!({ "commit": "", "pr": "" }));
+        assert_eq!(settings["model"], json!("opus"));
+
+        // Copilot, in a linked worktree: its settings file, and one exclude
+        // line in the repository's shared git dir however often it runs.
+        let common = tmp.path().join("repo.git");
+        let admin = common.join("worktrees").join("feat");
+        std::fs::create_dir_all(&admin).unwrap();
+        std::fs::write(admin.join("commondir"), "../..\n").unwrap();
+        std::fs::create_dir_all(common.join("info")).unwrap();
+        std::fs::write(common.join("info").join("exclude"), "# git ls-files\n*.log").unwrap();
+        let wt = tmp.path().join("feat");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(wt.join(".git"), format!("gitdir: {}\n", admin.display())).unwrap();
+
+        install_copilot_worktree_settings(&wt).unwrap();
+        install_copilot_worktree_settings(&wt).unwrap();
+        assert_eq!(
+            read_json(&wt, ".github/copilot/settings.local.json"),
+            json!({ "includeCoAuthoredBy": false })
+        );
+        let exclude = std::fs::read_to_string(common.join("info").join("exclude")).unwrap();
+        assert_eq!(
+            exclude,
+            "# git ls-files\n*.log\n.github/copilot/settings.local.json\n"
+        );
+
+        // A main checkout's `.git` directory is the common dir itself.
+        let main = tmp.path().join("main");
+        std::fs::create_dir_all(main.join(".git")).unwrap();
+        install_copilot_worktree_settings(&main).unwrap();
+        let exclude = std::fs::read_to_string(main.join(".git/info/exclude")).unwrap();
+        assert_eq!(exclude, ".github/copilot/settings.local.json\n");
     }
 
     #[test]

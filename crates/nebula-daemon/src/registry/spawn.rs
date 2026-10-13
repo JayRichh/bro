@@ -481,9 +481,11 @@ impl Daemon {
             }
             // Copilot loads every file in its home's `hooks/` dir, trust
             // dialog or not: one managed file there serves every worktree.
+            // Its co-author switch is per checkout, so that goes here.
             Some(AgentKind::Copilot) => hooks::installer::install_copilot_hooks(
                 &profile_dir(env::COPILOT_HOME).unwrap_or_else(hooks::installer::copilot_home),
-            ),
+            )
+            .and_then(|()| hooks::installer::install_copilot_worktree_settings(&worktree.path)),
             _ => Ok(()),
         };
         if let Err(e) = install_result {
