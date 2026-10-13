@@ -4537,11 +4537,20 @@ mod tests {
         let key = (WorktreeId("w1".into()), AgentKind::Claude);
         let id = AgentId("warm-1".into());
         let sref = SessionRef::Agent(id.clone());
+        // Any child that idles for the length of the test. `sleep` is only
+        // on a Windows PATH inside Git Bash; `ping` ships with Windows.
+        #[cfg(unix)]
+        let (program, args) = ("sleep", vec!["30".to_string()]);
+        #[cfg(windows)]
+        let (program, args) = (
+            "ping",
+            vec!["-n".to_string(), "30".to_string(), "127.0.0.1".to_string()],
+        );
         let session = PtySession::spawn(
             sref.clone(),
             SpawnSpec {
-                program: "sleep".into(),
-                args: vec!["30".into()],
+                program: program.into(),
+                args,
                 cwd: std::env::temp_dir(),
                 env: vec![],
                 scrub_env: &[],
