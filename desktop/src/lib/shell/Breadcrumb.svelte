@@ -3,6 +3,7 @@
   import { nav } from './history.svelte';
   import { placeOf } from '../status';
   import { parseItem } from '../ado/prs-api';
+  import { parseDiffItem } from '../diff-api';
 
   type Crumb = { label: string; mono?: boolean; go?: () => void };
 
@@ -42,7 +43,9 @@
       if (name) out.push({ label: name });
     } else if (p.view === 'diff') {
       out.push({ label: 'Diff' });
-      if (p.item) out.push({ label: placeOf(m, p.item).branch, mono: true });
+      const d = parseDiffItem(p.item);
+      if (d.worktree) out.push({ label: placeOf(m, d.worktree).branch, mono: true });
+      if (d.range) out.push({ label: `${d.range.base}...${d.range.tip}`, mono: true });
     }
     return out;
   });

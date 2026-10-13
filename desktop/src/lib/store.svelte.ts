@@ -5,6 +5,7 @@
 import { api, type Launchables, type Model, type SessionRef } from './api';
 import { ado, type AdoContextInfo } from './ado/api';
 import { nav, type Place } from './shell/history.svelte';
+import { diffItem, parseDiffItem, type DiffMode, type DiffRange } from './diff-api';
 
 export type ThemePref = 'system' | 'light' | 'dark';
 /** What the main column shows when no view is open: the overview or the board. */
@@ -34,7 +35,10 @@ export const app = $state({
   session: null as SessionRef | null,
   /** The worktree the Diff view reads, when no session picks it. */
   diffWorktree: null as string | null,
-  diffMode: 'side' as 'side' | 'inline',
+  /** The range the Diff view compares; null: the working tree against HEAD. */
+  diffRange: null as DiffRange | null,
+  /** The mode for a repo whose Diff view has none saved yet. */
+  diffMode: 'side' as DiffMode,
   /** Bumped to ask the quick prompt to take focus. */
   quickFocus: 0,
   /** Harness and profile the quick prompt should switch to, once. */
@@ -86,7 +90,15 @@ export function openSession(s: SessionRef) {
 
 export function openDiff(worktree: string | null) {
   app.diffWorktree = worktree;
+  app.diffRange = null;
   nav.go({ view: 'diff', repo: projectOf(worktree), item: worktree ?? undefined });
+}
+
+/** The Diff view on a range (`base` and `tip` as refs or SHAs), read in `worktree`. */
+export function openDiffRange(worktree: string, range: DiffRange) {
+  app.diffWorktree = worktree;
+  app.diffRange = { base: range.base, tip: range.tip };
+  nav.go({ view: 'diff', repo: projectOf(worktree), item: diffItem(worktree, range) });
 }
 
 /** Back to the overview (or the board), closing any split. */
@@ -107,7 +119,9 @@ export function follow(p: Place) {
     const s = sessionFromKey(p.item);
     if (s) app.session = s;
   } else if (p.view === 'diff') {
-    app.diffWorktree = p.item ?? null;
+    const d = parseDiffItem(p.item);
+    app.diffWorktree = d.worktree;
+    app.diffRange = d.range;
   }
 }
 
