@@ -1,148 +1,57 @@
 //! Azure DevOps pull requests: lists, votes, policies and threads.
 
-use crate::ado::auth::{AuthError, TokenSource};
+use crate::ado::auth::AuthError;
 use crate::ado::client::{AdoClient, AdoError};
-use crate::ado::remote::{parse_remote, AdoRemote};
-use crate::ado::store::{AdoStore, RepoKey, Reviewer};
+use crate::ado::remote::AdoRemote;
+use crate::ado::store::Reviewer;
+use crate::ado::{AdoContext, AdoState};
 use crate::attribution::strip_ai_trailers;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::collections::HashMap;
+use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 
 /// Policy evaluations are only offered as a preview API.
 const POLICY_API_VERSION: &str = "7.1-preview.1";
 /// `connectionData` is a preview-only resource.
 const CONNECTION_API_VERSION: &str = "7.1-preview.1";
 
-/// What a PR command needs: the org's client and the repo's ids.
+/// What a PR command needs: the repo's ADO context and its ids.
 pub struct PrCtx {
-    pub client: AdoClient,
+    pub ado: AdoContext,
     pub repo_id: String,
     pub project_id: String,
-    pub org_url: String,
-    pub remote_name: String,
-    pub repo_path: PathBuf,
     /// `https://vssps.dev.azure.com/{org}`, for identity search.
     pub vssps_base: String,
-    pub key: RepoKey,
 }
 
 impl PrCtx {
-    /// The context for the ADO repo behind `path`'s remote, or None when
-    /// the checkout has no Azure DevOps remote.
-    pub async fn from_worktree(
-        path: &Path,
-        tokens: Arc<TokenSource>,
-    ) -> Result<Option<PrCtx>, AdoError> {
-        let p = path.to_path_buf();
-        let found = tokio::task::spawn_blocking(move || find_ado_remote(&p))
-            .await
-            .map_err(|e| AdoError::Local(e.to_string()))?
-            .map_err(AdoError::Local)?;
-        let Some((remote_name, remote)) = found else {
-            return Ok(None);
-        };
-        Self::from_remote(path, remote_name, remote, tokens)
-            .await
-            .map(Some)
-    }
-
-    /// The context for a remote already found with [`find_ado_remote`].
-    pub async fn from_remote(
-        path: &Path,
-        remote_name: String,
-        remote: AdoRemote,
-        tokens: Arc<TokenSource>,
-    ) -> Result<PrCtx, AdoError> {
-        Self::build(path, remote_name, remote, maker(tokens, false)).await
-    }
-
-    /// As [`from_remote`](Self::from_remote), but its client never opens a
-    /// sign-in window: for the background PR poll.
-    pub async fn from_remote_silent(
-        path: &Path,
-        remote_name: String,
-        remote: AdoRemote,
-        tokens: Arc<TokenSource>,
-    ) -> Result<PrCtx, AdoError> {
-        Self::build(path, remote_name, remote, maker(tokens, true)).await
-    }
-
-    async fn build(
-        path: &Path,
-        remote_name: String,
-        remote: AdoRemote,
-        make: impl FnOnce(&str) -> AdoClient,
-    ) -> Result<PrCtx, AdoError> {
-        let client = make(&remote.org_url);
-        let (repo_id, project_id) = repo_ids(&client, &remote).await?;
+    /// The PR context over `ado`: one GET for the repo and project ids,
+    /// cached per repo.
+    pub async fn new(ado: AdoContext) -> Result<PrCtx, AdoError> {
+        let (repo_id, project_id) = repo_ids(&ado.client, &ado.remote).await?;
         Ok(PrCtx {
-            vssps_base: vssps_base(&remote.org_url)
-                .unwrap_or_else(|| format!("https://vssps.dev.azure.com/{}", remote.org)),
-            org_url: remote.org_url.clone(),
-            key: RepoKey {
-                org: remote.org.clone(),
-                project: remote.project.clone(),
-                repo: remote.repo.clone(),
-            },
-            client,
+            vssps_base: vssps_base(&ado.remote.org_url)
+                .unwrap_or_else(|| format!("https://vssps.dev.azure.com/{}", ado.remote.org)),
+            ado,
             repo_id,
             project_id,
-            remote_name,
-            repo_path: path.to_path_buf(),
         })
     }
-}
 
-/// The ADO state the PR commands and the PR poll share: one token source
-/// (one cache, one sign-in prompt per org) and the store.
-pub struct PrState {
-    pub tokens: Arc<TokenSource>,
-    pub store: Arc<AdoStore>,
-    /// Orgs whose background poll stopped after a sign-in failure, so the
-    /// poll never opens a sign-in window on its own. A command that works
-    /// for the org starts it again.
-    paused: Mutex<HashSet<String>>,
-}
-
-impl PrState {
-    pub fn new(tokens: Arc<TokenSource>, store: Arc<AdoStore>) -> Self {
-        Self {
-            tokens,
-            store,
-            paused: Mutex::new(HashSet::new()),
-        }
-    }
-
-    pub fn is_paused(&self, org_url: &str) -> bool {
-        self.paused.lock().unwrap().contains(org_url)
-    }
-
-    pub fn pause(&self, org_url: &str) {
-        self.paused.lock().unwrap().insert(org_url.to_string());
-    }
-
-    pub fn resume(&self, org_url: &str) {
-        self.paused.lock().unwrap().remove(org_url);
-    }
-
-    /// The context for a worktree, for a user-initiated command. No ADO
-    /// remote is an error here.
-    pub async fn ctx(&self, path: &Path) -> Result<PrCtx, String> {
-        let p = path.to_path_buf();
-        let found = tokio::task::spawn_blocking(move || find_ado_remote(&p))
-            .await
-            .map_err(|e| e.to_string())??;
-        let Some((name, remote)) = found else {
-            return Err("This checkout has no Azure DevOps remote.".into());
-        };
-        let ctx = PrCtx::from_remote(path, name, remote, self.tokens.clone())
-            .await
-            .map_err(|e| e.user_message())?;
-        self.resume(&ctx.org_url);
+    /// The PR context for a user-initiated command on `worktree` (a daemon
+    /// worktree id or a path). A command that works for the org starts its
+    /// paused PR poll again.
+    pub async fn for_command(
+        state: &AdoState,
+        client: &crate::daemon::Client,
+        worktree: &str,
+    ) -> Result<PrCtx, String> {
+        let ado = state.context_for(client, worktree).await?;
+        let ctx = PrCtx::new(ado).await.map_err(|e| e.user_message())?;
+        state.resume(&ctx.ado.remote.org_url);
         Ok(ctx)
     }
 }
@@ -151,17 +60,6 @@ impl PrState {
 /// keep asking for.
 pub fn is_auth_error(e: &AdoError) -> bool {
     matches!(e, AdoError::Auth(_) | AdoError::Unauthorized)
-}
-
-fn maker(tokens: Arc<TokenSource>, silent: bool) -> impl FnOnce(&str) -> AdoClient {
-    move |org_url| {
-        let c = AdoClient::new(org_url, tokens);
-        if silent {
-            c.silent()
-        } else {
-            c
-        }
-    }
 }
 
 /// The identity search host for an org URL: `dev.azure.com/{org}` and
@@ -192,42 +90,6 @@ fn git_command(cwd: &Path) -> Command {
     #[cfg(windows)]
     nebula_core::platform::no_window(&mut cmd);
     cmd
-}
-
-fn git_out(cwd: &Path, args: &[&str]) -> Option<String> {
-    let out = git_command(cwd)
-        .args(args)
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
-}
-
-/// The ADO remote to use: `origin` when it is one, else the only ADO
-/// remote. Several ADO remotes without an ADO `origin` is an error.
-pub fn find_ado_remote(repo: &Path) -> Result<Option<(String, AdoRemote)>, String> {
-    let Some(names) = git_out(repo, &["remote"]) else {
-        return Ok(None);
-    };
-    let mut found: Vec<(String, AdoRemote)> = names
-        .lines()
-        .map(str::trim)
-        .filter(|n| !n.is_empty())
-        .filter_map(|n| {
-            let url = git_out(repo, &["remote", "get-url", n])?;
-            Some((n.to_string(), parse_remote(&url)?))
-        })
-        .collect();
-    if let Some(i) = found.iter().position(|(n, _)| n == "origin") {
-        return Ok(Some(found.swap_remove(i)));
-    }
-    match found.len() {
-        0 => Ok(None),
-        1 => Ok(found.pop()),
-        _ => Err("This checkout has several Azure DevOps remotes and none is origin.".into()),
-    }
 }
 
 fn cache<V: Clone>(
@@ -813,6 +675,7 @@ async fn link_artifact(ctx: &PrCtx, task: u32, artifact: &str) -> Result<(), Ado
         }
     }]);
     let _: Value = ctx
+        .ado
         .client
         .patch_json_patch(&format!("/_apis/wit/workitems/{task}"), &body)
         .await?;
@@ -821,13 +684,14 @@ async fn link_artifact(ctx: &PrCtx, task: u32, artifact: &str) -> Result<(), Ado
 
 /// Link `task` to PR `pr_id` (the Retry for "Created, task not linked").
 pub async fn link_task(ctx: &PrCtx, pr_id: u32, task: u32) -> Result<(), AdoError> {
-    if work_items(&ctx.client, &ctx.repo_id, pr_id)
+    if work_items(&ctx.ado.client, &ctx.repo_id, pr_id)
         .await?
         .contains(&task)
     {
         return Ok(());
     }
     let v: Value = ctx
+        .ado
         .client
         .get(&format!("{}/{pr_id}", pulls_path(&ctx.repo_id)))
         .await?;
@@ -851,7 +715,8 @@ pub async fn link_task(ctx: &PrCtx, pr_id: u32, task: u32) -> Result<(), AdoErro
 ///    listing again, never by posting again,
 /// 6. a task the reply does not show as linked is linked with a PATCH; if
 ///    that fails the PR is still returned, as `CreatedTaskNotLinked`.
-pub async fn create(ctx: &PrCtx, repo_path: &Path, pr: NewPr) -> Result<CreateResult, AdoError> {
+pub async fn create(ctx: &PrCtx, pr: NewPr) -> Result<CreateResult, AdoError> {
+    let repo_path = ctx.ado.path.as_path();
     let source = strip_heads(pr.source.trim());
     let target = strip_heads(pr.target.trim());
     if source.is_empty() || target.is_empty() {
@@ -863,10 +728,10 @@ pub async fn create(ctx: &PrCtx, repo_path: &Path, pr: NewPr) -> Result<CreateRe
         return Err(AdoError::Local("Add a title".into()));
     }
 
-    let base = fetch_target(repo_path, &ctx.remote_name, &target).await;
+    let base = fetch_target(repo_path, &ctx.ado.remote_name, &target).await;
     let (repo, remote, src) = (
         repo_path.to_path_buf(),
-        ctx.remote_name.clone(),
+        ctx.ado.remote_name.clone(),
         source.clone(),
     );
     let note = tokio::task::spawn_blocking(move || -> Result<Option<String>, AdoError> {
@@ -890,7 +755,10 @@ async fn open(
     target: &str,
     pr: &NewPr,
 ) -> Result<CreateOutcome, AdoError> {
-    if let Some(p) = for_source(&ctx.client, &ctx.repo_id, source).await?.first() {
+    if let Some(p) = for_source(&ctx.ado.client, &ctx.repo_id, source)
+        .await?
+        .first()
+    {
         return Ok(CreateOutcome::Existing(p.id));
     }
 
@@ -907,10 +775,15 @@ async fn open(
         body["workItemRefs"] = serde_json::json!([{ "id": task.to_string() }]);
     }
 
-    let reply: Value = match ctx.client.post_json(&pulls_path(&ctx.repo_id), &body).await {
+    let reply: Value = match ctx
+        .ado
+        .client
+        .post_json(&pulls_path(&ctx.repo_id), &body)
+        .await
+    {
         Ok(v) => v,
         Err(e) if ambiguous(&e) => {
-            return match for_source(&ctx.client, &ctx.repo_id, source).await {
+            return match for_source(&ctx.ado.client, &ctx.repo_id, source).await {
                 Ok(found) if !found.is_empty() => Ok(CreateOutcome::Existing(found[0].id)),
                 _ => Err(e),
             };
@@ -933,7 +806,7 @@ async fn open(
         let linked = if in_reply {
             true
         } else {
-            match work_items(&ctx.client, &ctx.repo_id, id).await {
+            match work_items(&ctx.ado.client, &ctx.repo_id, id).await {
                 Ok(w) => w.contains(&task),
                 // Unknown: linking blind could add the link twice, so
                 // leave it to Retry.
@@ -962,6 +835,7 @@ async fn open(
 /// Take a draft out of draft.
 pub async fn publish(ctx: &PrCtx, id: u32) -> Result<(), AdoError> {
     let _: Value = ctx
+        .ado
         .client
         .patch_json(
             &format!("{}/{id}", pulls_path(&ctx.repo_id)),
@@ -977,6 +851,7 @@ pub async fn vote(ctx: &PrCtx, id: u32, vote: i8) -> Result<(), AdoError> {
         return Err(AdoError::Local(format!("{vote} is not a vote")));
     }
     let pr: Value = ctx
+        .ado
         .client
         .get(&format!("{}/{id}", pulls_path(&ctx.repo_id)))
         .await?;
@@ -985,8 +860,9 @@ pub async fn vote(ctx: &PrCtx, id: u32, vote: i8) -> Result<(), AdoError> {
             "Voting opens when the PR is published".into(),
         ));
     }
-    let me = my_id(&ctx.client).await?;
+    let me = my_id(&ctx.ado.client).await?;
     let _: Value = ctx
+        .ado
         .client
         .put_json(
             &format!("{}/{id}/reviewers/{}", pulls_path(&ctx.repo_id), enc(&me)),
@@ -1004,6 +880,7 @@ pub async fn reply(ctx: &PrCtx, id: u32, thread: u32, text: &str) -> Result<Comm
         return Err(AdoError::Local("The reply is empty".into()));
     }
     let v: Value = ctx
+        .ado
         .client
         .post_json(
             &format!(
@@ -1036,7 +913,11 @@ pub async fn search_identities(ctx: &PrCtx, q: &str) -> Result<Vec<Reviewer>, Ad
     if q.is_empty() {
         return Ok(Vec::new());
     }
-    let v: Value = ctx.client.get(&identities_url(&ctx.vssps_base, q)).await?;
+    let v: Value = ctx
+        .ado
+        .client
+        .get(&identities_url(&ctx.vssps_base, q))
+        .await?;
     Ok(v["value"]
         .as_array()
         .map(|a| {
@@ -1068,6 +949,8 @@ mod tests {
     use crate::ado::auth::{Credential, TokenSource};
     use httpmock::prelude::*;
     use serde_json::json;
+    use std::path::PathBuf;
+    use std::sync::Arc;
 
     fn client(s: &MockServer) -> AdoClient {
         AdoClient::new(
@@ -1391,22 +1274,13 @@ mod tests {
     }
 
     fn ctx_for(base: &str, repo: &Path) -> PrCtx {
+        let mut ado = crate::ado::testing::context(base, crate::ado::testing::temp_store());
+        ado.path = repo.to_path_buf();
         PrCtx {
-            client: AdoClient::new(
-                base,
-                Arc::new(TokenSource::fixed(Credential::Bearer("tok".into()))),
-            ),
+            ado,
             repo_id: "r1".into(),
             project_id: "p1".into(),
-            org_url: base.into(),
-            remote_name: "origin".into(),
-            repo_path: repo.to_path_buf(),
             vssps_base: "/vssps/tnt".into(),
-            key: RepoKey {
-                org: "tnt".into(),
-                project: "Platform".into(),
-                repo: "api".into(),
-            },
         }
     }
 
@@ -1450,7 +1324,7 @@ mod tests {
             t.status(201).json_body(json!({"pullRequestId": 5}));
         });
         assert!(!remote_has(&r.bare, "ja/fix"));
-        let out = create(&ctx_for(&s.base_url(), &r.work), &r.work, new_pr(None, "x"))
+        let out = create(&ctx_for(&s.base_url(), &r.work), new_pr(None, "x"))
             .await
             .unwrap();
         assert_eq!(
@@ -1480,8 +1354,8 @@ mod tests {
             t.status(201).json_body(json!({"pullRequestId": 5}));
         });
         let mut ctx = ctx_for(&s.base_url(), &r.work);
-        ctx.remote_name = "nowhere".into();
-        let e = create(&ctx, &r.work, new_pr(None, "x")).await.unwrap_err();
+        ctx.ado.remote_name = "nowhere".into();
+        let e = create(&ctx, new_pr(None, "x")).await.unwrap_err();
         // The push itself failed: the fetch of the target could not run
         // either, so the clean went ahead on the remote refs alone.
         assert!(
@@ -1509,7 +1383,7 @@ mod tests {
                 .path("/_apis/git/repositories/r1/pullrequests");
             t.status(201).json_body(json!({"pullRequestId": 5}));
         });
-        let out = create(&ctx_for(&s.base_url(), &r.work), &r.work, new_pr(None, "x"))
+        let out = create(&ctx_for(&s.base_url(), &r.work), new_pr(None, "x"))
             .await
             .unwrap();
         assert_eq!(out.outcome, CreateOutcome::Existing(77));
@@ -1580,7 +1454,7 @@ mod tests {
             Some(json!({"value": [pr_json(88, true, &[])]})),
         ])
         .await;
-        let out = create(&ctx_for(&base, &r.work), &r.work, new_pr(None, "x"))
+        let out = create(&ctx_for(&base, &r.work), new_pr(None, "x"))
             .await
             .unwrap();
         assert_eq!(out.outcome, CreateOutcome::Existing(88));
@@ -1607,13 +1481,9 @@ mod tests {
                 .path("/_apis/wit/workitems/42");
             t.status(200).json_body(json!({}));
         });
-        let out = create(
-            &ctx_for(&s.base_url(), &r.work),
-            &r.work,
-            new_pr(Some(42), "x"),
-        )
-        .await
-        .unwrap();
+        let out = create(&ctx_for(&s.base_url(), &r.work), new_pr(Some(42), "x"))
+            .await
+            .unwrap();
         assert_eq!(out.outcome, CreateOutcome::Created(6));
         post.assert();
         assert_eq!(patch.hits(), 0);
@@ -1652,13 +1522,9 @@ mod tests {
                 }]));
             t.status(400).json_body(json!({"message": "link refused"}));
         });
-        let out = create(
-            &ctx_for(&s.base_url(), &r.work),
-            &r.work,
-            new_pr(Some(42), "x"),
-        )
-        .await
-        .unwrap();
+        let out = create(&ctx_for(&s.base_url(), &r.work), new_pr(Some(42), "x"))
+            .await
+            .unwrap();
         patch.assert();
         assert!(
             matches!(&out.outcome, CreateOutcome::CreatedTaskNotLinked(9, why) if why.contains("link refused")),
@@ -1679,13 +1545,9 @@ mod tests {
         });
         let desc =
             "Summary\n\n\u{1f916} Generated with [Claude Code](https://claude.com/claude-code)\n";
-        create(
-            &ctx_for(&s.base_url(), &r.work),
-            &r.work,
-            new_pr(None, desc),
-        )
-        .await
-        .unwrap();
+        create(&ctx_for(&s.base_url(), &r.work), new_pr(None, desc))
+            .await
+            .unwrap();
         post.assert();
     }
 
@@ -1752,7 +1614,7 @@ mod tests {
         let s = MockServer::start();
         mock_no_existing(&s);
         let post = mock_post(&s, 5);
-        let out = create(&ctx_for(&s.base_url(), &r.work), &r.work, new_pr(None, "x"))
+        let out = create(&ctx_for(&s.base_url(), &r.work), new_pr(None, "x"))
             .await
             .unwrap();
         post.assert();
@@ -1773,9 +1635,7 @@ mod tests {
         let post = mock_post(&s, 6);
         let mut pr = new_pr(None, "x");
         pr.target = "release/never".into();
-        let out = create(&ctx_for(&s.base_url(), &r.work), &r.work, pr)
-            .await
-            .unwrap();
+        let out = create(&ctx_for(&s.base_url(), &r.work), pr).await.unwrap();
         post.assert();
         assert_eq!(out.outcome, CreateOutcome::Created(6));
         assert_eq!(out.note, None);
@@ -1804,7 +1664,7 @@ mod tests {
         let s = MockServer::start();
         mock_no_existing(&s);
         mock_post(&s, 7);
-        let out = create(&ctx_for(&s.base_url(), &r.work), &r.work, new_pr(None, "x"))
+        let out = create(&ctx_for(&s.base_url(), &r.work), new_pr(None, "x"))
             .await
             .unwrap();
         assert_eq!(out.outcome, CreateOutcome::Created(7));
@@ -1925,7 +1785,7 @@ mod tests {
         let list = mock_no_existing(&s);
         let mut pr = new_pr(None, "x");
         pr.title = "  ".into();
-        let e = create(&ctx_for(&s.base_url(), &r.work), &r.work, pr)
+        let e = create(&ctx_for(&s.base_url(), &r.work), pr)
             .await
             .unwrap_err();
         assert_eq!(e, AdoError::Local("Add a title".into()));
@@ -1954,13 +1814,9 @@ mod tests {
                 .path("/_apis/wit/workitems/42");
             t.status(200).json_body(json!({}));
         });
-        let out = create(
-            &ctx_for(&s.base_url(), &r.work),
-            &r.work,
-            new_pr(Some(42), "x"),
-        )
-        .await
-        .unwrap();
+        let out = create(&ctx_for(&s.base_url(), &r.work), new_pr(Some(42), "x"))
+            .await
+            .unwrap();
         assert!(
             matches!(&out.outcome, CreateOutcome::CreatedTaskNotLinked(11, why) if why.contains("busy")),
             "{out:?}"
