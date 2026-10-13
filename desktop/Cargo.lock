@@ -1919,6 +1919,7 @@ name = "kete-desktop"
 version = "0.44.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "base64 0.22.1",
  "nebula-core",
  "serde",
