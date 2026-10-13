@@ -46,8 +46,8 @@ pub const PRESETS: &[&str] = &[
     "kete-light",
 ];
 
-/// The theme that follows the OS app theme: `one-light` while the OS says
-/// light, `one-dark` otherwise ([`resolve`]).
+/// The theme that follows the OS app theme: `kete-light` while the OS says
+/// light, `kete-dark` otherwise ([`resolve`]).
 pub const AUTO: &str = "auto";
 /// The theme read out of VS Code's own settings (`crate::vscode_theme`),
 /// falling back to `one-dark` when there is none to read.
@@ -76,10 +76,8 @@ pub const THEMES: &[&str] = &[
     VSCODE,
 ];
 
-/// The theme a fresh config starts on: One Dark on Windows, where Kete sits
-/// beside a VS Code that most likely wears it; the classic look elsewhere,
-/// as upstream nebula ships it.
-pub const DEFAULT_THEME: &str = if cfg!(windows) { "one-dark" } else { "default" };
+/// The theme a fresh config starts on, on every OS: Kete Workshop, dark.
+pub const DEFAULT_THEME: &str = "kete-dark";
 
 /// Semantic color roles for the whole TUI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -669,15 +667,15 @@ pub struct Machine {
 }
 
 /// A theme NAME as the UI draws it: a preset by [`Theme::by_name`];
-/// [`AUTO`] the One preset the OS's light or dark asks for; [`VSCODE`]
+/// [`AUTO`] the Kete preset the OS's light or dark asks for; [`VSCODE`]
 /// what VS Code's settings resolved to, or One Dark with nothing to read.
 pub fn resolve(name: &str, machine: &Machine) -> Theme {
     match name.trim().to_ascii_lowercase().as_str() {
         AUTO => {
             if machine.os_light == Some(true) {
-                ONE_LIGHT
+                KETE_LIGHT
             } else {
-                ONE_DARK
+                KETE_DARK
             }
         }
         VSCODE => machine.vscode.unwrap_or(ONE_DARK),
@@ -1082,9 +1080,11 @@ mod tests {
             os_light: Some(true),
             vscode: None,
         };
-        assert_eq!(resolve("auto", &dark), ONE_DARK);
-        assert_eq!(resolve("Auto", &light), ONE_LIGHT);
-        assert_eq!(resolve("auto", &Machine::default()), ONE_DARK);
+        assert_eq!(resolve("auto", &dark), KETE_DARK);
+        assert_eq!(resolve("Auto", &light), KETE_LIGHT);
+        assert_eq!(resolve("auto", &Machine::default()), KETE_DARK);
+        assert_eq!(DEFAULT_THEME, "kete-dark");
+        assert_eq!(resolve("one-light", &dark), ONE_LIGHT, "still selectable");
         assert_eq!(
             resolve("vscode", &light),
             ONE_DARK,

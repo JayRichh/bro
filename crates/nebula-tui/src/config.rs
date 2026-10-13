@@ -3885,7 +3885,7 @@ mod tests {
     #[test]
     fn theme_cycles_through_presets_and_resolves() {
         let mut cfg = Config::default();
-        // One Dark out of the box on Windows, the classic look elsewhere.
+        // Kete Workshop dark out of the box, on every OS.
         assert_eq!(cfg.theme, crate::theme::DEFAULT_THEME);
         assert_eq!(
             cfg.theme(),

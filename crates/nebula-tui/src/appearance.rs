@@ -184,13 +184,13 @@ mod tests {
         assert_eq!(live.recheck(), None);
     }
 
-    /// `auto` resolves to one of the One presets, and a re-check with the
+    /// `auto` resolves to one of the Kete presets, and a re-check with the
     /// OS unchanged says nothing.
     #[test]
-    fn auto_resolves_to_a_one_preset_and_holds_still() {
+    fn auto_resolves_to_a_kete_preset_and_holds_still() {
         let mut live = LiveTheme::default();
         let th = live.resolve("auto");
-        assert!(th == crate::theme::ONE_DARK || th == crate::theme::ONE_LIGHT);
+        assert!(th == crate::theme::KETE_DARK || th == crate::theme::KETE_LIGHT);
         assert!(live.is_live());
         assert_eq!(live.recheck(), None, "the OS has not moved");
     }
