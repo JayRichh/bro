@@ -1,0 +1,223 @@
+// Demo bridge for screenshots: stands in for the Tauri backend so the
+// window renders in a plain browser with labelled synthetic data. Nothing
+// here talks to a daemon, git or Azure DevOps. Loaded only by demo.html
+// (`npx vite`, then open /demo.html?view=tasks&theme=dark&start=1).
+//
+// Query: view=tasks|branches, theme=light|dark, start=1 (open the Start
+// dialog), offline=1 (tasks come back as a saved list), sel=<branch>,
+// diff=1 (run Diff vs main on the selected branch).
+
+const q = new URLSearchParams(location.search);
+const now = Date.now();
+const DAY = 86_400_000;
+const iso = (d) => new Date(d).toISOString().slice(0, 10) + 'T00:00:00Z';
+const today = Date.parse(new Date(now).toISOString().slice(0, 10) + 'T00:00:00Z');
+
+// ---- daemon model: one ADO repo (synthetic), one plain repo ----
+const model = {
+  connected: true,
+  error: null,
+  daemon_pid: 4242,
+  protocol_version: 53,
+  runtime_dir: 'demo',
+  projects: [
+    { id: 'p1', name: 'ledger-api', repo_path: 'C:\\demo\\ledger-api', sort_order: 0 },
+    { id: 'p2', name: 'storefront-web', repo_path: 'C:\\demo\\storefront-web', sort_order: 1 },
+  ],
+  worktrees: [
+    { id: 'w1', project_id: 'p1', path: 'C:\\demo\\ledger-api', branch: 'main', is_main: true, sort_order: 0 },
+    { id: 'w2', project_id: 'p1', path: 'C:\\demo\\ledger-api-worktrees\\gst-rounding', branch: 'jari/gst-rounding', is_main: false, sort_order: 1 },
+    { id: 'w3', project_id: 'p2', path: 'C:\\demo\\storefront-web', branch: 'main', is_main: true, sort_order: 0 },
+  ],
+  agents: [
+    {
+      id: 'a1', worktree_id: 'w2', name: 'gst-rounding', status: 'running', archived: false, unseen: false,
+      status_changed_at: now - 120_000, kind: 'claude', custom_harness: null, model: null, profile: 'work',
+      alive: true, recent_prompts: [{ text: 'Round GST per invoice', submitted_at: now - 600_000 }],
+      role: 'worker', sort_order: 0, parent: null,
+    },
+  ],
+  terminals: [],
+  ports: [],
+  prs: {},
+  subagents: [],
+};
+
+// ---- Tasks (synthetic sprint) ----
+const sprints = [
+  { id: 's41', name: 'Sprint 41', path: 'Platform\\Sprint 41', start: iso(today - 31 * DAY), finish: iso(today - 17 * DAY), timeframe: 'past' },
+  { id: 's42', name: 'Sprint 42', path: 'Platform\\Sprint 42', start: iso(today - 16 * DAY), finish: iso(today - 3 * DAY), timeframe: 'past' },
+  { id: 's43', name: 'Sprint 43', path: 'Platform\\Sprint 43', start: iso(today - 2 * DAY), finish: iso(today + 11 * DAY), timeframe: 'current' },
+  { id: 's44', name: 'Sprint 44', path: 'Platform\\Sprint 44', start: iso(today + 12 * DAY), finish: iso(today + 25 * DAY), timeframe: 'future' },
+];
+const ME = 'Jamie Rivers (demo)';
+const item = (id, kind, title, state, cat, col, rem, parent, who = ME, desc = '', acc = '') => ({
+  id, kind, title, state, stateCategory: cat, assignedTo: who, remaining: rem, parent, boardColumn: col,
+  descriptionMd: desc, acceptanceMd: acc, url: `https://dev.azure.com/demo-org/Platform/_workitems/edit/${id}`,
+});
+const story = item(4210, 'User Story', 'GST rounding on invoices', 'Active', 'InProgress', 'Doing', null, null, ME,
+  'Invoices round GST on every line, so a 12-line invoice can drift a few cents from the ledger.',
+  '- Totals match the ledger to the cent\n- Rounding happens once per invoice\n- Existing invoices are not re-rounded');
+const bug = item(4230, 'Bug', 'Refund webhook retries forever when the gateway is down', 'Active', 'InProgress', 'Doing', null, null, 'Gale Ashby (demo)');
+const groups = [
+  {
+    parent: story,
+    items: [
+      item(4211, 'Task', 'Round GST per invoice, not per line', 'Active', 'InProgress', 'Doing', 3, 4210, ME,
+        'Move rounding out of InvoiceLine.Total and into Invoice.GstTotal. Keep the per-line figure for display only.',
+        story.acceptanceMd),
+      item(4212, 'Task', 'Ledger reconciliation test for GST totals', 'New', 'Proposed', 'To Do', 2, 4210, ME, '', story.acceptanceMd),
+      item(4213, 'Task', 'Show the rounding note on the invoice PDF', 'New', 'Proposed', 'To Do', 1.5, 4210, ME),
+      item(4209, 'Task', 'Spike: how the ledger rounds today', 'Closed', 'Completed', 'Done', 0, 4210, ME),
+    ],
+  },
+  {
+    parent: bug,
+    items: [
+      item(4231, 'Task', 'Back off refund webhook retries exponentially', 'Active', 'InProgress', 'Doing', 4, 4230, ME,
+        'Retries run every 5 s with no ceiling. Use exponential back-off capped at 10 min, then park the event.'),
+      item(4232, 'Task', 'Alert when a refund event is parked', 'Resolved', 'Resolved', 'Review', 0.5, 4230, ME),
+    ],
+  },
+  { parent: null, items: [item(4250, 'Task', 'Rotate the sandbox payment keys', 'New', 'Proposed', 'To Do', 1, null, ME)] },
+];
+const taskList = (scope) => {
+  if (scope && typeof scope === 'object') {
+    const it = sprints.find((s) => s.id === scope.iteration) ?? null;
+    return { iteration: it, stale: false, next: null, groups: it?.id === 's42' ? groups : [], cachedAt: null };
+  }
+  return {
+    iteration: sprints[1],
+    stale: scope !== 'myOpen',
+    next: sprints[2],
+    groups,
+    cachedAt: q.get('offline') ? now - 14 * 60_000 : null,
+  };
+};
+
+// ---- Branches (synthetic) ----
+const H = 3600;
+const br = (name, o) => ({
+  name, person: name.includes('/') ? name.slice(0, name.indexOf('/')) : 'other', local: true, remote: true,
+  ahead: 0, behind: 0, gone: false, last_commit_age: 5 * H, last_author: 'Jamie Rivers (demo)',
+  task: null, pr: null, worktree: null, session: null, ...o,
+});
+const tree = {
+  me: 'jari',
+  people: [
+    ['jari', [
+      br('jari/gst-rounding', { ahead: 2, behind: 1, last_commit_age: 25 * 60, task: 4211, pr: { id: 812, status: 'active', is_draft: true }, worktree: 'w2', session: 'a1' }),
+      br('jari/refund-webhook-backoff', { remote: false, ahead: 3, last_commit_age: 3 * H, task: 4231 }),
+      br('jari/ledger-export-csv', { last_commit_age: 4 * 86400, task: 4180, pr: { id: 790, status: 'active', is_draft: false } }),
+      br('jari/old-pdf-fonts', { remote: false, gone: true, last_commit_age: 26 * 86400 }),
+    ]],
+    ['gaas', [
+      br('gaas/flaky-login-test', { last_commit_age: 7 * H, last_author: 'Gale Ashby (demo)', pr: { id: 808, status: 'active', is_draft: false } }),
+      br('gaas/gst-docs', { local: false, last_commit_age: 2 * 86400, last_author: 'Gale Ashby (demo)' }),
+    ]],
+    ['mipa', [
+      br('mipa/refund-alerts', { local: false, last_commit_age: 30 * H, last_author: 'Mika Patel (demo)', task: 4232 }),
+      br('mipa/ci-node-24', { local: false, last_commit_age: 9 * 86400, last_author: 'Mika Patel (demo)' }),
+      br('mipa/spike-ledger-rounding', { local: false, last_commit_age: 15 * 86400, last_author: 'Mika Patel (demo)' }),
+    ]],
+    ['other', [br('main', { last_commit_age: 2 * H, last_author: 'Gale Ashby (demo)' })]],
+  ],
+};
+const range = {
+  base: '3f9c2a1d0b7e4c5a8d6f1e2b3c4d5e6f7a8b9c0d',
+  tip: 'a17e5b9c2d3f4e5a6b7c8d9e0f1a2b3c4d5e6f70',
+  offline: false,
+  files: [
+    { path: 'src/Ledger.Api/Invoices/Invoice.cs', from: null, status: 'M', added: 38, removed: 12 },
+    { path: 'src/Ledger.Api/Invoices/InvoiceLine.cs', from: null, status: 'M', added: 4, removed: 19 },
+    { path: 'src/Ledger.Api/Tax/GstRounding.cs', from: null, status: 'A', added: 61, removed: 0 },
+    { path: 'tests/Ledger.Api.Tests/Tax/GstRoundingTests.cs', from: null, status: 'A', added: 112, removed: 0 },
+  ],
+};
+
+const prompt = `# Task 4211: Round GST per invoice, not per line
+
+https://dev.azure.com/demo-org/Platform/_workitems/edit/4211
+
+Parent: User Story 4210: GST rounding on invoices
+
+## Description
+Move rounding out of InvoiceLine.Total and into Invoice.GstTotal. Keep the per-line figure for display only.
+
+## Acceptance criteria
+- Totals match the ledger to the cent
+- Rounding happens once per invoice
+- Existing invoices are not re-rounded
+`;
+
+const handlers = {
+  get_state: () => model,
+  'plugin:event|listen': () => 1,
+  'plugin:event|unlisten': () => null,
+  'plugin:window|set_theme': () => null,
+  launchables: () => ({
+    harnesses: [{ id: 'claude', label: 'Claude Code' }, { id: 'codex', label: 'Codex' }],
+    profiles: [{ name: 'work', harness: 'claude', default: true }, { name: 'personal', harness: 'claude', default: false }],
+  }),
+  startup: () => ({ view: null, session: null, theme: q.get('theme') ?? 'light', diff_mode: null }),
+  ado_context: ({ worktree }) =>
+    worktree === 'w1'
+      ? { host: 'dev.azure.com', org: 'demo-org', project: 'Platform', repo: 'ledger-api', orgUrl: 'https://dev.azure.com/demo-org', repoKey: 'demo-org/Platform/ledger-api', ui: {} }
+      : null,
+  ado_save_ui: () => null,
+  ado_teams: () => ['Payments Team', 'Platform Team'],
+  ado_iterations: () => sprints,
+  ado_tasks: ({ scope }) => taskList(scope),
+  ado_set_team: () => null,
+  ado_task_prompt: () => prompt,
+  ado_start_task: () => ({ worktreeId: 'w9', agentId: null, problems: [] }),
+  ado_branches: () => tree,
+  ado_fetch: () => null,
+  ado_checkout_worktree: () => 'w9',
+  ado_delete_local: () => null,
+  diff_range: () => range,
+  open_url: () => null,
+};
+
+let cb = 0;
+window.__TAURI_INTERNALS__ = {
+  metadata: { currentWindow: { label: 'main' }, currentWebview: { windowLabel: 'main', label: 'main' } },
+  transformCallback: () => ++cb,
+  unregisterCallback: () => {},
+  convertFileSrc: (p) => p,
+  invoke: async (cmd, args) => {
+    const h = handlers[cmd];
+    if (!h) throw new Error(`demo: no handler for ${cmd}`);
+    await new Promise((r) => setTimeout(r, 30));
+    return h(args ?? {});
+  },
+};
+
+// ---- drive the window to the requested place ----
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+async function until(find, tries = 100) {
+  for (let i = 0; i < tries; i++) {
+    const el = find();
+    if (el) return el;
+    await wait(50);
+  }
+  throw new Error('demo: element never appeared');
+}
+const byText = (sel, text) => () => [...document.querySelectorAll(sel)].find((e) => e.textContent.trim() === text);
+
+window.addEventListener('load', async () => {
+  const view = q.get('view');
+  if (!view) return;
+  const label = view === 'tasks' ? 'Tasks' : 'Branches';
+  (await until(byText('aside nav button', label))).click();
+  if (view === 'tasks') {
+    (await until(() => document.querySelector('[data-id="4211"]'))).click();
+    if (q.get('start')) (await until(byText('button', 'Start task'))).click();
+  } else {
+    const sel = q.get('sel');
+    if (sel) {
+      (await until(() => document.querySelector(`[data-branch="${sel}"] button`))).click();
+      if (q.get('diff')) (await until(byText('button', 'Diff vs main'))).click();
+    }
+  }
+});
