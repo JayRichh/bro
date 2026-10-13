@@ -90,7 +90,7 @@
   // which the help overlay lists too.
   function onKey(e: KeyboardEvent) {
     if (layerOpen()) return;
-    const t = e.target as HTMLElement;
+    const t = e.target instanceof Element ? e.target : document.body;
     const inTerminal = !!t.closest('.xterm');
     const typing = inTerminal || !!t.closest('input, textarea, select, .monaco-editor');
     const s = shortcutFor(e, { inTerminal, typing, onRow: !!focusedTarget() });

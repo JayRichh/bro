@@ -270,6 +270,46 @@
               "default": true,
               "restart": null,
               "is_new": false
+            },
+            {
+              "target": {
+                "scope": "global",
+                "key": "preset_text"
+              },
+              "label": "Preset text",
+              "hint": "Where a new agent preset's text goes: a prefix before the task, a postfix after it, or both (its Text row can change one)",
+              "control": {
+                "type": "choice",
+                "options": [
+                  "prefix",
+                  "postfix",
+                  "prefix & postfix"
+                ],
+                "labels": [
+                  "prefix",
+                  "postfix",
+                  "prefix & postfix"
+                ]
+              },
+              "value": "prefix",
+              "default": "prefix",
+              "restart": null,
+              "is_new": false
+            },
+            {
+              "target": {
+                "scope": "global",
+                "key": "ask_before_archive"
+              },
+              "label": "Confirm on archive",
+              "hint": "a and the card menu's Archive ask before archiving a session (off archives at once; u brings it back)",
+              "control": {
+                "type": "toggle"
+              },
+              "value": true,
+              "default": true,
+              "restart": null,
+              "is_new": false
             }
           ]
         },
@@ -383,31 +423,6 @@
             {
               "target": {
                 "scope": "global",
-                "key": "preset_text"
-              },
-              "label": "Preset text",
-              "hint": "Where a new agent preset's text goes: a prefix before the task, a postfix after it, or both (its Text row can change one)",
-              "control": {
-                "type": "choice",
-                "options": [
-                  "prefix",
-                  "postfix",
-                  "prefix & postfix"
-                ],
-                "labels": [
-                  "prefix",
-                  "postfix",
-                  "prefix & postfix"
-                ]
-              },
-              "value": "prefix",
-              "default": "prefix",
-              "restart": null,
-              "is_new": false
-            },
-            {
-              "target": {
-                "scope": "global",
                 "key": "delete_empty_worktree"
               },
               "label": "Delete emptied worktree",
@@ -442,21 +457,6 @@
               },
               "label": "Show all worktrees",
               "hint": "Every worktree gets a band on the grid, even an empty one (d deletes it); deleting a last card keeps the worktree unless Delete emptied worktree is on",
-              "control": {
-                "type": "toggle"
-              },
-              "value": true,
-              "default": true,
-              "restart": null,
-              "is_new": false
-            },
-            {
-              "target": {
-                "scope": "global",
-                "key": "ask_before_archive"
-              },
-              "label": "Confirm on archive",
-              "hint": "a and the card menu's Archive ask before archiving a session (off archives at once; u brings it back)",
               "control": {
                 "type": "toggle"
               },
@@ -923,6 +923,36 @@
               },
               "value": "claude",
               "default": "claude",
+              "restart": null,
+              "is_new": false
+            },
+            {
+              "target": {
+                "scope": "global",
+                "key": "follow_new_session"
+              },
+              "label": "Follow new",
+              "hint": "Move the cursor onto the new session's card, the grid scrolled to it, without entering it (off = stay on the card you're on)",
+              "control": {
+                "type": "toggle"
+              },
+              "value": true,
+              "default": true,
+              "restart": null,
+              "is_new": false
+            },
+            {
+              "target": {
+                "scope": "global",
+                "key": "quick_prompt_new_worktree"
+              },
+              "label": "New worktree",
+              "hint": "Each new session's box starts on a fresh worktree (off = the project's root branch; ^N flips one box)",
+              "control": {
+                "type": "toggle"
+              },
+              "value": false,
+              "default": false,
               "restart": null,
               "is_new": false
             },
@@ -1581,36 +1611,6 @@
               },
               "label": "Focus",
               "hint": "Enter the new session's terminal on launch (off = just select its row)",
-              "control": {
-                "type": "toggle"
-              },
-              "value": false,
-              "default": false,
-              "restart": null,
-              "is_new": false
-            },
-            {
-              "target": {
-                "scope": "global",
-                "key": "follow_new_session"
-              },
-              "label": "Follow new",
-              "hint": "Move the cursor onto the new session's card, the grid scrolled to it, without entering it (off = stay on the card you're on)",
-              "control": {
-                "type": "toggle"
-              },
-              "value": true,
-              "default": true,
-              "restart": null,
-              "is_new": false
-            },
-            {
-              "target": {
-                "scope": "global",
-                "key": "quick_prompt_new_worktree"
-              },
-              "label": "New worktree",
-              "hint": "Each new session's box starts on a fresh worktree (off = the project's root branch; ^N flips one box)",
               "control": {
                 "type": "toggle"
               },

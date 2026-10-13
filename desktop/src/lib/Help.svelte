@@ -9,7 +9,7 @@
     anywhere: 'anywhere',
     fields: 'not in a terminal',
     global: '',
-    row: 'on a focused row or card',
+    row: '',
   };
 
   function onKey(e: KeyboardEvent) {
@@ -37,16 +37,18 @@
       <span class="flex-1"></span>
       <kbd class="border border-rule px-1.5 font-mono text-[11px] leading-5 text-muted">Esc</kbd>
     </header>
-    <div class="grid min-h-0 grid-cols-1 gap-x-8 overflow-y-auto px-5 pb-5 md:grid-cols-2">
+    <div class="min-h-0 gap-x-8 overflow-y-auto px-5 pb-5 md:columns-2">
       {#each groups as g (g.group)}
-        <section class="pt-4" aria-label={g.group}>
-          <h3 class="m-0 border-b border-rule-strong pb-1 text-[13px] font-semibold">{g.group}</h3>
+        <section class="break-inside-avoid pt-4" aria-label={g.group}>
+          <h3 class="m-0 border-b border-rule-strong pb-1 text-[13px] font-semibold">
+            {g.group}{#if g.group === 'Sessions'}<span class="ml-2 font-mono text-[11px] font-normal text-muted">on a focused row or card</span>{/if}
+          </h3>
           <ul class="m-0 list-none p-0">
-            {#each g.rows as s (s.id)}
+            {#each g.rows as s (s.label)}
               <li class="flex items-center gap-3 border-b border-rule py-1.5">
                 <span class="min-w-0 flex-1 text-[13px]">
                   {s.label}
-                  {#if WHERE[s.scope]}<span class="ml-1 font-mono text-[11px] text-muted">{WHERE[s.scope]}</span>{/if}
+                  {#if s.scope && WHERE[s.scope]}<span class="ml-1 font-mono text-[11px] text-muted">{WHERE[s.scope]}</span>{/if}
                 </span>
                 <span class="flex flex-none gap-1">
                   {#each s.keys as k (k)}<kbd class="border border-rule px-1.5 font-mono text-[11px] leading-5">{keyLabel(k)}</kbd>{/each}

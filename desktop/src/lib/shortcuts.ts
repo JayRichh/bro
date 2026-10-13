@@ -60,12 +60,12 @@ export interface Shortcut {
 
 export const SHORTCUTS: Shortcut[] = [
   { id: 'palette', keys: ['ctrl+k'], scope: 'fields', label: 'Command palette', group: 'General' },
-  { id: 'palette_alt', keys: ['ctrl+shift+p'], scope: 'anywhere', label: 'Command palette (also in a terminal)', group: 'General' },
+  { id: 'palette_alt', keys: ['ctrl+shift+p'], scope: 'anywhere', label: 'Command palette', group: 'General' },
   { id: 'help', keys: ['?'], scope: 'global', label: 'Keyboard shortcuts', group: 'General' },
   { id: 'help_f1', keys: ['f1'], scope: 'anywhere', label: 'Keyboard shortcuts', group: 'General' },
   { id: 'settings', keys: ['ctrl+,'], scope: 'anywhere', label: 'Settings', group: 'General' },
   { id: 'quick_prompt', keys: ['p', 'n'], scope: 'global', label: 'Quick prompt', group: 'General' },
-  { id: 'quick_prompt_alt', keys: ['ctrl+shift+n'], scope: 'anywhere', label: 'Quick prompt (from anywhere)', group: 'General' },
+  { id: 'quick_prompt_alt', keys: ['ctrl+shift+n'], scope: 'anywhere', label: 'Quick prompt', group: 'General' },
   { id: 'cycle_theme', keys: ['ctrl+shift+l'], scope: 'anywhere', label: 'Cycle theme: system, light, dark', group: 'General' },
   { id: 'new_worktree', keys: ['shift+n'], scope: 'global', label: 'New worktree in this repo', group: 'General' },
 
@@ -162,13 +162,26 @@ export function keysOf(id: ShortcutId, table: Shortcut[] = SHORTCUTS): string[] 
   return table.find((s) => s.id === id)?.keys ?? [];
 }
 
+/** A help row: one action's keys, merged across the table entries that
+ *  share its label (Ctrl+K and Ctrl+Shift+P are one palette). Its scope
+ *  is the narrowest of them, cleared when one works anywhere. */
+export interface HelpRow {
+  label: string;
+  keys: string[];
+  scope: Scope | null;
+}
+
 /** The table grouped for the help overlay, in table order. */
-export function helpGroups(table: Shortcut[] = SHORTCUTS): { group: string; rows: Shortcut[] }[] {
-  const out: { group: string; rows: Shortcut[] }[] = [];
+export function helpGroups(table: Shortcut[] = SHORTCUTS): { group: string; rows: HelpRow[] }[] {
+  const out: { group: string; rows: HelpRow[] }[] = [];
   for (const s of table) {
     let g = out.find((x) => x.group === s.group);
     if (!g) out.push((g = { group: s.group, rows: [] }));
-    g.rows.push(s);
+    const same = g.rows.find((r) => r.label === s.label);
+    if (same) {
+      same.keys.push(...s.keys);
+      if (s.scope === 'anywhere' || same.scope !== s.scope) same.scope = null;
+    } else g.rows.push({ label: s.label, keys: [...s.keys], scope: s.scope });
   }
   return out;
 }

@@ -9,7 +9,9 @@
 // dialog), offline=1 (tasks come back as a saved list), sel=<branch>,
 // diff=1 (run Diff vs main on the selected branch), view=settings with
 // tab=<id> (desktop, general, sessions, appearance, agents, project,
-// experimental, hotkeys). The settings rows are the real schema, exported
+// experimental, hotkeys, presets, profiles); view=menu (a row's context
+// menu), view=palette (q=<query>), view=help, view=quick (the quick prompt
+// expanded). The settings rows are the real schema, exported
 // by `cargo test -- --ignored write_demo_settings` in src-tauri.
 
 const q = new URLSearchParams(location.search);
@@ -47,6 +49,26 @@ const model = {
   prs: {},
   subagents: [],
 };
+
+// Wave 2 shots (menu, palette, help, quick) want a fuller overview: a
+// session per state, a nested one, a terminal and a PR.
+const W2 = ['menu', 'palette', 'help', 'quick'].includes(q.get('view'));
+if (W2) {
+  const a = (id, worktree_id, name, status, extra = {}) => ({
+    id, worktree_id, name, status, archived: false, unseen: false, status_changed_at: now - 60_000,
+    kind: 'claude', custom_harness: null, model: null, effort: null, profile: null, alive: true,
+    recent_prompts: [], role: 'worker', sort_order: 0, parent: null, ...extra,
+  });
+  model.worktrees.push({ id: 'w4', project_id: 'p2', path: 'C:\\demo\\storefront-web-worktrees\\cart-badge', branch: 'jari/cart-badge', is_main: false, sort_order: 1 });
+  model.agents.push(
+    a('a2', 'w1', 'refund-backoff', 'needs_feedback', { status_changed_at: now - 30_000, recent_prompts: [{ text: 'Back off refund webhook retries', submitted_at: now - 900_000 }] }),
+    a('a3', 'w4', 'cart-badge', 'finished', { unseen: true, kind: 'codex', status_changed_at: now - 400_000, recent_prompts: [{ text: 'Show the item count on the cart icon', submitted_at: now - 1_200_000 }] }),
+    a('a4', 'w3', 'checkout-a11y', 'finished', { status_changed_at: now - 3_600_000, profile: 'personal' }),
+    a('a5', 'w2', 'ledger-recon-test', 'running', { parent: 'a1', status_changed_at: now - 90_000 }),
+  );
+  model.terminals.push({ id: 't1', worktree_id: 'w3', name: 'shell', sort_order: 0, alive: true, run_command: null });
+  model.prs = { w2: { number: 418, url: 'https://dev.azure.com/demo-org/Platform/_git/ledger-api/pullrequest/418', title: 'Round GST per invoice', draft: true } };
+}
 
 // ---- Tasks (synthetic sprint) ----
 const sprints = [
@@ -155,6 +177,18 @@ Move rounding out of InvoiceLine.Total and into Invoice.GstTotal. Keep the per-l
 - Existing invoices are not re-rounded
 `;
 
+const MID = String.fromCharCode(0xb7);
+const presets = [
+  { name: 'reviewer', harness: 'claude', model: 'opus', effort: 'high', prefix: 'Review this branch like a strict senior engineer. Point at lines.', postfix: '', skipTask: false, spec: ['claude', 'opus', 'high'].join(' ' + MID + ' '), usable: true },
+  { name: 'commit-and-push', harness: 'claude', model: null, effort: null, prefix: '', postfix: 'Commit with a plain message and push the branch.', skipTask: true, spec: 'claude', usable: true },
+  { name: 'codex-scout', harness: 'codex', model: 'gpt-5.5', effort: null, prefix: 'Read the code first; do not edit.', postfix: 'End with a short list of findings.', skipTask: false, spec: ['codex', 'gpt-5.5'].join(' ' + MID + ' '), usable: true },
+];
+const profiles = [
+  { name: 'work', harness: 'claude', default: true, useDefault: false, envKeys: [], home: 'C:\\Users\\demo\\AppData\\Local\\kete\\data\\profiles\\work', problem: null, login: 'kete profile login work', usage: '41% of weekly' },
+  { name: 'personal', harness: 'claude', default: false, useDefault: true, envKeys: [], home: null, problem: null, login: null, usage: null },
+  { name: 'codex-team', harness: 'codex', default: true, useDefault: false, envKeys: ['HTTPS_PROXY'], home: 'C:\\Users\\demo\\AppData\\Local\\kete\\data\\profiles\\codex-team', problem: null, login: 'kete profile login codex-team', usage: null },
+];
+
 let settingsSchema = null;
 const loadSchema = async () => (settingsSchema ??= await (await fetch('/demo/settings-schema.json')).json());
 const sameTarget = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -165,7 +199,14 @@ const handlers = {
   'plugin:event|unlisten': () => null,
   'plugin:window|set_theme': () => null,
   launchables: () => ({
-    harnesses: [{ id: 'claude', label: 'Claude Code' }, { id: 'codex', label: 'Codex' }],
+    harnesses: [
+      { id: 'claude', label: 'Claude Code', choices: { models: ['default', 'opus', 'sonnet', 'haiku'], model: 'opus', efforts: Object.fromEntries(['default', 'opus', 'sonnet', 'haiku'].map((m) => [m, ['default', 'low', 'medium', 'high', 'max']])), effort: 'high' } },
+      { id: 'codex', label: 'Codex', choices: { models: ['default', 'gpt-5.5', 'gpt-5.5-mini'], model: 'default', efforts: Object.fromEntries(['default', 'gpt-5.5', 'gpt-5.5-mini'].map((m) => [m, ['default', 'low', 'medium', 'high']])), effort: 'default' } },
+    ],
+    default_harness: 'claude',
+    new_worktree: false,
+    follow: true,
+    ask_before_archive: true,
     profiles: [{ name: 'work', harness: 'claude', default: true }, { name: 'personal', harness: 'claude', default: false }],
   }),
   startup: () => ({ view: null, session: null, theme: q.get('theme') ?? 'light', diff_mode: null }),
@@ -197,6 +238,23 @@ const handlers = {
   run_commands: () => ({ w1: 'dotnet watch run', w2: 'dotnet watch run' }),
   start_run: () => 't9',
   stop_run: () => null,
+  presets_list: () => presets,
+  preset_save: ({ original, preset }) => {
+    const i = original ? presets.findIndex((p) => p.name === original) : -1;
+    const row = { ...preset, spec: [preset.harness, preset.model, preset.effort].filter((x) => x && x !== 'default').join(' / '), usable: true };
+    if (i >= 0) presets[i] = row;
+    else presets.push(row);
+    return presets;
+  },
+  preset_delete: ({ name }) => (presets.splice(presets.findIndex((p) => p.name === name), 1), presets),
+  profiles_list: () => profiles,
+  profile_harnesses: () => ['claude', 'codex', 'copilot'],
+  profile_add: () => ({ rows: profiles, login: 'kete profile login work', home: null }),
+  profile_update: () => ({ rows: profiles, login: null, home: null }),
+  profile_remove: () => ({ rows: profiles, login: null, home: null }),
+  profile_set_default: () => profiles,
+  suggest_branch: () => 'amber-otter-glides',
+  quick_launch: () => ({ worktree: 'w1', agent: 'a1', terminal: null }),
 };
 
 let cb = 0;
@@ -232,6 +290,39 @@ window.addEventListener('load', async () => {
     (await until(byText('aside button', 'Settings'))).click();
     const tab = q.get('tab');
     if (tab) (await until(() => document.getElementById('settings-tab-' + tab))).click();
+    return;
+  }
+  const key = (k, m = {}) => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, ...m }));
+  const ready = () => until(() => document.querySelector('[data-target="agent:a1"]'));
+  if (view === 'menu') {
+    const row = await ready();
+    const r = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: r.left + 300, clientY: r.top + r.height / 2 }));
+    await wait(150);
+    for (let i = 0; i < 2; i++) document.querySelector('[role="menu"]')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    return;
+  }
+  if (view === 'palette') {
+    await ready();
+    key('k', { ctrlKey: true });
+    const input = await until(() => document.querySelector('[aria-label="Command palette"] input'));
+    if (q.get('q')) {
+      input.value = q.get('q');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    return;
+  }
+  if (view === 'help') {
+    await ready();
+    key('?', { shiftKey: true });
+    return;
+  }
+  if (view === 'quick') {
+    await ready();
+    const box = await until(() => document.querySelector('textarea[aria-label="Prompt"]'));
+    box.focus();
+    box.value = 'Add a reconciliation test for GST totals across 12-line invoices.\nKeep the fixtures small.';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
     return;
   }
   const label = view === 'tasks' ? 'Tasks' : 'Branches';

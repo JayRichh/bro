@@ -81,7 +81,11 @@ describe('chordOf and shortcutFor', () => {
   it('groups the help in table order', () => {
     const groups = helpGroups();
     expect(groups.map((g) => g.group)).toEqual(['General', 'Views', 'Sessions']);
-    expect(groups.reduce((n, g) => n + g.rows.length, 0)).toBe(SHORTCUTS.length);
+    const keys = (n: number, g: { rows: { keys: string[] }[] }) => n + g.rows.reduce((m, r) => m + r.keys.length, 0);
+    expect(groups.reduce(keys, 0)).toBe(SHORTCUTS.reduce((n, s) => n + s.keys.length, 0));
+    const palette = groups[0].rows.find((r) => r.label === 'Command palette')!;
+    expect(palette.keys).toEqual(['ctrl+k', 'ctrl+shift+p']);
+    expect(palette.scope).toBeNull();
   });
 
   it('every scope is reachable', () => {

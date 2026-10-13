@@ -215,14 +215,14 @@
 >
   {#if expanded}
     <div class="flex h-8 items-stretch border-b border-rule" role="group" aria-label="Launch options">
-      <span class="relative flex max-w-48 min-w-0 items-center border-r border-rule">
+      <span class="relative flex max-w-60 min-w-0 items-center border-r border-rule">
         <span class={optLabel}>model</span>
         <select class="{pick} font-mono text-[12px]" bind:value={model} disabled={isTerminal || !models.length} aria-label="Model">
           {#each models as m (m)}<option value={m}>{m}{m === info?.choices?.model ? ' (set)' : ''}</option>{/each}
         </select>
         {@render chevron()}
       </span>
-      <span class="relative flex max-w-40 min-w-0 items-center border-r border-rule">
+      <span class="relative flex max-w-52 min-w-0 items-center border-r border-rule">
         <span class={optLabel}>effort</span>
         <select class="{pick} font-mono text-[12px]" bind:value={effort} disabled={isTerminal || !efforts.length} aria-label="Effort">
           {#if !efforts.length}<option value={effort}>n/a</option>{/if}
