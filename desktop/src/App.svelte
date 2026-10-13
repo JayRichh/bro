@@ -7,9 +7,13 @@
     focusQuickPrompt,
     follow,
     goHome,
+    loadDesktopPrefs,
     openDiff,
+    openSettings,
     openSession,
     sessionWorktree,
+    setHome,
+    setThemePref,
     type ThemePref,
   } from './lib/store.svelte';
   import { api } from './lib/api';
@@ -27,6 +31,7 @@
   import Tasks from './lib/ado/Tasks.svelte';
   import Branches from './lib/ado/Branches.svelte';
   import Prs from './lib/ado/Prs.svelte';
+  import Settings from './lib/settings/Settings.svelte';
 
   const media = window.matchMedia('(prefers-color-scheme: dark)');
   let osDark = $state(media.matches);
@@ -91,12 +96,11 @@
 
   function cycleTheme() {
     const order: ThemePref[] = ['system', 'light', 'dark'];
-    app.themePref = order[(order.indexOf(app.themePref) + 1) % order.length];
+    setThemePref(order[(order.indexOf(app.themePref) + 1) % order.length]);
   }
 
   function toggleHome() {
-    app.home = app.home === 'overview' ? 'board' : 'overview';
-    goHome(nav.current.repo);
+    setHome(app.home === 'overview' ? 'board' : 'overview', nav.current.repo);
   }
 
   function onKey(e: KeyboardEvent) {
@@ -108,11 +112,13 @@
       if (e.key === 'ArrowLeft') return (e.preventDefault(), nav.back());
       if (e.key === 'ArrowRight') return (e.preventDefault(), nav.forward());
     }
+    // Ctrl+, opens Settings, wherever the focus is (as in most editors).
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key === ',') return (e.preventDefault(), openSettings());
     if (e.ctrlKey && e.shiftKey && !e.altKey) {
       const k = e.key.toUpperCase();
       const act: Record<string, () => void> = {
-        B: () => ((app.home = 'board'), goHome(nav.current.repo)),
-        O: () => ((app.home = 'overview'), goHome(nav.current.repo)),
+        B: () => setHome('board', nav.current.repo),
+        O: () => setHome('overview', nav.current.repo),
         T: () => app.session && openSession(app.session),
         D: () => openDiff(app.diffWorktree ?? sessionWorktree(app.session)),
         N: () => focusQuickPrompt(),
@@ -128,7 +134,7 @@
     if (typing || e.ctrlKey || e.altKey || e.metaKey) return;
     if (e.key === 'K' && e.shiftKey) return (e.preventDefault(), toggleHome());
     if (e.key === 'p' || e.key === 'n') return (e.preventDefault(), focusQuickPrompt());
-    if (e.key === 'Escape' && split) return goHome(nav.current.repo);
+    if (e.key === 'Escape' && (split || view === 'settings')) return goHome(nav.current.repo);
     if (e.key === '1') goHome(nav.current.repo);
     else if (e.key === '2' && app.session) openSession(app.session);
     else if (e.key === '3') openDiff(app.diffWorktree ?? sessionWorktree(app.session));
@@ -142,6 +148,9 @@
 
   /** Command-line `--view`, `--session`, `--theme`, `--diff`. */
   async function applyStartup() {
+    // Saved preferences first; the command line overrides them for this
+    // run only and is never written back.
+    await loadDesktopPrefs();
     const s = await api.startup().catch(() => null);
     if (!s) return;
     if (s.theme === 'light' || s.theme === 'dark' || s.theme === 'system') app.themePref = s.theme;
@@ -187,10 +196,7 @@
             aria-checked={on}
             class="border-0 px-2 text-[12px] {i ? 'border-l border-rule' : ''} {on ? 'bg-ink text-bg' : 'bg-transparent text-muted hover:text-ink'}"
             title="{h.label} (Shift+K switches)"
-            onclick={() => {
-              app.home = h.id as 'overview' | 'board';
-              goHome(nav.current.repo);
-            }}>{h.label}</button
+            onclick={() => setHome(h.id as 'overview' | 'board', nav.current.repo)}>{h.label}</button
           >
         {/each}
       </div>
@@ -203,6 +209,8 @@
         {#key nav.current.repo}<Branches repo={nav.current.repo} />{/key}
       {:else if view === 'prs'}
         <Prs />
+      {:else if view === 'settings'}
+        <Settings />
       {:else if adoView}
         <section class="min-w-0 flex-1 px-6 pt-6">
           <h1 class="m-0 text-[28px] font-semibold tracking-tight text-ink">{ADO_TITLE[view]}</h1>

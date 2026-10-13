@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, projectOf, sessionWorktree } from './store.svelte';
+  import { app, projectOf, saveDesktopPref, sessionWorktree } from './store.svelte';
   import { nav } from './shell/history.svelte';
   import { isDiffMode, type DiffMode } from './diff-api';
   import { placeOf } from './status';
@@ -19,6 +19,8 @@
   function setMode(m: DiffMode) {
     ui.mode = m;
     app.diffMode = m;
+    // The layout a repo with none saved yet opens in, from now on.
+    saveDesktopPref('diff_mode', m);
   }
 
   function pickWorktree(id: string) {

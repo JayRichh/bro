@@ -5,7 +5,7 @@
 import { api, type Launchables, type Model, type SessionRef } from './api';
 import { ado, type AdoContextInfo } from './ado/api';
 import { nav, type Place } from './shell/history.svelte';
-import { diffItem, parseDiffItem, type DiffMode, type DiffRange } from './diff-api';
+import { diffItem, isDiffMode, parseDiffItem, type DiffMode, type DiffRange } from './diff-api';
 
 export type ThemePref = 'system' | 'light' | 'dark';
 /** What the main column shows when no view is open: the overview or the board. */
@@ -55,7 +55,63 @@ export const app = $state({
   /** A repo picked in the rail, for the overview to scroll to; seq bumps per
    *  pick, and `done` is the last seq the overview scrolled for. */
   reveal: { repo: null as string | null, seq: 0, done: 0 },
+  /** Worktree id to the command its Run button starts. */
+  runCommands: {} as Record<string, string>,
 });
+
+/** The window's own preferences, saved under `desktop` in config.json. */
+export type DesktopPref = 'theme' | 'diff_mode' | 'home';
+
+/** Save one preference. A failed write says so; the window keeps the value. */
+export function saveDesktopPref(key: DesktopPref, value: string) {
+  api.settingsSet({ scope: 'desktop', key }, value).catch((e) => toast(`Could not save the preference: ${e}`));
+}
+
+/** The theme, changed by the user: applied and saved. */
+export function setThemePref(p: ThemePref) {
+  app.themePref = p;
+  saveDesktopPref('theme', p);
+}
+
+/** Overview or board, picked by the user: shown and saved. */
+export function setHome(h: Home, repo?: string) {
+  app.home = h;
+  saveDesktopPref('home', h);
+  goHome(repo);
+}
+
+/** Read the saved preferences (before any command-line override). */
+export async function loadDesktopPrefs() {
+  const p = await api.desktopPrefs().catch(() => null);
+  if (!p) return;
+  if (p.theme === 'system' || p.theme === 'light' || p.theme === 'dark') app.themePref = p.theme;
+  if (isDiffMode(p.diff_mode)) app.diffMode = p.diff_mode;
+  if (p.home === 'overview' || p.home === 'board') {
+    app.home = p.home;
+    if (nav.current.view === 'overview' || nav.current.view === 'board') nav.replace({ ...nav.current, view: p.home });
+  }
+}
+
+/** Ask which worktrees have a run command (after a settings change too). */
+export function refreshRunCommands() {
+  api
+    .runCommands()
+    .then((r) => (app.runCommands = r))
+    .catch(() => {});
+}
+
+/** Ask again what the quick prompt offers (after a settings change). */
+export function refreshLaunchables() {
+  api
+    .launchables()
+    .then((l) => (app.launch = l))
+    .catch(() => {});
+}
+
+/** The Settings view, on a tab. */
+export function openSettings(tab?: string) {
+  nav.go({ view: 'settings', item: tab ?? (nav.current.view === 'settings' ? nav.current.item : undefined) });
+}
 
 export function sessionKey(s: SessionRef | null): string {
   if (!s) return '';
@@ -81,6 +137,11 @@ export function sessionWorktree(s: SessionRef | null): string | null {
 export function projectOf(worktree: string | null): string | undefined {
   if (!worktree) return undefined;
   return app.model.worktrees.find((w) => w.id === worktree)?.project_id;
+}
+
+/** The session the window shows or selects: seen, so its unread clears. */
+export function markSeen(s: SessionRef | null) {
+  if (s && 'Agent' in s) api.markSeen(s.Agent).catch(() => {});
 }
 
 export function openSession(s: SessionRef) {
@@ -120,6 +181,8 @@ export function follow(p: Place) {
   if (p.view === 'session') {
     const s = sessionFromKey(p.item);
     if (s) app.session = s;
+    // Back or forward onto a session shows it again: it is seen.
+    markSeen(s);
   } else if (p.view === 'diff') {
     const d = parseDiffItem(p.item);
     app.diffWorktree = d.worktree;
@@ -182,9 +245,26 @@ nav.setSaver((view, repo, state) => {
   if (ctx) ado.saveUi(ctx.repoKey, view, state).catch(() => {});
 });
 
+let worktreeSig = '';
 function take(m: Model) {
   app.model = m;
   askAdo(m);
+  // A session open on screen that turns unread again (a new turn finished
+  // while you watch) is seen at once, as the TUI's pane does.
+  seeOpenSession();
+  const sig = m.worktrees.map((w) => w.id).join(',');
+  if (sig !== worktreeSig) {
+    worktreeSig = sig;
+    refreshRunCommands();
+  }
+}
+
+/** Mark the session on screen seen when it reads unread and the window has focus. */
+export function seeOpenSession() {
+  const s = app.session;
+  if (nav.current.view !== 'session' || !s || !('Agent' in s)) return;
+  if (typeof document !== 'undefined' && !document.hasFocus()) return;
+  if (app.model.agents.find((a) => a.id === s.Agent)?.unseen) markSeen(s);
 }
 
 export async function boot() {
@@ -195,9 +275,7 @@ export async function boot() {
   }
   await api.onState(take);
   app.booted = true;
-  api
-    .launchables()
-    .then((l) => (app.launch = l))
-    .catch(() => {});
+  refreshLaunchables();
+  window.addEventListener('focus', seeOpenSession);
   setInterval(() => (app.now = Date.now()), 15_000);
 }

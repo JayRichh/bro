@@ -122,6 +122,59 @@ export interface DiffPair {
 export interface Launchables {
   harnesses: { id: string; label: string }[];
   profiles: { name: string; harness: string; default: boolean }[];
+  /** The Agents tab's quick prompt harness; empty from an old backend. */
+  default_harness?: string;
+}
+
+/** Where a settings write lands, as the Rust side's `schema::Target`. */
+export type SettingTarget =
+  | { scope: 'global'; key: string }
+  | { scope: 'agent'; harness: string; field: string }
+  | { scope: 'project'; path: string; field: string }
+  | { scope: 'desktop'; key: string };
+export type SettingControl =
+  | { type: 'toggle' }
+  | { type: 'choice'; options: string[]; labels: string[] }
+  | { type: 'text'; placeholder: string };
+export interface SettingRow {
+  target: SettingTarget;
+  label: string;
+  hint: string;
+  control: SettingControl;
+  value: boolean | string;
+  default: boolean | string;
+  restart: string | null;
+  is_new: boolean;
+}
+export interface SettingGroup {
+  title: string;
+  subtitle: string | null;
+  terminal: boolean;
+  rows: SettingRow[];
+}
+export interface HotkeyRow {
+  id: string;
+  label: string;
+  hint: string;
+  group: string;
+  defaults: string[];
+  bound: string[];
+  overridden: boolean;
+}
+export interface SettingsTab {
+  id: string;
+  title: string;
+  note: string | null;
+  groups: SettingGroup[];
+  hotkeys: HotkeyRow[];
+}
+export interface SettingsSchema {
+  tabs: SettingsTab[];
+}
+export interface DesktopPrefs {
+  theme: string;
+  diff_mode: string;
+  home: string;
 }
 export interface Startup {
   view: string | null;
@@ -147,6 +200,13 @@ export const api = {
   createTerminal: (worktree: string) => invoke<string>('create_terminal', { worktree }),
   addProject: (path: string) => invoke<string>('add_project', { path }),
   startRun: (worktree: string) => invoke<string>('start_run', { worktree }),
+  stopRun: (worktree: string) => invoke<void>('stop_run', { worktree }),
+  /** Worktree id to the command its Run button starts; absent: none. */
+  runCommands: () => invoke<Record<string, string>>('run_commands'),
+  settingsSchema: () => invoke<SettingsSchema>('settings_schema'),
+  settingsSet: (target: SettingTarget, value: boolean | string) => invoke<void>('settings_set', { target, value }),
+  settingsReset: () => invoke<void>('settings_reset'),
+  desktopPrefs: () => invoke<DesktopPrefs>('desktop_prefs'),
   diffFiles: (worktree: string) => invoke<DiffFile[]>('diff_files', { worktree }),
   diffPair: (worktree: string, file: DiffFile) => invoke<DiffPair>('diff_pair', { worktree, file }),
   openUrl: (url: string) => invoke<void>('open_url', { url }),

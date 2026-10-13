@@ -11,6 +11,7 @@
     tasks: 'Tasks',
     branches: 'Branches',
     prs: 'Pull requests',
+    settings: 'Settings',
   };
 
   const crumbs = $derived.by((): Crumb[] => {

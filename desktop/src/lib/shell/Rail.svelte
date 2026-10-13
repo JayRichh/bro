@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, focusQuickPrompt, revealRepo, toast, type ThemePref } from '../store.svelte';
+  import { app, focusQuickPrompt, openSettings, revealRepo, setThemePref, toast, type ThemePref } from '../store.svelte';
   import { api } from '../api';
   import { nav, type View } from './history.svelte';
   import { repoRows, tally } from '../overview/repos';
@@ -8,6 +8,7 @@
   /** Projects in the user's own order: the rail is a map, not a ranking. */
   const projects = $derived([...rows].sort((a, b) => a.project.sort_order - b.project.sort_order));
   const here = $derived(nav.current.repo);
+  const inSettings = $derived(nav.current.view === 'settings');
   let adding = $state(false);
   let addPath = $state('');
 
@@ -31,7 +32,7 @@
 
   function cycleTheme() {
     const order: ThemePref[] = ['system', 'light', 'dark'];
-    app.themePref = order[(order.indexOf(app.themePref) + 1) % order.length];
+    setThemePref(order[(order.indexOf(app.themePref) + 1) % order.length]);
   }
   const THEME_WORD: Record<ThemePref, string> = { system: 'System', light: 'Light', dark: 'Dark' };
 
@@ -137,6 +138,27 @@
   </nav>
 
   <div class="flex h-10 flex-none items-center border-t border-rule px-2">
+    <button
+      class="inline-flex h-7 items-center gap-2 border-0 px-2 text-[13px] hover:bg-surface hover:text-ink {inSettings
+        ? 'bg-surface text-ink'
+        : 'bg-transparent text-muted'}"
+      onclick={() => openSettings()}
+      title="Settings (Ctrl+,)"
+      aria-current={inSettings ? 'page' : undefined}
+    >
+      <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+        <path
+          d="M6.7 1.5h2.6l.4 1.9 1.3.6 1.7-1 1.8 1.8-1 1.7.6 1.3 1.9.4v2.6l-1.9.4-.6 1.3 1 1.7-1.8 1.8-1.7-1-1.3.6-.4 1.9H6.7l-.4-1.9-1.3-.6-1.7 1-1.8-1.8 1-1.7-.6-1.3-1.9-.4V6.7l1.9-.4.6-1.3-1-1.7 1.8-1.8 1.7 1 1.3-.6z"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.2"
+          stroke-linejoin="miter"
+        />
+        <rect x="6" y="6" width="4" height="4" fill="none" stroke="currentColor" stroke-width="1.2" />
+      </svg>
+      Settings
+    </button>
+    <span class="flex-1"></span>
     <button
       class="inline-flex h-7 items-center gap-2 border-0 bg-transparent px-2 text-[13px] text-muted hover:bg-surface hover:text-ink"
       onclick={cycleTheme}

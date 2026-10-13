@@ -4,7 +4,7 @@
 // the view as it was left. View state is also saved to ado.json, after a
 // pause, through whatever saver the app installs.
 
-export type View = 'overview' | 'board' | 'session' | 'diff' | 'tasks' | 'branches' | 'prs';
+export type View = 'overview' | 'board' | 'session' | 'diff' | 'tasks' | 'branches' | 'prs' | 'settings';
 export type Place = { view: View; repo?: string; item?: string };
 export type UiState = Record<string, unknown>;
 export type Saver = (view: string, repo: string, state: UiState) => void;
