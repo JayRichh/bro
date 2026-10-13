@@ -61,7 +61,10 @@ fn restarted_note(sessions: usize) -> String {
 
 pub fn run_upgrade(force: bool) -> Result<()> {
     if cfg!(windows) {
-        bail!("`kete upgrade` is not supported on Windows yet");
+        bail!(
+            "`kete upgrade` is not supported on Windows yet. To update, run the installer \
+             again: irm https://raw.githubusercontent.com/JayRichh/kete/main/install.ps1 | iex"
+        );
     }
     let url = install_url();
     // The runtime dir is already the 0700 auth boundary; staging the script

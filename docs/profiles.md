@@ -8,7 +8,7 @@ account's config dir and nothing else, so two subscriptions of one harness run s
 
 Each profile is an entry in `config.json`'s `profiles` list. Unless it adopts the CLI's existing
 login (`use_default`), it owns a PROFILE HOME under `<data dir>/profiles/<name>/`
-(`%LOCALAPPDATA%\bro\data\profiles\<name>\` on Windows) holding the harness's config:
+(`%LOCALAPPDATA%\kete\data\profiles\<name>\` on Windows) holding the harness's config:
 
 | Harness | Dir in the home | Variable set on its sessions |
 |---|---|---|

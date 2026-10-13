@@ -102,7 +102,7 @@ gated tool's `PostToolUse`, and its `question` tool's `question.asked` / `questi
 waits on you (one raised from a subagent session included), and green when the turn ends, an aborted
 one included. Copilot loads every hook file in its home's `hooks/` dir (`~/.copilot/hooks/`, or
 `$COPILOT_HOME/hooks/`) at startup, whatever you answer to its folder-trust dialog, so kete writes one
-managed file there, `bro.json`, inert outside kete: Copilot's `sessionStart`, `userPromptSubmitted`,
+managed file there, `kete.json` (replacing the `bro.json` an older build wrote), inert outside kete: Copilot's `sessionStart`, `userPromptSubmitted`,
 `agentStop`, `permissionRequest` and `postToolUse` arrive as `SessionStart`, `UserPromptSubmit`,
 `Stop`, `PermissionRequest` and `PostToolUse`, so a Copilot row goes yellow, red while a tool waits
 on your yes, and green when the turn ends. Copilot reads nothing back from its hooks, so a Copilot

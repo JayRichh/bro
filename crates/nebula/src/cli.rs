@@ -297,7 +297,7 @@ pub(crate) enum Command {
     },
     /// Manage PROFILES: several accounts per harness.
     ///
-    /// A profile is a named account for one harness, a second Claude
+    /// A profile is a named account for one harness: a second Claude
     /// subscription, another ChatGPT login for Codex. Sessions launched under
     /// it get its own config dir (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
     /// `COPILOT_HOME`) under `<data dir>/profiles/<name>/`, and inherited

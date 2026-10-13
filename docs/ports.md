@@ -22,6 +22,7 @@ environment:
 | `PORT` | `3010`, the block's first port |
 | `KETE_PORT` | `3010`, the same, under a name nothing else sets |
 | `KETE_PORT_1` … `KETE_PORT_9` | `3011` … `3019`, the rest of the block |
+| `BRO_PORT`, `BRO_PORT_1` … | the same again under Kete's old name, so a config written for Bro still works |
 
 Dev servers that read `PORT` (Next.js, Express, Remix, most of the Node world) bind there without
 being told. Vite does not read it; point it there in `vite.config.ts` with

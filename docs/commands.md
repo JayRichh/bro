@@ -140,17 +140,18 @@ See [Profiles](profiles.md).
 
 ```sh
 kete setup terminal           # install JetBrainsMono Nerd Font for this user (from the latest
-                                # nerd-fonts release, into %LOCALAPPDATA%\Microsoft\Windows\Fonts,
-                                # registered under HKCU) and add or update a "Kete" profile in
-                                # Windows Terminal's settings.json: this bro.exe, Kete's icon, the
-                                # font, a "One Dark" color scheme (one already there is kept)
+                              # nerd-fonts release, into %LOCALAPPDATA%\Microsoft\Windows\Fonts,
+                              # registered under HKCU) and add or update a "Kete" profile in
+                              # Windows Terminal's settings.json: this kete.exe, Kete's icon, the
+                              # font, a "One Dark" color scheme (one already there is kept)
 kete setup terminal --dry-run # say all of it and print the diff of settings.json; do nothing
 kete setup terminal --no-font # only the profile
 ```
 
-`settings.json` is backed up beside itself (`settings.json.bro-backup-<seconds>`) before it is
+`settings.json` is backed up beside itself (`settings.json.kete-backup-<seconds>`) before it is
 written, and the profile and scheme are spliced in: its comments, key order and layout stay. A second
-run finds them and writes nothing. On macOS and Linux it says how to set up a Nerd Font by hand. The
+run finds them and writes nothing. A "Bro" profile made by `bro setup terminal` is the same profile
+(Kete keeps its GUID), so it is renamed and pointed at `kete` rather than joined by a second one. On macOS and Linux it says how to set up a Nerd Font by hand. The
 font is what `nerd` [file icons](configuration.md) need.
 
 ## Other machines, other screens

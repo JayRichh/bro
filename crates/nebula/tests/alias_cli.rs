@@ -25,7 +25,10 @@ fn kete_and_bro_each_say_their_own_name() {
             root.contains(&format!("Usage: {name} ")),
             "{name} --help:\n{root}"
         );
-        assert!(!root.contains(".exe"), "no file extension in usage:\n{root}");
+        assert!(
+            !root.contains(".exe"),
+            "no file extension in usage:\n{root}"
+        );
         let sub = help(bin, &["rename", "--help"]);
         assert!(
             sub.contains(&format!("Usage: {name} rename")),

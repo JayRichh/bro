@@ -1,4 +1,4 @@
-# Kete — Windows port of nebula
+# Kete on Windows: the port of nebula
 
 Kete is a cross-platform fork of [nebula](https://github.com/AgentSystemLabs/nebula) (MIT) that runs natively on Windows 10 1809+ and Windows 11 (x64, ARM64). macOS and Linux keep building from the same tree. Binary: `kete`.
 
@@ -20,8 +20,8 @@ Kete is a cross-platform fork of [nebula](https://github.com/AgentSystemLabs/neb
 
 | Concern | Unix (upstream) | Windows |
 |---|---|---|
-| Runtime dir | `$XDG_RUNTIME_DIR/nebula`, `/tmp/nebula-<uid>` (0700) | `%LOCALAPPDATA%\bro\run` |
-| Daemon endpoint | unix socket `daemon.sock` | named pipe `\\.\pipe\bro-<user>-<hash(runtime_dir)>`, current-user DACL, `reject_remote_clients` |
+| Runtime dir | `$XDG_RUNTIME_DIR/nebula`, `/tmp/nebula-<uid>` (0700) | `%LOCALAPPDATA%\kete\run` |
+| Daemon endpoint | unix socket `daemon.sock` | named pipe `\\.\pipe\kete-<user>-<hash(runtime_dir)>`, current-user DACL, `reject_remote_clients` |
 | Daemon spawn | `setsid` via `pre_exec` | `CREATE_NEW_PROCESS_GROUP \| DETACHED_PROCESS \| CREATE_NO_WINDOW` |
 | Pidfile lock | `flock` | `std::fs::File::try_lock` (exclusive; it is the `LockFileEx` analogue) |
 | File identity | `ino()` | `file_index` via `GetFileInformationByHandle`, or skip the check |
@@ -30,7 +30,7 @@ Kete is a cross-platform fork of [nebula](https://github.com/AgentSystemLabs/neb
 | Kill a session tree | `killpg` | job object per session (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`), or `taskkill /T /F /PID` |
 | In-place restart (`handoff.rs`) | exec over self, fds kept | unsupported: the daemon stops and sessions resume by id |
 | Agent launch | `/bin/sh -c` login-shell wrapper | direct spawn: resolve via PATH + PATHEXT; `.cmd`/`.bat` through `cmd /d /s /c` with strict quoting; `.ps1` through `pwsh -NoProfile -File` (or `powershell`) |
-| User shell | `$SHELL` | `BRO_SHELL`, else pwsh 7, then `powershell.exe`, then `%COMSPEC%` |
+| User shell | `$SHELL` | `KETE_SHELL` (or `BRO_SHELL`), else pwsh 7, then `powershell.exe`, then `%COMSPEC%` |
 | Hooks | `curl … ${API_TOKEN}` shell strings | `kete _hook <event>` subcommand: token from env, payload from stdin |
 | `ssh` / `tunnel` / `browser` | supported | disabled on Windows at first (clear error) |
 
@@ -38,16 +38,24 @@ Kete is a cross-platform fork of [nebula](https://github.com/AgentSystemLabs/neb
 
 - **Profiles:** several accounts per harness. Each profile maps to env: `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GH_CONFIG_DIR`, `COPILOT_*`. A picker in the quick prompt chooses one, quota is shown per profile, and switch-and-resume is supported.
 - **Copilot:** as a harness.
-- **Kanban:** layout by status (Needs input / Running / Unseen / Done / PR).
-- **Diff:** side-by-side, inline and replacement modes; per-hunk accept/reject.
-- **Theme:** derived from the user's VS Code theme (One Dark by default), with dark/light awareness.
+- **Kanban:** sessions in lanes by status (Needs input, Running, Unseen, Done, PR open), on `Shift+K`.
+- **Diff:** side by side, inline and replacement layouts, word highlights, and per-change stage and discard.
+- **Themes:** One Dark and One Light, `auto` to follow the OS, or `vscode` to derive the palette from the VS Code theme.
 - **File icons:** Material Icon Theme mapping. Nerd Font glyphs in the TUI with an ASCII fallback; SVGs in the GUI.
 - **Localhost:**
   - ports per worktree, allocated by the daemon and handed to sessions and the WORKTREE HOOK (see [ports.md](ports.md))
   - open in Chrome, Edge or Firefox
   - headless screenshots
-- **Desktop GUI:** Tauri v2, a client of the daemon protocol over the named pipe.
-- **agent-office:** optional demo alongside.
+- **`kete setup terminal`:** JetBrainsMono Nerd Font and a Kete profile in Windows Terminal.
+- **Desktop GUI:** Tauri v2, a client of the daemon protocol over the named pipe: board, live sessions, read-only diff.
+
+## The name
+
+Kete was called Bro. `bro` is still installed beside `kete` as the same program, and the first
+`kete` run moves `%LOCALAPPDATA%\bro\data` and `\run` to `%LOCALAPPDATA%\kete` (unix: the old data,
+state and runtime dirs). It leaves them where they are while Bro's daemon still holds its lock, and
+uses them, and that daemon's pipe, until it stops. `.bro.json`, `BRO_PORT` and `BRO_SHELL` keep
+working.
 
 ## Upstream sync
 
