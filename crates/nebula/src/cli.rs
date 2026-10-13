@@ -385,6 +385,17 @@ pub(crate) enum Command {
         #[arg(long)]
         no_sync_config: bool,
     },
+    /// Set up the terminal Bro runs in.
+    ///
+    /// `bro setup terminal` installs JetBrainsMono Nerd Font for this user
+    /// (the FILE ICONS' glyphs need a Nerd Font) and adds a "Bro" profile
+    /// to Windows Terminal: `bro` as its command line, that font, a One Dark
+    /// color scheme. The settings file is backed up first.
+    #[command(after_help = SETUP_EXAMPLES)]
+    Setup {
+        #[command(subcommand)]
+        command: SetupCommand,
+    },
     /// Install the latest published bro over this one.
     ///
     /// Runs the install script for the newest release, then moves a running
@@ -643,6 +654,32 @@ pub(crate) enum ProfileCommand {
         /// Extra arguments for the harness's sign-in.
         #[arg(last = true, value_name = "ARGS")]
         args: Vec<String>,
+    },
+}
+
+const SETUP_EXAMPLES: &str = "\
+Examples:
+  bro setup terminal --dry-run  say what it would do, and the diff, do nothing
+  bro setup terminal            install the font, add the profile
+  bro setup terminal --no-font  only the profile";
+
+#[derive(Subcommand)]
+pub(crate) enum SetupCommand {
+    /// Install JetBrainsMono Nerd Font (per user) and add a "Bro" profile
+    /// to Windows Terminal, backing its settings.json up first.
+    Terminal {
+        /// Say what would be downloaded, installed and written, and do none
+        /// of it.
+        #[arg(long)]
+        dry_run: bool,
+        /// Leave the font alone; only add the profile.
+        #[arg(long)]
+        no_font: bool,
+        /// The Windows Terminal settings.json to edit instead of the one
+        /// Windows Terminal reads — a copy, to try it on. Hidden: it is
+        /// for tests.
+        #[arg(long, value_name = "PATH", hide = true)]
+        wt_settings: Option<std::path::PathBuf>,
     },
 }
 

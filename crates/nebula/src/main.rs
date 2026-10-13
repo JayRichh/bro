@@ -2,13 +2,14 @@ mod browser;
 mod cli;
 mod hook;
 mod profile;
+mod setup;
 mod ssh;
 mod tunnel;
 mod upgrade;
 
 use anyhow::Result;
 use clap::Parser;
-use cli::{Cli, Command, ConfigCommand, OrchestratorCommand, ProfileCommand};
+use cli::{Cli, Command, ConfigCommand, OrchestratorCommand, ProfileCommand, SetupCommand};
 use std::path::Path;
 
 fn main() -> Result<()> {
@@ -144,6 +145,18 @@ fn main() -> Result<()> {
             port,
             remote_port,
             sync_config: !no_sync_config,
+        }),
+        Some(Command::Setup {
+            command:
+                SetupCommand::Terminal {
+                    dry_run,
+                    no_font,
+                    wt_settings,
+                },
+        }) => setup::run_terminal(setup::Options {
+            dry_run,
+            no_font,
+            wt_settings,
         }),
         Some(Command::Upgrade { force }) => upgrade::run_upgrade(force),
         Some(Command::StaleDaemonNote) => {

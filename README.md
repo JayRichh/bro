@@ -130,6 +130,22 @@ a session is listening on show on its worktree's band as `:3010 ●`. `w` opens 
 Firefox or the default browser, and `Shift+W` takes a headless screenshot of it. See
 [Localhost ports](docs/ports.md).
 
+## File icons and Windows Terminal
+
+The tree browser, the file finder, the diff viewer's file list and the file tabs mark each file with
+its type's icon, in Material Icon Theme's colors. They are Nerd Font glyphs, so the terminal needs a
+Nerd Font; without one Bro draws a two-letter tag in the same color instead.
+
+```powershell
+bro setup terminal --dry-run   # what it would do, and the diff of settings.json
+bro setup terminal             # install JetBrainsMono Nerd Font, add a "Bro" profile
+```
+
+It installs the font for your user only (no admin), and adds a **Bro** profile to Windows Terminal
+that runs `bro` with Bro's icon, that font and a One Dark color scheme. It backs `settings.json` up
+first and keeps its comments. Run it again and it changes nothing. `icons` in Settings → Appearance
+picks `nerd`, `ascii` or `off` by hand.
+
 ## Where things live
 
 | | Windows | macOS | Linux |
@@ -146,7 +162,6 @@ These are planned and not in Bro yet:
 
 - **Kanban:** sessions laid out by status.
 - **A VS Code-grade diff:** side-by-side, inline and replacement modes, with per-hunk accept and reject.
-- **Theme and file icons:** follows your VS Code theme, light or dark, with Material-style file icons.
 - **A desktop GUI:** a Tauri window over the same daemon.
 
 ## Building
@@ -165,3 +180,10 @@ again after a rebase.
 Bro is a fork of nebula by AgentSystemLabs.
 nebula is © Cody Seibert and released under the MIT license; Bro keeps that license and notice. See
 [LICENSE](LICENSE).
+
+The file icons' associations and colors come from
+[Material Icon Theme](https://github.com/material-extensions/vscode-material-icon-theme) by Philipp
+Kief (MIT), and their glyphs from [Nerd Fonts](https://www.nerdfonts.com) (MIT), vendored by
+`scripts/icons/gen-icons.mjs` with Material Icon Theme's license notice in the generated
+`icons_table.rs`. `bro setup terminal` downloads JetBrainsMono Nerd Font (SIL Open Font License
+1.1) from the Nerd Fonts release; Bro does not ship it.

@@ -24,6 +24,7 @@ bro read <session>       read recent context from another session    (agents run
 bro ask <session> <q>    ask another session and print its answer    (agents run this)
 bro config <cmd>         back up, restore or locate this machine's settings
 bro profile <cmd>        several accounts per harness: add, sign in, list, remove
+bro setup terminal       install a Nerd Font and add a "Bro" Windows Terminal profile
 bro browser              serve this TUI in a web browser via ttyd
 bro ssh <host>           open bro on a remote host over ssh
 bro tunnel <host>        open a remote host's bro in a tab here
@@ -130,6 +131,23 @@ bro profile remove <name> [--purge]
 ```
 
 See [Profiles](profiles.md).
+
+## Windows Terminal
+
+```sh
+bro setup terminal           # install JetBrainsMono Nerd Font for this user (from the latest
+                                # nerd-fonts release, into %LOCALAPPDATA%\Microsoft\Windows\Fonts,
+                                # registered under HKCU) and add or update a "Bro" profile in
+                                # Windows Terminal's settings.json: this bro.exe, Bro's icon, the
+                                # font, a "One Dark" color scheme (one already there is kept)
+bro setup terminal --dry-run # say all of it and print the diff of settings.json; do nothing
+bro setup terminal --no-font # only the profile
+```
+
+`settings.json` is backed up beside itself (`settings.json.bro-backup-<seconds>`) before it is
+written, and the profile and scheme are spliced in: its comments, key order and layout stay. A second
+run finds them and writes nothing. On macOS and Linux it says how to set up a Nerd Font by hand. The
+font is what `nerd` [file icons](configuration.md) need.
 
 ## Other machines, other screens
 
