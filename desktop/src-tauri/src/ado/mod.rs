@@ -12,6 +12,7 @@ pub mod prs;
 pub mod remote;
 pub mod store;
 pub mod tasks;
+pub mod ui;
 
 use auth::TokenSource;
 use client::{AdoClient, AdoError};

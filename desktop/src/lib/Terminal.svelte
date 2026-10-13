@@ -7,7 +7,7 @@
   import { WebLinksAddon } from '@xterm/addon-web-links';
   import '@xterm/xterm/css/xterm.css';
   import { api, Channel, decodeB64, type PtyEvent, type SessionRef } from './api';
-  import { monoFamily, xtermTheme } from './theme';
+  import { termFamily, xtermTheme } from './theme';
   import { app, sessionKey } from './store.svelte';
 
   let { session, dark }: { session: SessionRef; dark: boolean } = $props();
@@ -89,11 +89,11 @@
 
   onMount(async () => {
     await Promise.all([
-      document.fonts.load('13px ' + monoFamily()),
-      document.fonts.load('bold 13px ' + monoFamily()),
+      document.fonts.load('13px ' + termFamily()),
+      document.fonts.load('bold 13px ' + termFamily()),
     ]).catch(() => {});
     term = new Terminal({
-      fontFamily: monoFamily(),
+      fontFamily: termFamily(),
       fontSize: 13,
       lineHeight: 1.12,
       letterSpacing: 0,
@@ -195,13 +195,13 @@
 <div class="relative h-full min-h-0 bg-term-bg">
   <div class="absolute inset-[8px_4px_4px_12px] [&_.xterm]:h-full [&_.xterm-viewport]:bg-transparent!" bind:this={host}></div>
   {#if phase === 'booting'}
-    <div class="absolute top-3.5 right-[18px] flex items-center gap-2 text-[11.5px] text-muted">
-      <span class="size-[7px] animate-pulse rounded-full bg-st-running"></span>Attaching&hellip;
+    <div class="absolute top-3.5 right-[18px] flex items-center gap-2 font-mono text-[12px] text-muted">
+      <span class="size-1.5 bg-running"></span>Attaching&hellip;
     </div>
   {:else if phase === 'exited' || phase === 'refused'}
     <div
-      class="absolute bottom-4 left-1/2 max-w-[80%] -translate-x-1/2 rounded-md border bg-raised px-3 py-1.5 text-xs shadow-pop
-        {phase === 'refused' ? 'border-red text-red' : 'border-line text-fg'}"
+      class="absolute bottom-4 left-1/2 max-w-[80%] -translate-x-1/2 border bg-surface px-3 py-1.5 text-[13px]
+        {phase === 'refused' ? 'border-fail text-fail' : 'border-rule text-ink'}"
     >
       {note}
     </div>

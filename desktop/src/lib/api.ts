@@ -47,6 +47,21 @@ export interface Agent {
   recent_prompts: PromptEntry[];
   role: string;
   sort_order: number;
+  /** The session that started this one with `kete spawn`; null for a root. */
+  parent: string | null;
+}
+/** A Claude in-session subagent, hung off the session it runs inside. */
+export interface Subagent {
+  /** Unique within its parent session only. */
+  id: string;
+  parent_agent: string;
+  /** `general-purpose`, `Explore`, a custom agent; empty when unknown. */
+  kind: string;
+  /** The task the parent gave it; empty when unknown. */
+  description: string;
+  started_at: number;
+  ended_at: number | null;
+  status: 'running' | 'done' | 'failed' | 'ended_unknown';
 }
 export interface TerminalTab {
   id: string;
@@ -79,6 +94,7 @@ export interface Model {
   terminals: TerminalTab[];
   ports: WorktreePorts[];
   prs: Record<string, PrInfo>;
+  subagents: Subagent[];
 }
 
 /** `SessionRef` exactly as serde spells it: externally tagged. */

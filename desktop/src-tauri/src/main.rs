@@ -694,6 +694,9 @@ fn main() {
             ado::tasks::ado_set_team,
             ado::tasks::ado_task_prompt,
             ado::tasks::ado_start_task,
+            // Workshop shell (Task 13)
+            ado::ui::ado_context,
+            ado::ui::ado_save_ui,
         ])
         .run(tauri::generate_context!())
         .expect("kete-desktop failed to start");

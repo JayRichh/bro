@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import tailwindcss from '@tailwindcss/vite';
@@ -11,7 +12,7 @@ export default defineConfig({
   clearScreen: false,
   resolve: {
     alias: {
-      'monaco-esm': path.resolve(__dirname, 'node_modules/monaco-editor/esm/vs'),
+      'monaco-esm': path.resolve(import.meta.dirname, 'node_modules/monaco-editor/esm/vs'),
     },
   },
   server: {
@@ -24,4 +25,5 @@ export default defineConfig({
     chunkSizeWarningLimit: 6000,
   },
   worker: { format: 'es' },
+  test: { include: ['src/**/*.test.ts'], environment: 'node' },
 });

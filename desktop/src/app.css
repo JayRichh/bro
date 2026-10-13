@@ -4,46 +4,59 @@
 
 @layer base {
   :root {
-    color-scheme: dark;
+    color-scheme: light;
   }
 
   html,
   body,
   #app {
-    @apply h-full m-0;
+    @apply m-0 h-full;
   }
 
   body {
-    @apply bg-bg text-fg font-ui overflow-hidden select-none antialiased;
-    font-size: 13px;
-    line-height: 1.4;
+    @apply overflow-hidden bg-bg font-ui text-ink antialiased select-none;
+    font-size: 14px;
+    line-height: 1.45;
   }
 
   button,
   select {
     cursor: default;
+    font: inherit;
+    color: inherit;
   }
 
   input,
-  textarea {
-    @apply select-text caret-focus;
+  textarea,
+  select {
+    @apply select-text caret-ember;
+    border-radius: 0;
   }
 
   ::selection {
-    @apply bg-focus/35 text-fg-strong;
+    @apply bg-selection text-ink;
   }
 
   :focus-visible {
-    @apply outline-2 outline-offset-1 outline-focus;
+    @apply outline-2 -outline-offset-2 outline-rule-strong;
+  }
+
+  ::placeholder {
+    @apply text-muted;
+  }
+
+  /* Counts, ports and ages line up. */
+  .font-mono {
+    font-variant-numeric: tabular-nums;
   }
 
   ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 9px;
+    height: 9px;
   }
   ::-webkit-scrollbar-thumb {
-    @apply rounded-md bg-muted/35 hover:bg-muted/55;
-    border: 3px solid transparent;
+    @apply bg-rule hover:bg-faint;
+    border: 2px solid transparent;
     background-clip: padding-box;
   }
   ::-webkit-scrollbar-corner,
@@ -52,7 +65,7 @@
   }
 
   kbd {
-    @apply font-mono text-[10.5px] px-[5px] py-px rounded border border-b-2 border-line text-muted bg-sunk;
+    @apply border border-rule bg-surface px-1 font-mono text-[11px] leading-4 text-muted;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -60,7 +73,23 @@
     *::before,
     *::after {
       animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
     }
+    /* The running line holds still, full width. */
+    .run-seg {
+      animation: none !important;
+      width: 100% !important;
+    }
+  }
+}
+
+/* The one moving thing: a 1px segment travelling under a running name. */
+@keyframes kete-run {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
   }
 }

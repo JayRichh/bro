@@ -1,10 +1,11 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { app, sessionWorktree, toast } from './store.svelte';
+  import { nav } from './shell/history.svelte';
   import { api, type DiffFile } from './api';
   import { fileIcon, languageOf } from './icons';
   import { placeOf } from './status';
-  import { defineMonacoTheme, monoFamily } from './theme';
+  import { defineMonacoTheme, termFamily } from './theme';
   import type * as Monaco from 'monaco-esm/editor/editor.api.js';
 
   let monaco: typeof Monaco | null = null;
@@ -82,7 +83,7 @@
   }
 
   function onKey(e: KeyboardEvent) {
-    if (app.view !== 'diff' || app.quickPrompt) return;
+    if (nav.current.view !== 'diff') return;
     const t = e.target as HTMLElement;
     if (t.closest('input, textarea, select, .monaco-editor')) return;
     if (e.ctrlKey || e.altKey || e.metaKey) return;
@@ -94,7 +95,7 @@
   }
 
   onMount(async () => {
-    await document.fonts.load('12px ' + monoFamily()).catch(() => {});
+    await document.fonts.load('12px ' + termFamily()).catch(() => {});
     monaco = (await import('./monaco')).monaco;
     editor = monaco.editor.createDiffEditor(host, {
       theme: 'vs-dark',
@@ -103,7 +104,7 @@
       automaticLayout: true,
       renderSideBySide: app.diffMode === 'side',
       useInlineViewWhenSpaceIsLimited: false,
-      fontFamily: monoFamily(),
+      fontFamily: termFamily(),
       fontSize: 12.5,
       lineHeight: 19,
       fontLigatures: false,
@@ -162,9 +163,9 @@
 <svelte:window onkeydown={onKey} />
 
 <div class="flex h-full min-h-0 flex-col">
-  <div class="flex h-9 min-w-0 flex-none items-center gap-2.5 border-b border-line-soft pr-2 pl-2.5 text-xs">
+  <div class="flex h-10 min-w-0 flex-none items-center gap-3 border-b border-rule pr-2 pl-3 text-[13px]">
     <select
-      class="max-w-[260px] rounded-[5px] border border-line bg-raised px-1.5 py-0.5 font-mono text-[11.5px]"
+      class="h-7 max-w-[260px] border border-rule bg-bg px-1.5 font-mono text-[12px] text-ink"
       aria-label="Worktree"
       value={worktree ?? ''}
       onchange={(e) => (app.diffWorktree = (e.target as HTMLSelectElement).value)}
@@ -174,28 +175,28 @@
       {/each}
     </select>
     {#if files.length}
-      <span class="font-mono text-[11px] whitespace-nowrap text-muted tabular-nums"
+      <span class="font-mono text-[12px] whitespace-nowrap text-muted"
         >{files.length} {files.length === 1 ? 'file' : 'files'}
         <span class="text-git-added">+{totals.add}</span> <span class="text-git-deleted">&minus;{totals.del}</span></span
       >
     {/if}
     <span class="flex-1"></span>
     {#if current}
-      <span class="min-w-0 truncate font-mono text-[11px] text-muted [direction:rtl]" title={current.path}>{current.path}</span>
+      <span class="min-w-0 truncate font-mono text-[12px] text-muted [direction:rtl]" title={current.path}>{current.path}</span>
     {/if}
-    <div class="flex flex-none overflow-hidden rounded-md border border-line" role="radiogroup" aria-label="Diff layout">
+    <div class="flex h-7 flex-none border border-rule" role="radiogroup" aria-label="Diff layout">
       {#each [{ id: 'side', label: 'Side by side', key: 'S' }, { id: 'inline', label: 'Inline', key: 'I' }] as m, i (m.id)}
         {@const on = app.diffMode === m.id}
         <button
           role="radio"
           aria-checked={on}
-          class="inline-flex items-center gap-[5px] border-0 px-[9px] py-[3px] text-[11.5px]
-            {i ? 'border-l border-line' : ''} {on ? 'bg-active text-fg-strong' : 'bg-transparent text-muted'}"
+          class="inline-flex items-center gap-1.5 border-0 px-2 text-[12px]
+            {i ? 'border-l border-rule' : ''} {on ? 'bg-ink text-bg' : 'bg-transparent text-muted hover:text-ink'}"
           onclick={() => (app.diffMode = m.id as 'side' | 'inline')}
           title="{m.label} ({m.key})"
         >
           <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"
-            ><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3" /><path
+            ><rect x="1.5" y="2.5" width="13" height="11" fill="none" stroke="currentColor" stroke-width="1.3" /><path
               d={m.id === 'side' ? 'M8 2.5v11' : 'M4 6.5h8M4 9.5h8'}
               stroke="currentColor"
               stroke-width="1.3"
@@ -206,7 +207,7 @@
       {/each}
     </div>
     <button
-      class="grid size-6 place-items-center rounded-[5px] border-0 bg-transparent text-muted hover:bg-hover hover:text-fg-strong"
+      class="grid size-7 place-items-center border-0 bg-transparent text-muted hover:bg-surface hover:text-ink"
       onclick={() => load(worktree)}
       title="Refresh (R)"
       aria-label="Refresh"
@@ -217,45 +218,45 @@
     </button>
   </div>
   <div class="grid min-h-0 flex-1 grid-cols-[272px_1fr]">
-    <ul class="m-0 list-none overflow-y-auto border-r border-line-soft bg-side p-1.5" aria-label="Changed files">
+    <ul class="m-0 list-none overflow-y-auto border-r border-rule bg-bg p-0" aria-label="Changed files">
       {#each files as f (f.path)}
         {@const p = split(f.path)}
         {@const cur = current?.path === f.path}
         <li>
           <button
             data-file-cur={cur || undefined}
-            class="flex min-h-6 w-full items-center gap-[7px] rounded-[5px] border-0 px-1.5 py-[3px] text-left text-[12.5px]
-              focus-visible:-outline-offset-2 {cur ? 'bg-active' : 'bg-transparent hover:bg-hover'}"
+            class="flex min-h-7 w-full items-center gap-2 border-0 border-b border-rule px-3 py-1 text-left text-[13px]
+              focus-visible:-outline-offset-2 {cur ? 'bg-raised' : 'bg-transparent hover:bg-surface'}"
             onclick={() => show(f)}
             title={f.from ? `${f.from} -> ${f.path}` : f.path}
           >
             <img class="flex-none" src={fileIcon(f.path, app.dark)} alt="" width="16" height="16" draggable="false" />
             <span class="min-w-0 truncate"
-              ><span class={f.status === 'D' ? 'text-muted line-through decoration-git-deleted' : 'text-fg-strong'}>{p.base}</span><span
-                class="ml-1.5 text-[11px] text-faint">{p.dir}</span
+              ><span class={f.status === 'D' ? 'text-muted line-through decoration-git-deleted' : 'text-ink'}>{p.base}</span><span
+                class="ml-1.5 text-[12px] text-muted">{p.dir}</span
               ></span
             >
-            <span class="ml-auto flex flex-none gap-1 font-mono text-[10.5px] tabular-nums">
+            <span class="ml-auto flex flex-none gap-1 font-mono text-[12px]">
               {#if f.added}<span class="text-git-added">+{f.added}</span>{/if}
               {#if f.removed}<span class="text-git-deleted">&minus;{f.removed}</span>{/if}
             </span>
-            <span class="w-3 flex-none text-center font-mono text-[11px] font-bold {STATUS_COLOR[f.status]}" title={STATUS_WORD[f.status]}
+            <span class="w-3 flex-none text-center font-mono text-[12px] font-bold {STATUS_COLOR[f.status]}" title={STATUS_WORD[f.status]}
               >{f.status}</span
             >
           </button>
         </li>
       {/each}
       {#if !files.length && !loading}
-        <li class="px-2.5 py-3.5 text-xs text-muted">
-          {#if error}<span class="text-red">{error}</span>{:else if worktree}Working tree clean. Nothing to diff against HEAD.{:else}No worktree to diff.{/if}
+        <li class="px-3 py-3 text-[13px] text-muted">
+          {#if error}<span class="text-fail">{error}</span>{:else if worktree}Working tree clean. Nothing to diff against HEAD.{:else}No worktree to diff.{/if}
         </li>
       {/if}
     </ul>
     <div class="relative min-h-0 min-w-0">
       <div class="absolute inset-0" bind:this={host}></div>
-      {#if note}<div class="absolute inset-0 grid place-items-center bg-bg text-[12.5px] text-muted">{note}</div>{/if}
+      {#if note}<div class="absolute inset-0 grid place-items-center bg-bg text-[13px] text-muted">{note}</div>{/if}
       {#if !current && !loading}
-        <div class="absolute inset-0 grid place-items-center bg-bg text-[12.5px] text-muted">{where ? `${where.project} / ${where.branch}` : ''}</div>
+        <div class="absolute inset-0 grid place-items-center bg-bg text-[13px] text-muted">{where ? `${where.project} / ${where.branch}` : ''}</div>
       {/if}
     </div>
   </div>

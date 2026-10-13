@@ -6,11 +6,13 @@
 import type { ITheme } from '@xterm/xterm';
 
 let probe: CanvasRenderingContext2D | null = null;
+const BLACK = 'rgb(0 0 0)';
+const WHITE = 'rgb(255 255 255)';
 
 /** A theme token as `#rrggbb` or `#rrggbbaa`, whatever syntax theme.css used. */
 export function token(name: string): string {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(`--${name}`).trim();
-  if (!raw) return '#000000';
+  if (!raw) return BLACK;
   probe ??= Object.assign(document.createElement('canvas'), { width: 1, height: 1 }).getContext('2d', {
     willReadFrequently: true,
   });
@@ -20,13 +22,13 @@ export function token(name: string): string {
   const over = (base: string) => {
     probe!.fillStyle = base;
     probe!.fillRect(0, 0, 1, 1);
-    probe!.fillStyle = '#000';
+    probe!.fillStyle = BLACK;
     probe!.fillStyle = raw;
     probe!.fillRect(0, 0, 1, 1);
     return probe!.getImageData(0, 0, 1, 1).data;
   };
-  const k = over('#000');
-  const w = over('#fff');
+  const k = over(BLACK);
+  const w = over(WHITE);
   const alpha = 1 - (w[0] - k[0]) / 255;
   const ch = (i: number) => (alpha > 0 ? Math.round(k[i] / alpha) : 0);
   const hex = (n: number) => Math.max(0, Math.min(255, n)).toString(16).padStart(2, '0');
@@ -34,9 +36,9 @@ export function token(name: string): string {
   return `#${hex(ch(0))}${hex(ch(1))}${hex(ch(2))}${a >= 255 ? '' : hex(a)}`;
 }
 
-/** The first family of --font-mono, for the libraries that take one. */
-export function monoFamily(): string {
-  return getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim();
+/** The terminal font stack (--font-term), for the libraries that take one. */
+export function termFamily(): string {
+  return getComputedStyle(document.documentElement).getPropertyValue('--font-term').trim();
 }
 
 export function xtermTheme(): ITheme {
@@ -83,8 +85,8 @@ export function defineMonacoTheme(
       { token: 'number', foreground: fgOf('syn-number') },
       { token: 'type', foreground: fgOf('syn-type') },
       { token: 'type.identifier', foreground: fgOf('syn-type') },
-      { token: 'identifier', foreground: fgOf('fg') },
-      { token: 'delimiter', foreground: fgOf('fg') },
+      { token: 'identifier', foreground: fgOf('ink') },
+      { token: 'delimiter', foreground: fgOf('ink') },
       { token: 'tag', foreground: fgOf('syn-tag') },
       { token: 'attribute.name', foreground: fgOf('syn-attr') },
       { token: 'attribute.value', foreground: fgOf('syn-string') },
@@ -94,9 +96,9 @@ export function defineMonacoTheme(
     ],
     colors: {
       'editor.background': c('bg'),
-      'editor.foreground': c('fg'),
+      'editor.foreground': c('ink'),
       'editorLineNumber.foreground': c('editor-gutter'),
-      'editorLineNumber.activeForeground': c('fg'),
+      'editorLineNumber.activeForeground': c('ink'),
       'editor.selectionBackground': c('term-selection'),
       'editor.lineHighlightBackground': c('editor-line'),
       'editorGutter.background': c('bg'),
@@ -106,11 +108,11 @@ export function defineMonacoTheme(
       'diffEditor.removedLineBackground': c('diff-remove-line'),
       'diffEditorGutter.insertedLineBackground': c('diff-insert'),
       'diffEditorGutter.removedLineBackground': c('diff-remove'),
-      'diffEditor.diagonalFill': c('line'),
-      'scrollbarSlider.background': c('line'),
+      'diffEditor.diagonalFill': c('rule'),
+      'scrollbarSlider.background': c('rule'),
       'scrollbarSlider.hoverBackground': c('faint'),
-      'editorOverviewRuler.border': '#00000000',
-      focusBorder: '#00000000',
+      'editorOverviewRuler.border': c('none'),
+      focusBorder: c('none'),
     },
   });
   monaco.editor.setTheme('kete');

@@ -2,20 +2,30 @@
 // words. Lane rules mirror the TUI's (`launcher::lane_of`): the most urgent
 // that applies, an open pull request only once nothing else needs you.
 
-import type { Agent, Model, PrInfo, TerminalTab } from './api';
+import type { Agent, Model, PrInfo, Subagent, TerminalTab } from './api';
 
 export type Lane = 'needs' | 'running' | 'unseen' | 'done' | 'pr';
 
+/** A session's state on screen: a square plus a word, never colour alone. */
+export type Tone =
+  | 'needs'
+  | 'failed'
+  | 'unread'
+  | 'running'
+  | 'done'
+  | 'merged'
+  | 'pr'
+  | 'idle'
+  | 'stopped'
+  | 'shell';
+
 export const LANES: { id: Lane; title: string; tone: Tone }[] = [
-  { id: 'needs', title: 'Needs input', tone: 'needs' },
+  { id: 'needs', title: 'Needs you', tone: 'needs' },
   { id: 'running', title: 'Running', tone: 'running' },
-  { id: 'unseen', title: 'Unseen', tone: 'unseen' },
+  { id: 'unseen', title: 'Unread', tone: 'unread' },
   { id: 'done', title: 'Done', tone: 'done' },
   { id: 'pr', title: 'PR open', tone: 'pr' },
 ];
-
-/** The dot: colour plus glyph, so state never rests on colour alone. */
-export type Tone = 'needs' | 'running' | 'unseen' | 'done' | 'idle' | 'dead' | 'pr' | 'shell';
 
 export function laneOf(a: Agent, pr: PrInfo | undefined): Lane {
   if (a.status === 'needs_feedback') return 'needs';
@@ -32,28 +42,43 @@ export function toneOf(a: Agent): Tone {
     case 'running':
       return 'running';
     case 'finished':
-      return a.unseen ? 'unseen' : 'done';
+      return a.unseen ? 'unread' : 'done';
     case 'terminated':
     case 'disconnected':
-      return 'dead';
+      return a.unseen ? 'unread' : 'stopped';
     default:
       return 'idle';
   }
 }
 
+export function subagentTone(s: Subagent): Tone {
+  switch (s.status) {
+    case 'running':
+      return 'running';
+    case 'done':
+      return 'done';
+    case 'failed':
+      return 'failed';
+    default:
+      return 'stopped';
+  }
+}
+
 export function terminalTone(t: TerminalTab): Tone {
-  return t.alive ? 'shell' : 'dead';
+  return t.alive ? 'shell' : 'stopped';
 }
 
 export const TONE_LABEL: Record<Tone, string> = {
-  needs: 'Needs input',
-  running: 'Running',
-  unseen: 'Done, unread',
-  done: 'Done',
-  idle: 'Idle',
-  dead: 'Stopped',
+  needs: 'needs you',
+  failed: 'failed',
+  unread: 'unread',
+  running: 'running',
+  done: 'done',
+  merged: 'merged',
   pr: 'PR open',
-  shell: 'Shell running',
+  idle: 'idle',
+  stopped: 'stopped',
+  shell: 'shell',
 };
 
 const HARNESS: Record<string, string> = {

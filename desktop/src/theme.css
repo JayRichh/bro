@@ -1,212 +1,290 @@
 /*
- * kete-desktop's theme: every colour and font the window uses, in one file.
+ * kete-desktop's theme: the Workshop palette. Every colour and font the
+ * window uses lives in this file, nowhere else.
  *
- * - Tailwind v4 turns each `--color-*` / `--font-*` / `--shadow-*` token into
- *   utilities (`bg-raised`, `text-muted`, `border-line`, `font-mono`, ...).
- *   Components use only those utilities, never a literal colour.
- * - Dark is the default block; `html[data-theme='light']` overrides it. The
- *   app sets `data-theme` from the OS (prefers-color-scheme) or the user's
- *   override (Ctrl+Shift+L, `--theme`).
+ * - Tailwind v4 turns each `--color-*` / `--font-*` token into utilities
+ *   (`bg-bg`, `text-ink`, `border-rule`, `text-ember-ink`, `font-mono`).
+ *   Tailwind's own palette, radii and shadows are switched off: components
+ *   use these tokens only. Zero radius, 1px rules, no shadows.
+ * - Light is the base block. Dark is written twice, once for an explicit
+ *   `data-theme='dark'` and once for the OS default while the user picked
+ *   system; change both together. The app sets `data-theme` from the
+ *   user's choice (system, light, dark).
  * - The terminal (`--color-term-*`) and the diff editor (`--color-syn-*`,
- *   `--color-diff-*`) read these same variables at runtime, so swapping a
- *   value here re-themes them too. Any CSS colour syntax works.
+ *   `--color-diff-*`, `--color-editor-*`) read these same variables at
+ *   runtime through theme.ts. Write plain colours (hex or rgb()); the
+ *   runtime reader paints them onto a canvas, so no light-dark() or var().
  *
- * Current values: One Dark / One Light.
+ * Ember is the one accent and it means "needs you". Nothing else uses it.
  */
 
-@import '@fontsource-variable/inter/index.css';
 @import '@fontsource/jetbrains-mono/400.css';
-@import '@fontsource/jetbrains-mono/500.css';
 @import '@fontsource/jetbrains-mono/700.css';
 @import '@fontsource/jetbrains-mono/400-italic.css';
 
-@theme static {
-  --font-ui: 'Inter Variable', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
-  /* The terminal and diff editor take the first family of --font-mono. */
-
-  /* Surfaces */
-  --color-bg: #282c34;
-  --color-side: #21252b;
-  --color-raised: #2c313a;
-  --color-sunk: #1e2227;
-  --color-hover: #2a2f37;
-  --color-sel: #2c313a;
-  --color-active: #353b45;
-  --color-scrim: rgb(10 12 16 / 0.42);
-
-  /* Text */
-  --color-fg: #abb2bf;
-  --color-fg-strong: #d7dae0;
-  --color-muted: #7f848e;
-  --color-faint: #5c6370;
-
-  /* Lines and focus */
-  --color-line: #3a3f4b;
-  --color-line-soft: #2f343e;
-  --color-focus: #528bff;
-  --color-on-focus: #ffffff;
-
-  /* Accents */
-  --color-red: #e06c75;
-  --color-green: #98c379;
-  --color-yellow: #e5c07b;
-  --color-blue: #61afef;
-  --color-purple: #c678dd;
-  --color-cyan: #56b6c2;
-  --color-orange: #d19a66;
-  --color-on-accent: #1b1e23;
-
-  /* Session status: the dots, lane headers and alert cards */
-  --color-st-needs: #e06c75;
-  --color-st-running: #e5c07b;
-  --color-st-unseen: #61afef;
-  --color-st-done: #98c379;
-  --color-st-pr: #c678dd;
-  --color-st-shell: #56b6c2;
-  --color-st-idle: #5c6370;
-
-  /* Harness names on cards */
-  --color-h-claude: #d19a66;
-  --color-h-codex: #56b6c2;
-  --color-h-copilot: #c678dd;
-  --color-h-cursor: #61afef;
-
-  /* Diff file status letters and line counts */
-  --color-git-modified: #e5c07b;
-  --color-git-added: #98c379;
-  --color-git-deleted: #e06c75;
-  --color-git-renamed: #61afef;
-  --color-git-conflict: #c678dd;
-
-  /* Terminal (xterm.js) */
-  --color-term-bg: #282c34;
-  --color-term-fg: #abb2bf;
-  --color-term-cursor: #528bff;
-  --color-term-selection: #3e4451;
-  --color-term-black: #3f4451;
-  --color-term-red: #e06c75;
-  --color-term-green: #98c379;
-  --color-term-yellow: #d19a66;
-  --color-term-blue: #61afef;
-  --color-term-magenta: #c678dd;
-  --color-term-cyan: #56b6c2;
-  --color-term-white: #d7dae0;
-  --color-term-bright-black: #4f5666;
-  --color-term-bright-red: #ff616e;
-  --color-term-bright-green: #a5e075;
-  --color-term-bright-yellow: #e5c07b;
-  --color-term-bright-blue: #4dc4ff;
-  --color-term-bright-magenta: #de73ff;
-  --color-term-bright-cyan: #4cd1e0;
-  --color-term-bright-white: #e6e6e6;
-
-  /* Diff editor (Monaco) */
-  --color-syn-comment: #7f848e;
-  --color-syn-keyword: #c678dd;
-  --color-syn-string: #98c379;
-  --color-syn-number: #d19a66;
-  --color-syn-type: #e5c07b;
-  --color-syn-tag: #e06c75;
-  --color-syn-attr: #d19a66;
-  --color-syn-function: #61afef;
-  --color-syn-regexp: #56b6c2;
-  --color-editor-gutter: #495162;
-  --color-editor-line: #2c313c;
-  --color-diff-insert: rgb(152 195 121 / 0.15);
-  --color-diff-insert-line: rgb(152 195 121 / 0.08);
-  --color-diff-remove: rgb(224 108 117 / 0.15);
-  --color-diff-remove-line: rgb(224 108 117 / 0.08);
-
-  --shadow-pop: 0 8px 28px rgb(0 0 0 / 0.45), 0 1px 3px rgb(0 0 0 / 0.3);
+@font-face {
+  font-family: 'Geist';
+  src: url('../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('../node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
 }
 
-html[data-theme='light'] {
-  color-scheme: light;
+@theme static {
+  --color-*: initial;
+  --radius-*: initial;
+  --shadow-*: initial;
+  --inset-shadow-*: initial;
+  --drop-shadow-*: initial;
 
-  --color-bg: #fafafa;
-  --color-side: #eaeaeb;
-  --color-raised: #ffffff;
-  --color-sunk: #f0f0f1;
-  --color-hover: #efeff0;
-  --color-sel: #e5e5e6;
-  --color-active: #dcdcde;
-  --color-scrim: rgb(40 44 52 / 0.18);
+  --font-ui: 'Geist', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  /* Paths, ports, branches, counts. */
+  --font-mono: 'Geist Mono', ui-monospace, Consolas, monospace;
+  /* Inside terminals and the diff editor (their first family is used). */
+  --font-term: 'JetBrains Mono', ui-monospace, Consolas, monospace;
 
-  --color-fg: #383a42;
-  --color-fg-strong: #202227;
-  --color-muted: #696c77;
-  --color-faint: #8e9099;
+  /* Surfaces */
+  --color-bg: #F4EFE6;
+  --color-surface: #EDE6DA;
+  --color-raised: #E4DBCC;
 
-  --color-line: #d3d3d6;
-  --color-line-soft: #e1e1e3;
-  --color-focus: #526fff;
-  --color-on-focus: #ffffff;
+  /* Lines */
+  --color-rule: #CFC5B4;
+  --color-rule-strong: #1C1917;
 
-  --color-red: #e45649;
-  --color-green: #50a14f;
-  --color-yellow: #c18401;
-  --color-blue: #4078f2;
-  --color-purple: #a626a4;
-  --color-cyan: #0184bc;
-  --color-orange: #986801;
-  --color-on-accent: #ffffff;
+  /* Text */
+  --color-ink: #1C1917;
+  --color-muted: #57534E;
+  --color-faint: #8A8178;
 
-  --color-st-needs: #e45649;
-  --color-st-running: #c18401;
-  --color-st-unseen: #4078f2;
-  --color-st-done: #50a14f;
-  --color-st-pr: #a626a4;
-  --color-st-shell: #0184bc;
-  --color-st-idle: #8e9099;
+  /* Attention: the one accent */
+  --color-ember: #D9822B;
+  --color-ember-ink: #A9550F;
+  --color-on-ember: #1C1917;
 
-  --color-h-claude: #986801;
-  --color-h-codex: #0184bc;
-  --color-h-copilot: #a626a4;
-  --color-h-cursor: #4078f2;
+  /* Status squares */
+  --color-unread: #2F6F6A;
+  --color-done: #5B6B2E;
+  --color-fail: #A23B22;
+  --color-merged: #6B4A7A;
+  --color-running: #1C1917;
 
-  --color-git-modified: #c18401;
-  --color-git-added: #50a14f;
-  --color-git-deleted: #e45649;
-  --color-git-renamed: #4078f2;
-  --color-git-conflict: #a626a4;
+  /* Browser surfaces */
+  --color-selection: rgb(217 130 43 / 0.26);
+  --color-none: rgb(0 0 0 / 0);
 
-  --color-term-bg: #fafafa;
-  --color-term-fg: #383a42;
-  --color-term-cursor: #526fff;
-  --color-term-selection: #d5dbf7;
-  --color-term-black: #383a42;
-  --color-term-red: #e45649;
-  --color-term-green: #50a14f;
-  --color-term-yellow: #986801;
-  --color-term-blue: #4078f2;
-  --color-term-magenta: #a626a4;
-  --color-term-cyan: #0184bc;
-  --color-term-white: #a0a1a7;
-  --color-term-bright-black: #4f525e;
-  --color-term-bright-red: #e06c75;
-  --color-term-bright-green: #50a14f;
-  --color-term-bright-yellow: #c18401;
-  --color-term-bright-blue: #4078f2;
-  --color-term-bright-magenta: #a626a4;
-  --color-term-bright-cyan: #0184bc;
-  --color-term-bright-white: #ffffff;
+  /* Diff file status letters and line counts */
+  --color-git-modified: #8A6410;
+  --color-git-added: #5B6B2E;
+  --color-git-deleted: #A23B22;
+  --color-git-renamed: #2F6F6A;
+  --color-git-conflict: #6B4A7A;
 
-  --color-syn-comment: #a0a1a7;
-  --color-syn-keyword: #a626a4;
-  --color-syn-string: #50a14f;
-  --color-syn-number: #986801;
-  --color-syn-type: #c18401;
-  --color-syn-tag: #e45649;
-  --color-syn-attr: #986801;
-  --color-syn-function: #4078f2;
-  --color-syn-regexp: #0184bc;
-  --color-editor-gutter: #9d9d9f;
-  --color-editor-line: #f0f0f1;
-  --color-diff-insert: rgb(80 161 79 / 0.18);
-  --color-diff-insert-line: rgb(80 161 79 / 0.08);
-  --color-diff-remove: rgb(228 86 73 / 0.18);
-  --color-diff-remove-line: rgb(228 86 73 / 0.08);
+  /* Terminal (xterm.js): the Kete Workshop scheme */
+  --color-term-bg: #F4EFE6;
+  --color-term-fg: #1C1917;
+  --color-term-cursor: #A9550F;
+  --color-term-selection: #DCCFB9;
+  --color-term-black: #1C1917;
+  --color-term-red: #A23B22;
+  --color-term-green: #5B6B2E;
+  --color-term-yellow: #8A6410;
+  --color-term-blue: #35607F;
+  --color-term-magenta: #6B4A7A;
+  --color-term-cyan: #2F6F6A;
+  --color-term-white: #8A8178;
+  --color-term-bright-black: #57534E;
+  --color-term-bright-red: #B84A2E;
+  --color-term-bright-green: #6E7F38;
+  --color-term-bright-yellow: #A9750F;
+  --color-term-bright-blue: #3F7096;
+  --color-term-bright-magenta: #80598F;
+  --color-term-bright-cyan: #3A8079;
+  --color-term-bright-white: #CFC5B4;
 
-  --shadow-pop: 0 10px 30px rgb(40 44 52 / 0.16), 0 1px 3px rgb(40 44 52 / 0.12);
+  /* Diff editor (Monaco) */
+  --color-syn-comment: #8A8178;
+  --color-syn-keyword: #6B4A7A;
+  --color-syn-string: #5B6B2E;
+  --color-syn-number: #A9550F;
+  --color-syn-type: #2F6F6A;
+  --color-syn-tag: #A23B22;
+  --color-syn-attr: #A9550F;
+  --color-syn-function: #35607F;
+  --color-syn-regexp: #2F6F6A;
+  --color-editor-gutter: #8A8178;
+  --color-editor-line: #EDE6DA;
+  --color-diff-insert: rgb(91 107 46 / 0.18);
+  --color-diff-insert-line: rgb(91 107 46 / 0.08);
+  --color-diff-remove: rgb(162 59 34 / 0.16);
+  --color-diff-remove-line: rgb(162 59 34 / 0.07);
+}
+
+html[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --color-bg: #161412;
+  --color-surface: #1E1B18;
+  --color-raised: #26221E;
+
+  /* Lines */
+  --color-rule: #3A342D;
+  --color-rule-strong: #EDE6DA;
+
+  /* Text */
+  --color-ink: #EDE6DA;
+  --color-muted: #A89F92;
+  --color-faint: #6E665C;
+
+  /* Attention: the one accent */
+  --color-ember: #E08A35;
+  --color-ember-ink: #F0A35A;
+  --color-on-ember: #161412;
+
+  /* Status squares */
+  --color-unread: #5FA8A0;
+  --color-done: #9BAA5E;
+  --color-fail: #D2694E;
+  --color-merged: #B48EC2;
+  --color-running: #EDE6DA;
+
+  /* Browser surfaces */
+  --color-selection: rgb(224 138 53 / 0.3);
+  --color-none: rgb(0 0 0 / 0);
+
+  /* Diff file status letters and line counts */
+  --color-git-modified: #E0B15A;
+  --color-git-added: #9BAA5E;
+  --color-git-deleted: #D2694E;
+  --color-git-renamed: #5FA8A0;
+  --color-git-conflict: #B48EC2;
+
+  /* Terminal (xterm.js): the Kete Workshop scheme */
+  --color-term-bg: #161412;
+  --color-term-fg: #EDE6DA;
+  --color-term-cursor: #E08A35;
+  --color-term-selection: #3A342D;
+  --color-term-black: #26221E;
+  --color-term-red: #D2694E;
+  --color-term-green: #9BAA5E;
+  --color-term-yellow: #E0B15A;
+  --color-term-blue: #7FA3C0;
+  --color-term-magenta: #B48EC2;
+  --color-term-cyan: #5FA8A0;
+  --color-term-white: #CFC5B4;
+  --color-term-bright-black: #6E665C;
+  --color-term-bright-red: #E58A72;
+  --color-term-bright-green: #B5C47A;
+  --color-term-bright-yellow: #F0C878;
+  --color-term-bright-blue: #9DBBD4;
+  --color-term-bright-magenta: #C9A7D6;
+  --color-term-bright-cyan: #7CC2BA;
+  --color-term-bright-white: #F7F2EA;
+
+  /* Diff editor (Monaco) */
+  --color-syn-comment: #8A8178;
+  --color-syn-keyword: #B48EC2;
+  --color-syn-string: #9BAA5E;
+  --color-syn-number: #F0A35A;
+  --color-syn-type: #5FA8A0;
+  --color-syn-tag: #D2694E;
+  --color-syn-attr: #F0A35A;
+  --color-syn-function: #9DBBD4;
+  --color-syn-regexp: #5FA8A0;
+  --color-editor-gutter: #6E665C;
+  --color-editor-line: #1E1B18;
+  --color-diff-insert: rgb(155 170 94 / 0.16);
+  --color-diff-insert-line: rgb(155 170 94 / 0.07);
+  --color-diff-remove: rgb(210 105 78 / 0.16);
+  --color-diff-remove-line: rgb(210 105 78 / 0.07);
+}
+
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme='light']) {
+    color-scheme: dark;
+
+    /* Surfaces */
+    --color-bg: #161412;
+    --color-surface: #1E1B18;
+    --color-raised: #26221E;
+
+    /* Lines */
+    --color-rule: #3A342D;
+    --color-rule-strong: #EDE6DA;
+
+    /* Text */
+    --color-ink: #EDE6DA;
+    --color-muted: #A89F92;
+    --color-faint: #6E665C;
+
+    /* Attention: the one accent */
+    --color-ember: #E08A35;
+    --color-ember-ink: #F0A35A;
+    --color-on-ember: #161412;
+
+    /* Status squares */
+    --color-unread: #5FA8A0;
+    --color-done: #9BAA5E;
+    --color-fail: #D2694E;
+    --color-merged: #B48EC2;
+    --color-running: #EDE6DA;
+
+    /* Browser surfaces */
+    --color-selection: rgb(224 138 53 / 0.3);
+    --color-none: rgb(0 0 0 / 0);
+
+    /* Diff file status letters and line counts */
+    --color-git-modified: #E0B15A;
+    --color-git-added: #9BAA5E;
+    --color-git-deleted: #D2694E;
+    --color-git-renamed: #5FA8A0;
+    --color-git-conflict: #B48EC2;
+
+    /* Terminal (xterm.js): the Kete Workshop scheme */
+    --color-term-bg: #161412;
+    --color-term-fg: #EDE6DA;
+    --color-term-cursor: #E08A35;
+    --color-term-selection: #3A342D;
+    --color-term-black: #26221E;
+    --color-term-red: #D2694E;
+    --color-term-green: #9BAA5E;
+    --color-term-yellow: #E0B15A;
+    --color-term-blue: #7FA3C0;
+    --color-term-magenta: #B48EC2;
+    --color-term-cyan: #5FA8A0;
+    --color-term-white: #CFC5B4;
+    --color-term-bright-black: #6E665C;
+    --color-term-bright-red: #E58A72;
+    --color-term-bright-green: #B5C47A;
+    --color-term-bright-yellow: #F0C878;
+    --color-term-bright-blue: #9DBBD4;
+    --color-term-bright-magenta: #C9A7D6;
+    --color-term-bright-cyan: #7CC2BA;
+    --color-term-bright-white: #F7F2EA;
+
+    /* Diff editor (Monaco) */
+    --color-syn-comment: #8A8178;
+    --color-syn-keyword: #B48EC2;
+    --color-syn-string: #9BAA5E;
+    --color-syn-number: #F0A35A;
+    --color-syn-type: #5FA8A0;
+    --color-syn-tag: #D2694E;
+    --color-syn-attr: #F0A35A;
+    --color-syn-function: #9DBBD4;
+    --color-syn-regexp: #5FA8A0;
+    --color-editor-gutter: #6E665C;
+    --color-editor-line: #1E1B18;
+    --color-diff-insert: rgb(155 170 94 / 0.16);
+    --color-diff-insert-line: rgb(155 170 94 / 0.07);
+    --color-diff-remove: rgb(210 105 78 / 0.16);
+    --color-diff-remove-line: rgb(210 105 78 / 0.07);
+  }
 }

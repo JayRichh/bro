@@ -1,20 +1,14 @@
 <script lang="ts">
   import { app, openSession, openDiff } from './store.svelte';
   import { LANES, lanes, toneOf, harnessLabel, lastPrompt, age, placeOf, type Lane } from './status';
-  import StatusDot from './StatusDot.svelte';
+  import Status from './Status.svelte';
   import Empty from './Empty.svelte';
   import type { Agent } from './api';
 
+  let { active = true }: { active?: boolean } = $props();
   const board = $derived(lanes(app.model));
   const total = $derived(LANES.reduce((n, l) => n + board[l.id].length, 0));
   let cursor = $state<{ lane: number; row: number } | null>(null);
-
-  const HARNESS_COLOR: Record<string, string> = {
-    claude: 'text-h-claude',
-    codex: 'text-h-codex',
-    copilot: 'text-h-copilot',
-    cursor: 'text-h-cursor',
-  };
 
   function selectedAgent(): Agent | null {
     if (!cursor) return null;
@@ -45,7 +39,7 @@
   }
 
   function onKey(e: KeyboardEvent) {
-    if (app.view !== 'board' || app.quickPrompt) return;
+    if (!active) return;
     const t = e.target as HTMLElement;
     if (t.closest('input, textarea, select, .xterm')) return;
     const map: Record<string, [number, number]> = {
@@ -74,23 +68,23 @@
 
 <svelte:window onkeydown={onKey} />
 
+<!-- The alternate home: lanes are ruled columns, sessions are ruled rows. -->
 {#if total === 0}
   <Empty />
 {:else}
   <div
-    class="grid h-full min-h-0 grid-cols-[repeat(5,minmax(200px,1fr))] gap-2.5 overflow-x-auto px-3.5 pt-3 pb-3.5"
+    class="grid h-full min-h-0 grid-cols-[repeat(5,minmax(220px,1fr))] overflow-x-auto"
     role="grid"
     aria-label="Sessions by status"
   >
     {#each LANES as lane, li (lane.id)}
       {@const cards = board[lane.id]}
-      <section class="flex min-h-0 min-w-0 flex-col" aria-label={lane.title}>
-        <header class="flex items-center gap-[7px] px-1 pt-1 pb-[9px]">
-          <StatusDot tone={lane.tone} size={13} />
-          <h2 class="m-0 text-xs font-semibold {cards.length ? 'text-fg-strong' : 'text-muted'}">{lane.title}</h2>
-          <span class="ml-auto font-mono text-[11px] text-muted tabular-nums">{cards.length}</span>
+      <section class="flex min-h-0 min-w-0 flex-col border-r border-rule last:border-r-0" aria-label={lane.title}>
+        <header class="flex h-10 flex-none items-center gap-2 border-b border-rule-strong px-4">
+          <h2 class="m-0 text-[15px] font-semibold {lane.id === 'needs' && cards.length ? 'text-ember-ink' : 'text-ink'}">{lane.title}</h2>
+          <span class="ml-auto font-mono text-[12px] font-bold {cards.length ? 'text-ink' : 'text-muted'}">{cards.length}</span>
         </header>
-        <div class="-m-0.5 flex min-h-0 flex-col gap-1.5 overflow-y-auto p-0.5 pb-2">
+        <div class="flex min-h-0 flex-col overflow-y-auto">
           {#each cards as a, ri (a.id)}
             {@const where = placeOf(app.model, a.worktree_id)}
             {@const prompt = lastPrompt(a)}
@@ -99,42 +93,30 @@
             {@const alert = lane.id === 'needs'}
             <button
               data-card-sel={sel || undefined}
-              class="flex flex-col gap-[5px] rounded-[7px] border px-2.5 pt-[9px] pb-2.5 text-left transition-colors
-                focus-visible:outline-none
-                {alert ? 'border-st-needs/40 bg-st-needs/8' : 'border-line-soft bg-raised hover:border-line hover:bg-hover'}
-                {sel ? 'border-focus! ring-1 ring-focus' : ''}"
+              class="relative flex flex-col gap-1 border-0 border-b border-rule px-4 py-2.5 text-left focus-visible:-outline-offset-2
+                {sel ? 'bg-surface' : 'bg-transparent hover:bg-surface'}"
               onclick={() => {
                 cursor = { lane: li, row: ri };
                 openSession({ Agent: a.id });
               }}
               onfocus={() => (cursor = { lane: li, row: ri })}
             >
-              <div class="flex min-w-0 items-center gap-[7px]">
-                <StatusDot tone={lane.id === 'pr' ? 'pr' : toneOf(a)} />
-                <span class="truncate font-semibold text-fg-strong">{a.name}</span>
-                <span class="ml-auto font-mono text-[11px] text-muted tabular-nums">{age(a.status_changed_at, app.now)}</span>
-              </div>
-              <div class="flex min-w-0 items-center gap-1.5 text-[11.5px]">
-                <span class="font-medium {HARNESS_COLOR[a.kind] ?? 'text-fg'}">{harnessLabel(a)}</span>
-                {#if a.profile}
-                  <span class="rounded-full border border-line-soft bg-sunk px-1.5 text-[10.5px] leading-4 text-fg">{a.profile}</span>
-                {/if}
-                {#if a.model}<span class="truncate font-mono text-[10.5px] text-muted">{a.model}</span>{/if}
-              </div>
-              <div class="truncate font-mono text-[11px] text-muted">
-                <span>{where.project}</span><span class="px-0.5 text-faint">/</span><span
-                  class={where.isMain ? 'text-muted' : 'text-purple'}>{where.branch}</span
-                >
-                {#if pr}<span class="ml-1.5 text-st-pr">#{pr.number}</span>{/if}
-              </div>
-              <p class="m-0 line-clamp-2 text-xs leading-[1.38] {prompt ? 'text-fg' : 'text-faint italic'}">
-                {prompt ?? 'No prompt yet'}
-              </p>
+              {#if alert}<span class="absolute inset-y-0 left-0 w-[3px] bg-ember" aria-hidden="true"></span>{/if}
+              <span class="flex min-w-0 items-baseline gap-2">
+                <span class="truncate text-[14px] font-medium {alert ? 'text-ember-ink' : 'text-ink'}">{a.name}</span>
+                <span class="ml-auto font-mono text-[12px] text-muted">{age(a.status_changed_at, app.now)}</span>
+              </span>
+              <Status tone={lane.id === 'pr' ? 'pr' : toneOf(a)} />
+              <span class="truncate text-[13px] text-muted">{harnessLabel(a)}{a.profile ? ` \u00b7 ${a.profile}` : ''}</span>
+              <span class="truncate font-mono text-[12px] text-muted"
+                >{where.project} / {where.branch}{#if pr}<span class="ml-2 text-ink">PR #{pr.number}</span>{/if}</span
+              >
+              {#if prompt}<span class="line-clamp-2 text-[13px] text-muted">{prompt}</span>{/if}
             </button>
           {/each}
           {#if !cards.length}
-            <p class="m-0 rounded-[7px] border border-dashed border-line-soft px-2.5 py-3.5 text-center text-[11.5px] text-faint">
-              {lane.id === 'needs' ? 'Nobody waiting on you.' : 'Nothing here.'}
+            <p class="m-0 px-4 py-3 text-[13px] text-muted">
+              {lane.id === 'needs' ? 'Nothing needs you.' : 'Nothing here.'}
             </p>
           {/if}
         </div>
@@ -142,3 +124,4 @@
     {/each}
   </div>
 {/if}
+
