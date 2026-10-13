@@ -619,8 +619,6 @@ impl Store {
         }
     }
 
-    /// User rename: always applies, and retires any pending auto-title so a
-    /// late agent attempt can't clobber the user's choice.
     /// Pin `id` as the one ORCHESTRATOR — or, with None, nobody — in one
     /// transaction: every other row holding the role (archived ones too, so
     /// an unarchive can never bring back a second) is demoted first.
@@ -675,6 +673,8 @@ impl Store {
         Ok(rows.next()?.map(row_to_agent).transpose()?)
     }
 
+    /// User rename: always applies, and retires any pending auto-title so a
+    /// late agent attempt can't clobber the user's choice.
     pub fn rename_agent(&self, id: &AgentId, name: &str) -> Result<()> {
         self.conn.lock().execute(
             "UPDATE agents SET name = ?2, auto_title_pending = 0 WHERE id = ?1",

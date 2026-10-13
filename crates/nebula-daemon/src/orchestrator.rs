@@ -170,6 +170,7 @@ impl Daemon {
                 match self.project_at(&home)? {
                     Some(id) => id,
                     None => {
+                        ensure_own_repo(&home).await?;
                         let created = self
                             .add_project(&home, Some(DEFAULT_ORCHESTRATOR_NAME.into()), true)
                             .await
@@ -215,6 +216,7 @@ impl Daemon {
         self: &Arc<Self>,
         spec: StartOrchestratorSpec,
     ) -> Result<EntityId> {
+        let _gate = self.provision_gate.lock().await;
         let previous = self.store.orchestrator()?;
         if let Some(current) = previous.as_ref().filter(|a| !a.archived) {
             if !spec.replace {
@@ -272,6 +274,7 @@ impl Daemon {
     /// guidance as its next turn at once; one mid-turn, or not running,
     /// gets it with its next cold spawn's system prompt.
     pub fn set_orchestrator(self: &Arc<Self>, id: &AgentId) -> Result<()> {
+        let _gate = self.provision_gate.blocking_lock();
         let agent = self.store.get_agent(id)?.context("agent not found")?;
         if agent.archived {
             bail!("an archived session cannot be the orchestrator; unarchive it first");
@@ -302,6 +305,7 @@ impl Daemon {
 
     /// Demote whichever row holds the role. None held is not an error.
     pub fn clear_orchestrator(self: &Arc<Self>) -> Result<()> {
+        let _gate = self.provision_gate.blocking_lock();
         for agent in self.store.set_orchestrator(None)? {
             let _ = self.broadcast_agent(&agent);
         }
@@ -313,16 +317,43 @@ impl Daemon {
     /// refused, so a worker cannot mint or become the orchestrator through
     /// its own shell. Terminal sessions are the user's own shells and pass.
     pub fn pid_inside_agent_session(&self, pid: u32) -> bool {
-        let roots: HashSet<u32> = self
+        self.pid_session_owner(pid).is_some()
+    }
+
+    /// The live AGENT session `pid` runs inside (its PTY child or any
+    /// descendant), if any.
+    pub fn pid_session_owner(&self, pid: u32) -> Option<AgentId> {
+        let roots: HashMap<u32, AgentId> = self
             .session_pids()
             .into_iter()
-            .filter(|(sref, _, _)| matches!(sref, SessionRef::Agent(_)))
-            .map(|(_, pid, _)| pid)
+            .filter_map(|(sref, pid, _)| match sref {
+                SessionRef::Agent(id) => Some((pid, id)),
+                SessionRef::Terminal(_) => None,
+            })
             .collect();
         if roots.is_empty() {
-            return false;
+            return None;
         }
-        descends_from(&process_parents(), pid, &roots)
+        owning_session(&process_parents(), pid, &roots)
+    }
+
+    /// A privileged verb's `caller` is what the client says it is
+    /// (`NEBULA_AGENT_ID`), so a worker could claim the orchestrator's id.
+    /// When the client's pid is known and it runs inside some agent session,
+    /// that session must be the caller's own. A process inside no session
+    /// (the user's shell) passes, as does an unknown pid: defence in depth
+    /// over a same-user socket, not the trust boundary.
+    pub fn check_caller_peer(&self, caller: &AgentId, pid: Option<u32>) -> Result<()> {
+        let Some(pid) = pid else {
+            return Ok(());
+        };
+        match self.pid_session_owner(pid) {
+            Some(owner) if &owner != caller => bail!(
+                "this command runs inside another session ({owner}), not the orchestrator \
+                 it names"
+            ),
+            _ => Ok(()),
+        }
     }
 
     // ---- privileged verbs ----
@@ -595,6 +626,25 @@ impl Daemon {
     }
 }
 
+/// Make `dir` a git repo of its own: created when missing, and `git init`ed
+/// unless it is already a repo's top level. A data dir inside another repo
+/// (a dotfiles checkout of the home dir) would otherwise hand
+/// `add_project` the ENCLOSING repo, registered as "orchestrator".
+async fn ensure_own_repo(dir: &Path) -> Result<()> {
+    tokio::fs::create_dir_all(dir)
+        .await
+        .with_context(|| format!("create {}", dir.display()))?;
+    let own = std::fs::canonicalize(dir).ok();
+    let top = crate::git::repo_toplevel(dir)
+        .await
+        .ok()
+        .and_then(|t| std::fs::canonicalize(t).ok());
+    if top.is_none() || top != own {
+        crate::git::init(dir).await?;
+    }
+    Ok(())
+}
+
 /// The attention tier a session sorts into: what the user's `/` palette
 /// uses, so the orchestrator triages in the order the user would.
 fn attention_tier(agent: Option<&Agent>) -> u8 {
@@ -659,18 +709,31 @@ fn attention_ordered(
 
 /// Whether `pid` is one of `roots` or descends from one, walking `parents`
 /// (pid → ppid) upward. Bounded, so a cycle in a racy snapshot ends.
+#[cfg(test)]
 fn descends_from(parents: &HashMap<u32, u32>, pid: u32, roots: &HashSet<u32>) -> bool {
+    let roots: HashMap<u32, ()> = roots.iter().map(|r| (*r, ())).collect();
+    owning_session(parents, pid, &roots).is_some()
+}
+
+/// The root (and what it maps to) `pid` is or descends from, walking
+/// `parents` (pid → ppid) upward. Bounded, so a cycle in a racy snapshot
+/// ends.
+fn owning_session<T: Clone>(
+    parents: &HashMap<u32, u32>,
+    pid: u32,
+    roots: &HashMap<u32, T>,
+) -> Option<T> {
     let mut at = pid;
     for _ in 0..128 {
-        if roots.contains(&at) {
-            return true;
+        if let Some(owner) = roots.get(&at) {
+            return Some(owner.clone());
         }
         match parents.get(&at) {
             Some(&parent) if parent != at && parent != 0 => at = parent,
-            _ => return false,
+            _ => return None,
         }
     }
-    false
+    None
 }
 
 /// The machine's process table as pid → ppid; empty when it can't be read.

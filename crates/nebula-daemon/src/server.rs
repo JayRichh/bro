@@ -149,6 +149,20 @@ impl ClientConnection {
     }
 
     async fn handle_request(&mut self, req: ClientRequest) -> Result<bool> {
+        // A privileged verb from a process inside some other agent's
+        // session, naming the orchestrator as its caller: refused before
+        // the verb runs.
+        if let (true, Some((req_id, caller)), Some(peer)) =
+            (self.handshaken, privileged_caller(&req), self.peer_pid)
+        {
+            let checked = self
+                .blocking_daemon(move |daemon| daemon.check_caller_peer(&caller, Some(peer)))
+                .await;
+            if let Err(e) = checked {
+                reply_done(&self.out_tx, req_id, Err(e)).await;
+                return Ok(true);
+            }
+        }
         match req {
             ClientRequest::Hello { protocol_version } => {
                 Ok(self.handle_hello(protocol_version).await)
@@ -1444,6 +1458,23 @@ async fn forward_subscription_events(
 }
 
 /// [`reply`] for the requests that create nothing: success is a bare Ack.
+/// The request id and claimed caller of a privileged orchestrator verb.
+fn privileged_caller(req: &ClientRequest) -> Option<(u64, nebula_core::AgentId)> {
+    use ClientRequest as R;
+    match req {
+        R::OrchestratorList { req_id, caller }
+        | R::OrchestratorRead { req_id, caller, .. }
+        | R::OrchestratorSend { req_id, caller, .. }
+        | R::OrchestratorSpawn { req_id, caller, .. }
+        | R::OrchestratorOpenReview { req_id, caller, .. }
+        | R::OrchestratorSessions { req_id, caller }
+        | R::OrchestratorTell { req_id, caller, .. }
+        | R::OrchestratorReadSession { req_id, caller, .. }
+        | R::OrchestratorSpawnWith { req_id, caller, .. } => Some((*req_id, caller.clone())),
+        _ => None,
+    }
+}
+
 async fn reply_done(out_tx: &mpsc::Sender<ServerEvent>, req_id: u64, result: anyhow::Result<()>) {
     reply(out_tx, req_id, result.map(|_| None)).await
 }
@@ -1592,6 +1623,96 @@ mod tests {
         assert!(err.contains("cannot grant the orchestrator role"), "{err}");
         assert!(daemon.store.load_tree().unwrap().2.is_empty());
         assert!(daemon.store.orchestrator().unwrap().is_none());
+    }
+
+    /// A worker claiming the orchestrator's id (`NEBULA_AGENT_ID=<orch>`)
+    /// from inside its own session is refused every privileged verb; the
+    /// orchestrator's own session, and a process inside no session, pass.
+    #[tokio::test]
+    async fn a_worker_cannot_borrow_the_orchestrators_id() {
+        #[cfg(unix)]
+        let stand_in = "/bin/cat";
+        #[cfg(windows)]
+        let stand_in = "cmd.exe";
+        let _cli = crate::registry::tests::EnvGuard::set(nebula_core::env::AGENT_CMD, stand_in);
+        let daemon = test_daemon();
+        let dir = tempfile::tempdir().unwrap();
+        seed(&daemon, dir.path());
+        let row = |id: &str, role| nebula_core::Agent {
+            parent: None,
+            profile: None,
+            id: nebula_core::AgentId(id.into()),
+            worktree_id: nebula_core::WorktreeId("w".into()),
+            name: id.into(),
+            status: nebula_core::AgentStatus::Fresh,
+            archived: false,
+            archived_at: 0,
+            unseen: false,
+            kind: nebula_core::AgentKind::Claude,
+            custom_harness: None,
+            model: None,
+            effort: None,
+            session_id: None,
+            cloud_session_id: None,
+            sort_order: 0,
+            status_changed_at: 0,
+            alive: false,
+            issue_url: None,
+            role,
+            recent_prompts: Vec::new(),
+        };
+        let mut roots = std::collections::HashMap::new();
+        for (id, role) in [
+            ("worker", nebula_core::AgentRole::Worker),
+            ("orch", nebula_core::AgentRole::Orchestrator),
+        ] {
+            daemon.store.insert_agent(&row(id, role)).unwrap();
+            let sref = SessionRef::Agent(nebula_core::AgentId(id.into()));
+            daemon.ensure_session(&sref, 80, 24).unwrap();
+            let pid = daemon
+                .session_pids()
+                .into_iter()
+                .find(|(s, _, _)| *s == sref)
+                .map(|(_, pid, _)| pid)
+                .unwrap();
+            roots.insert(id, pid);
+        }
+        let orch = nebula_core::AgentId("orch".into());
+        let (mut client, mut rx) = connection(daemon.clone());
+        for (req_id, peer, refused) in [
+            (1, roots["worker"], true),
+            (2, roots["orch"], false),
+            (3, std::process::id(), false),
+        ] {
+            client.peer_pid = Some(peer);
+            client
+                .handle_request(ClientRequest::OrchestratorList {
+                    req_id,
+                    caller: orch.clone(),
+                })
+                .await
+                .unwrap();
+            let answer = loop {
+                match rx.recv().await.expect("closed") {
+                    ServerEvent::Error {
+                        req_id: Some(r),
+                        message,
+                    } if r == req_id => break Err(message),
+                    ServerEvent::OrchestratorList { req_id: r, .. } if r == req_id => break Ok(()),
+                    _ => continue,
+                }
+            };
+            if refused {
+                let err = answer.unwrap_err();
+                assert!(err.contains("another session"), "{err}");
+            } else {
+                assert_eq!(answer, Ok(()), "peer {peer}");
+            }
+        }
+
+        for id in ["worker", "orch"] {
+            daemon.kill_session(&SessionRef::Agent(nebula_core::AgentId(id.into())));
+        }
     }
 
     /// A process running inside an agent session (here: the session's own

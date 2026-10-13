@@ -239,6 +239,9 @@ pub struct Daemon {
     /// Where an orchestrator started without a project runs, when not the
     /// data dir's `orchestrator` folder: tests point it at a temp dir.
     orchestrator_home: Mutex<Option<PathBuf>>,
+    /// Serializes orchestrator provisioning (start, set, clear), so a check,
+    /// demote and create never interleave with another.
+    pub(crate) provision_gate: tokio::sync::Mutex<()>,
 }
 
 mod exit;
@@ -281,6 +284,7 @@ impl Daemon {
             finished_runs: Mutex::new(HashMap::new()),
             subagents: Mutex::new(subagents::SubagentBook::default()),
             orchestrator_home: Mutex::new(None),
+            provision_gate: tokio::sync::Mutex::new(()),
         })
     }
 

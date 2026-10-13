@@ -422,6 +422,72 @@ async fn replace_starts_a_new_orchestrator_and_demotes_the_old() {
     daemon.kill_session(&SessionRef::Agent(id));
 }
 
+/// Two starts at once: provisioning is serialized, so exactly one wins and
+/// the other sees it and is refused.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn concurrent_starts_leave_exactly_one_orchestrator() {
+    let _cli = stand_in_cli();
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = daemon_at(dir.path().to_str().unwrap());
+    let spec = || StartOrchestratorSpec {
+        project: Some(ProjectId("p".into())),
+        ..Default::default()
+    };
+    let (a, b) = tokio::join!(
+        daemon.start_orchestrator(spec()),
+        daemon.start_orchestrator(spec())
+    );
+    let wins: Vec<_> = [&a, &b].into_iter().filter(|r| r.is_ok()).collect();
+    assert_eq!(wins.len(), 1, "{a:?} / {b:?}");
+    let lost = [a, b].into_iter().find_map(|r| r.err()).unwrap();
+    assert!(lost.to_string().contains("already running"), "{lost}");
+    let pinned = daemon.store.orchestrator().unwrap().unwrap();
+    daemon.kill_session(&SessionRef::Agent(pinned.id));
+}
+
+/// A data dir inside a git repo (a dotfiles checkout of the home dir, say):
+/// the workspace is still a repo of its own, never the enclosing one, and
+/// later starts keep finding it.
+#[tokio::test]
+async fn a_data_dir_inside_a_repo_still_gets_its_own_workspace_repo() {
+    let _cli = stand_in_cli();
+    let outer = tempfile::tempdir().unwrap();
+    let ok = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(outer.path())
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok);
+    let daemon = daemon();
+    let home = outer.path().join("data").join("orchestrator");
+    daemon.set_orchestrator_home(home.clone());
+    for replace in [false, true] {
+        let created = daemon
+            .start_orchestrator(StartOrchestratorSpec {
+                replace,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        if let EntityId::Agent(id) = created {
+            daemon.kill_session(&SessionRef::Agent(id));
+        }
+    }
+    assert!(home.join(".git").exists(), "the workspace is its own repo");
+    let (projects, _, _, _) = daemon.store.load_tree().unwrap();
+    let workspace: Vec<_> = projects
+        .iter()
+        .filter(|p| p.name == DEFAULT_ORCHESTRATOR_NAME)
+        .collect();
+    assert_eq!(workspace.len(), 1, "{projects:#?}");
+    assert_eq!(
+        std::fs::canonicalize(&workspace[0].repo_path).unwrap(),
+        std::fs::canonicalize(&home).unwrap(),
+        "never the enclosing repo"
+    );
+}
+
 /// Started with no project, the orchestrator gets a workspace of its own
 /// under the data dir: registered once as the `orchestrator` project and
 /// reused by the next start, never one of the user's repos.
