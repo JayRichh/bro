@@ -275,6 +275,22 @@ async fn serve(opts: DaemonOpts) -> Result<()> {
         });
     }
 
+    // WORKTREE PORTS watcher: which ports each worktree's sessions listen
+    // on, re-read every few seconds and broadcast when it changes — a dev
+    // server shows up on its band's rule moments after it binds.
+    {
+        let daemon = daemon.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3));
+            loop {
+                tokio::select! {
+                    _ = daemon.shutdown.cancelled() => break,
+                    _ = interval.tick() => daemon.refresh_worktree_ports().await,
+                }
+            }
+        });
+    }
+
     // Idle-session reaper: kill PTYs in worktrees no client is looking at
     // once they age past `session_idle_timeout` (bounds what prewarmed and
     // walked-away-from sessions cost). Its own loop so tests can speed the

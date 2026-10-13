@@ -164,6 +164,9 @@ pub struct Daemon {
     // above. Keep SQLite work out of async workers with `store_blocking`.
     sessions: Mutex<HashMap<SessionRef, Arc<PtySession>>>,
     status_machines: Mutex<HashMap<AgentId, AgentStatusMachine>>,
+    /// WORKTREE PORTS as the watcher last read them
+    /// (`refresh_worktree_ports`), taken alone.
+    live_ports: Mutex<Vec<nebula_core::ports::WorktreePorts>>,
     pub hook_env: HookEnv,
     /// Shared with the hook HTTP server, which reads agent rows to decide
     /// auto-title injection.
@@ -232,6 +235,7 @@ pub struct Daemon {
 
 mod exit;
 mod lifecycle;
+mod ports;
 mod prewarm;
 mod projects;
 mod sessions;
@@ -246,6 +250,7 @@ impl Daemon {
         Arc::new(Self {
             sessions: Mutex::new(HashMap::new()),
             status_machines: Mutex::new(HashMap::new()),
+            live_ports: Mutex::new(Vec::new()),
             hook_env,
             store,
             events,

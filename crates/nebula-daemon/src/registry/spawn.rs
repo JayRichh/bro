@@ -611,6 +611,13 @@ impl Daemon {
             (env::API_TOKEN.into(), self.hook_env.token.clone()),
         ];
         session_env.extend(launch_env.set.iter().cloned());
+        // The worktree's PORT BLOCK: a dev server the agent starts binds
+        // where no other worktree's does.
+        session_env.extend(
+            self.port_block(&worktree.id)
+                .map(|block| block.env())
+                .unwrap_or_default(),
+        );
         let spec = SpawnSpec {
             program,
             args,
@@ -861,7 +868,12 @@ impl Daemon {
             program,
             args,
             cwd: worktree.path.clone(),
-            env: vec![],
+            // A terminal — a RUN TERMINAL's `npm run dev` above all — gets
+            // its worktree's PORT BLOCK too.
+            env: self
+                .port_block(&worktree.id)
+                .map(|block| block.env())
+                .unwrap_or_default(),
             scrub_env: env::AGENT_SESSION_VARS,
             unset_env: Vec::new(),
             cols,

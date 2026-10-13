@@ -10,14 +10,14 @@ use std::path::PathBuf;
 ///
 /// Bump on every protocol change. Additive changes keep
 /// [`MIN_COMPATIBLE_PROTOCOL`] where it is; breaking changes bump both.
-pub const PROTOCOL_VERSION: u32 = 51;
+pub const PROTOCOL_VERSION: u32 = 52;
 
 /// Oldest IPC protocol this build can safely talk to.
 ///
 /// Compatibility is a range overlap: two peers can talk when each peer's
 /// `[MIN_COMPATIBLE_PROTOCOL, PROTOCOL_VERSION]` range includes at least one
 /// version the other peer also supports.
-pub const MIN_COMPATIBLE_PROTOCOL: u32 = 51;
+pub const MIN_COMPATIBLE_PROTOCOL: u32 = 52;
 
 pub fn protocol_ranges_overlap(
     local_min: u32,
@@ -593,8 +593,15 @@ pub struct SessionSummary {
     pub summary: String,
     /// The PROFILE an agent session runs under; None for none, and for
     /// every terminal.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub profile: Option<String>,
+    /// The first port of its worktree's PORT BLOCK (`PORT` in its
+    /// environment), once one is allocated.
+    #[serde(default)]
+    pub port: Option<u16>,
+    /// Ports its worktree's sessions are listening on right now.
+    #[serde(default)]
+    pub live_ports: Vec<u16>,
 }
 
 /// Daemon-side half of the metrics modal's data; the client stacks its own
@@ -775,6 +782,12 @@ pub enum ServerEvent {
         req_id: u64,
         session: SessionRef,
         tail: Option<OutputTail>,
+    },
+    /// WORKTREE PORTS: every worktree's PORT BLOCK and the ports its
+    /// sessions are listening on — the whole list, sent after the Snapshot
+    /// and again whenever any of it changes (`nebula_core::ports`).
+    WorktreePorts {
+        ports: Vec<crate::ports::WorktreePorts>,
     },
 }
 

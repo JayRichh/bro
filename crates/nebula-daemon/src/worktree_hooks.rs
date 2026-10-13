@@ -68,6 +68,9 @@ pub struct HookContext<'a> {
     pub worktree: &'a Path,
     pub branch: &'a str,
     pub id: &'a WorktreeId,
+    /// The worktree's PORT BLOCK, handed to the script as `PORT`,
+    /// `BRO_PORT` and `BRO_PORT_1…` so it can provision what listens there.
+    pub ports: Option<nebula_core::ports::PortBlock>,
 }
 
 /// How long a hook may run before it is killed, unless
@@ -144,6 +147,7 @@ async fn run_program(
         tokio::process::Command::new(&launch.program)
             .args(&launch.args)
             .envs(launch.env.iter().map(|(k, v)| (k, v)))
+            .envs(ctx.ports.map(|b| b.env()).unwrap_or_default())
             .env(env::HOOK, label)
             .env(env::WORKTREE_BRANCH, ctx.branch)
             .env(env::WORKTREE_ID, ctx.id.as_str())
@@ -160,6 +164,7 @@ async fn run_program(
     let mut child = tokio::process::Command::new(program)
         .arg(ctx.repo)
         .arg(ctx.worktree)
+        .envs(ctx.ports.map(|b| b.env()).unwrap_or_default())
         .env(env::HOOK, label)
         .env(env::WORKTREE_BRANCH, ctx.branch)
         .env(env::WORKTREE_ID, ctx.id.as_str())
@@ -307,7 +312,60 @@ mod tests {
             worktree,
             branch: "feat/x",
             id,
+            ports: None,
         }
+    }
+
+    /// The worktree's PORT BLOCK rides the hook's environment, so a create
+    /// hook can provision what will listen there. A `.cmd` on Windows, a
+    /// shell script elsewhere.
+    #[tokio::test]
+    async fn hook_gets_the_port_block() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = nebula_core::paths::canonical(tmp.path()).unwrap();
+        let repo = repo_with_space(&root);
+        let out = root.join("ports.txt");
+        #[cfg(unix)]
+        let hook = script(
+            &root,
+            &format!(
+                "printf '%s %s %s %s' \"$PORT\" \"$BRO_PORT\" \"$BRO_PORT_1\" \"$BRO_PORT_9\" > '{}'",
+                out.display()
+            ),
+        );
+        #[cfg(windows)]
+        let hook = {
+            let path = root.join("hook.cmd");
+            std::fs::write(
+                &path,
+                format!(
+                    "@echo off\r\necho %PORT% %BRO_PORT% %BRO_PORT_1% %BRO_PORT_9%> \"{}\"\r\n",
+                    out.display()
+                ),
+            )
+            .unwrap();
+            path
+        };
+        git(
+            &repo,
+            &[
+                "config",
+                "nebula.worktreeCreateHook",
+                &hook.to_string_lossy(),
+            ],
+        );
+        let wt = root.join("wt");
+        let id = WorktreeId("w1".into());
+        let mut context = ctx(&repo, &wt, &id);
+        context.ports = Some(nebula_core::ports::PortBlock {
+            first: 3010,
+            size: 10,
+        });
+
+        assert!(run(WorktreeHook::Create, context).await.unwrap());
+
+        let got = std::fs::read_to_string(&out).unwrap();
+        assert_eq!(got.trim(), "3010 3010 3011 3019");
     }
 
     #[tokio::test]

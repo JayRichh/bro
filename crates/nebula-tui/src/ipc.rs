@@ -643,8 +643,17 @@ pub async fn ask_session(
 
 fn print_session_summaries(sessions: &[SessionSummary]) {
     for session in sessions {
+        // WORKTREE PORTS: the block's first port, and what is listening.
+        let mut ports = String::new();
+        if let Some(port) = session.port {
+            ports.push_str(&format!(" port={port}"));
+        }
+        if !session.live_ports.is_empty() {
+            let live: Vec<String> = session.live_ports.iter().map(u16::to_string).collect();
+            ports.push_str(&format!(" listening={}", live.join(",")));
+        }
         println!(
-            "{} name={} project={} branch={} worktree={} harness={} status={}{} summary={}",
+            "{} name={} project={} branch={} worktree={} harness={} status={}{}{ports} summary={}",
             session.id,
             shell_word(&session.name),
             shell_word(&session.project),

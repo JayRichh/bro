@@ -581,14 +581,27 @@ impl Daemon {
         repo: &Path,
         worktree: &Worktree,
     ) {
+        // A created worktree is handed its PORT BLOCK now, so the hook can
+        // provision it; a deleted one's is read for the hook and then
+        // given back.
+        let ports = match hook {
+            WorktreeHook::Create => self.port_block(&worktree.id),
+            WorktreeHook::Delete => self.held_port_block(&worktree.id),
+        };
         let ctx = HookContext {
             repo,
             worktree: &worktree.path,
             branch: &worktree.branch,
             id: &worktree.id,
+            ports,
         };
         if let Err(e) = worktree_hooks::run(hook, ctx).await {
             self.warn_clients(format!("{e:#}"));
+        }
+        if hook == WorktreeHook::Delete {
+            if let Err(e) = self.store.release_port_slot(&worktree.id) {
+                tracing::warn!(worktree = %worktree.id, error = %e, "freeing the port slot failed");
+            }
         }
     }
 

@@ -59,6 +59,12 @@ pub struct Config {
     /// default — against this list, and points each spawn's environment
     /// at the profile's config dirs (`nebula_core::profiles`).
     pub profiles: Vec<nebula_core::profiles::Profile>,
+    /// WORKTREE PORTS: the first port of slot 0's PORT BLOCK (`PORT` in
+    /// the first worktree's sessions). Default 3000.
+    pub port_base: u16,
+    /// Ports per worktree: slot `n` gets `port_base + port_block × n` and
+    /// the `port_block - 1` after it. Default 10.
+    pub port_block: u16,
 }
 
 /// One project's entry under `projects` — the rows of the TUI's Project
@@ -84,6 +90,8 @@ impl Default for Config {
             harnesses: BTreeMap::new(),
             projects: BTreeMap::new(),
             profiles: Vec::new(),
+            port_base: nebula_core::ports::DEFAULT_BASE,
+            port_block: nebula_core::ports::DEFAULT_BLOCK,
         }
     }
 }

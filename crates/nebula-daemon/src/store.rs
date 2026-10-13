@@ -10,7 +10,7 @@ use nebula_core::{
     TerminalId, TerminalTab, Worktree, WorktreeId, RECENT_PROMPTS_KEPT,
 };
 use parking_lot::Mutex;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::path::{Path, PathBuf};
 
 const MIGRATIONS: &[&str] = &[
@@ -336,6 +336,16 @@ const MIGRATIONS: &[&str] = &[
     // existing session keeps the daemon's own environment.
     "
     ALTER TABLE agents ADD COLUMN profile TEXT;
+    ",
+    // 31: each worktree's PORT BLOCK slot (`nebula_core::ports`). No
+    // foreign key: the delete hook still reads a removed worktree's block,
+    // and the row goes after it; a slot whose worktree is gone any other
+    // way is freed the next time one is handed out.
+    "
+    CREATE TABLE worktree_ports (
+      worktree_id TEXT PRIMARY KEY,
+      slot        INTEGER NOT NULL UNIQUE
+    );
     ",
 ];
 
@@ -980,6 +990,76 @@ impl Store {
         ))?;
         let mut rows = stmt.query(params![id.as_str()])?;
         Ok(rows.next()?.map(row_to_worktree).transpose()?)
+    }
+
+    // ---- worktree ports ----
+
+    /// The PORT BLOCK slot `worktree` holds, if it has one yet.
+    pub fn worktree_port_slot(&self, worktree: &WorktreeId) -> Result<Option<u32>> {
+        let conn = self.conn.lock();
+        let slot: Option<i64> = conn
+            .query_row(
+                "SELECT slot FROM worktree_ports WHERE worktree_id = ?1",
+                params![worktree.as_str()],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(slot.map(|s| s as u32))
+    }
+
+    /// The slot `worktree` holds, handing it the lowest free one first if it
+    /// has none — so a deleted worktree's slot is reused and nobody else's
+    /// block ever moves. Slots of worktrees no longer in the table are freed
+    /// on the way.
+    pub fn allocate_port_slot(&self, worktree: &WorktreeId) -> Result<u32> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "DELETE FROM worktree_ports WHERE worktree_id NOT IN (SELECT id FROM worktrees)",
+            [],
+        )?;
+        let held: Option<i64> = tx
+            .query_row(
+                "SELECT slot FROM worktree_ports WHERE worktree_id = ?1",
+                params![worktree.as_str()],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(slot) = held {
+            tx.commit()?;
+            return Ok(slot as u32);
+        }
+        let taken: Vec<i64> = {
+            let mut stmt = tx.prepare("SELECT slot FROM worktree_ports ORDER BY slot")?;
+            let rows = stmt.query_map([], |r| r.get(0))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        let slot = (0..).find(|s| !taken.contains(s)).unwrap_or(0);
+        tx.execute(
+            "INSERT INTO worktree_ports (worktree_id, slot) VALUES (?1, ?2)",
+            params![worktree.as_str(), slot],
+        )?;
+        tx.commit()?;
+        Ok(slot as u32)
+    }
+
+    /// Give `worktree`'s slot back.
+    pub fn release_port_slot(&self, worktree: &WorktreeId) -> Result<()> {
+        self.conn.lock().execute(
+            "DELETE FROM worktree_ports WHERE worktree_id = ?1",
+            params![worktree.as_str()],
+        )?;
+        Ok(())
+    }
+
+    /// Every allocated slot, by worktree.
+    pub fn port_slots(&self) -> Result<Vec<(WorktreeId, u32)>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare("SELECT worktree_id, slot FROM worktree_ports")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((WorktreeId(r.get(0)?), r.get::<_, i64>(1)? as u32))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     pub fn get_agent(&self, id: &AgentId) -> Result<Option<Agent>> {
@@ -1707,6 +1787,50 @@ mod tests {
             .unwrap()
     }
 
+    /// A PORT BLOCK slot is the lowest free one, held for good, and a
+    /// released or orphaned one is handed out again.
+    #[test]
+    fn port_slots_are_lowest_free_and_stable() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .conn
+            .lock()
+            .execute_batch(
+                "INSERT INTO projects (id, name, repo_path, sort_order, created_at) VALUES ('p', 'p', '/p', 0, 0);
+                 INSERT INTO worktrees (id, project_id, path, branch, is_main, sort_order, created_at)
+                   VALUES ('a', 'p', '/p', 'main', 1, 0, 0), ('b', 'p', '/b', 'b', 0, 1, 0), ('c', 'p', '/c', 'c', 0, 2, 0);",
+            )
+            .unwrap();
+        let (a, b, c) = (
+            WorktreeId("a".into()),
+            WorktreeId("b".into()),
+            WorktreeId("c".into()),
+        );
+        assert_eq!(store.allocate_port_slot(&a).unwrap(), 0);
+        assert_eq!(store.allocate_port_slot(&b).unwrap(), 1);
+        assert_eq!(store.allocate_port_slot(&a).unwrap(), 0, "held for good");
+        store.release_port_slot(&a).unwrap();
+        assert_eq!(store.worktree_port_slot(&a).unwrap(), None);
+        assert_eq!(
+            store.allocate_port_slot(&c).unwrap(),
+            0,
+            "a freed slot is reused"
+        );
+        assert_eq!(
+            store.worktree_port_slot(&b).unwrap(),
+            Some(1),
+            "nobody else moved"
+        );
+        // A slot whose worktree went some other way is freed on the next ask.
+        store
+            .conn
+            .lock()
+            .execute_batch("DELETE FROM worktrees WHERE id = 'b';")
+            .unwrap();
+        assert_eq!(store.allocate_port_slot(&a).unwrap(), 1);
+        assert_eq!(store.port_slots().unwrap().len(), 2);
+    }
+
     fn table_names_without_workspaces() -> Vec<String> {
         [
             "agents",
@@ -1715,6 +1839,7 @@ mod tests {
             "projects",
             "terminals",
             "ui_state",
+            "worktree_ports",
             "worktrees",
         ]
         .map(String::from)

@@ -693,6 +693,11 @@ impl ClientConnection {
             .await
             .unwrap_or_else(|_| empty_snapshot());
         self.send(snapshot).await;
+        // WORKTREE PORTS ride beside the tree: the last reading, at once.
+        self.send(ServerEvent::WorktreePorts {
+            ports: self.daemon.worktree_ports(),
+        })
+        .await;
         let tx = self.out_tx.clone();
         let forward = tokio::spawn(forward_subscription_events(self.daemon.clone(), rx, tx));
         if let Some(old) = self.subscription.replace(forward) {
@@ -1191,6 +1196,12 @@ fn snapshot_or_empty(daemon: &Daemon) -> ServerEvent {
 
 async fn send_snapshot(daemon: &Daemon, tx: &mpsc::Sender<ServerEvent>) -> bool {
     tx.send(snapshot_or_empty(daemon)).await.is_ok()
+        && tx
+            .send(ServerEvent::WorktreePorts {
+                ports: daemon.worktree_ports(),
+            })
+            .await
+            .is_ok()
 }
 
 async fn forward_subscription_events(

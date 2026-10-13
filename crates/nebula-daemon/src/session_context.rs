@@ -65,6 +65,15 @@ impl Daemon {
                 rows.push(row);
             }
         }
+        // WORKTREE PORTS: the block and the live listeners, per row's
+        // worktree, as the watcher last read them.
+        let ports = self.worktree_ports();
+        for row in &mut rows {
+            if let Some(info) = ports.iter().find(|p| p.worktree == row.worktree_id) {
+                row.port = info.block.map(|b| b.first);
+                row.live_ports = info.live.clone();
+            }
+        }
         rows.sort_by(|a, b| {
             a.project
                 .cmp(&b.project)
@@ -236,6 +245,8 @@ fn agent_summary(
         alive: agent.alive,
         summary,
         profile: agent.profile,
+        port: None,
+        live_ports: Vec::new(),
     })
 }
 
@@ -265,6 +276,8 @@ fn terminal_summary(
         alive: terminal.alive,
         summary,
         profile: None,
+        port: None,
+        live_ports: Vec::new(),
     })
 }
 
