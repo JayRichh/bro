@@ -5420,3 +5420,109 @@ exit 0
     wait_for_exit(&mut daemon);
     assert_eq!(runs(), "1");
 }
+
+/// The orchestrator, end to end over the real socket and CLI: `kete
+/// orchestrator start` from a user shell starts the one orchestrator in its
+/// own workspace under the data dir, a second start is refused, status
+/// names it, the orchestrator's own verbs answer it and refuse a worker,
+/// and CreateAgent can no longer grant the role.
+#[tokio::test]
+async fn orchestrator_start_status_gating_and_escalation() {
+    let env = TestEnv::new();
+    let mut daemon = env.spawn_daemon();
+    let mut c = connect(&env.sock()).await;
+    handshake(&mut c).await;
+
+    let run = |args: &[&str], agent: Option<&str>| {
+        let mut cmd = env.cli();
+        cmd.args(args);
+        match agent {
+            Some(id) => cmd.env(env::AGENT_ID, id),
+            None => cmd.env_remove(env::AGENT_ID),
+        };
+        let out = cmd.output().unwrap();
+        (
+            out.status.success(),
+            format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            ),
+        )
+    };
+
+    let (ok, text) = run(&["orchestrator", "start"], None);
+    assert!(ok, "start failed: {text}");
+    assert!(text.contains("started the orchestrator"), "{text}");
+    assert!(
+        env.tmp.path().join("data/orchestrator/.git").is_dir(),
+        "the workspace lives under the data dir"
+    );
+
+    let (ok, text) = run(&["orchestrator", "start"], None);
+    assert!(!ok && text.contains("already running"), "{text}");
+    let (ok, text) = run(&["orchestrator", "start"], Some("anything"));
+    assert!(!ok && text.contains("inside an agent session"), "{text}");
+
+    let (ok, text) = run(&["orchestrator", "status", "--json"], None);
+    assert!(ok, "{text}");
+    let status: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let orch = status["orchestrator"]["id"].as_str().unwrap().to_string();
+    assert_eq!(status["orchestrator"]["role"], "orchestrator");
+    assert_eq!(status["project"]["name"], "orchestrator");
+
+    // The orchestrator's verbs answer it, attention-ordered, naming it.
+    let (ok, text) = run(&["orchestrator", "list"], Some(&orch));
+    assert!(ok, "{text}");
+    assert!(text.contains("role=orchestrator(you)"), "{text}");
+    let (ok, text) = run(&["orchestrator", "list", "--json"], Some(&orch));
+    assert!(ok, "{text}");
+    let listed: serde_json::Value = serde_json::from_str(&text).unwrap();
+    for field in ["projects", "worktrees", "agents", "terminals", "links", "sessions"] {
+        assert!(listed.get(field).is_some(), "--json lost {field}: {text}");
+    }
+    let (ok, text) = run(&["orchestrator", "send", &orch, "hello"], Some(&orch));
+    assert!(!ok && text.contains("itself"), "{text}");
+
+    // CreateAgent naming the role is refused; a worker is still refused the
+    // verbs.
+    let worktree = status["worktree"]["id"].as_str().unwrap().to_string();
+    write_frame(
+        &mut c,
+        &ClientRequest::CreateAgent {
+            req_id: 9,
+            worktree: nebula_core::WorktreeId(worktree),
+            name: "sneaky".into(),
+            kind: AgentKind::Claude,
+            custom_harness: None,
+            model: None,
+            effort: None,
+            auto_title: false,
+            cloud_prompt: None,
+            starting_prompt: None,
+            issue_url: None,
+            role: nebula_core::AgentRole::Orchestrator,
+            profile: None,
+        },
+    )
+    .await
+    .unwrap();
+    let events = read_events_until(&mut c, EVENT_TIMEOUT, |evs| find_ack(evs, 9).is_some()).await;
+    assert!(
+        matches!(
+            find_ack(&events, 9),
+            Some(ServerEvent::Error { message, .. }) if message.contains("cannot grant")
+        ),
+        "{events:#?}"
+    );
+    let (ok, text) = run(&["orchestrator", "list"], Some("not-the-orchestrator"));
+    assert!(!ok && text.contains("not found"), "{text}");
+
+    let (ok, text) = run(&["orchestrator", "clear"], None);
+    assert!(ok, "{text}");
+    let (ok, text) = run(&["orchestrator", "list"], Some(&orch));
+    assert!(!ok && text.contains("only available"), "{text}");
+
+    write_frame(&mut c, &ClientRequest::Shutdown).await.unwrap();
+    wait_for_exit(&mut daemon);
+}
