@@ -686,21 +686,82 @@ pub enum CreateOutcome {
     Existing(u32),
 }
 
-impl Serialize for CreateOutcome {
+/// What [`create`] hands the composer: the outcome and, when commits
+/// already on the server carry co-author lines, a one-line note saying
+/// they were left alone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreateResult {
+    pub outcome: CreateOutcome,
+    pub note: Option<String>,
+}
+
+/// The note for co-author lines in commits that were already pushed.
+pub const PUSHED_TRAILERS_NOTE: &str =
+    "Some commits on the server still carry co-author lines; they were left as they are.";
+
+impl Serialize for CreateResult {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
-        let (kind, id, reason) = match self {
+        let (kind, id, reason) = match &self.outcome {
             CreateOutcome::Created(id) => ("created", id, None),
             CreateOutcome::CreatedTaskNotLinked(id, why) => {
                 ("createdTaskNotLinked", id, Some(why.as_str()))
             }
             CreateOutcome::Existing(id) => ("existing", id, None),
         };
-        let mut st = s.serialize_struct("CreateOutcome", 3)?;
+        let mut st = s.serialize_struct("CreateResult", 4)?;
         st.serialize_field("kind", kind)?;
         st.serialize_field("id", id)?;
         st.serialize_field("reason", &reason)?;
+        st.serialize_field("note", &self.note)?;
         st.end()
+    }
+}
+
+/// How long the fetch of the PR target may take before the clean goes
+/// ahead without it.
+const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Fetch `target` from `remote` into its remote-tracking ref, never
+/// asking for a sign-in, and return that ref when it exists afterwards.
+/// A failed or slow fetch is not an error: an earlier fetch may have left
+/// the ref, and without it the clean is bounded by the remotes alone.
+async fn fetch_target(repo: &Path, remote: &str, target: &str) -> Option<String> {
+    let tracking = format!("refs/remotes/{remote}/{target}");
+    let refspec = format!("+refs/heads/{target}:{tracking}");
+    let args = [
+        "-c",
+        "credential.interactive=never",
+        "fetch",
+        "--quiet",
+        "--no-tags",
+        "--end-of-options",
+        remote,
+        &refspec,
+    ];
+    let _ = tokio::time::timeout(FETCH_TIMEOUT, crate::ado::git_out(repo, &args)).await;
+    crate::ado::git_out(
+        repo,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{tracking}^{{commit}}"),
+        ],
+    )
+    .await
+    .ok()
+    .map(|_| tracking)
+}
+
+/// The note when commits between `base` and the pushed `source` still
+/// carry co-author lines. After the clean, any that do were already on
+/// the server before this push.
+fn pushed_trailers_note(repo: &Path, base: &str, remote: &str, source: &str) -> Option<String> {
+    let range = format!("{base}..refs/remotes/{remote}/{source}");
+    match crate::attribution::find_ai_commits(repo, &range) {
+        Ok(found) if !found.is_empty() => Some(PUSHED_TRAILERS_NOTE.to_string()),
+        _ => None,
     }
 }
 
@@ -779,15 +840,18 @@ pub async fn link_task(ctx: &PrCtx, pr_id: u32, task: u32) -> Result<(), AdoErro
 }
 
 /// Push `pr.source` and open a pull request for it, never twice:
-/// 1. clean AI trailers from the branch's unpushed commits,
-/// 2. `git push --set-upstream`,
+/// 1. fetch the target, then clean co-author lines and footers from the
+///    branch's unpushed commits (bounded by the target when it is there,
+///    and by the remote-tracking refs either way),
+/// 2. `git push --set-upstream`; pushed commits that still carry
+///    co-author lines give the result its note,
 /// 3. an active PR from the branch already there is returned as `Existing`,
 /// 4. POST the PR with reviewers and the task link,
 /// 5. a create that may have landed (timeout, 409, 5xx) is reconciled by
 ///    listing again, never by posting again,
 /// 6. a task the reply does not show as linked is linked with a PATCH; if
 ///    that fails the PR is still returned, as `CreatedTaskNotLinked`.
-pub async fn create(ctx: &PrCtx, repo_path: &Path, pr: NewPr) -> Result<CreateOutcome, AdoError> {
+pub async fn create(ctx: &PrCtx, repo_path: &Path, pr: NewPr) -> Result<CreateResult, AdoError> {
     let source = strip_heads(pr.source.trim());
     let target = strip_heads(pr.target.trim());
     if source.is_empty() || target.is_empty() {
@@ -799,24 +863,34 @@ pub async fn create(ctx: &PrCtx, repo_path: &Path, pr: NewPr) -> Result<CreateOu
         return Err(AdoError::Local("Add a title".into()));
     }
 
-    let (repo, remote, src, tgt) = (
+    let base = fetch_target(repo_path, &ctx.remote_name, &target).await;
+    let (repo, remote, src) = (
         repo_path.to_path_buf(),
         ctx.remote_name.clone(),
         source.clone(),
-        target.clone(),
     );
-    tokio::task::spawn_blocking(move || -> Result<(), AdoError> {
-        crate::attribution::rewrite_unpushed(&repo, &format!("{remote}/{tgt}"), &src)
+    let note = tokio::task::spawn_blocking(move || -> Result<Option<String>, AdoError> {
+        crate::attribution::rewrite_unpushed(&repo, base.as_deref(), &src)
             .map_err(|e| AdoError::Local(format!("Could not clean the commit messages: {e}")))?;
-        push(&repo, &remote, &src)
+        push(&repo, &remote, &src)?;
+        // Without the target there is no telling the branch's own commits
+        // from the target's history, so no note.
+        Ok(base.and_then(|b| pushed_trailers_note(&repo, &b, &remote, &src)))
     })
     .await
     .map_err(|e| AdoError::Local(e.to_string()))??;
+    let outcome = open(ctx, &source, &target, &pr).await?;
+    Ok(CreateResult { outcome, note })
+}
 
-    if let Some(p) = for_source(&ctx.client, &ctx.repo_id, &source)
-        .await?
-        .first()
-    {
+/// Steps 3 to 6 of [`create`], once the branch is on the server.
+async fn open(
+    ctx: &PrCtx,
+    source: &str,
+    target: &str,
+    pr: &NewPr,
+) -> Result<CreateOutcome, AdoError> {
+    if let Some(p) = for_source(&ctx.client, &ctx.repo_id, source).await?.first() {
         return Ok(CreateOutcome::Existing(p.id));
     }
 
@@ -836,7 +910,7 @@ pub async fn create(ctx: &PrCtx, repo_path: &Path, pr: NewPr) -> Result<CreateOu
     let reply: Value = match ctx.client.post_json(&pulls_path(&ctx.repo_id), &body).await {
         Ok(v) => v,
         Err(e) if ambiguous(&e) => {
-            return match for_source(&ctx.client, &ctx.repo_id, &source).await {
+            return match for_source(&ctx.client, &ctx.repo_id, source).await {
                 Ok(found) if !found.is_empty() => Ok(CreateOutcome::Existing(found[0].id)),
                 _ => Err(e),
             };
@@ -1379,7 +1453,13 @@ mod tests {
         let out = create(&ctx_for(&s.base_url(), &r.work), &r.work, new_pr(None, "x"))
             .await
             .unwrap();
-        assert_eq!(out, CreateOutcome::Created(5));
+        assert_eq!(
+            out,
+            CreateResult {
+                outcome: CreateOutcome::Created(5),
+                note: None
+            }
+        );
         assert!(remote_has(&r.bare, "ja/fix"));
         assert_eq!(
             git(&r.work, &["rev-parse", "--abbrev-ref", "ja/fix@{upstream}"]),
@@ -1402,8 +1482,10 @@ mod tests {
         let mut ctx = ctx_for(&s.base_url(), &r.work);
         ctx.remote_name = "nowhere".into();
         let e = create(&ctx, &r.work, new_pr(None, "x")).await.unwrap_err();
+        // The push itself failed: the fetch of the target could not run
+        // either, so the clean went ahead on the remote refs alone.
         assert!(
-            matches!(&e, AdoError::Local(m) if m.contains("git push")),
+            matches!(&e, AdoError::Local(m) if m.starts_with("The git push of ja/fix to nowhere failed")),
             "{e}"
         );
         assert!(!e.user_message().contains("Azure DevOps"), "{e}");
@@ -1430,7 +1512,7 @@ mod tests {
         let out = create(&ctx_for(&s.base_url(), &r.work), &r.work, new_pr(None, "x"))
             .await
             .unwrap();
-        assert_eq!(out, CreateOutcome::Existing(77));
+        assert_eq!(out.outcome, CreateOutcome::Existing(77));
         assert_eq!(post.hits(), 0);
     }
 
@@ -1501,7 +1583,7 @@ mod tests {
         let out = create(&ctx_for(&base, &r.work), &r.work, new_pr(None, "x"))
             .await
             .unwrap();
-        assert_eq!(out, CreateOutcome::Existing(88));
+        assert_eq!(out.outcome, CreateOutcome::Existing(88));
         let seen = server.await.unwrap();
         assert_eq!(seen.len(), 3);
         assert_eq!(seen.iter().filter(|l| l.starts_with("POST ")).count(), 1);
@@ -1532,7 +1614,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(out, CreateOutcome::Created(6));
+        assert_eq!(out.outcome, CreateOutcome::Created(6));
         post.assert();
         assert_eq!(patch.hits(), 0);
     }
@@ -1579,7 +1661,7 @@ mod tests {
         .unwrap();
         patch.assert();
         assert!(
-            matches!(&out, CreateOutcome::CreatedTaskNotLinked(9, why) if why.contains("link refused")),
+            matches!(&out.outcome, CreateOutcome::CreatedTaskNotLinked(9, why) if why.contains("link refused")),
             "{out:?}"
         );
     }
@@ -1608,14 +1690,134 @@ mod tests {
     }
 
     #[test]
-    fn create_outcome_serialises_with_a_kind() {
+    fn create_result_serialises_with_a_kind() {
         assert_eq!(
-            serde_json::to_value(CreateOutcome::CreatedTaskNotLinked(4, "no".into())).unwrap(),
-            json!({"kind": "createdTaskNotLinked", "id": 4, "reason": "no"})
+            serde_json::to_value(CreateResult {
+                outcome: CreateOutcome::CreatedTaskNotLinked(4, "no".into()),
+                note: None
+            })
+            .unwrap(),
+            json!({"kind": "createdTaskNotLinked", "id": 4, "reason": "no", "note": null})
         );
         assert_eq!(
-            serde_json::to_value(CreateOutcome::Existing(2)).unwrap(),
-            json!({"kind": "existing", "id": 2, "reason": null})
+            serde_json::to_value(CreateResult {
+                outcome: CreateOutcome::Existing(2),
+                note: Some(PUSHED_TRAILERS_NOTE.into())
+            })
+            .unwrap(),
+            json!({"kind": "existing", "id": 2, "reason": null, "note": PUSHED_TRAILERS_NOTE})
+        );
+    }
+
+    fn mock_post(s: &MockServer, id: u32) -> httpmock::Mock<'_> {
+        s.mock(|w, t| {
+            w.method(POST)
+                .path("/_apis/git/repositories/r1/pullrequests");
+            t.status(201).json_body(json!({ "pullRequestId": id }));
+        })
+    }
+
+    #[tokio::test]
+    async fn create_fetches_the_target_before_the_clean() {
+        let r = temp_repo();
+        // The target moved on the server and was never fetched here; the
+        // local tracking ref is gone too.
+        git(&r.work, &["update-ref", "-d", "refs/remotes/origin/main"]);
+        let other = r.root.join("other");
+        git(
+            &r.root,
+            &[
+                "clone",
+                "-q",
+                r.bare.to_str().unwrap(),
+                other.to_str().unwrap(),
+            ],
+        );
+        std::fs::write(other.join("b.txt"), "b\n").unwrap();
+        git(&other, &["add", "."]);
+        git(&other, &["commit", "-q", "-m", "Elsewhere"]);
+        git(&other, &["push", "-q", "origin", "main"]);
+        let server_main = git(&r.bare, &["rev-parse", "main"]);
+        git(
+            &r.work,
+            &[
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "More\n\nCo-authored-by: Sam Lee <sam@tnt.co.nz>",
+            ],
+        );
+
+        let s = MockServer::start();
+        mock_no_existing(&s);
+        let post = mock_post(&s, 5);
+        let out = create(&ctx_for(&s.base_url(), &r.work), &r.work, new_pr(None, "x"))
+            .await
+            .unwrap();
+        post.assert();
+        assert_eq!(out.outcome, CreateOutcome::Created(5));
+        assert_eq!(out.note, None);
+        assert_eq!(git(&r.work, &["rev-parse", "origin/main"]), server_main);
+        assert_eq!(
+            git(&r.bare, &["log", "-1", "--format=%B", "ja/fix"]),
+            "More"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_target_found_nowhere_still_pushes_and_posts() {
+        let r = temp_repo();
+        let s = MockServer::start();
+        mock_no_existing(&s);
+        let post = mock_post(&s, 6);
+        let mut pr = new_pr(None, "x");
+        pr.target = "release/never".into();
+        let out = create(&ctx_for(&s.base_url(), &r.work), &r.work, pr)
+            .await
+            .unwrap();
+        post.assert();
+        assert_eq!(out.outcome, CreateOutcome::Created(6));
+        assert_eq!(out.note, None);
+        assert!(remote_has(&r.bare, "ja/fix"));
+    }
+
+    #[tokio::test]
+    async fn co_author_lines_already_pushed_are_left_with_a_note() {
+        let r = temp_repo();
+        // A commit with a co-author line reached the server before Kete
+        // saw the branch; a plain one follows locally.
+        git(
+            &r.work,
+            &[
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "Early\n\nCo-authored-by: Sam Lee <sam@tnt.co.nz>",
+            ],
+        );
+        git(&r.work, &["push", "-q", "-u", "origin", "ja/fix"]);
+        let pushed = git(&r.bare, &["rev-parse", "ja/fix"]);
+        git(&r.work, &["commit", "-q", "--allow-empty", "-m", "Later"]);
+
+        let s = MockServer::start();
+        mock_no_existing(&s);
+        mock_post(&s, 7);
+        let out = create(&ctx_for(&s.base_url(), &r.work), &r.work, new_pr(None, "x"))
+            .await
+            .unwrap();
+        assert_eq!(out.outcome, CreateOutcome::Created(7));
+        assert_eq!(out.note.as_deref(), Some(PUSHED_TRAILERS_NOTE));
+        assert_eq!(
+            PUSHED_TRAILERS_NOTE,
+            "Some commits on the server still carry co-author lines; they were left as they are."
+        );
+        // The pushed commit is exactly as it was, under the new tip.
+        assert_eq!(git(&r.bare, &["rev-parse", "ja/fix~1"]), pushed);
+        assert_eq!(
+            git(&r.bare, &["log", "-1", "--format=%B", "ja/fix"]),
+            "Later"
         );
     }
 
@@ -1760,7 +1962,7 @@ mod tests {
         .await
         .unwrap();
         assert!(
-            matches!(&out, CreateOutcome::CreatedTaskNotLinked(11, why) if why.contains("busy")),
+            matches!(&out.outcome, CreateOutcome::CreatedTaskNotLinked(11, why) if why.contains("busy")),
             "{out:?}"
         );
         assert_eq!(patch.hits(), 0);

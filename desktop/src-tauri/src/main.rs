@@ -395,7 +395,7 @@ async fn ado_create_pr(
     ado: State<'_, Arc<PrState>>,
     worktree: String,
     pr: prs::NewPr,
-) -> Res<prs::CreateOutcome> {
+) -> Res<prs::CreateResult> {
     let ctx = ado.ctx(&worktree_path(&client, &worktree)?).await?;
     let reviewers = pr.reviewers.clone();
     let repo = ctx.repo_path.clone();
