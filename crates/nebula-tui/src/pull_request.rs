@@ -1395,6 +1395,9 @@ mod tests {
     }
 
     #[tokio::test]
+    // The env guard spans the whole test, awaits included: the test
+    // runtime is one thread, and PATH must stay put until the end.
+    #[allow(clippy::await_holding_lock)]
     async fn merged_lookup_never_matches_the_default_branch() {
         let _env = crate::test_env::spawning();
         let (_tmp, repo) = init_lookup_repo();
@@ -1409,6 +1412,9 @@ mod tests {
     }
 
     #[tokio::test]
+    // The env guard spans the whole test, awaits included: the test
+    // runtime is one thread, and PATH must stay put until the end.
+    #[allow(clippy::await_holding_lock)]
     async fn merged_lookup_matches_only_while_branch_has_no_commits_beyond_pr_head() {
         let _env = crate::test_env::spawning();
         let (_tmp, repo) = init_lookup_repo();

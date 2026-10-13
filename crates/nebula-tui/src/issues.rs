@@ -2250,6 +2250,9 @@ mod tests {
     /// `gh` that isn't there.
     #[cfg(unix)]
     #[tokio::test]
+    // The env guard spans the whole test, awaits included: the test
+    // runtime is one thread, and PATH must stay put until the end.
+    #[allow(clippy::await_holding_lock)]
     async fn the_comment_body_goes_down_stdin_and_a_refusal_is_a_miss() {
         let _env = crate::test_env::spawning();
         use std::os::unix::fs::PermissionsExt;
@@ -3123,6 +3126,9 @@ mod tests {
     /// stock reason, and a `gh` that isn't there says so.
     #[cfg(unix)]
     #[tokio::test]
+    // The env guard spans the whole test, awaits included: the test
+    // runtime is one thread, and PATH must stay put until the end.
+    #[allow(clippy::await_holding_lock)]
     async fn the_edit_sends_the_title_on_argv_and_the_body_down_stdin() {
         let _env = crate::test_env::spawning();
         use std::os::unix::fs::PermissionsExt;
