@@ -2967,16 +2967,25 @@ pub fn program_installed(program: &str) -> bool {
     if program.is_empty() {
         return false;
     }
-    let Some(paths) = std::env::var_os("PATH") else {
-        return false;
-    };
-    for dir in std::env::split_paths(&paths) {
-        let candidate = dir.join(program);
-        if candidate.is_file() {
-            return true;
-        }
+    // Windows: `claude` is `claude.exe` or `claude.cmd` on disk; a bare
+    // join never finds it, so look the way a spawn does (PATH + PATHEXT).
+    #[cfg(windows)]
+    {
+        nebula_core::shell::resolve_program(program).is_some()
     }
-    false
+    #[cfg(not(windows))]
+    {
+        let Some(paths) = std::env::var_os("PATH") else {
+            return false;
+        };
+        for dir in std::env::split_paths(&paths) {
+            let candidate = dir.join(program);
+            if candidate.is_file() {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 /// [`DEFAULT_CHOICE`] (or blank) → None; anything else passes through.
