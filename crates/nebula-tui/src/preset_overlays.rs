@@ -15,10 +15,11 @@
 //! — and the create it ends in goes through `event_loop::create_agent`
 //! like every other session.
 
-use crate::agent_presets::{AgentPreset, PresetText};
+use crate::agent_presets::{AgentPreset, PresetText, PresetTextExt};
 use crate::app::{
     clamp_selection, window_start, App, ConfirmDialog, Focus, Overlay, PendingAction, PromptKind,
 };
+use crate::config::ConfigExt;
 use crate::quick_prompt::QuickTarget;
 use crate::text_input::TextInput;
 use crate::theme::Theme;

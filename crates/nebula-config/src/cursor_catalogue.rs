@@ -26,7 +26,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::DEFAULT_CHOICE;
+use crate::DEFAULT_CHOICE;
 
 /// Catalogue ids as `cursor-agent` accepted them on 2026-08-28 (cursor-agent
 /// 2026.08.25), curated to the current families. Order is the pick order.

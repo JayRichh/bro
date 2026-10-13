@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/nebula-core", "crates/nebula-daemon", "crates/nebula-fuzzy", "crates/nebula-tui", "crates/nebula"]
+members = ["crates/nebula-core", "crates/nebula-config", "crates/nebula-daemon", "crates/nebula-fuzzy", "crates/nebula-tui", "crates/nebula"]
 # desktop/ is its own workspace (the Tauri GUI), built by its own CI job.
 exclude = ["vendor/vt100", "desktop"]
 
@@ -19,6 +19,7 @@ license = "MIT"
 
 [workspace.dependencies]
 nebula-core = { path = "crates/nebula-core" }
+nebula-config = { path = "crates/nebula-config" }
 nebula-daemon = { path = "crates/nebula-daemon" }
 nebula-tui = { path = "crates/nebula-tui" }
 nebula-fuzzy = { path = "crates/nebula-fuzzy" }

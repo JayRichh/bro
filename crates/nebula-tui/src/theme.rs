@@ -46,38 +46,12 @@ pub const PRESETS: &[&str] = &[
     "kete-light",
 ];
 
-/// The theme that follows the OS app theme: `kete-light` while the OS says
-/// light, `kete-dark` otherwise ([`resolve`]).
-pub const AUTO: &str = "auto";
-/// The theme read out of VS Code's own settings (`crate::vscode_theme`),
-/// falling back to `one-dark` when there is none to read.
-pub const VSCODE: &str = "vscode";
-
-/// Names the settings overlay cycles through: every preset, then the two
-/// that are resolved against the machine. `by_name` accepts the presets
-/// case-insensitively and falls back to the first entry; [`resolve`]
-/// accepts all of them.
-pub const THEMES: &[&str] = &[
-    "default",
-    "ocean",
-    "forest",
-    "rose",
-    "amber",
-    "lavender",
-    "coral",
-    "slate",
-    "sand",
-    "mono",
-    "one-dark",
-    "one-light",
-    "kete-dark",
-    "kete-light",
-    AUTO,
-    VSCODE,
-];
-
-/// The theme a fresh config starts on, on every OS: Kete Workshop, dark.
-pub const DEFAULT_THEME: &str = "kete-dark";
+// The theme names — every preset, then `auto` (the OS app theme:
+// `kete-light` while the OS says light, `kete-dark` otherwise, see
+// [`resolve`]) and `vscode` (read out of VS Code's own settings,
+// `crate::vscode_theme`, falling back to `one-dark`) — and the default
+// live in the shared settings crate, so the desktop window offers the same.
+pub use nebula_config::choices::{AUTO, DEFAULT_THEME, THEMES, VSCODE};
 
 /// Semantic color roles for the whole TUI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

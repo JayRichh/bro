@@ -27,6 +27,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::app::{App, ContextMenu, MenuAction, MenuItem, Overlay};
+use crate::config::ConfigExt;
 
 /// One browser the chooser can offer.
 #[derive(Debug, Clone, PartialEq, Eq)]

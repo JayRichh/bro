@@ -1,0 +1,20 @@
+[package]
+name = "nebula-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Kete's user settings: the config.json data model, its schema and the harness catalogues, shared by the TUI and the desktop window (no terminal UI dependencies)"
+
+[features]
+# For dependents' test builds: the thread-local config path override and
+# the guard that a test never saves to the developer's real config.
+test-support = []
+
+[dependencies]
+nebula-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

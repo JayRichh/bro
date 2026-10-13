@@ -86,70 +86,24 @@ impl AgentPreset {
 /// to fill. Never stored on the preset — a side is what it holds, so the
 /// form derives it ([`PresetText::for_preset`]) and an older nebula reads
 /// the file unchanged.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PresetText {
-    Prefix,
-    Postfix,
-    Both,
-}
+pub use nebula_config::choices::PresetText;
 
-impl PresetText {
-    /// In cycle order, as the Text row and the setting step them.
-    pub const ALL: [PresetText; 3] = [PresetText::Prefix, PresetText::Postfix, PresetText::Both];
-    /// What a config that never set `preset_text` means.
-    pub const DEFAULT: PresetText = PresetText::Prefix;
-
-    /// The label the setting stores and both rows show.
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            PresetText::Prefix => "prefix",
-            PresetText::Postfix => "postfix",
-            PresetText::Both => "prefix & postfix",
-        }
-    }
-
-    /// A label back to its side, case-insensitively and trimmed; `both` is
-    /// accepted for a hand edit. None for anything else.
-    pub fn parse(value: &str) -> Option<PresetText> {
-        let value = value.trim();
-        if value.eq_ignore_ascii_case("both") {
-            return Some(PresetText::Both);
-        }
-        Self::ALL
-            .into_iter()
-            .find(|side| side.as_str().eq_ignore_ascii_case(value))
-    }
-
-    pub fn has_prefix(self) -> bool {
-        matches!(self, PresetText::Prefix | PresetText::Both)
-    }
-
-    pub fn has_postfix(self) -> bool {
-        matches!(self, PresetText::Postfix | PresetText::Both)
-    }
-
-    /// The side (or sides) two flags name; None when neither is set.
-    pub fn of_sides(prefix: bool, postfix: bool) -> Option<PresetText> {
-        match (prefix, postfix) {
-            (true, true) => Some(PresetText::Both),
-            (true, false) => Some(PresetText::Prefix),
-            (false, true) => Some(PresetText::Postfix),
-            (false, false) => None,
-        }
-    }
-
+/// [`PresetText`] against a stored preset, which only the TUI knows.
+pub trait PresetTextExt {
     /// What the editor shows for a stored preset under the `default`
     /// setting: every side the preset already holds text on, plus the
     /// side(s) the setting names — so nothing saved is ever hidden, and a
     /// blank preset opens the way a new one would.
-    pub fn for_preset(preset: &AgentPreset, default: PresetText) -> PresetText {
-        Self::of_sides(
+    fn for_preset(preset: &AgentPreset, default: PresetText) -> PresetText {
+        PresetText::of_sides(
             !preset.prefix.trim().is_empty() || default.has_prefix(),
             !preset.postfix.trim().is_empty() || default.has_postfix(),
         )
         .unwrap_or(default)
     }
 }
+
+impl PresetTextExt for PresetText {}
 
 pub fn load() -> Vec<AgentPreset> {
     load_from(&store_path())

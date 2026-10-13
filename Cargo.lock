@@ -1260,6 +1260,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "nebula-config"
+version = "0.45.0"
+dependencies = [
+ "nebula-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
 name = "nebula-core"
 version = "0.45.0"
 dependencies = [
@@ -1312,6 +1323,7 @@ dependencies = [
  "crossterm",
  "futures",
  "image",
+ "nebula-config",
  "nebula-core",
  "nebula-fuzzy",
  "portable-pty",

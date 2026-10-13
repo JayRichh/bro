@@ -34,7 +34,7 @@ pub enum IconStyle {
 }
 
 /// What the `icons` setting cycles through.
-pub const ICON_STYLES: &[&str] = &["auto", "nerd", "ascii", "off"];
+pub use nebula_config::choices::ICON_STYLES;
 
 impl IconStyle {
     /// The setting's word, `auto` resolved against the terminal.

@@ -9,6 +9,7 @@ use crate::app::{
     WorktreeRollback,
 };
 use crate::app::{PrCommentAnswer, PrDiffAnswer};
+use crate::config::ConfigExt;
 use crate::pull_request::Lookup;
 use crate::text_input::TextInput;
 use crate::tree_browser::TreeBrowser;

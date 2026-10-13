@@ -1,4 +1,5 @@
 use super::*;
+use crate::config::ConfigExt;
 
 pub(super) fn draw_overlay(f: &mut Frame, app: &mut App) {
     let th = app.chrome.theme;

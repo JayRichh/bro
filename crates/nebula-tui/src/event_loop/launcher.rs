@@ -3163,6 +3163,7 @@ mod tests {
     };
     use super::super::{handle_terminal_event, sweep_target};
     use crate::app::{App, Focus, HitTarget, Overlay, PendingAction, PromptKind};
+    use crate::config::ConfigExt;
     use crate::launcher::BoxField;
     use crate::launcher::CardRef;
     use crate::quick_prompt::{QuickLaunch, QuickTarget};

@@ -32,58 +32,9 @@ use crate::syntax::{Highlighter, TokenKind};
 /// A tab, as the diff pane draws one.
 const TAB: &str = "    ";
 
-/// How a DIFF VIEWER lays a diff out (the module docs).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum DiffMode {
-    #[default]
-    SideBySide,
-    Inline,
-    Replacement,
-}
-
-impl DiffMode {
-    /// The order `Ctrl+s` and the settings row cycle through.
-    pub const ALL: [DiffMode; 3] = [
-        DiffMode::SideBySide,
-        DiffMode::Inline,
-        DiffMode::Replacement,
-    ];
-
-    /// The word config.json stores.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            DiffMode::SideBySide => "side-by-side",
-            DiffMode::Inline => "inline",
-            DiffMode::Replacement => "replacement",
-        }
-    }
-
-    /// A stored word, read forgivingly: `split` and `unified` are what
-    /// the older `Ctrl+s` toggle called the first two.
-    pub fn parse(word: &str) -> Option<Self> {
-        match word.trim().to_ascii_lowercase().as_str() {
-            "side-by-side" | "side by side" | "split" => Some(DiffMode::SideBySide),
-            "inline" | "unified" => Some(DiffMode::Inline),
-            "replacement" | "replace" => Some(DiffMode::Replacement),
-            _ => None,
-        }
-    }
-
-    /// The layout after this one, round to the first.
-    pub fn next(self) -> Self {
-        let at = Self::ALL.iter().position(|m| *m == self).unwrap_or(0);
-        Self::ALL[(at + 1) % Self::ALL.len()]
-    }
-
-    /// What the pane's frame and the footer call it.
-    pub fn label(self) -> &'static str {
-        match self {
-            DiffMode::SideBySide => "side by side",
-            DiffMode::Inline => "inline",
-            DiffMode::Replacement => "replacement",
-        }
-    }
-}
+/// How a DIFF VIEWER lays a diff out (the module docs). The words it
+/// stores are shared with the desktop window, so the enum lives there.
+pub use nebula_config::choices::DiffMode;
 
 /// Which side of the diff a line is on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

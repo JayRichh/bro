@@ -19,9 +19,7 @@ use ratatui::text::{Line, Span};
 
 use crate::theme::{Theme, BLACK_BACKGROUND};
 
-pub const INLINE_GRAPHICS_MODES: &[&str] =
-    &["auto", "kitty", "iterm", "sixel", "halfblocks", "off"];
-pub const DEFAULT_INLINE_GRAPHICS: &str = "auto";
+pub use nebula_config::choices::{mode_label, DEFAULT_INLINE_GRAPHICS, INLINE_GRAPHICS_MODES};
 
 const MAX_MARKDOWN_DIAGRAM_ROWS: u16 = 40;
 
@@ -36,14 +34,6 @@ pub fn graphics_mode(value: &str) -> GraphicsMode {
         "off" => GraphicsMode::Off,
         _ => GraphicsMode::Halfblocks,
     }
-}
-
-pub fn mode_label(value: &str) -> &'static str {
-    INLINE_GRAPHICS_MODES
-        .iter()
-        .copied()
-        .find(|mode| mode.eq_ignore_ascii_case(value.trim()))
-        .unwrap_or(DEFAULT_INLINE_GRAPHICS)
 }
 
 pub fn is_image_path(path: &Path) -> bool {

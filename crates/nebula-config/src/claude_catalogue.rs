@@ -32,7 +32,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{OnceLock, RwLock};
 
-use crate::config::DEFAULT_CHOICE;
+use crate::DEFAULT_CHOICE;
 
 /// The built-in Claude model aliases, [`DEFAULT_CHOICE`] first: what the
 /// pickers offer when neither CONFIG.JSON's `claude_models` nor Claude
