@@ -576,14 +576,15 @@ fn main() {
     // window has no console to say so on; `kete` says it when it moves them.
     let _ = nebula_core::paths::migrate_legacy_dirs();
     let client = Client::new();
-    let ado_prs_state = Arc::new(PrState::new(
-        Arc::new(TokenSource::system()),
-        Arc::new(AdoStore::open(AdoStore::default_path())),
-    ));
+    // One token source and one ado.json store for every ADO command.
+    let ado_tokens = Arc::new(TokenSource::system());
+    let ado_store = Arc::new(AdoStore::open(AdoStore::default_path()));
+    let ado_prs_state = Arc::new(PrState::new(ado_tokens.clone(), ado_store.clone()));
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(client.clone())
         .manage(ado_prs_state.clone())
+        .manage(ado::AdoState::new(ado_store, ado_tokens))
         .setup(move |app| {
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(daemon::run(client.clone()));
@@ -624,6 +625,10 @@ fn main() {
             ado::branches::ado_fetch,
             ado::branches::ado_checkout_worktree,
             ado::branches::ado_delete_local,
+            // ADO tasks (Tasks 6 and 10)
+            ado::tasks::ado_teams,
+            ado::tasks::ado_iterations,
+            ado::tasks::ado_tasks,
         ])
         .run(tauri::generate_context!())
         .expect("kete-desktop failed to start");

@@ -1,0 +1,18 @@
+{
+  "count": 1,
+  "value": [
+    {
+      "id": 300,
+      "rev": 21,
+      "fields": {
+        "System.Id": 300,
+        "System.WorkItemType": "Feature",
+        "System.State": "In Progress",
+        "System.Title": "NZ tax compliance",
+        "System.Description": "<p>Everything GST.</p>",
+        "Microsoft.VSTS.Common.AcceptanceCriteria": "<p>IRD sign-off</p>"
+      },
+      "url": "https://dev.azure.com/tnt/6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c/_apis/wit/workItems/300"
+    }
+  ]
+}

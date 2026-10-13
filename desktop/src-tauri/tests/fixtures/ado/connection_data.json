@@ -1,0 +1,22 @@
+{
+  "authenticatedUser": {
+    "id": "4f6e2c8a-7b1d-6c3e-9f2a-1b4d5e6f7a8b",
+    "descriptor": "Microsoft.IdentityModel.Claims.ClaimsIdentity;72f988bf-86f1-41af-91ab-2d7cd011db47\\jay@tnt.co.nz",
+    "subjectDescriptor": "aad.NGY2ZTJjOGEtN2IxZC03YzNlLTlmMmEtMWI0ZDVlNmY3YThi",
+    "providerDisplayName": "Jay Richardson",
+    "isActive": true,
+    "properties": {
+      "Account": { "$type": "System.String", "$value": "jay@tnt.co.nz" }
+    },
+    "resourceVersion": 2,
+    "metaTypeId": 0
+  },
+  "authorizedUser": {
+    "id": "4f6e2c8a-7b1d-6c3e-9f2a-1b4d5e6f7a8b",
+    "providerDisplayName": "Jay Richardson"
+  },
+  "instanceId": "3c1c2d1e-0000-4c5d-9a2b-1a2b3c4d5e6f",
+  "deploymentId": "5d4c3b2a-0000-4a5b-8c9d-0e1f2a3b4c5d",
+  "deploymentType": "hosted",
+  "locationServiceData": {}
+}

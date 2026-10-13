@@ -1,0 +1,13 @@
+{
+  "workItemRelations": [
+    { "rel": null, "source": null, "target": { "id": 100, "url": "https://dev.azure.com/tnt/_apis/wit/workItems/100" } },
+    { "rel": "System.LinkTypes.Hierarchy-Forward", "source": { "id": 100, "url": "https://dev.azure.com/tnt/_apis/wit/workItems/100" }, "target": { "id": 101, "url": "https://dev.azure.com/tnt/_apis/wit/workItems/101" } },
+    { "rel": "System.LinkTypes.Hierarchy-Forward", "source": { "id": 100, "url": "https://dev.azure.com/tnt/_apis/wit/workItems/100" }, "target": { "id": 102, "url": "https://dev.azure.com/tnt/_apis/wit/workItems/102" } },
+    { "rel": null, "source": null, "target": { "id": 200, "url": "https://dev.azure.com/tnt/_apis/wit/workItems/200" } },
+    { "rel": null, "source": null, "target": { "id": 103, "url": "https://dev.azure.com/tnt/_apis/wit/workItems/103" } }
+  ],
+  "url": "https://dev.azure.com/tnt/6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c/66df9be7-3586-467b-9c5f-425b29afedfd/_apis/work/teamsettings/iterations/a589a806-bf11-4d4f-a031-c19813331553/workitems",
+  "_links": {
+    "self": { "href": "https://dev.azure.com/tnt/6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c/66df9be7-3586-467b-9c5f-425b29afedfd/_apis/work/teamsettings/iterations/a589a806-bf11-4d4f-a031-c19813331553/workitems" }
+  }
+}

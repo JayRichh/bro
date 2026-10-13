@@ -1,0 +1,10 @@
+{
+  "field": { "referenceName": "System.AreaPath", "url": "https://dev.azure.com/tnt/_apis/wit/fields/System.AreaPath" },
+  "defaultValue": "Platform\\Payments",
+  "values": [
+    { "value": "Platform\\Payments", "includeChildren": true },
+    { "value": "Platform\\O'Brien Squad", "includeChildren": false }
+  ],
+  "url": "https://dev.azure.com/tnt/6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c/66df9be7-3586-467b-9c5f-425b29afedfd/_apis/work/teamsettings/teamfieldvalues",
+  "_links": {}
+}
