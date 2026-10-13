@@ -51,3 +51,17 @@ fn a_custom_harness_with_no_effort_offers_none() {
     assert!(choices.efforts.values().all(Vec::is_empty));
     assert_eq!(choices.effort, "n/a");
 }
+
+#[test]
+fn the_rows_the_window_now_honours_are_not_terminal_only() {
+    use nebula_config::schema::TERMINAL_ONLY;
+    use nebula_config::SettingKind;
+    for kind in [
+        SettingKind::PresetText,
+        SettingKind::AskBeforeArchive,
+        SettingKind::FollowNewSession,
+        SettingKind::QuickPromptNewWorktree,
+    ] {
+        assert!(!TERMINAL_ONLY.contains(&kind), "{kind:?}");
+    }
+}

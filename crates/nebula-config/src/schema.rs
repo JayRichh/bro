@@ -21,7 +21,10 @@ use std::path::{Path, PathBuf};
 
 /// Rows that only mean something to the terminal app — its search, file
 /// editor, sounds, grid layout, card chrome, colours and quick-prompt
-/// focus. The window shows them under a "Terminal app" group in their tab,
+/// focus. (Preset text, Confirm on archive, Follow new session and the
+/// quick prompt's New worktree are the window's too: its presets editor,
+/// archive and quick prompt read them.) The window shows them under a
+/// "Terminal app" group in their tab,
 /// still editable, since they are the same file.
 pub const TERMINAL_ONLY: &[SettingKind] = &[
     SettingKind::PaletteEnterAttaches,
@@ -29,11 +32,9 @@ pub const TERMINAL_ONLY: &[SettingKind] = &[
     SettingKind::CloseFinderOnOpen,
     SettingKind::DoneSound,
     SettingKind::FeedbackSound,
-    SettingKind::PresetText,
     SettingKind::DeleteEmptyWorktree,
     SettingKind::AutoCleanupMerged,
     SettingKind::ShowAllWorktrees,
-    SettingKind::AskBeforeArchive,
     SettingKind::ConfirmDragMove,
     SettingKind::Theme,
     SettingKind::Icons,
@@ -53,8 +54,6 @@ pub const TERMINAL_ONLY: &[SettingKind] = &[
     SettingKind::CardIssueNumber,
     SettingKind::HideDraftPrs,
     SettingKind::QuickPromptFocus,
-    SettingKind::FollowNewSession,
-    SettingKind::QuickPromptNewWorktree,
     SettingKind::RememberHarness,
 ];
 
