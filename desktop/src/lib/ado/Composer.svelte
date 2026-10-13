@@ -224,7 +224,7 @@
 
   /** Created: show it in PRs, Mine, with its checklist. */
   function opened(id: number, note: string | null) {
-    prsState.created = { id, note };
+    prsState.created[repo] = { id, note, pending: true };
     delete prsState.drafts[key];
     nav.go({ view: 'prs', repo, item: prItem(id) });
   }

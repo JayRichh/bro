@@ -32,7 +32,7 @@
   let replies = $state<Record<number, string>>({});
   let replying = $state<number | null>(null);
 
-  const note = $derived(prsState.created?.id === id ? prsState.created.note : null);
+  const note = $derived(prsState.created[repo]?.id === id ? prsState.created[repo].note : null);
 
   let asked = 0;
   async function load(quiet = false) {

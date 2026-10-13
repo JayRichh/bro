@@ -35,9 +35,17 @@ export interface ComposeDraft {
 export const prsState = $state({
   lists: {} as Record<string, ListState>,
   drafts: {} as Record<string, ComposeDraft>,
-  /** The PR just created, and its note, for the detail's first look. */
-  created: null as { id: number; note: string | null } | null,
+  /** Per repo: the PR just created and its note, for the list's badge and
+   *  the detail's first look. `pending` until the list has reloaded once
+   *  to show it, on the Mine tab. */
+  created: {} as Record<string, CreatedPr>,
 });
+
+export interface CreatedPr {
+  id: number;
+  note: string | null;
+  pending: boolean;
+}
 
 export function freshDraft(): ComposeDraft {
   return {

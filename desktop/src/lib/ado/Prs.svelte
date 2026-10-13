@@ -7,7 +7,7 @@
   import Mark from './Mark.svelte';
   import Review from './Review.svelte';
   import { composeItem, parseItem, prItem, prMark, prs, voteSquare, type PrSummary } from './prs-api';
-  import { prsState } from './prs-state.svelte';
+  import { prsState, type CreatedPr } from './prs-state.svelte';
 
   const repo = $derived(nav.current.repo ?? '');
   const item = $derived(parseItem(nav.current.item));
@@ -43,24 +43,29 @@
     }
   }
 
+  // One load per repo, plus one more when a PR was just created there, so
+  // its row shows on the Mine tab. The created PR is consumed once that
+  // reload is done, so a later visit keeps whichever tab was picked.
   let loadedFor = '';
+  /** The created PR whose reload is in flight: never asked for twice. */
+  let consuming: CreatedPr | null = null;
   $effect(() => {
+    if (!ctx || !worktree || item.kind === 'compose') return;
     const k = `${repo}\u0000${worktree}`;
-    if (ctx && worktree && k !== loadedFor && item.kind !== 'compose') {
-      loadedFor = k;
+    const fresh = prsState.created[repo];
+    const pending = !!fresh?.pending && fresh !== consuming;
+    if (k === loadedFor && !pending) return;
+    loadedFor = k;
+    if (!pending) {
       load();
+      return;
     }
-  });
-
-  // A PR just created: reload Mine so its row is there, on the Mine tab.
-  let reloadedFor = 0;
-  $effect(() => {
-    const id = prsState.created?.id ?? 0;
-    if (id && id !== reloadedFor && ctx && worktree && item.kind !== 'compose') {
-      reloadedFor = id;
-      ui.tab = 'mine';
-      load();
-    }
+    ui.tab = 'mine';
+    consuming = fresh;
+    load().finally(() => {
+      fresh.pending = false;
+      if (consuming === fresh) consuming = null;
+    });
   });
 
   // "New pull request": a branch name, then the composer for it.
@@ -190,7 +195,7 @@
             >
               <span class="flex min-w-0 items-baseline gap-3">
                 <span class="min-w-0 flex-1 truncate text-[15px] font-semibold text-ink">{pr.title}</span>
-                {#if pr.id === prsState.created?.id}<span class="flex-none text-[12px] font-medium text-ink">just created</span>{/if}
+                {#if pr.id === prsState.created[repo]?.id}<span class="flex-none text-[12px] font-medium text-ink">just created</span>{/if}
                 <span class="flex-none font-mono text-[12px] text-muted">{pr.id}</span>
               </span>
               <span class="mt-1 flex min-w-0 items-center gap-3">
