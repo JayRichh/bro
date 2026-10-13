@@ -210,7 +210,7 @@ pub(crate) fn dispatch_input(app: &mut App, event: Event, out: &mut Vec<ClientRe
             // A review the orchestrator held back keeps saying so until
             // F10 shows it.
             if app.orch.pending_review.is_some() && app.chrome.flash.is_none() {
-                app.chrome.flash = Some(orchestrator::PENDING_REVIEW.into());
+                app.chrome.flash = Some(orchestrator::pending_review_toast(app).into());
             }
             // A key that only went to the PTY changed nothing here: what
             // it does shows up as the PTY's answer, a couple of

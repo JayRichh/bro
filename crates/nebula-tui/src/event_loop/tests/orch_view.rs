@@ -364,7 +364,7 @@ fn review_opened_while_typing_into_another_session_waits_for_f10() {
 }
 
 #[test]
-fn review_opened_while_talking_to_the_orchestrator_opens_at_once() {
+fn review_opened_while_typing_to_the_orchestrator_waits_too_and_f10_shows_it() {
     with_default_config(|| {
         let mut app = app_with_orchestrator();
         let mut out = Vec::new();
@@ -380,6 +380,16 @@ fn review_opened_while_talking_to_the_orchestrator_opens_at_once() {
                 tabs: Vec::new(),
             },
         );
+        assert!(
+            app.modals.overlay.is_none(),
+            "keys stay with the orchestrator"
+        );
+        assert_eq!(pane_on(&app), Some(orch()));
+        assert_eq!(
+            app.chrome.flash.as_deref(),
+            Some(orchestrator::PENDING_REVIEW)
+        );
+        key(&mut app, KeyCode::F(10), &mut out);
         let Some(Overlay::Review(review)) = &app.modals.overlay else {
             panic!("no review: {:?}", app.modals.overlay);
         };
@@ -391,6 +401,200 @@ fn review_opened_while_talking_to_the_orchestrator_opens_at_once() {
             Some(SessionRef::Agent(AgentId("run".into())))
         );
     });
+}
+
+/// A review held while typing into a terminal tab, where F10 is the
+/// shell's: the toast says how to get there.
+#[test]
+fn a_held_review_from_a_terminal_tab_says_ctrl_q_first() {
+    with_default_config(|| {
+        let mut app = app_with_orchestrator();
+        app.pane.term = Some(AttachedTerm::new(
+            SessionRef::Terminal(nebula_core::TerminalId("t1".into())),
+            80,
+            24,
+        ));
+        app.nav.focus = Focus::Terminal;
+        app.pane.term_locked = true;
+        hse(
+            &mut app,
+            ServerEvent::ReviewOpened {
+                opener: AgentId("orch".into()),
+                sessions: vec![SessionRef::Agent(AgentId("ask".into()))],
+                tabs: Vec::new(),
+            },
+        );
+        assert_eq!(
+            app.chrome.flash.as_deref(),
+            Some(orchestrator::PENDING_REVIEW_FROM_TERMINAL)
+        );
+    });
+}
+
+/// An unsolicited review (from the daemon, the user on the cards) ignores
+/// Enter and a click on the screen for a moment, so a keystroke meant for
+/// something else does not jump into a worker.
+#[test]
+fn an_unsolicited_review_ignores_an_immediate_enter() {
+    with_default_config(|| {
+        let mut app = app_with_orchestrator();
+        let mut out = Vec::new();
+        hse(
+            &mut app,
+            ServerEvent::ReviewOpened {
+                opener: AgentId("orch".into()),
+                sessions: vec![SessionRef::Agent(AgentId("ask".into()))],
+                tabs: Vec::new(),
+            },
+        );
+        assert!(matches!(app.modals.overlay, Some(Overlay::Review(_))));
+        key(&mut app, KeyCode::Enter, &mut out);
+        assert!(
+            matches!(app.modals.overlay, Some(Overlay::Review(_))),
+            "Enter right after an unsolicited open does not jump"
+        );
+        if let Some(Overlay::Review(review)) = &mut app.modals.overlay {
+            review.guard_until = None;
+        }
+        key(&mut app, KeyCode::Enter, &mut out);
+        assert!(app.modals.overlay.is_none(), "after the guard, Enter jumps");
+        assert_eq!(
+            pane_on(&app),
+            Some(SessionRef::Agent(AgentId("ask".into())))
+        );
+    });
+}
+
+/// History asked for one session, then another before the first answer:
+/// both answers land, neither tab stays on Loading.
+#[test]
+fn a_superseded_history_request_still_lands() {
+    with_default_config(|| {
+        let mut app = app_with_orchestrator();
+        let mut out = Vec::new();
+        orchestrator::open_review(
+            &mut app,
+            None,
+            vec![
+                SessionRef::Agent(AgentId("ask".into())),
+                SessionRef::Agent(AgentId("run".into())),
+            ],
+            vec![ReviewTabKind::History],
+            &mut out,
+        );
+        key(&mut app, KeyCode::Right, &mut out);
+        let asked: Vec<(u64, String)> = out
+            .iter()
+            .filter_map(|r| match r {
+                ClientRequest::ReadSession { req_id, target, .. } => {
+                    Some((*req_id, target.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(asked.len(), 2, "{asked:?}");
+        for (req_id, target) in asked.iter().rev() {
+            hse(
+                &mut app,
+                ServerEvent::SessionText {
+                    req_id: *req_id,
+                    session: SessionRef::Agent(AgentId(target.clone())),
+                    text: format!("history of {target}"),
+                },
+            );
+        }
+        let Some(Overlay::Review(review)) = &app.modals.overlay else {
+            panic!("no review");
+        };
+        for id in ["ask", "run"] {
+            assert_eq!(
+                review.histories.get(&SessionRef::Agent(AgentId(id.into()))),
+                Some(&crate::review_modal::Loaded::Ready(format!(
+                    "history of {id}"
+                )))
+            );
+        }
+    });
+}
+
+/// A review opened over an empty pane leaves it empty again on close.
+#[test]
+fn closing_a_review_over_an_empty_pane_empties_it_again() {
+    with_default_config(|| {
+        let mut app = app_with_orchestrator();
+        let mut out = Vec::new();
+        assert!(app.pane.term.is_none());
+        orchestrator::open_review(
+            &mut app,
+            None,
+            vec![SessionRef::Agent(AgentId("ask".into()))],
+            Vec::new(),
+            &mut out,
+        );
+        assert_eq!(
+            pane_on(&app),
+            Some(SessionRef::Agent(AgentId("ask".into())))
+        );
+        key(&mut app, KeyCode::Esc, &mut out);
+        assert!(app.pane.term.is_none(), "{:?}", pane_on(&app));
+    });
+}
+
+/// "Make orchestrator" says so when the daemon has done it, not before.
+#[test]
+fn make_orchestrator_flashes_on_the_ack() {
+    with_default_config(|| {
+        let mut app = app_with_orchestrator();
+        let mut out = Vec::new();
+        app.chrome.flash = None;
+        run_menu_action(
+            &mut app,
+            MenuAction::MakeOrchestrator(AgentId("run".into())),
+            &mut out,
+        );
+        assert!(app.chrome.flash.is_none(), "{:?}", app.chrome.flash);
+        let req_id = out
+            .iter()
+            .find_map(|r| match r {
+                ClientRequest::SetOrchestrator { req_id, .. } => Some(*req_id),
+                _ => None,
+            })
+            .unwrap();
+        hse(
+            &mut app,
+            ServerEvent::Ack {
+                req_id,
+                created: None,
+            },
+        );
+        assert!(app
+            .chrome
+            .flash
+            .as_deref()
+            .is_some_and(|f| f.contains("run is the orchestrator")));
+    });
+}
+
+/// The start prompt launches on the harness's configured model and effort.
+#[test]
+fn the_start_prompt_applies_the_harness_defaults() {
+    with_config_json(
+        r#"{"claude_model": "sonnet", "claude_effort": "max"}"#,
+        || {
+            let mut app = App::new();
+            seed_tree(&mut app);
+            let mut out = Vec::new();
+            key(&mut app, KeyCode::F(10), &mut out);
+            key(&mut app, KeyCode::Enter, &mut out);
+            let sent = out.iter().find_map(|r| match r {
+                ClientRequest::StartOrchestrator { model, effort, .. } => {
+                    Some((model.clone(), effort.clone()))
+                }
+                _ => None,
+            });
+            assert_eq!(sent, Some((Some("sonnet".into()), Some("max".into()))));
+        },
+    );
 }
 
 #[test]

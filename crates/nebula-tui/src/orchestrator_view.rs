@@ -32,7 +32,8 @@ pub struct OrchState {
     pub pending_review: Option<(AgentId, Vec<SessionRef>, Vec<ReviewTabKind>)>,
     /// What the pane showed before a review moved it onto the session
     /// under review: put back when the review closes, however it closes.
-    pub review_restore: Option<SessionRef>,
+    /// `Some(None)`: the pane showed nothing, and is emptied again.
+    pub review_restore: Option<Option<SessionRef>>,
     /// The protocol the daemon answered the handshake with; None before
     /// one (tests). Below [`ORCHESTRATOR_PROTOCOL`] it cannot decode the
     /// provisioning requests, and sending one would drop the connection.

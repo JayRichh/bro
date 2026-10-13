@@ -355,6 +355,9 @@ fn handle_ack_event(app: &mut App, event: ServerEvent, out: &mut Vec<ClientReque
                 ) => {
                     app.chrome.flash = Some(format!("■ stopped the run in {branch}"));
                 }
+                (Some(PendingIntent::FlashOnAck(note)), _) => {
+                    app.chrome.flash = Some(note);
+                }
                 // F10's start prompt: straight into the view.
                 (Some(PendingIntent::OpenOrchestrator), Some(EntityId::Agent(id))) => {
                     orchestrator::open_view(app, id, out);

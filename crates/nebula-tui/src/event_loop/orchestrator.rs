@@ -9,6 +9,9 @@ use nebula_core::ReviewTabKind;
 
 /// The toast a held-back review leaves up until F10 shows it.
 pub(crate) const PENDING_REVIEW: &str = "the orchestrator opened a review: F10 to see it";
+/// The same, from a locked terminal tab.
+pub(crate) const PENDING_REVIEW_FROM_TERMINAL: &str =
+    "the orchestrator opened a review: ^q then F10 to see it";
 
 /// Lines of history a review asks for.
 const REVIEW_HISTORY_LINES: u32 = 400;
@@ -97,14 +100,17 @@ fn start_orchestrator(app: &mut App, start: &StartView, out: &mut Vec<ClientRequ
     if refuse_old_daemon(app) {
         return;
     }
+    // The harness's configured model and effort, as a new session gets.
+    let cfg = crate::config::Config::load();
+    let (model, effort) = (cfg.default_model(kind), cfg.default_effort(kind));
     app.chrome.flash = Some(format!("starting the orchestrator on {}…", kind.as_str()));
     send_with(app, out, PendingIntent::OpenOrchestrator, |req_id| {
         ClientRequest::StartOrchestrator {
             req_id,
             kind,
             custom_harness: None,
-            model: None,
-            effort: None,
+            model,
+            effort,
             profile,
             project: None,
             name: None,
@@ -173,11 +179,11 @@ pub(crate) fn make_orchestrator(app: &mut App, id: AgentId, out: &mut Vec<Client
         .find(|a| a.id == id)
         .map(|a| a.name.clone())
         .unwrap_or_default();
-    send(app, out, |req_id| ClientRequest::SetOrchestrator {
-        req_id,
-        agent: id,
+    // Said when the daemon has done it; a refusal flashes its own reason.
+    let note = format!("{name} is the orchestrator now: F10 opens it");
+    send_with(app, out, PendingIntent::FlashOnAck(note), |req_id| {
+        ClientRequest::SetOrchestrator { req_id, agent: id }
     });
-    app.chrome.flash = Some(format!("{name} is the orchestrator now: F10 opens it"));
 }
 
 /// "Unpin orchestrator" on the orchestrator's card.
@@ -185,16 +191,19 @@ pub(crate) fn clear_orchestrator(app: &mut App, out: &mut Vec<ClientRequest>) {
     if refuse_old_daemon(app) {
         return;
     }
-    send(app, out, |req_id| ClientRequest::ClearOrchestrator {
-        req_id,
+    let note = "no session is the orchestrator now".to_string();
+    send_with(app, out, PendingIntent::FlashOnAck(note), |req_id| {
+        ClientRequest::ClearOrchestrator { req_id }
     });
     app.orch.view = false;
-    app.chrome.flash = Some("no session is the orchestrator now".into());
 }
 
-/// `ReviewOpened` from the daemon. Up at once — unless the user is typing
-/// into some other session, or has another modal up: then it waits, with
-/// a toast, for F10.
+/// `ReviewOpened` from the daemon. Up at once, unless the user is typing
+/// into a locked pane (the orchestrator's own included: the request is
+/// often the answer to what they just typed, and the rest of the line must
+/// not land in the modal) or has another modal up. Then it waits, with a
+/// toast, for F10. Opened at once, it ignores Enter and a click on the
+/// screen for a moment ([`UNSOLICITED_GUARD`]).
 pub(crate) fn review_opened(
     app: &mut App,
     opener: AgentId,
@@ -202,21 +211,39 @@ pub(crate) fn review_opened(
     tabs: Vec<ReviewTabKind>,
     out: &mut Vec<ClientRequest>,
 ) {
-    let typing_elsewhere = app.nav.focus == Focus::Terminal
+    let typing =
+        app.nav.focus == Focus::Terminal && app.pane.term_locked && app.pane.term.is_some();
+    let busy = app.modals.overlay.is_some() || app.pane.vim.is_some();
+    if typing || busy {
+        app.orch.pending_review = Some((opener, sessions, tabs));
+        app.chrome.flash = Some(pending_review_toast(app).into());
+        app.chrome.dirty = true;
+        return;
+    }
+    open_review(app, Some(opener), sessions, tabs, out);
+    if let Some(Overlay::Review(review)) = &mut app.modals.overlay {
+        review.guard_until = Some(std::time::Instant::now() + UNSOLICITED_GUARD);
+    }
+}
+
+/// How long an unsolicited review ignores Enter and a click on the screen.
+const UNSOLICITED_GUARD: std::time::Duration = std::time::Duration::from_millis(750);
+
+/// The toast a held-back review shows: F10 where it reaches, `^q` first
+/// from a locked terminal tab, where F10 is the shell program's.
+pub(crate) fn pending_review_toast(app: &App) -> &'static str {
+    let in_terminal_tab = app.nav.focus == Focus::Terminal
         && app.pane.term_locked
         && app
             .pane
             .term
             .as_ref()
-            .is_some_and(|t| t.sref != SessionRef::Agent(opener.clone()));
-    let busy = app.modals.overlay.is_some() || app.pane.vim.is_some();
-    if typing_elsewhere || busy {
-        app.orch.pending_review = Some((opener, sessions, tabs));
-        app.chrome.flash = Some(PENDING_REVIEW.into());
-        app.chrome.dirty = true;
-        return;
+            .is_some_and(|t| matches!(t.sref, SessionRef::Terminal(_)));
+    if in_terminal_tab {
+        PENDING_REVIEW_FROM_TERMINAL
+    } else {
+        PENDING_REVIEW
     }
-    open_review(app, Some(opener), sessions, tabs, out);
 }
 
 /// The review modal up, remembering what the pane showed so closing it
@@ -232,7 +259,7 @@ pub(crate) fn open_review(
         return;
     }
     if app.orch.review_restore.is_none() {
-        app.orch.review_restore = app.pane.term.as_ref().map(|t| t.sref.clone());
+        app.orch.review_restore = Some(app.pane.term.as_ref().map(|t| t.sref.clone()));
     }
     crate::review_modal::open(app, opener, sessions, tabs);
     settle_review(app, out);
@@ -244,10 +271,11 @@ pub(crate) fn open_review(
 /// gone, put the pane back on what it showed before.
 pub(crate) fn settle_review(app: &mut App, out: &mut Vec<ClientRequest>) {
     let Some(Overlay::Review(review)) = &mut app.modals.overlay else {
-        if let Some(sref) = app.orch.review_restore.take() {
-            if !pane_shows(app, &sref) {
-                attach_now(app, sref, out);
-            }
+        match app.orch.review_restore.take() {
+            Some(Some(sref)) if !pane_shows(app, &sref) => attach_now(app, sref, out),
+            // The pane showed nothing before the review: nothing again.
+            Some(None) if app.pane.term.is_some() => detach_pane(app, out),
+            _ => {}
         }
         return;
     };
@@ -288,7 +316,7 @@ pub(crate) fn settle_review(app: &mut App, out: &mut Vec<ClientRequest>) {
         let req_id = app.requests.next_req_id;
         app.requests.next_req_id += 1;
         if let Some(Overlay::Review(review)) = &mut app.modals.overlay {
-            review.history_req = Some((req_id, sref.clone()));
+            review.history_reqs.insert(req_id, sref.clone());
         }
         out.push(ClientRequest::ReadSession {
             req_id,
@@ -379,15 +407,12 @@ fn land_history(app: &mut App, req_id: u64, loaded: Loaded) -> bool {
     let Some(Overlay::Review(review)) = &mut app.modals.overlay else {
         return false;
     };
-    match review.history_req.take() {
-        Some((r, sref)) if r == req_id => {
+    match review.history_reqs.remove(&req_id) {
+        Some(sref) => {
             review.histories.insert(sref, loaded);
             app.chrome.dirty = true;
             true
         }
-        other => {
-            review.history_req = other;
-            false
-        }
+        None => false,
     }
 }

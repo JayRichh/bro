@@ -42,8 +42,12 @@ pub struct ReviewView {
     pub scroll: u16,
     pub diffs: HashMap<SessionRef, Loaded>,
     pub histories: HashMap<SessionRef, Loaded>,
-    /// The ReadSession in flight, by request id.
-    pub history_req: Option<(u64, SessionRef)>,
+    /// Every ReadSession in flight, by request id: one per session asked.
+    pub history_reqs: HashMap<u64, SessionRef>,
+    /// Until when Enter and a click on the screen do not jump: set on an
+    /// UNSOLICITED open (the daemon's ReviewOpened), so a keystroke meant
+    /// for something else never lands the user in a worker.
+    pub guard_until: Option<std::time::Instant>,
     /// Enter (or a click) on the Terminal tab: close the modal and type
     /// into this session.
     pub jump: Option<SessionRef>,
@@ -82,7 +86,8 @@ impl ReviewView {
             scroll: 0,
             diffs: HashMap::new(),
             histories: HashMap::new(),
-            history_req: None,
+            history_reqs: HashMap::new(),
+            guard_until: None,
             jump: None,
             open_url: None,
             pr_url: None,
@@ -95,6 +100,12 @@ impl ReviewView {
 
     pub fn selected_tab(&self) -> Option<ReviewTabKind> {
         self.tabs.get(self.tab).copied()
+    }
+
+    /// Is the unsolicited-open guard still up?
+    pub fn guarded(&self) -> bool {
+        self.guard_until
+            .is_some_and(|until| std::time::Instant::now() < until)
     }
 
     fn select_tab(&mut self, index: i64) {
@@ -173,7 +184,9 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> bool {
 /// URL on the view).
 fn enter(view: &mut ReviewView) {
     match view.selected_tab() {
-        Some(ReviewTabKind::Terminal) => view.jump = view.selected_session().cloned(),
+        Some(ReviewTabKind::Terminal) if !view.guarded() => {
+            view.jump = view.selected_session().cloned()
+        }
         Some(ReviewTabKind::PullRequest) => view.open_url = view.pr_url.clone(),
         _ => {}
     }
@@ -199,7 +212,9 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> bool {
                 && view.selected_tab() == Some(ReviewTabKind::Terminal)
             {
                 // The session's own screen: a click goes to it, to type.
-                view.jump = view.selected_session().cloned();
+                if !view.guarded() {
+                    view.jump = view.selected_session().cloned();
+                }
             }
         }
         MouseEventKind::ScrollDown if contains(view.area, x, y) => view.scroll_by(3),

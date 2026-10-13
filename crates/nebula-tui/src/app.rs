@@ -2492,6 +2492,9 @@ pub enum PendingIntent {
     /// F10's start prompt: open the ORCHESTRATOR VIEW on the created
     /// orchestrator.
     OpenOrchestrator,
+    /// Flash this once the DAEMON has done it (an Error flashes its own
+    /// reason instead).
+    FlashOnAck(String),
     /// The NEW WORKTREE modal's create. The stand-in row `placeholder`
     /// went up and took the cursor when Enter was pressed, exactly as the
     /// Ack used to leave the real row: the Ack only swaps the real id in.
