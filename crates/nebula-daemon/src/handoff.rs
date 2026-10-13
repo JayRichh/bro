@@ -26,6 +26,7 @@ use crate::platform::RawFd;
 use crate::pty::Carried;
 #[cfg(unix)]
 use crate::registry::Daemon;
+use crate::registry::SubagentCarry;
 use anyhow::bail;
 #[cfg(unix)]
 use anyhow::Context;
@@ -126,6 +127,11 @@ struct State {
     sessions: Vec<CarriedSession>,
     #[serde(default)]
     pending_moves: Vec<CarriedPendingMove>,
+    /// Claude subagents per session (`registry::subagents`). Named-map
+    /// state, so an older reader skips it and a state without it reads
+    /// as an empty book: no VERSION bump.
+    #[serde(default)]
+    subagents: SubagentCarry,
 }
 
 /// The running image's handles a restart passes on.
@@ -151,6 +157,7 @@ pub struct Carry {
     pub nonce: String,
     pub sessions: Vec<CarriedSession>,
     pub pending_moves: Vec<(AgentId, Worktree, bool)>,
+    pub subagents: SubagentCarry,
 }
 
 impl Carry {
@@ -234,6 +241,7 @@ pub fn restart(daemon: &Arc<Daemon>, handles: &Handles, request: &Request) -> Re
             .into_iter()
             .map(|(agent, target, notice)| CarriedPendingMove::new(agent, target, notice))
             .collect(),
+        subagents: daemon.carry_subagents(),
     };
     let state_path = paths::restart_state_path();
     let kept = [state.pidfile_fd, state.socket_fd, state.hook_fd];
@@ -328,6 +336,7 @@ pub fn inherit(state_path: &Path) -> Result<Inherited> {
                 .into_iter()
                 .map(CarriedPendingMove::into_parts)
                 .collect(),
+            subagents: state.subagents,
         },
     })
 }
@@ -502,6 +511,18 @@ mod tests {
                 launching: true,
             }],
             pending_moves: vec![],
+            subagents: SubagentCarry {
+                rows: vec![nebula_core::SubagentSummary {
+                    id: "agent-1".into(),
+                    parent_agent: AgentId("a".into()),
+                    kind: "Explore".into(),
+                    description: "Find it".into(),
+                    started_at: 5,
+                    ended_at: None,
+                    status: nebula_core::SubagentStatus::Running,
+                }],
+                pending: vec![],
+            },
         };
         let bytes = rmp_serde::to_vec_named(&state).unwrap();
         let back: State = rmp_serde::from_slice(&bytes).unwrap();
@@ -515,6 +536,43 @@ mod tests {
         assert_eq!(pty.title.as_deref(), Some("✳ Fix Login"));
         assert!(pty.bracketed_paste);
         assert!(pty.cloud_scan && pty.question_scan && back.sessions[0].launching);
+        assert_eq!(back.subagents.rows[0].id, "agent-1");
+        assert_eq!(
+            back.subagents.rows[0].status,
+            nebula_core::SubagentStatus::Running
+        );
+    }
+
+    /// A state written by a build that predates the subagent book reads
+    /// as an empty book, so restarting onto this build needs no VERSION
+    /// bump.
+    #[test]
+    fn a_state_without_subagents_reads_as_an_empty_book() {
+        #[derive(Serialize)]
+        struct Before {
+            version: u32,
+            nonce: String,
+            pidfile_fd: RawFd,
+            socket_fd: RawFd,
+            hook_fd: RawFd,
+            hook_token: String,
+            sessions: Vec<CarriedSession>,
+            pending_moves: Vec<CarriedPendingMove>,
+        }
+        let bytes = rmp_serde::to_vec_named(&Before {
+            version: VERSION,
+            nonce: "n".into(),
+            pidfile_fd: 3,
+            socket_fd: 4,
+            hook_fd: 5,
+            hook_token: "tok".into(),
+            sessions: vec![],
+            pending_moves: vec![],
+        })
+        .unwrap();
+        let back: State = rmp_serde::from_slice(&bytes).unwrap();
+        assert_eq!(back.subagents, SubagentCarry::default());
+        assert_eq!(back.hook_token, "tok");
     }
 
     #[test]
@@ -555,6 +613,7 @@ mod tests {
                 },
             ],
             pending_moves: vec![],
+            subagents: SubagentCarry::default(),
         };
         assert_eq!(
             carry.agents(),

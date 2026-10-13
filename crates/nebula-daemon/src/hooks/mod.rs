@@ -460,14 +460,18 @@ async fn receive_hook(
             .and_then(crate::prompt_history::condense),
         _ => None,
     };
-    let subagent = SubagentHookInfo {
-        kind: payload.agent_type.clone().filter(|k| !k.is_empty()),
-        task: payload
+    let tool_input_text = |key: &str| {
+        payload
             .tool_input
             .as_ref()
-            .and_then(|input| input.get("description"))
+            .and_then(|input| input.get(key))
             .and_then(serde_json::Value::as_str)
-            .map(str::to_string),
+            .map(str::to_string)
+    };
+    let subagent = SubagentHookInfo {
+        kind: payload.agent_type.clone().filter(|k| !k.is_empty()),
+        task: tool_input_text("description"),
+        task_kind: tool_input_text("subagent_type").filter(|k| !k.is_empty()),
     };
     let _ = state
         .tx

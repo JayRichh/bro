@@ -157,8 +157,11 @@ async fn serve(opts: DaemonOpts) -> Result<()> {
     let daemon = registry::Daemon::new(store, hook_env);
 
     if let Some(carry) = carry {
+        // Before the sessions move out: whose subagents can keep running.
+        let live = carry.agents();
         let sessions = daemon.adopt_sessions(carry.sessions);
         daemon.restore_pending_moves(carry.pending_moves);
+        daemon.restore_subagents(carry.subagents, &live);
         tracing::info!(sessions, "restarted in place");
         handoff::report(&carry.nonce, Ok(sessions));
     }

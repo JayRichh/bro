@@ -1470,9 +1470,6 @@ mod tests {
         assert_eq!(agents[3].issue_url.as_deref(), Some(issue_url));
     }
 
-    /// Read marks are keyed by PR URL and outlive the worktree they were
-    /// noticed on, so they live in their own table with no foreign key: no
-    /// row here is ever cascaded away by a checkout being deleted.
     /// A `kete spawn` child keeps the session that started it across a
     /// reload; a row a person started has none.
     #[test]
@@ -1534,6 +1531,9 @@ mod tests {
         assert!(store.get_agent(&AgentId("child".into())).unwrap().is_some());
     }
 
+    /// Read marks are keyed by PR URL and outlive the worktree they were
+    /// noticed on, so they live in their own table with no foreign key: no
+    /// row here is ever cascaded away by a checkout being deleted.
     #[test]
     fn pr_seen_marks_roundtrip_and_overwrite() {
         let store = Store::open_in_memory().unwrap();

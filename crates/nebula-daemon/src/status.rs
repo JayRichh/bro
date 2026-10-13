@@ -1085,6 +1085,51 @@ mod tests {
         }
     }
 
+    /// The installer matches PreToolUse for `Agent` / `Task` too (it names
+    /// a subagent's task). Such a call is an ordinary tool call here: it
+    /// moves no running row, answers no open question, and only closes a
+    /// permission prompt from its own origin, as any next call does.
+    #[test]
+    fn a_subagent_launch_call_is_an_ordinary_tool_call() {
+        for launcher in ["Agent", "Task"] {
+            let now = t0();
+            let mut m = AgentStatusMachine::new(AgentStatus::Fresh, None);
+            m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
+            let fx = m.handle(tool(launcher, None, false), Some("s1"), now);
+            assert!(fx.is_empty(), "{launcher} on a running row: {fx:?}");
+            assert_eq!(m.status(), AgentStatus::Running);
+
+            m.handle(tool("AskUserQuestion", None, false), Some("s1"), now);
+            let fx = m.handle(tool(launcher, None, false), Some("s1"), now);
+            assert!(fx.is_empty(), "{launcher} beside a question: {fx:?}");
+            assert_eq!(m.status(), AgentStatus::NeedsFeedback);
+            m.handle(tool("AskUserQuestion", None, true), Some("s1"), now);
+
+            m.handle(
+                HookEvent::PermissionRequest { subagent_id: None },
+                Some("s1"),
+                now,
+            );
+            let fx = m.handle(tool(launcher, None, false), Some("s1"), now);
+            assert_eq!(
+                status_of(&fx),
+                Some(AgentStatus::Running),
+                "the foreground's next call answers its own prompt"
+            );
+
+            m.handle(
+                HookEvent::PermissionRequest {
+                    subagent_id: Some("sub1".into()),
+                },
+                Some("s1"),
+                now,
+            );
+            let fx = m.handle(tool(launcher, None, false), Some("s1"), now);
+            assert!(fx.is_empty(), "another origin's prompt stays: {fx:?}");
+            assert_eq!(m.status(), AgentStatus::NeedsFeedback);
+        }
+    }
+
     #[test]
     fn approving_a_prompt_beside_an_open_question_stays_red() {
         // A permission prompt and a question up together, whichever opened

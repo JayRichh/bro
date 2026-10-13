@@ -17,7 +17,7 @@ pub const PROTOCOL_VERSION: u32 = 53;
 /// Compatibility is a range overlap: two peers can talk when each peer's
 /// `[MIN_COMPATIBLE_PROTOCOL, PROTOCOL_VERSION]` range includes at least one
 /// version the other peer also supports.
-pub const MIN_COMPATIBLE_PROTOCOL: u32 = 52;
+pub const MIN_COMPATIBLE_PROTOCOL: u32 = 53;
 
 pub fn protocol_ranges_overlap(
     local_min: u32,
@@ -656,8 +656,9 @@ pub enum ServerEvent {
         pr_seen: Vec<PrSeen>,
         ui_state: Option<String>,
         /// Claude's in-session subagents the daemon knows of, open and
-        /// recently ended. Last on purpose (positional codec): a snapshot
-        /// from a daemon that predates it decodes with this empty.
+        /// recently ended. Last, with a default, so this build still decodes
+        /// the protocol-52 shape; a 52 peer cannot decode this one, and is
+        /// refused at the handshake (MIN_COMPATIBLE_PROTOCOL 53).
         #[serde(default)]
         subagents: Vec<SubagentSummary>,
     },
@@ -801,6 +802,10 @@ pub enum ServerEvent {
     },
 }
 
+/// Ended subagents kept per parent session; beyond it the oldest ended
+/// go, in the daemon's book and in every client mirroring it.
+pub const SUBAGENTS_ENDED_KEPT: usize = 20;
+
 /// One of Claude's in-session subagents (the Task / Agent tool), as its
 /// SubagentStart and SubagentStop hooks report it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -853,6 +858,20 @@ mod tests {
         assert!(protocol_compatible_with(PROTOCOL_VERSION));
         assert!(protocol_compatible_with(PROTOCOL_VERSION + 1));
         assert!(!protocol_compatible_with(MIN_COMPATIBLE_PROTOCOL - 1));
+    }
+
+    /// Protocol 53 grew `Agent` and `Snapshot` by a trailing field, which
+    /// a 52 decoder refuses mid-stream (rmp `LengthMismatch`). 52 must
+    /// therefore be refused at the handshake, on both sides.
+    #[test]
+    fn protocol_52_peers_are_refused_at_the_handshake() {
+        assert!(!protocol_compatible_with(52));
+        assert!(!protocol_ranges_overlap(
+            MIN_COMPATIBLE_PROTOCOL,
+            PROTOCOL_VERSION,
+            52,
+            52
+        ));
     }
 
     fn sample_agent(parent: Option<&str>) -> Agent {
@@ -1014,8 +1033,9 @@ mod tests {
         }
     }
 
-    /// A protocol-52 daemon's snapshot still decodes here: no `subagents`
-    /// and no agent `parent` on the wire read as empty and None.
+    /// The 52 shape still decodes here: no `subagents` and no agent
+    /// `parent` read as empty and None. The handshake refuses 52 peers,
+    /// but the defaults keep a stray or recorded old frame readable.
     #[test]
     fn a_snapshot_from_a_protocol_52_peer_decodes_without_the_new_fields() {
         let agent = sample_agent(None);

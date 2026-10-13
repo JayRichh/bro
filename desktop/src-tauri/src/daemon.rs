@@ -14,7 +14,7 @@ use nebula_core::codec::{read_frame, write_frame};
 use nebula_core::ports::WorktreePorts;
 use nebula_core::{
     paths, Agent, ClientRequest, Entity, EntityId, Project, ServerEvent, SessionRef,
-    SubagentSummary, TerminalTab, Worktree, PROTOCOL_VERSION,
+    SubagentStatus, SubagentSummary, TerminalTab, Worktree, PROTOCOL_VERSION, SUBAGENTS_ENDED_KEPT,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -327,8 +327,11 @@ impl Client {
 }
 
 /// A subagent is keyed by its parent and its id: ids are unique only
-/// within one session.
+/// within one session. Each parent keeps at most
+/// [`SUBAGENTS_ENDED_KEPT`] ended rows, the oldest going first, as the
+/// daemon's book does, so a long session's tree stays bounded here too.
 fn upsert_subagent(list: &mut Vec<SubagentSummary>, sub: SubagentSummary) {
+    let parent = sub.parent_agent.clone();
     match list
         .iter_mut()
         .find(|s| s.parent_agent == sub.parent_agent && s.id == sub.id)
@@ -336,6 +339,20 @@ fn upsert_subagent(list: &mut Vec<SubagentSummary>, sub: SubagentSummary) {
         Some(slot) => *slot = sub,
         None => list.push(sub),
     }
+    let ended =
+        |s: &SubagentSummary| s.parent_agent == parent && s.status != SubagentStatus::Running;
+    let mut drop = list
+        .iter()
+        .filter(|s| ended(s))
+        .count()
+        .saturating_sub(SUBAGENTS_ENDED_KEPT);
+    list.retain(|s| {
+        if drop > 0 && ended(s) {
+            drop -= 1;
+            return false;
+        }
+        true
+    });
 }
 
 fn upsert<T>(list: &mut Vec<T>, item: T, key: impl Fn(&T) -> String) {
@@ -572,7 +589,7 @@ pub async fn run(client: Arc<Client>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nebula_core::{AgentId, AgentKind, AgentRole, AgentStatus, SubagentStatus, WorktreeId};
+    use nebula_core::{AgentId, AgentKind, AgentRole, AgentStatus, WorktreeId};
 
     fn agent(id: &str, parent: Option<&str>) -> Agent {
         Agent {
@@ -650,5 +667,24 @@ mod tests {
         let model = client.snapshot();
         assert_eq!(model.subagents.len(), 1);
         assert_eq!(model.subagents[0].parent_agent, AgentId("lead".into()));
+    }
+
+    /// Mirrors the daemon's prune: per parent, the newest
+    /// `SUBAGENTS_ENDED_KEPT` ended rows stay, running ones always do, and
+    /// another parent's rows are never counted against it.
+    #[test]
+    fn a_long_session_keeps_only_its_newest_ended_subagents() {
+        let mut list = Vec::new();
+        upsert_subagent(&mut list, sub("p", "open", SubagentStatus::Running));
+        upsert_subagent(&mut list, sub("q", "other", SubagentStatus::Done));
+        for i in 0..SUBAGENTS_ENDED_KEPT + 3 {
+            upsert_subagent(&mut list, sub("p", &format!("s{i}"), SubagentStatus::Done));
+        }
+        let of_p = list.iter().filter(|s| s.parent_agent.0 == "p").count();
+        assert_eq!(of_p, SUBAGENTS_ENDED_KEPT + 1);
+        assert!(list.iter().any(|s| s.id == "open"));
+        assert!(list.iter().any(|s| s.id == "other"));
+        assert!(!list.iter().any(|s| s.id == "s2"), "the oldest ended go");
+        assert!(list.iter().any(|s| s.id == "s3"));
     }
 }

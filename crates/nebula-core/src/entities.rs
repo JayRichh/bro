@@ -294,8 +294,10 @@ pub struct Agent {
     pub profile: Option<String>,
     /// The session that started this one with `kete spawn` (or an
     /// orchestrator spawn); None for every session a person started.
-    /// Last on purpose: the codec is positional, so a peer that predates
-    /// the field still reads every field before it.
+    /// Last, with a default, so this build still decodes a row written
+    /// before the field existed (it reads None). The reverse fails: the
+    /// codec is positional, and an older decoder refuses the extra
+    /// element, which is why protocol 53 raised MIN_COMPATIBLE_PROTOCOL.
     #[serde(default)]
     pub parent: Option<AgentId>,
 }

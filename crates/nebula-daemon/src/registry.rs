@@ -249,7 +249,7 @@ mod status;
 mod subagents;
 mod terminals;
 
-pub use subagents::SubagentHookInfo;
+pub use subagents::{SubagentCarry, SubagentHookInfo};
 
 impl Daemon {
     pub fn new(store: Arc<Store>, hook_env: HookEnv) -> Arc<Self> {

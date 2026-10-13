@@ -58,6 +58,9 @@ const CODEX_DIR: &str = ".codex";
 #[cfg(unix)]
 const HOOK_CURL_TIMEOUT_SECS: u32 = 3;
 
+/// Claude's PreToolUse matcher: a regex over the tool name.
+pub(crate) const PRE_TOOL_USE_MATCHER: &str = "^(AskUserQuestion|Agent|Task)$";
+
 /// (hook event, optional matcher)
 const CLAUDE_EVENTS: &[(&str, Option<&str>)] = &[
     ("UserPromptSubmit", None),
@@ -69,7 +72,11 @@ const CLAUDE_EVENTS: &[(&str, Option<&str>)] = &[
     // your input") as well as `permission_prompt` — it is the only signal
     // that arrives when a turn ends without a Stop. See status.rs.
     ("Notification", None),
-    ("PreToolUse", Some("AskUserQuestion")),
+    // The question (the row goes red), and the call that starts a
+    // subagent: its `description` is the task the overview shows on the
+    // subagent's row (`registry::subagents`). Anchored, so `TaskCreate`
+    // and its kin stay out.
+    ("PreToolUse", Some(PRE_TOOL_USE_MATCHER)),
     // Every tool's end, unmatched. Three signals ride it: the answer to an
     // `AskUserQuestion` (the row leaves red); the approval of a permission
     // prompt, which fires no hook of its own — the gated tool simply runs,
@@ -737,7 +744,51 @@ mod tests {
         let notification = &settings["hooks"]["Notification"];
         assert!(notification[0].get("matcher").is_none());
         let pre = &settings["hooks"]["PreToolUse"];
-        assert_eq!(pre[0]["matcher"], json!("AskUserQuestion"));
+        assert_eq!(pre[0]["matcher"], json!(PRE_TOOL_USE_MATCHER));
+    }
+
+    /// The tool names Claude's anchored PreToolUse matcher lets through,
+    /// read off the regex's one alternation.
+    fn pre_tool_use_tools(matcher: &str) -> Vec<&str> {
+        let inner = matcher
+            .strip_prefix("^(")
+            .and_then(|m| m.strip_suffix(")$"))
+            .expect("an anchored alternation");
+        inner.split('|').collect()
+    }
+
+    /// The Agent (and older Task) call that starts a subagent has to
+    /// reach the daemon, or every subagent's description stays empty. A
+    /// reinstall swaps an older nebula's question-only group for it.
+    #[test]
+    fn pre_tool_use_matches_the_subagent_tools_beside_the_question() {
+        let tools = pre_tool_use_tools(PRE_TOOL_USE_MATCHER);
+        for tool in ["AskUserQuestion", "Agent", "Task"] {
+            assert!(tools.contains(&tool), "{tool} is not matched: {tools:?}");
+        }
+        assert!(!tools.contains(&"TaskCreate"), "anchored, so kin stay out");
+
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join(".claude");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut old = managed_group("claude", "PreToolUse", Some("AskUserQuestion"));
+        old["_nebulaManaged"] = json!(true);
+        std::fs::write(
+            dir.join("settings.local.json"),
+            serde_json::to_string(&json!({ "hooks": { "PreToolUse": [old] } })).unwrap(),
+        )
+        .unwrap();
+        install_claude_hooks(tmp.path()).unwrap();
+        let settings = read_settings(tmp.path());
+        let groups = settings["hooks"]["PreToolUse"].as_array().unwrap();
+        assert_eq!(groups.len(), 1, "{groups:?}");
+        let matcher = groups[0]["matcher"].as_str().unwrap();
+        assert!(pre_tool_use_tools(matcher).contains(&"Agent"));
+        assert!(routes(
+            groups[0]["hooks"][0]["command"].as_str().unwrap(),
+            "claude",
+            "PreToolUse"
+        ));
     }
 
     #[test]
