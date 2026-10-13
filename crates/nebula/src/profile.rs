@@ -83,7 +83,7 @@ pub fn run_profile(op: ProfileOp) -> Result<()> {
                         profile.harness,
                         home.display()
                     );
-                    if login_args(&profile.harness).is_some() {
+                    if profiles::login_args(&profile.harness).is_some() {
                         println!("sign it in with: kete profile login {}", profile.name);
                     }
                 }
@@ -162,19 +162,6 @@ fn list() -> Result<()> {
     Ok(())
 }
 
-/// The harness's own sign-in, as its argv after the program.
-fn login_args(harness: &str) -> Option<&'static [&'static str]> {
-    match harness.trim() {
-        // The subscription flow, as agent-office signs accounts in: Claude
-        // opens the browser and takes the callback, or prints the URL and
-        // asks for the code when it cannot.
-        "claude" => Some(&["auth", "login", "--claudeai"]),
-        "codex" => Some(&["login"]),
-        "copilot" => Some(&["login"]),
-        _ => None,
-    }
-}
-
 /// Run the harness's sign-in in this terminal under the profile's
 /// environment, and wait for it. `extra` rides after the sign-in's own
 /// arguments (`--email you@example.com`, `--device-code`).
@@ -186,7 +173,7 @@ fn login(name: &str, extra: &[String]) -> Result<()> {
     if let Some(problem) = profile.problem() {
         bail!("{problem}");
     }
-    let Some(args) = login_args(&profile.harness) else {
+    let Some(args) = profiles::login_args(&profile.harness) else {
         bail!(
             "kete knows no sign-in command for `{}`: sign in from a session under the profile instead",
             profile.harness

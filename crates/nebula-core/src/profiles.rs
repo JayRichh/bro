@@ -280,6 +280,31 @@ pub fn resolve<'a>(
     }
 }
 
+/// The harness's own sign-in, as its argv after the program — what
+/// `kete profile login` runs. None for a harness kete knows no sign-in for.
+pub fn login_args(harness: &str) -> Option<&'static [&'static str]> {
+    match harness.trim() {
+        // The subscription flow, as agent-office signs accounts in: Claude
+        // opens the browser and takes the callback, or prints the URL and
+        // asks for the code when it cannot.
+        "claude" => Some(&["auth", "login", "--claudeai"]),
+        "codex" => Some(&["login"]),
+        "copilot" => Some(&["login"]),
+        _ => None,
+    }
+}
+
+/// The command that signs `profile` in, for a front end to show (never to
+/// run with credentials of its own): None for an adopted default login,
+/// which signs in as the CLI always does, or a harness with no known
+/// sign-in.
+pub fn login_hint(profile: &Profile) -> Option<String> {
+    if profile.use_default || login_args(&profile.harness).is_none() {
+        return None;
+    }
+    Some(format!("kete profile login {}", profile.name.trim()))
+}
+
 /// The harness's default profile: the first usable one flagged `default`.
 pub fn default_for<'a>(all: &'a [Profile], harness: &str) -> Option<&'a Profile> {
     all.iter()
@@ -341,6 +366,40 @@ pub fn add_to_file(path: &Path, profile: &Profile) -> Result<(), String> {
             clear_default(entries, &profile.harness);
         }
         entries.push(serde_json::to_value(profile).map_err(|e| e.to_string())?);
+        Ok(())
+    })
+}
+
+/// Rewrite the entry named `profile.name` in the settings file at `path`,
+/// in place: its position and any field this build has no name for stay,
+/// the known fields take `profile`'s values. The name itself is what is
+/// looked up (it names the PROFILE HOME), so it never changes here. A
+/// `default` entry takes the flag off the harness's other entries.
+pub fn update_in_file(path: &Path, profile: &Profile) -> Result<(), String> {
+    if let Some(problem) = profile.problem() {
+        return Err(problem);
+    }
+    let name = profile.name.trim();
+    edit_file(path, |entries| {
+        let Some(at) = entries
+            .iter()
+            .position(|e| e.get("name").and_then(Value::as_str) == Some(name))
+        else {
+            return Err(format!("no profile named `{name}`"));
+        };
+        if profile.default {
+            clear_default(entries, &profile.harness);
+        }
+        let Value::Object(known) = serde_json::to_value(profile).map_err(|e| e.to_string())? else {
+            return Err("a profile serializes to an object".into());
+        };
+        let mut entry = entries[at].as_object().cloned().unwrap_or_default();
+        // Fields left out when empty or off must go, not linger.
+        for key in ["name", "harness", "env", "default", "use_default"] {
+            entry.remove(key);
+        }
+        entry.extend(known);
+        entries[at] = Value::Object(entry);
         Ok(())
     })
 }
@@ -617,6 +676,53 @@ mod tests {
             default: false,
             use_default: false,
         }
+    }
+
+    #[test]
+    fn an_update_rewrites_the_entry_in_place_and_keeps_unknown_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(
+            &path,
+            r#"{"theme": "ocean", "profiles": [
+                {"name": "work", "harness": "claude", "default": true, "env": {"A": "1"}, "colour": "red"},
+                {"name": "home", "harness": "claude"}
+            ]}"#,
+        )
+        .unwrap();
+        let mut home = profile("home", "claude");
+        home.default = true;
+        update_in_file(&path, &home).unwrap();
+        let mut work = profile("work", "claude");
+        work.use_default = true;
+        update_in_file(&path, &work).unwrap();
+        let saved: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved["theme"], "ocean");
+        let list = saved["profiles"].as_array().unwrap();
+        assert_eq!(list[0]["name"], "work", "position kept");
+        assert_eq!(list[0]["colour"], "red", "unknown field kept");
+        assert_eq!(list[0]["use_default"], true);
+        assert!(list[0].get("env").is_none(), "an emptied env goes");
+        assert!(
+            list[0].get("default").is_none(),
+            "the default moved to home"
+        );
+        assert_eq!(list[1]["default"], true);
+        assert!(update_in_file(&path, &profile("nope", "claude")).is_err());
+        assert!(update_in_file(&path, &profile("bad name", "claude")).is_err());
+    }
+
+    #[test]
+    fn a_login_hint_names_the_cli_command_only_where_one_exists() {
+        assert_eq!(
+            login_hint(&profile("work", "claude")).as_deref(),
+            Some("kete profile login work")
+        );
+        let mut adopted = profile("main", "codex");
+        adopted.use_default = true;
+        assert_eq!(login_hint(&adopted), None);
+        assert_eq!(login_hint(&profile("x", "cursor")), None);
+        assert_eq!(login_args("copilot"), Some(&["login"][..]));
     }
 
     #[test]
