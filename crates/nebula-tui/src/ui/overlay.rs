@@ -79,7 +79,7 @@ fn draw_review_overlay(f: &mut Frame, app: &mut App, mut view: crate::review_mod
         }
         Some(nebula_core::ReviewTabKind::Diff) => "Diff review is planned for this tab.",
         Some(nebula_core::ReviewTabKind::History) => {
-            "Recent session history is available through `nebula orchestrator read <session-id>`."
+            "Recent session history is available through `bro orchestrator read <session-id>`."
         }
         Some(nebula_core::ReviewTabKind::PullRequest) => {
             "Pull request review is planned for this tab."
@@ -516,10 +516,10 @@ const HELP_RIGHT: &[HelpSection] = &[
             (Act(&[ToggleFullScreen]), "full-screen / normal size"),
             // The SHIFT PAIRS' rule (#93), once, for every
             // letter above that has a shifted twin.
-            (Lit("⇧ + letter"), "bigger, or outside nebula"),
+            (Lit("⇧ + letter"), "bigger, or outside bro"),
             (Act(&[Hosts]), "ssh hosts (a: new, d: del)"),
             (Act(&[Settings]), "settings; Hotkeys tab rebinds"),
-            (Act(&[Metrics]), "memory: nebula + agents"),
+            (Act(&[Metrics]), "memory: bro + agents"),
             (Act(&[Quit, Help]), "quit / toggle this help"),
         ],
     ),
@@ -1056,7 +1056,7 @@ fn metrics_rows(
     rows.sort_by_key(|row| std::cmp::Reverse(row.bytes));
     append_warm_spares(&mut rows, spares);
     rows.push(MetricsRow {
-        name: "nebula daemon".into(),
+        name: "bro daemon".into(),
         context: String::new(),
         pid: Some(snap.daemon_pid),
         procs: 1,
@@ -1064,7 +1064,7 @@ fn metrics_rows(
         sref: None,
     });
     rows.push(MetricsRow {
-        name: "nebula ui (this window)".into(),
+        name: "bro ui (this window)".into(),
         context: String::new(),
         pid: Some(std::process::id()),
         procs: 1,
@@ -1137,7 +1137,7 @@ fn draw_metrics_overlay(f: &mut Frame, app: &mut App, view: crate::app::MetricsV
         }
         let nebula_bytes = snap.daemon_rss_bytes + view.client_rss_bytes;
         lines.push(Line::from(vec![
-            Span::styled(" nebula   ", header),
+            Span::styled(" bro   ", header),
             Span::styled(format!("{:<42}", "daemon + this ui"), dim),
             Span::styled(format!("{:>9}", fmt_mem(nebula_bytes)), mem_style),
         ]));

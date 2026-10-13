@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, windows]
 
 permissions:
   contents: read
@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
 
     env:
       CARGO_TERM_COLOR: always
@@ -41,6 +41,7 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Warn on large Rust source files
+        if: runner.os != 'Windows'
         continue-on-error: true
         run: |
           python3 - <<'PY'
@@ -86,4 +87,28 @@ jobs:
         run: cargo build --workspace --locked
 
       - name: Test workspace
+        # The Windows port still has known failing tests (unix-shaped fixtures);
+        # report them without failing the job until they are ported.
+        continue-on-error: ${{ matrix.os == 'windows-latest' }}
         run: cargo test --workspace --locked
+
+  windows-arm64:
+    name: cargo build (aarch64-pc-windows-msvc)
+    runs-on: windows-latest
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Install Rust stable
+        run: rustup toolchain install stable --profile minimal --target aarch64-pc-windows-msvc
+
+      - name: Use Rust stable
+        run: rustup default stable
+
+      - name: Cache cargo and target directories
+        uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
+
+      - name: Cross-build workspace
+        run: cargo build --workspace --locked --target aarch64-pc-windows-msvc

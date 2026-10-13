@@ -588,7 +588,7 @@ pub const SETTINGS_TABS: &[SettingsTab] = &[
             SettingSpec {
                 kind: SettingKind::SshSyncConfig,
                 label: "Sync settings over ssh",
-                hint: "nebula ssh / tunnel carry config.json and presets to the remote (config.local.json stays)",
+                hint: "bro ssh / tunnel carry config.json and presets to the remote (config.local.json stays)",
                 group: "",
             },
         ]),
@@ -759,13 +759,13 @@ pub const SETTINGS_TABS: &[SettingsTab] = &[
             SettingSpec {
                 kind: SettingKind::RunCommand,
                 label: "Run command",
-                hint: "Shell line a menu's Run starts in this project's worktrees (empty = its .nebula.json \"run\")",
+                hint: "Shell line a menu's Run starts in this project's worktrees (empty = its .bro.json \"run\")",
                 group: "",
             },
             SettingSpec {
                 kind: SettingKind::OpenCommand,
                 label: "Open command",
-                hint: "Shell line ⇧Enter / ⇧O runs to open a worktree of this project, e.g. open http://localhost:3000 (empty = its .nebula.json \"open\")",
+                hint: "Shell line ⇧Enter / ⇧O runs to open a worktree of this project, e.g. open http://localhost:3000 (empty = its .bro.json \"open\")",
                 group: "",
             },
         ]),
@@ -4270,7 +4270,7 @@ mod tests {
             cfg.project(demo).value_label(SettingKind::RunCommand),
             PROJECT_FILE_CHOICE
         );
-        assert_eq!(cfg.value_label(SettingKind::RunCommand), ".nebula.json");
+        assert_eq!(cfg.value_label(SettingKind::RunCommand), ".bro.json");
         assert_eq!(cfg.project_text_value(demo, SettingKind::RunCommand), "");
 
         // The tab's cycle never touches a typed row.
@@ -4359,7 +4359,7 @@ mod tests {
             cfg.project(demo).value_label(SettingKind::OpenCommand),
             PROJECT_FILE_CHOICE
         );
-        assert_eq!(cfg.value_label(SettingKind::OpenCommand), ".nebula.json");
+        assert_eq!(cfg.value_label(SettingKind::OpenCommand), ".bro.json");
 
         // A typed row: cycling its tab row changes nothing, and the
         // top-level setter is not its.

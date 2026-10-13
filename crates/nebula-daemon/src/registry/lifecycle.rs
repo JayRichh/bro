@@ -23,7 +23,7 @@ impl Daemon {
         if !self.store.rename_agent_if_auto_pending(id, &title)? {
             bail!(
                 "session already has a title ({:?}); leaving it unchanged — a user-set \
-                 title is only replaced with `nebula rename --force`",
+                 title is only replaced with `bro rename --force`",
                 agent.name
             );
         }

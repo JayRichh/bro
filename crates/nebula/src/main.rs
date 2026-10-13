@@ -164,7 +164,7 @@ fn main() -> Result<()> {
                     // terminal so a fresh `nebula ssh` can exec over us (the
                     // local daemon and its sessions stay up).
                     Some(entry) => {
-                        eprintln!("nebula: connecting to {}…", entry.host);
+                        eprintln!("bro: connecting to {}…", entry.host);
                         ssh::run_ssh(&entry.host, entry.path.as_deref(), true)
                     }
                     None => Ok(()),

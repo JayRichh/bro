@@ -15,8 +15,8 @@
 #                 and whatever those still depend on)
 
 PREFIX      ?= $(HOME)/.cargo/bin
-RELEASE_BIN := target/release/nebula
-DEBUG_BIN   := target/debug/nebula
+RELEASE_BIN := target/release/bro
+DEBUG_BIN   := target/debug/bro
 
 # The dev instance is a second, complete nebula: its own socket, DB, and
 # settings — and one *per checkout*, so the main clone and every worktree can
@@ -98,13 +98,13 @@ dev-prep:
 # settings, minus `agents` and `terminals`: those rows are the live sessions
 # the real daemon owns, and the dev daemon must not resume them. `.backup`
 # reads the WAL, so the copy is consistent even with the real daemon running.
-# The real dir is where `directories::ProjectDirs::from("dev","nebula","nebula")`
+# The real dir is where `directories::ProjectDirs::from("dev","bro","bro")`
 # puts it (nebula-core/src/paths.rs); keep the two in step.
 dev-seed: ## Copy real projects/settings into the dev instance (only if it has no DB yet)
 	@[ ! -e $(DEV_DATA)/nebula.db ] || exit 0; \
 	case "$$(uname -s)" in \
-		Darwin) real="$$HOME/Library/Application Support/dev.nebula.nebula";; \
-		*)      real="$${XDG_DATA_HOME:-$$HOME/.local/share}/nebula";; \
+		Darwin) real="$$HOME/Library/Application Support/dev.bro.bro";; \
+		*)      real="$${XDG_DATA_HOME:-$$HOME/.local/share}/bro";; \
 	esac; \
 	if [ ! -f "$$real/nebula.db" ]; then \
 		echo "no real nebula data at $$real — dev instance starts empty"; exit 0; fi; \
@@ -146,7 +146,7 @@ dev-ls: ## List every checkout's dev instance and whether its daemon is up
 		pidfile=/tmp/nebula-dev-$$slot/daemon.pid; \
 		state=stopped; \
 		if [ -f "$$pidfile" ] && ps -p "$$(cat $$pidfile 2>/dev/null)" -o command= 2>/dev/null \
-			| grep -q 'nebula daemon'; then state=running; fi; \
+			| grep -q 'bro daemon'; then state=running; fi; \
 		printf '  %-8s %-40s %s\n' "$$state" "$$(basename $$d)" "$$d"; \
 	done
 
@@ -159,7 +159,7 @@ dev-stop: ## Stop the dev daemon (it detaches, so quitting the TUI leaves it run
 	[ -f $$pidfile ] || exit 0; \
 	pid=$$(cat $$pidfile 2>/dev/null); \
 	case "$$pid" in ''|*[!0-9]*) exit 0;; esac; \
-	if ps -p $$pid -o command= 2>/dev/null | grep -q 'nebula daemon'; then \
+	if ps -p $$pid -o command= 2>/dev/null | grep -q 'bro daemon'; then \
 		kill $$pid 2>/dev/null || true; \
 	fi
 
@@ -173,10 +173,10 @@ build: ## Release build
 # for that inode no longer matches the new contents — every exec then dies
 # with SIGKILL (exit 137). A fresh inode forces signature re-validation.
 install: build ## Install to $(PREFIX) — warns if the live daemon is now stale
-	cp $(RELEASE_BIN) $(PREFIX)/nebula.new
-	mv $(PREFIX)/nebula.new $(PREFIX)/nebula
-	@$(PREFIX)/nebula --version
-	@$(PREFIX)/nebula _stale-daemon-note
+	cp $(RELEASE_BIN) $(PREFIX)/bro.new
+	mv $(PREFIX)/bro.new $(PREFIX)/bro
+	@$(PREFIX)/bro --version
+	@$(PREFIX)/bro _stale-daemon-note
 
 kill: ## Stop every session and the daemon — the cutover step after `make install`
 	$(PREFIX)/nebula kill

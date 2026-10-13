@@ -330,7 +330,7 @@ pub(crate) fn confirm_close_terminal(name: &str, id: TerminalId) -> ConfirmDialo
 /// it is cheap — the daemon keeps every session running.
 pub(crate) fn confirm_quit() -> ConfirmDialog {
     ConfirmDialog {
-        title: "Quit nebula".into(),
+        title: "Quit bro".into(),
         // Sized to the longest line, never wrapped: keep both under 52.
         message: "Leave the TUI?\nSessions keep running in the daemon.".into(),
         action: PendingAction::Quit,
@@ -342,7 +342,7 @@ pub(crate) fn confirm_quit() -> ConfirmDialog {
 pub(crate) fn confirm_remove_project(name: &str, id: ProjectId) -> ConfirmDialog {
     ConfirmDialog {
         title: "Remove project".into(),
-        message: format!("Remove '{name}' from nebula? Nothing on disk is touched."),
+        message: format!("Remove '{name}' from bro? Nothing on disk is touched."),
         action: PendingAction::RemoveProject(id),
         area: ratatui::layout::Rect::default(),
     }

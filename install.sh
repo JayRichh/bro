@@ -1,7 +1,8 @@
 #!/bin/sh
-# nebula installer — installs or updates the `nebula` binary.
+# bro installer: installs or updates the `bro` binary on macOS and Linux.
+# On Windows, use install.ps1 instead.
 #
-#   curl -fsSL https://raw.githubusercontent.com/AgentSystemLabs/nebula/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/JayRichh/bro/main/install.sh | sh
 #
 # Grabs the prebuilt binary for this platform from the latest GitHub release,
 # falling back to `cargo install --git` when no release (or no matching asset)
@@ -9,9 +10,11 @@
 #
 # Environment overrides:
 #   NEBULA_INSTALL_DIR   install destination (default: ~/.local/bin)
+#   BRO_BRANCH           branch the source fallback builds (default: windows)
 set -eu
 
-REPO="AgentSystemLabs/nebula"
+REPO="JayRichh/bro"
+BRANCH="${BRO_BRANCH:-windows}"
 INSTALL_DIR="${NEBULA_INSTALL_DIR:-$HOME/.local/bin}"
 
 say() { printf '%s\n' "$*"; }
@@ -36,26 +39,29 @@ detect_target() {
         *) return 1 ;;
         esac
         ;;
-    *) err "nebula runs on macOS and Linux only (the daemon needs unix sockets)" ;;
+    MINGW* | MSYS* | CYGWIN*)
+        err "on Windows, install with PowerShell: irm https://raw.githubusercontent.com/$REPO/main/install.ps1 | iex"
+        ;;
+    *) err "no bro build for $(uname -s)" ;;
     esac
 }
 
 install_from_release() {
-    url="https://github.com/$REPO/releases/latest/download/nebula-$1.tar.gz"
+    url="https://github.com/$REPO/releases/latest/download/bro-$1.tar.gz"
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
     say "downloading $url"
-    curl -fsSL "$url" -o "$tmp/nebula.tar.gz" || return 1
-    tar -xzf "$tmp/nebula.tar.gz" -C "$tmp"
+    curl -fsSL "$url" -o "$tmp/bro.tar.gz" || return 1
+    tar -xzf "$tmp/bro.tar.gz" -C "$tmp"
     mkdir -p "$INSTALL_DIR"
-    install -m 755 "$tmp/nebula" "$INSTALL_DIR/nebula"
+    install -m 755 "$tmp/bro" "$INSTALL_DIR/bro"
 }
 
 install_from_source() {
     command -v cargo >/dev/null 2>&1 ||
-        err "no prebuilt binary available and cargo is not installed — get Rust from https://rustup.rs and re-run"
-    say "building from source (this takes a few minutes)…"
-    cargo install --git "https://github.com/$REPO" nebula --locked --force
+        err "no prebuilt binary available and cargo is not installed. Get Rust from https://rustup.rs and re-run"
+    say "building from source (this takes a few minutes)..."
+    cargo install --git "https://github.com/$REPO" --branch "$BRANCH" nebula --locked --force
 }
 
 main() {
@@ -64,39 +70,38 @@ main() {
     installed=""
     if target=$(detect_target); then
         if install_from_release "$target"; then
-            installed="$INSTALL_DIR/nebula"
+            installed="$INSTALL_DIR/bro"
         else
-            reason="couldn't download nebula-$target from the latest release"
+            reason="couldn't download bro-$target from the latest release"
         fi
     else
         reason="no prebuilt binary for $(uname -s) $(uname -m)"
     fi
 
     if [ -z "$installed" ]; then
-        say "$reason — building from source instead"
+        say "$reason, building from source instead"
         install_from_source
-        installed="$HOME/.cargo/bin/nebula"
+        installed="$HOME/.cargo/bin/bro"
     fi
 
-    version=$("$installed" --version 2>/dev/null || echo nebula)
-    say "installed $version → $installed"
+    version=$("$installed" --version 2>/dev/null || echo bro)
+    say "installed $version -> $installed"
 
     bin_dir=$(dirname "$installed")
     case ":$PATH:" in
     *":$bin_dir:"*) ;;
-    *) say "note: $bin_dir is not on your PATH — add: export PATH=\"$bin_dir:\$PATH\"" ;;
+    *) say "note: $bin_dir is not on your PATH. Add: export PATH=\"$bin_dir:\$PATH\"" ;;
     esac
 
     # Replacing the file doesn't touch an already-running daemon: sessions keep
-    # running on the old binary until it's restarted. `nebula reload` restarts
-    # it in place, sessions and all; a daemon from before reload existed can
-    # only be restarted by `nebula kill`, which stops every session. `nebula
-    # upgrade` handles this itself and suppresses the note via
-    # NEBULA_UPGRADE_HANDOFF.
-    if [ -z "${NEBULA_UPGRADE_HANDOFF:-}" ] && pgrep -f 'nebula daemon' >/dev/null 2>&1; then
-        say "note: a nebula daemon from the previous version is still running."
-        say "      run 'nebula reload' to move it onto the new one (sessions keep running);"
-        say "      a daemon too old for that needs 'nebula kill' (stops all sessions)."
+    # running on the old binary until it's restarted. `bro reload` restarts it
+    # in place, sessions and all; a daemon from before reload existed can only
+    # be restarted by `bro kill`, which stops every session. `bro upgrade`
+    # handles this itself and suppresses the note via NEBULA_UPGRADE_HANDOFF.
+    if [ -z "${NEBULA_UPGRADE_HANDOFF:-}" ] && pgrep -f 'bro daemon' >/dev/null 2>&1; then
+        say "note: a bro daemon from the previous version is still running."
+        say "      run 'bro reload' to move it onto the new one (sessions keep running);"
+        say "      a daemon too old for that needs 'bro kill' (stops all sessions)."
     fi
 }
 

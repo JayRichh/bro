@@ -202,7 +202,7 @@ impl Report {
         }
         if !self.unknown_sections.is_empty() {
             parts.push(format!(
-                "left alone, unknown to this nebula: {}",
+                "left alone, unknown to this bro: {}",
                 self.unknown_sections.join(", ")
             ));
         }
@@ -221,7 +221,7 @@ fn plural(n: usize, noun: &str) -> String {
 /// import with nothing changed.
 pub fn import(paths: &Paths, bundle: &Value) -> Result<Report> {
     let Some(obj) = bundle.as_object().filter(|obj| obj.contains_key(MARKER)) else {
-        bail!("not a nebula settings bundle (it has no \"{MARKER}\" key)");
+        bail!("not a bro settings bundle (it has no \"{MARKER}\" key)");
     };
     let incoming_config = match obj.get(CONFIG) {
         None => None,
@@ -487,7 +487,7 @@ pub fn for_remote() -> Option<String> {
     }
     let (bundle, warnings) = export(&Paths::current(), Scope::Remote);
     for warning in warnings {
-        eprintln!("nebula: settings not sent in full: {warning}");
+        eprintln!("bro: settings not sent in full: {warning}");
     }
     if section_count(&bundle) == 0 {
         return None;
@@ -495,7 +495,7 @@ pub fn for_remote() -> Option<String> {
     let encoded = encode(&bundle);
     if encoded.len() > MAX_FORWARD_BYTES {
         eprintln!(
-            "nebula: settings are {} KiB, too large to send over ssh — connecting without them",
+            "bro: settings are {} KiB, too large to send over ssh — connecting without them",
             encoded.len() / 1024
         );
         return None;
@@ -520,11 +520,11 @@ pub fn apply_forwarded() {
     }
     match decode(&encoded).and_then(|bundle| import(&Paths::current(), &bundle)) {
         Ok(report) if report.changed() || !report.held_local.is_empty() => eprintln!(
-            "nebula: settings from the connecting machine applied — {}",
+            "bro: settings from the connecting machine applied — {}",
             report.summary()
         ),
         Ok(_) => {}
-        Err(err) => eprintln!("nebula: ignored the settings the connecting machine sent: {err:#}"),
+        Err(err) => eprintln!("bro: ignored the settings the connecting machine sent: {err:#}"),
     }
 }
 
@@ -567,7 +567,7 @@ pub fn run(op: ConfigOp) -> Result<()> {
         ConfigOp::Export { path } => {
             let (bundle, warnings) = export(&paths, Scope::Backup);
             for warning in &warnings {
-                eprintln!("nebula: {warning}");
+                eprintln!("bro: {warning}");
             }
             let mut text = serde_json::to_string_pretty(&bundle)?;
             text.push('\n');
@@ -805,7 +805,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&p.config).unwrap(), "{ broken");
 
         let err = import(&p, &json!({"theme": "ocean"})).unwrap_err();
-        assert!(err.to_string().contains("not a nebula settings bundle"));
+        assert!(err.to_string().contains("not a bro settings bundle"));
     }
 
     #[test]

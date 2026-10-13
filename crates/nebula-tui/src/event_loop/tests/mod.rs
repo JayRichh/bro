@@ -1201,7 +1201,7 @@ fn empty_tree_draws_splash_until_first_project() {
     let text = buffer_text(&terminal);
     assert!(text.contains("create your first project"), "{text}");
     assert!(
-        text.contains("your agents keep running"),
+        text.contains("Sweet as agent management"),
         "tagline on the splash: {text}"
     );
     let grid_head = |app: &App| {
@@ -3407,7 +3407,7 @@ fn ctrl_t_flips_the_pr_diff_file_list_between_flat_and_tree() {
     assert_eq!(view.selected_file().unwrap().path, "docs/keys.md");
     assert!(view.diff.contains("+new-keys"), "{}", view.diff);
     assert!(!app.modals.diff_tree);
-    assert!(out.is_empty(), "the list's shape is nebula's own business");
+    assert!(out.is_empty(), "the list's shape is bro's own business");
 }
 
 /// INPUT PARITY: Enter on a tree directory's row and a click on it are
@@ -4973,7 +4973,7 @@ fn mid_stream_snapshot_preserves_the_live_selection() {
 /// is not.
 #[test]
 fn footer_shows_the_nebula_version_but_never_truncates_a_flash() {
-    let stamp = concat!("nebula v", env!("CARGO_PKG_VERSION"));
+    let stamp = concat!("bro v", env!("CARGO_PKG_VERSION"));
     let mut app = App::new();
     seed_tree(&mut app);
     let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
@@ -5004,7 +5004,7 @@ fn footer_shows_the_nebula_version_but_never_truncates_a_flash() {
 /// one.
 #[test]
 fn footer_flags_a_newer_release_beside_the_nameplate() {
-    let stamp = concat!("nebula v", env!("CARGO_PKG_VERSION"));
+    let stamp = concat!("bro v", env!("CARGO_PKG_VERSION"));
     let mut app = App::new();
     seed_tree(&mut app);
     let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
@@ -7231,13 +7231,13 @@ fn shift_enter_on_a_worktree_fires_its_open_command() {
         assert!(
             flash.contains("no open command")
                 && flash.contains("Settings")
-                && flash.contains(".nebula.json"),
+                && flash.contains(".bro.json"),
             "names both places: {flash}"
         );
         assert_eq!(app.nav.focus, Focus::Worktrees, "not Enter's drill-in");
 
         std::fs::write(
-            dir.path().join(".nebula.json"),
+            dir.path().join(".bro.json"),
             r#"{"open": "open http://localhost:3000"}"#,
         )
         .unwrap();
@@ -7504,7 +7504,7 @@ fn menu_confirms_match_the_key_path_word_for_word() {
     assert_eq!(key_project.title, "Remove project");
     assert_eq!(
         key_project.message,
-        "Remove 'demo' from nebula? Nothing on disk is touched."
+        "Remove 'demo' from bro? Nothing on disk is touched."
     );
     assert!(matches!(
         menu_project.action,
@@ -9513,10 +9513,7 @@ fn the_left_button_goes_to_a_program_that_asked_for_the_mouse() {
         &mut out,
     );
     assert_eq!(only_input(&out), b"\x1b[<0;6;4M");
-    assert!(
-        app.pane.term_selection.is_none(),
-        "no selection of nebula's"
-    );
+    assert!(app.pane.term_selection.is_none(), "no selection of bro's");
     assert!(
         app.pane.term_locked,
         "a click into the pane still locks input"
@@ -9553,7 +9550,7 @@ fn the_left_button_goes_to_a_program_that_asked_for_the_mouse() {
     );
     assert_eq!(only_input(&out), b"\x1b[<0;11;5m");
     assert!(app.pane.term_mouse_grab.is_none(), "the release lets go");
-    assert!(app.chrome.flash.is_none(), "nebula copied nothing");
+    assert!(app.chrome.flash.is_none(), "bro copied nothing");
     assert!(app.pane.term_selection.is_none());
 }
 
@@ -13752,7 +13749,7 @@ fn metrics_modal_opens_requests_and_renders() {
     );
     assert!(text.contains("1.5 GB"), "subtree memory rendered:\n{text}");
     assert!(
-        text.contains("nebula daemon") && text.contains("40 MB"),
+        text.contains("bro daemon") && text.contains("40 MB"),
         "daemon row rendered:\n{text}"
     );
     assert!(
@@ -13838,8 +13835,8 @@ fn metrics_groups_prewarm_spares_under_their_own_header() {
         pos("agent-1 (claude)") < pos("warm spares (2)")
             && pos("warm spares (2)") < pos("├ claude · opus")
             && pos("├ claude · opus") < pos("└ claude")
-            && pos("└ claude") < pos("nebula daemon"),
-        "live rows, then the spares tree, then nebula's own:\n{text}"
+            && pos("└ claude") < pos("bro daemon"),
+        "live rows, then the spares tree, then bro's own:\n{text}"
     );
     let leaf = text
         .lines()
@@ -13964,7 +13961,7 @@ fn metrics_enter_opens_selected_session() {
     press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
     assert!(
         matches!(app.modals.overlay, Some(Overlay::Metrics(_))),
-        "Enter on a nebula row keeps the modal open"
+        "Enter on a bro row keeps the modal open"
     );
 }
 
@@ -17816,7 +17813,7 @@ fn the_project_tab_run_command_is_typed_into_the_selected_projects_entry() {
         let screen = draw_to_string(&mut app, 100, 40);
         assert!(screen.contains("Run command"), "{screen}");
         assert!(
-            screen.contains("[.nebula.json]"),
+            screen.contains("[.bro.json]"),
             "unset reads as the file: {screen}"
         );
 
@@ -17890,7 +17887,7 @@ fn the_project_tab_run_command_is_typed_into_the_selected_projects_entry() {
         open_on_row(&mut app, &mut out);
         let screen = draw_to_string(&mut app, 100, 40);
         assert!(screen.contains("/tmp/other"), "{screen}");
-        assert!(screen.contains("[.nebula.json]"), "{screen}");
+        assert!(screen.contains("[.bro.json]"), "{screen}");
         press(&mut app, KeyCode::Esc, KeyModifiers::NONE, &mut out);
 
         // An empty Enter is the way back to the file — the entry goes.
@@ -17904,7 +17901,7 @@ fn the_project_tab_run_command_is_typed_into_the_selected_projects_entry() {
         assert_eq!(saved(&path)["projects"], serde_json::json!({}));
         let view = settings_view(&app);
         assert!(
-            matches!(&view.notice, Some((t, _)) if t.contains(".nebula.json")),
+            matches!(&view.notice, Some((t, _)) if t.contains(".bro.json")),
             "back to the file: {:?}",
             view.notice
         );
@@ -21471,7 +21468,7 @@ fn key_combo_display_sits_on_the_footers_padding_row_at_the_left() {
         "  j  - Move down",
         "the row above the bar, at the far left"
     );
-    assert!(rows[29].contains("nebula v"), "the bar itself is untouched");
+    assert!(rows[29].contains("bro v"), "the bar itself is untouched");
     let cell = &terminal.backend().buffer()[(2, 28)];
     assert_eq!(cell.symbol(), "j");
     assert_eq!(cell.bg, app.chrome.theme.sel_bg, "the key sits in a keycap");

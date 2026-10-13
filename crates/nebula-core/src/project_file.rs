@@ -29,7 +29,11 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 /// The file's name at the root of a checkout.
-pub const FILE_NAME: &str = ".nebula.json";
+pub const FILE_NAME: &str = ".bro.json";
+
+/// The name upstream nebula reads, still honoured in a checkout that has
+/// no `.bro.json`.
+pub const LEGACY_FILE_NAME: &str = ".nebula.json"; // rebrand:keep
 
 /// What `.nebula.json` says. Unknown keys are ignored, so a file written
 /// for a newer nebula still works in this one.
@@ -80,9 +84,17 @@ impl ProjectFile {
     }
 }
 
-/// Parse one checkout's file. Ok(None) when the checkout has none.
+/// Parse one checkout's file: `.bro.json`, else `.nebula.json`. Ok(None)
+/// when the checkout has neither.
 pub fn read(dir: &Path) -> Result<Option<ProjectFile>, String> {
-    let path = dir.join(FILE_NAME);
+    match read_named(dir, FILE_NAME)? {
+        Some(file) => Ok(Some(file)),
+        None => read_named(dir, LEGACY_FILE_NAME),
+    }
+}
+
+fn read_named(dir: &Path, name: &str) -> Result<Option<ProjectFile>, String> {
+    let path = dir.join(name);
     match std::fs::read_to_string(&path) {
         Ok(text) => serde_json::from_str(&text)
             .map(Some)
@@ -219,7 +231,7 @@ mod tests {
     fn missing_file_blank_command_and_bad_json_say_what_to_fix() {
         let empty = TempDir::new();
         let err = command(&empty.0, &empty.0, ProjectCommand::Run).unwrap_err();
-        assert!(err.contains("no .nebula.json"), "{err}");
+        assert!(err.contains("no .bro.json"), "{err}");
         assert!(err.contains(r#"{"run": "npm run dev"}"#), "{err}");
 
         let blank = TempDir::new().with_file(r#"{"run": "   "}"#);
@@ -230,5 +242,22 @@ mod tests {
         let err = command(&broken.0, &broken.0, ProjectCommand::Run).unwrap_err();
         assert!(err.contains(FILE_NAME), "names the file: {err}");
         assert!(err.contains("invalid type"), "{err}");
+    }
+
+    #[test]
+    fn the_bro_file_wins_and_the_nebula_file_still_reads() {
+        let legacy = TempDir::new();
+        std::fs::write(legacy.0.join(LEGACY_FILE_NAME), r#"{"run": "npm run dev"}"#).unwrap();
+        assert_eq!(
+            command(&legacy.0, &legacy.0, ProjectCommand::Run).unwrap(),
+            "npm run dev"
+        );
+
+        let both = TempDir::new().with_file(r#"{"run": "bun dev"}"#);
+        std::fs::write(both.0.join(LEGACY_FILE_NAME), r#"{"run": "npm run dev"}"#).unwrap();
+        assert_eq!(
+            command(&both.0, &both.0, ProjectCommand::Run).unwrap(),
+            "bun dev"
+        );
     }
 }

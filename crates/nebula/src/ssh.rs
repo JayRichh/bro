@@ -32,10 +32,10 @@ macro_rules! install_prelude {
             // on a macOS remote that is the only place ttyd (which
             // `nebula browser` needs) or a brew-installed nebula lives.
             "export PATH=\"$HOME/.local/bin:$PATH:/opt/homebrew/bin:/usr/local/bin\"; ",
-            "if ! command -v nebula >/dev/null 2>&1; then ",
+            "if ! command -v bro >/dev/null 2>&1; then ",
             "command -v curl >/dev/null 2>&1 || { ",
-            "echo \"nebula: curl is required on the remote to install nebula\" >&2; exit 127; }; ",
-            "echo \"nebula not found on remote; installing...\" >&2; ",
+            "echo \"bro: curl is required on the remote to install bro\" >&2; exit 127; }; ",
+            "echo \"bro not found on remote; installing...\" >&2; ",
             "curl -fsSL \"$1\" | sh || exit 1; ",
             "fi; "
         )
@@ -71,14 +71,14 @@ const REMOTE_SCRIPT: &str = concat!(
     install_prelude!(),
     "cd -- \"${2:-$HOME}\" || exit 1; ",
     export_settings_bundle!("3"),
-    "exec nebula"
+    "exec bro"
 );
 
 /// Not on Windows yet: it execs `ssh` over this process, which Windows has
 /// no way to do.
 #[cfg(windows)]
 pub fn run_ssh(_host: &str, _path: Option<&str>, _sync_config: bool) -> Result<()> {
-    bail!("`nebula ssh` is not supported on Windows yet")
+    bail!("`bro ssh` is not supported on Windows yet")
 }
 
 #[cfg(unix)]
@@ -93,7 +93,7 @@ pub fn run_ssh(host: &str, path: Option<&str>, sync_config: bool) -> Result<()> 
     // natively. Only returns on failure.
     let err = Command::new("ssh").args(["-t", "--", host, &cmd]).exec();
     if err.kind() == std::io::ErrorKind::NotFound {
-        bail!("ssh not found on PATH — nebula ssh requires the OpenSSH client");
+        bail!("ssh not found on PATH — bro ssh requires the OpenSSH client");
     }
     Err(err).context("failed to exec ssh")
 }
@@ -181,7 +181,7 @@ mod tests {
             let home = tempfile::tempdir().unwrap();
             let stub = home.path().join("stub");
             std::fs::create_dir(&stub).unwrap();
-            let nebula = stub.join("nebula");
+            let nebula = stub.join("bro");
             std::fs::write(
                 &nebula,
                 "#!/bin/sh\nprintf '%s' \"${NEBULA_IMPORT_BUNDLE-unset}\" > \"$SEEN\"\n",

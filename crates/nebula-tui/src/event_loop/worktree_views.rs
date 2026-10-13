@@ -42,7 +42,7 @@ pub(crate) fn open_folder(app: &mut App, path: std::path::PathBuf, out: &mut Vec
         app.modals.overlay = Some(Overlay::Confirm(ConfirmDialog {
             title: "Not a git repository".into(),
             message: format!(
-                "{} isn't a git repository — nebula projects are. Run git init in it?",
+                "{} isn't a git repository — bro projects are. Run git init in it?",
                 path.display()
             ),
             action: PendingAction::InitProjectRepo(path),
@@ -223,7 +223,7 @@ pub(crate) fn open_selected_worktree(app: &mut App) {
 /// the twin of the DAEMON's line for `r`.
 const NO_OPEN_COMMAND: &str =
     "no open command for this worktree — set one in Settings (s) → Project, \
-                               or add .nebula.json with {\"open\": \"open http://localhost:3000\"}";
+                               or add .bro.json with {\"open\": \"open http://localhost:3000\"}";
 
 /// Run `worktree`'s OPEN COMMAND once and say so: the project's **Open
 /// command** setting (Settings → Project) when it is set, else the
@@ -292,8 +292,7 @@ pub(crate) fn spawn_open_command(command: &str, cwd: &std::path::Path) -> std::i
     let mut child = {
         use std::os::windows::process::CommandExt;
         let args = nebula_core::shell::shell_line_args(&shell, command);
-        let launch =
-            nebula_core::shell::launch(&shell, &args).map_err(std::io::Error::other)?;
+        let launch = nebula_core::shell::launch(&shell, &args).map_err(std::io::Error::other)?;
         Command::new(&launch.program)
             .args(&launch.args)
             .envs(launch.env.iter().map(|(k, v)| (k, v)))

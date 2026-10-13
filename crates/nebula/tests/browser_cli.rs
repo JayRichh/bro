@@ -6,11 +6,11 @@ use std::process::Command;
 
 #[test]
 fn missing_ttyd_explains_the_dependency_and_fails() {
-    let out = Command::new(env!("CARGO_BIN_EXE_nebula"))
+    let out = Command::new(env!("CARGO_BIN_EXE_bro"))
         .arg("browser")
         .env("PATH", "")
         .output()
-        .expect("failed to run nebula browser");
+        .expect("failed to run bro browser");
 
     assert!(!out.status.success(), "should exit non-zero without ttyd");
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -23,11 +23,11 @@ fn missing_ttyd_explains_the_dependency_and_fails() {
 /// the *only* thing left to fail once PATH is scrubbed.
 #[test]
 fn port_zero_now_resolves_and_reaches_the_ttyd_lookup() {
-    let out = Command::new(env!("CARGO_BIN_EXE_nebula"))
+    let out = Command::new(env!("CARGO_BIN_EXE_bro"))
         .args(["browser", "--port", "0"])
         .env("PATH", "")
         .output()
-        .expect("failed to run nebula browser");
+        .expect("failed to run bro browser");
 
     assert!(!out.status.success(), "no ttyd on a scrubbed PATH");
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -46,11 +46,11 @@ fn port_zero_now_resolves_and_reaches_the_ttyd_lookup() {
 /// loopback — before ttyd is looked for.
 #[test]
 fn public_resolves_a_port_on_every_interface_and_reaches_the_ttyd_lookup() {
-    let out = Command::new(env!("CARGO_BIN_EXE_nebula"))
+    let out = Command::new(env!("CARGO_BIN_EXE_bro"))
         .args(["browser", "--public", "--port", "0"])
         .env("PATH", "")
         .output()
-        .expect("failed to run nebula browser");
+        .expect("failed to run bro browser");
 
     assert!(!out.status.success(), "no ttyd on a scrubbed PATH");
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -62,11 +62,11 @@ fn public_resolves_a_port_on_every_interface_and_reaches_the_ttyd_lookup() {
 /// that fails for any other reason.
 #[test]
 fn a_public_bind_without_a_credential_warns() {
-    let out = Command::new(env!("CARGO_BIN_EXE_nebula"))
+    let out = Command::new(env!("CARGO_BIN_EXE_bro"))
         .args(["browser", "--public", "--port", "0"])
         .env("PATH", "")
         .output()
-        .expect("failed to run nebula browser");
+        .expect("failed to run bro browser");
 
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("WARNING"), "{stderr}");
@@ -76,11 +76,11 @@ fn a_public_bind_without_a_credential_warns() {
 /// Loopback is unchanged: no warning, because there is nobody to warn about.
 #[test]
 fn the_default_loopback_bind_is_silent() {
-    let out = Command::new(env!("CARGO_BIN_EXE_nebula"))
+    let out = Command::new(env!("CARGO_BIN_EXE_bro"))
         .args(["browser", "--port", "0"])
         .env("PATH", "")
         .output()
-        .expect("failed to run nebula browser");
+        .expect("failed to run bro browser");
 
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(!stderr.contains("WARNING"), "{stderr}");
@@ -90,10 +90,10 @@ fn the_default_loopback_bind_is_silent() {
 /// an error rather than a silent winner.
 #[test]
 fn bind_and_public_cannot_both_be_given() {
-    let out = Command::new(env!("CARGO_BIN_EXE_nebula"))
+    let out = Command::new(env!("CARGO_BIN_EXE_bro"))
         .args(["browser", "--public", "--bind", "127.0.0.1"])
         .output()
-        .expect("failed to run nebula browser");
+        .expect("failed to run bro browser");
 
     assert!(!out.status.success(), "should refuse both");
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -102,10 +102,10 @@ fn bind_and_public_cannot_both_be_given() {
 
 #[test]
 fn a_bind_address_that_is_not_an_ip_is_rejected_by_the_parser() {
-    let out = Command::new(env!("CARGO_BIN_EXE_nebula"))
+    let out = Command::new(env!("CARGO_BIN_EXE_bro"))
         .args(["browser", "--bind", "example.com"])
         .output()
-        .expect("failed to run nebula browser");
+        .expect("failed to run bro browser");
 
     assert!(!out.status.success(), "hostnames are not bind addresses");
     let stderr = String::from_utf8_lossy(&out.stderr);

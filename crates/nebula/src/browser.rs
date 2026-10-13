@@ -48,9 +48,9 @@ const POLL_INTERVAL: Duration = Duration::from_millis(50);
 const FONT_SIZE: u16 = 13;
 
 const MISSING_TTYD: &str = "\
-nebula browser needs ttyd, and it is not on your PATH.
+bro browser needs ttyd, and it is not on your PATH.
 
-ttyd serves a command's terminal over HTTP; `nebula browser` points it at this
+ttyd serves a command's terminal over HTTP; `bro browser` points it at this
 binary so the TUI renders in a browser tab. Install it, then try again:
 
   macOS          brew install ttyd
@@ -88,7 +88,7 @@ impl Default for BrowserOpts {
 pub fn run_browser(opts: BrowserOpts) -> Result<()> {
     // ttyd has no Windows build that can host a ConPTY client like this.
     if cfg!(windows) {
-        anyhow::bail!("`nebula browser` is not supported on Windows yet");
+        anyhow::bail!("`bro browser` is not supported on Windows yet");
     }
     let port = resolve_port(opts.port, opts.bind)?;
     warn_if_exposed(&opts);
@@ -97,12 +97,12 @@ pub fn run_browser(opts: BrowserOpts) -> Result<()> {
 
     let url = url_for(reachable_addr(opts.bind), port);
     if opts.open && open_url(&url) {
-        println!("nebula browser: serving on {url}");
+        println!("bro browser: serving on {url}");
     } else {
-        println!("nebula browser: serving on {url} (open it yourself — no browser launched)");
+        println!("bro browser: serving on {url} (open it yourself — no browser launched)");
     }
     if opts.bind.is_unspecified() {
-        println!("nebula browser: reachable on every interface of this host at port {port}.");
+        println!("bro browser: reachable on every interface of this host at port {port}.");
     }
     println!("Ctrl+C to stop.");
 
@@ -139,9 +139,9 @@ fn warn_if_exposed(opts: &BrowserOpts) {
     if opts.bind.is_loopback() {
         return;
     }
-    eprintln!("nebula browser: WARNING — binding {} serves a live, writable terminal on this machine to the network.", opts.bind);
+    eprintln!("bro browser: WARNING — binding {} serves a live, writable terminal on this machine to the network.", opts.bind);
     if opts.credential.is_none() {
-        eprintln!("nebula browser: there is no password on it. Restrict the port (firewall, security group, VPN) or pass --credential USER:PASSWORD.");
+        eprintln!("bro browser: there is no password on it. Restrict the port (firewall, security group, VPN) or pass --credential USER:PASSWORD.");
     }
 }
 
@@ -170,7 +170,7 @@ fn resolve_port(requested: Option<u16>, bind: IpAddr) -> Result<u16> {
         None if probe(DEFAULT_PORT, bind).is_ok() => Ok(DEFAULT_PORT),
         None => {
             let port = free_port(bind)?;
-            println!("nebula browser: {DEFAULT_PORT} is busy — serving on {port} instead");
+            println!("bro browser: {DEFAULT_PORT} is busy — serving on {port} instead");
             Ok(port)
         }
     }
@@ -265,7 +265,7 @@ fn ttyd_args(port: u16, opts: &BrowserOpts) -> Vec<String> {
 fn nebula_exe() -> OsString {
     std::env::current_exe()
         .map(OsString::from)
-        .unwrap_or_else(|_| "nebula".into())
+        .unwrap_or_else(|_| "bro".into())
 }
 
 /// Block until the address accepts a connection, so the browser never opens

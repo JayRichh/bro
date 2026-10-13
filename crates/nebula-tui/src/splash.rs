@@ -34,14 +34,11 @@ const DUST: &[u8] = &[17, 54, 55, 92, 93, 129, 135, 177];
 /// Wordmark gradient, swept left to right.
 const MARK: &[u8] = &[99, 105, 141, 177, 213, 219];
 
-/// 5-row block bitmaps for N E B U L A.
+/// 5-row block bitmaps for B R O.
 const LETTERS: &[&[&str; 5]] = &[
-    &["#...#", "##..#", "#.#.#", "#..##", "#...#"],
-    &["####", "#...", "###.", "#...", "####"],
     &["###.", "#..#", "###.", "#..#", "###."],
-    &["#..#", "#..#", "#..#", "#..#", ".##."],
-    &["#...", "#...", "#...", "#...", "####"],
-    &[".##.", "#..#", "####", "#..#", "#..#"],
+    &["###.", "#..#", "###.", "#.#.", "#..#"],
+    &[".##.", "#..#", "#..#", "#..#", ".##."],
 ];
 
 fn hash(x: i32, y: i32, salt: u32) -> u32 {
@@ -190,7 +187,7 @@ pub fn draw_splash(f: &mut Frame, app: &mut App, area: Rect) {
         lines.push(Line::from(vec![
             Span::styled("◆ ", Style::default().fg(th.accent)),
             Span::styled(
-                "nebula",
+                "bro",
                 Style::default().fg(th.text).add_modifier(Modifier::BOLD),
             ),
         ]));
@@ -198,7 +195,7 @@ pub fn draw_splash(f: &mut Frame, app: &mut App, area: Rect) {
     lines.push(Line::from(""));
     if area.width >= 47 {
         lines.push(Line::from(Span::styled(
-            "your agents keep running, even when you leave",
+            "Sweet as agent management.",
             Style::default().fg(th.dim),
         )));
         lines.push(Line::from(""));

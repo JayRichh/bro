@@ -17,29 +17,29 @@ use crate::registry::{CreateAgentSpec, Daemon};
 /// trying to launch an agent process itself. Claude and pi, like the
 /// worktree guidance (both take `--append-system-prompt`): codex and cursor
 /// have no system-prompt flag.
-pub const CLAUDE_SPAWN_GUIDANCE: &str = "[nebula] When the user asks you to start, spin up, or hand \
-off work to a separate new/parallel nebula session (\"start a new nebula session that …\", \"spin up \
+pub const CLAUDE_SPAWN_GUIDANCE: &str = "[bro] When the user asks you to start, spin up, or hand \
+off work to a separate new/parallel bro session (\"start a new bro session that …\", \"spin up \
 another session to …\", \"open a new session for …\", \"hand this off\"), do not launch an agent \
-process yourself. Run this shell command instead, exactly once:\n\n  nebula spawn \"<task>\"\n\nwhere \
+process yourself. Run this shell command instead, exactly once:\n\n  bro spawn \"<task>\"\n\nwhere \
 <task> is the work the user wants that session to do, in their own words — the new session opens on \
 it as its first prompt, so make it self-contained. Add `--kind \
 claude|codex|cursor|pi|muse|grok|opencode` only when the user names the harness; otherwise the new \
-session matches this one. nebula starts it beside this session, in the same worktree, and it shows \
+session matches this one. bro starts it beside this session, in the same worktree, and it shows \
 up in the sessions list on its own. When the user wants that separate new/parallel session on its \
 own branch or worktree (\"start a new session on branch fix-login\", \"spin up an agent in a new \
-worktree to fix login\"), add `--worktree <branch>`: nebula starts it in the project's worktree on \
+worktree to fix login\"), add `--worktree <branch>`: bro starts it in the project's worktree on \
 that branch, creating it when there is none (`--base <ref>` picks a new branch's start point, only \
-when the user names one). Do not use `nebula spawn --worktree` for requests that ask this current \
+when the user names one). Do not use `bro spawn --worktree` for requests that ask this current \
 session to \"do this in a new worktree\" or \"move to a worktree\"; follow the worktree guidance and \
-run `nebula worktree <name>` for those. This session is unaffected by a spawn either way: carry on \
+run `bro worktree <name>` for those. This session is unaffected by a spawn either way: carry on \
 with whatever else the user asked, and if starting the session was the whole request, tell the user \
 in one line that it is running. If the command fails, report the error.";
 
 /// What nebula appends to Claude and pi so every session can consult other
 /// sessions when the user names them, without becoming the orchestrator.
-pub const CLAUDE_SESSION_CONTEXT_GUIDANCE: &str = "[nebula] When the user refers to another nebula \
+pub const CLAUDE_SESSION_CONTEXT_GUIDANCE: &str = "[bro] When the user refers to another bro \
 session by name/id or asks you to get context from or ask another session, use the shell commands \
-`nebula sessions`, `nebula read <session> [--lines N]`, and `nebula ask <session> \"<question>\" \
+`bro sessions`, `bro read <session> [--lines N]`, and `bro ask <session> \"<question>\" \
 [--timeout S]` instead of guessing from your own context. Use `sessions --json` when you need an \
 exact id; `read` is for recent context, and `ask` sends a concise labelled question to that session \
 and prints its answer. Do not use these commands to spawn or move worktrees; follow the spawn and \

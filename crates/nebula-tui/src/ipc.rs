@@ -1,6 +1,7 @@
 //! Client-side IPC: connect to the daemon (auto-spawning it when absent) and
 //! perform the version handshake.
 
+use crate::platform::Stream;
 use anyhow::{bail, Context, Result};
 use nebula_core::codec::{read_frame, write_frame};
 use nebula_core::{
@@ -8,7 +9,6 @@ use nebula_core::{
     ReviewTabKind, ServerEvent, SessionRef, SessionSummary, TerminalId, TerminalTab, Worktree,
     WorktreeId, PROTOCOL_VERSION,
 };
-use crate::platform::Stream;
 use std::time::Duration;
 #[cfg(unix)]
 use tokio::net::UnixStream;
@@ -41,10 +41,10 @@ pub async fn connect_or_spawn() -> Result<Connection> {
         Some(nebula_core::host::WslFlavor::Wsl1)
     ) {
         bail!(
-            "nebula supports WSL2, but this looks like WSL1. \
+            "bro supports WSL2, but this looks like WSL1. \
              WSL1 does not provide the Linux kernel features the daemon needs \
              for its Unix socket, pidfile lock, and PTYs. Convert the distro \
-             with `wsl.exe --set-version <distro> 2`, then run `nebula` again."
+             with `wsl.exe --set-version <distro> 2`, then run `bro` again."
         );
     }
 
@@ -100,7 +100,7 @@ fn spawn_daemon() -> Result<()> {
     // daemon stays in it.
     spawn(flags | CREATE_BREAKAWAY_FROM_JOB)
         .or_else(|_| spawn(flags))
-        .context("spawn nebula daemon")?;
+        .context("spawn bro daemon")?;
     Ok(())
 }
 
@@ -122,7 +122,7 @@ fn spawn_daemon() -> Result<()> {
     unsafe {
         cmd.pre_exec(own_session);
     }
-    cmd.spawn().context("spawn nebula daemon")?;
+    cmd.spawn().context("spawn bro daemon")?;
     Ok(())
 }
 
@@ -220,7 +220,7 @@ fn version_skew_message(daemon_protocol_version: u32, daemon_pid: Option<i32>) -
     );
     if daemon_protocol_version > PROTOCOL_VERSION {
         format!(
-            "{header}This client is the older build, so `nebula kill` will not fix it — the \
+            "{header}This client is the older build, so `bro kill` will not fix it — the \
              running instance respawns its daemon from its own binary. Install the daemon's \
              build over this one instead (`make install` from that checkout)."
         )
@@ -234,7 +234,7 @@ fn version_skew_message(daemon_protocol_version: u32, daemon_pid: Option<i32>) -
             })
             .unwrap_or_default();
         format!(
-            "{header}The daemon is the older build — run `nebula kill` and relaunch. That \
+            "{header}The daemon is the older build — run `bro kill` and relaunch. That \
              stops every live session.{by_hand}"
         )
     }
@@ -307,8 +307,8 @@ pub fn split_connection(conn: Connection) -> IpcChannels {
 fn agent_id_from(value: Option<String>, verb: &str) -> Result<String> {
     value.filter(|v| !v.is_empty()).with_context(|| {
         format!(
-            "{} is not set — `nebula {verb}` only works from inside a \
-             nebula agent session",
+            "{} is not set — `bro {verb}` only works from inside a \
+             bro agent session",
             env::AGENT_ID
         )
     })
@@ -347,7 +347,7 @@ async fn await_reply(conn: &mut Connection, req_id: u64) -> Result<Reply> {
 fn require_protocol(conn: &Connection, needed: u32, command: &str) -> Result<()> {
     if conn.protocol_version < needed {
         bail!(
-            "`nebula {command}` needs daemon protocol v{needed}, but the running daemon speaks v{} — run `nebula kill` and relaunch",
+            "`bro {command}` needs daemon protocol v{needed}, but the running daemon speaks v{} — run `bro kill` and relaunch",
             conn.protocol_version
         );
     }
@@ -383,7 +383,7 @@ pub async fn rename_current_agent(title: &str, mode: RenameMode) -> Result<()> {
     let agent_id = current_agent_id("rename")?;
     let sock = paths::socket_path();
     let Ok(stream) = try_connect(&sock).await else {
-        bail!("no nebula daemon is running — title unchanged");
+        bail!("no bro daemon is running — title unchanged");
     };
     let mut conn = handshake(stream).await?;
     let req_id = ONE_SHOT_REQ_ID;
@@ -396,7 +396,7 @@ pub async fn rename_current_agent(title: &str, mode: RenameMode) -> Result<()> {
     write_frame(&mut conn.stream, &request).await?;
     match await_reply(&mut conn, req_id).await? {
         Reply::Ack => println!("session renamed to \"{title}\""),
-        Reply::Error(message) => println!("nebula: {message}"),
+        Reply::Error(message) => println!("bro: {message}"),
     }
     Ok(())
 }
@@ -422,14 +422,16 @@ pub async fn spawn_sibling_for_current_agent(
     let agent_id = current_agent_id("spawn")?;
     let task = task.trim();
     if task.is_empty() {
-        bail!("the task is empty — `nebula spawn \"<task>\"` needs the work the new session starts on");
+        bail!(
+            "the task is empty — `bro spawn \"<task>\"` needs the work the new session starts on"
+        );
     }
     // The words become a branch as `nebula worktree`'s do, so both
     // commands land on the same branch for the same words. Unlike there, no
     // name is invented for a blank one: a spawn names where its work goes.
     let worktree = match worktree.as_deref().map(crate::branch_name::slugify) {
         Some(slug) if slug.is_empty() => {
-            bail!("the branch is empty — `nebula spawn --worktree <branch>` needs a branch name")
+            bail!("the branch is empty — `bro spawn --worktree <branch>` needs a branch name")
         }
         other => other,
     };
@@ -439,7 +441,7 @@ pub async fn spawn_sibling_for_current_agent(
     };
     let sock = paths::socket_path();
     let Ok(stream) = try_connect(&sock).await else {
-        bail!("no nebula daemon is running — no session started");
+        bail!("no bro daemon is running — no session started");
     };
     let mut conn = handshake(stream).await?;
     let req_id = ONE_SHOT_REQ_ID;
@@ -476,7 +478,7 @@ pub async fn spawn_sibling_for_current_agent(
 pub async fn open_files_for_current_agent(files: &[String]) -> Result<()> {
     let agent_id = current_agent_id("open")?;
     if files.is_empty() {
-        bail!("nothing to open — `nebula open <file>…` needs at least one file");
+        bail!("nothing to open — `bro open <file>…` needs at least one file");
     }
     let mut resolved = Vec::with_capacity(files.len());
     for file in files {
@@ -491,7 +493,7 @@ pub async fn open_files_for_current_agent(files: &[String]) -> Result<()> {
             .with_context(|| format!("can't open {file}: unreadable"))?;
         if !openable {
             bail!(
-                "can't open {file}: unsupported binary file — nebula opens text, images and \
+                "can't open {file}: unsupported binary file — bro opens text, images and \
                  Mermaid diagrams; name this path in your reply instead"
             );
         }
@@ -499,7 +501,7 @@ pub async fn open_files_for_current_agent(files: &[String]) -> Result<()> {
     }
     let sock = paths::socket_path();
     let Ok(stream) = try_connect(&sock).await else {
-        bail!("no nebula daemon is running — nothing opened");
+        bail!("no bro daemon is running — nothing opened");
     };
     let mut conn = handshake(stream).await?;
     let req_id = ONE_SHOT_REQ_ID;
@@ -516,7 +518,7 @@ pub async fn open_files_for_current_agent(files: &[String]) -> Result<()> {
     await_ack(&mut conn, req_id).await?;
     let noun = if count == 1 { "file" } else { "files" };
     println!(
-        "opened {count} {noun} in nebula's file tabs — the user is looking at them now, one tab \
+        "opened {count} {noun} in bro's file tabs — the user is looking at them now, one tab \
          each, with a preview and an editor. Don't paste their contents into your reply; carry on."
     );
     Ok(())
@@ -525,7 +527,7 @@ pub async fn open_files_for_current_agent(files: &[String]) -> Result<()> {
 async fn session_context_connection(command: &str) -> Result<Connection> {
     let sock = paths::socket_path();
     let Ok(stream) = try_connect(&sock).await else {
-        bail!("no nebula daemon is running");
+        bail!("no bro daemon is running");
     };
     let conn = handshake(stream).await?;
     require_protocol(&conn, SESSION_CONTEXT_PROTOCOL, command)?;
@@ -680,7 +682,7 @@ async fn orchestrator_connection() -> Result<(AgentId, Connection)> {
     let agent_id = AgentId(current_agent_id("orchestrator")?);
     let sock = paths::socket_path();
     let Ok(stream) = try_connect(&sock).await else {
-        bail!("no nebula daemon is running");
+        bail!("no bro daemon is running");
     };
     Ok((agent_id, handshake(stream).await?))
 }
@@ -854,7 +856,7 @@ pub async fn orchestrator_review(session: &str, tabs: Vec<ReviewTabKind>) -> Res
     )
     .await?;
     await_ack(&mut conn, req_id).await?;
-    println!("opened review in nebula");
+    println!("opened review in bro");
     Ok(())
 }
 
@@ -966,7 +968,7 @@ pub async fn enter_worktree_for_current_agent(name: &str, base: Option<String>) 
     };
     let sock = paths::socket_path();
     let Ok(stream) = try_connect(&sock).await else {
-        bail!("no nebula daemon is running — nothing to move");
+        bail!("no bro daemon is running — nothing to move");
     };
     let mut conn = handshake(stream).await?;
     let req_id = ONE_SHOT_REQ_ID;
@@ -998,7 +1000,7 @@ pub async fn enter_worktree_for_current_agent(name: &str, base: Option<String>) 
                     }
                     EnterOutcome::Relocating => {
                         println!(
-                            "this session is now associated with it; nebula will relocate the \
+                            "this session is now associated with it; bro will relocate the \
                              session into it the moment this turn ends."
                         );
                         println!(
@@ -1094,8 +1096,8 @@ async fn kill_daemon_at(sock: &std::path::Path, pidfile: &std::path::Path) -> Re
             return Ok(true);
         }
         bail!(
-            "a nebula daemon is listening on {} but this build can't talk to it or find its \
-             pid — look it up with `pgrep -f 'nebula daemon'` and stop it with `kill <pid>` \
+            "a bro daemon is listening on {} but this build can't talk to it or find its \
+             pid — look it up with `pgrep -f 'bro daemon'` and stop it with `kill <pid>` \
              (never `kill -9`, which skips flushing its database)",
             sock.display()
         );
@@ -1299,12 +1301,12 @@ mod tests {
     #[test]
     fn agent_id_requires_a_non_empty_value_and_names_the_verb() {
         let err = agent_id_from(None, "rename").unwrap_err().to_string();
-        assert!(err.contains("`nebula rename`"), "{err}");
+        assert!(err.contains("`bro rename`"), "{err}");
         assert!(err.contains(env::AGENT_ID), "{err}");
         let err = agent_id_from(Some(String::new()), "worktree")
             .unwrap_err()
             .to_string();
-        assert!(err.contains("`nebula worktree`"), "{err}");
+        assert!(err.contains("`bro worktree`"), "{err}");
         assert_eq!(agent_id_from(Some("a1".into()), "rename").unwrap(), "a1");
     }
 
@@ -1316,14 +1318,14 @@ mod tests {
         let daemon_ahead = version_skew_message(PROTOCOL_VERSION + 2, None);
         assert!(daemon_ahead.contains("This client is the older build"));
         assert!(
-            !daemon_ahead.contains("run `nebula kill` and relaunch"),
+            !daemon_ahead.contains("run `bro kill` and relaunch"),
             "must not send the user to kill a daemon that is not the stale side: {daemon_ahead}"
         );
         assert!(daemon_ahead.contains("make install"));
 
         let daemon_behind = version_skew_message(PROTOCOL_VERSION - 1, None);
         assert!(daemon_behind.contains("The daemon is the older build"));
-        assert!(daemon_behind.contains("run `nebula kill` and relaunch"));
+        assert!(daemon_behind.contains("run `bro kill` and relaunch"));
     }
 
     // #68: with the daemon's pid known, the stale-daemon message names it

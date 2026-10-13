@@ -2,16 +2,16 @@
 
 <sub>[← README](../README.md) · [Keys](keys.md) · [Commands](commands.md) · [Sessions](sessions.md) · [Configuration](configuration.md) · [How it works](how-it-works.md)</sub>
 
-- **Relative links in the host terminal.** On local sessions, nebula reports the displayed
+- **Relative links in the host terminal.** On local sessions, bro reports the displayed
   agent or shell's checkout root through OSC 7, so the host terminal can resolve relative
   file links. With no attached session it reports the selected checkout; on exit it restores
-  nebula's launch directory. This follows checkout changes, not `cd` inside a child shell.
+  bro's launch directory. This follows checkout changes, not `cd` inside a child shell.
   SSH sessions leave the host's directory unchanged rather than label remote paths as local.
-- **Detached daemon (tmux-style).** A background `nebula` daemon owns every PTY, so agents keep running
-  when the TUI closes. The TUI is a client that attaches over a unix socket (`$XDG_RUNTIME_DIR/nebula/`
-  or `/tmp/nebula-<uid>/`, mode 0700). Quit the TUI, relaunch later, and your sessions are still alive
+- **Detached daemon (tmux-style).** A background `bro` daemon owns every PTY, so agents keep running
+  when the TUI closes. The TUI is a client that attaches over a unix socket (`$XDG_RUNTIME_DIR/bro/`
+  or `/tmp/bro-<uid>/`, mode 0700). Quit the TUI, relaunch later, and your sessions are still alive
   with scrollback replayed. When the daemon swaps the process under a session you are looking at — a
-  restart, or the `nebula worktree` relocation at the end of a turn — the pane is rebound to the new
+  restart, or the `bro worktree` relocation at the end of a turn — the pane is rebound to the new
   one on its own. Moving the cursor onto a live session — a card in the grid, or a worktree or
   project switch that brings one back — attaches it on the keypress; only a session the
   idle reaper took waits a moment, so that walking past its row doesn't boot a CLI. The screens of the
@@ -48,8 +48,8 @@
   the checkout, a stand-in agent with a full 1 MB ring — and prints handler / paint / settle / echo
   per step plus the peak RSS of the TUI and the DAEMON; `python3 scripts/perf/report.py BEFORE AFTER`
   compares two runs. A change to anything on a key path is judged by that table.
-- **Every pane is the same truecolor terminal.** A session paints nebula's own grid, not the terminal
-  nebula runs in, so the daemon tells each child `TERM=xterm-256color` and `COLORTERM=truecolor` and
+- **Every pane is the same truecolor terminal.** A session paints bro's own grid, not the terminal
+  bro runs in, so the daemon tells each child `TERM=xterm-256color` and `COLORTERM=truecolor` and
   drops any `NO_COLOR` / `FORCE_COLOR` it inherited. An agent launch runs through your login shell
   (`$SHELL -l -i -c 'unset …; export …; claude …'`) so it sees your real PATH — and your aliases and
   functions: a `claude` that `.zshrc` reroutes through a wrapper launches exactly as it does when typed
@@ -62,16 +62,16 @@
   change to the shared types bumps `PROTOCOL_VERSION` (`crates/nebula-core/src/protocol.rs`) and the
   handshake refuses a mismatched pair — the DAEMON answers `Incompatible`, the TUI bails, and the
   VERSION SKEW message names both binaries. Which side is stale decides the fix, and getting it
-  backwards costs an afternoon: when the DAEMON is the *older* build, `nebula kill` and relaunch is the
+  backwards costs an afternoon: when the DAEMON is the *older* build, `bro kill` and relaunch is the
   whole remedy (it stops every live session on the way). A DAEMON that can't take the `Shutdown`
   request gets SIGTERM instead, at the pid the kernel reports on the other end of the socket or, when
   it can't say, at the pid in its pidfile — which can't come first, because macOS's tmp cleaner deletes
   regular files in `/tmp` after three idle days but spares sockets, so the DAEMON touches its pidfile
-  hourly and puts it back if it vanishes. When the DAEMON is *ahead* of the `nebula` you
-  just ran, `nebula kill` does nothing for you — a live instance respawns its DAEMON from its own
+  hourly and puts it back if it vanishes. When the DAEMON is *ahead* of the `bro` you
+  just ran, `bro kill` does nothing for you — a live instance respawns its DAEMON from its own
   binary, so the skew survives every restart, and the fix is to install the DAEMON's build over yours
   (`make install` from that checkout) instead. The usual shape in a checkout is a `make dev` DAEMON out
-  of `target/debug` while your PATH still finds an older `nebula` from the last `make install`.
+  of `target/debug` while your PATH still finds an older `bro` from the last `make install`.
 - **RECENCY ORDER stamps every row.** A session is stamped when it last did anything, a worktree carries
   the newest stamp of its sessions, and a project the newest of its worktrees — which is why the lists
   sort themselves most-recent-first. The one fixed seat is the ROOT WORKTREE, always the first worktree
@@ -79,13 +79,13 @@
 - **Projects → worktrees → sessions.** All work happens in the main checkout or a git worktree.
   Worktrees are real (`git worktree add/remove`), created under
   `<repo>/../<repo-name>-worktrees/<branch>` and branched from the freshly fetched `origin/HEAD`
-  unless `nebula worktree --base` names another start — a branch origin has means origin's fetched
+  unless `bro worktree --base` names another start — a branch origin has means origin's fetched
   copy, so `--base main` is `origin/main` and never the checkout's local `main` (no `origin`, or a
   fetch that fails: the checkout's HEAD). The `worktree_base_branch` SETTING (Settings → General)
   is a standing `--base` for every worktree nobody names one for — `master` for a repo whose
   default branch is not what origin says, or that has no origin — resolved the same way, and
   falling back to `origin/HEAD` in a repo that has no branch of that name.
-- **Worktrees made outside nebula show up anyway — WORKTREE SYNC.** Every 2 s the DAEMON mtime-probes
+- **Worktrees made outside bro show up anyway — WORKTREE SYNC.** Every 2 s the DAEMON mtime-probes
   the git files a worktree operation touches — the repo's shared `.git/HEAD`, the `.git/worktrees`
   directory, and each linked checkout's own `HEAD` — and only when the newest of those stamps has moved
   does it spend a `git worktree list` and reconcile the rows. So an agent that runs `git worktree add`
@@ -111,7 +111,7 @@
   releasing it — and under a 30 s timeout that kills the hook and everything it started; a failure is
   a warning in every client, never a rolled-back create or delete. Per repo in git config rather than in CONFIG.JSON, and never a file inside the
   checkout. See [Configuration](configuration.md#worktree-hooks).
-- **A worktree runs its own project — the PROJECT FILE.** A committed `.nebula.json` names a `run` and
+- **A worktree runs its own project — the PROJECT FILE.** A committed `.bro.json` names a `run` and
   an `open` command; the Project tab of the SETTINGS OVERLAY can hold either instead, per project in
   `config.json`, and wins over the file while it is set. **Run** in a card's or the project tab's
   right-click menu has the DAEMON start `run` in a RUN TERMINAL — a terminal row
@@ -130,7 +130,7 @@
   Restored agents resume with `claude --resume <session-id>` /
   `codex resume <session-id>` / `cursor-agent --resume <session-id>` (falling back to a fresh session
   when the old one is gone) / `pi --session-id <session-id>` (which creates a missing id instead of
-  dying) / `opencode --session <session-id>` / `grok --resume <session-id>` (nebula does not capture
+  dying) / `opencode --session <session-id>` / `grok --resume <session-id>` (bro does not capture
   Grok's id yet, so there is rarely one to resume); `muse` always boots fresh (no resume flag mapped yet). A session's id is saved only once a turn has run in it — the CLI writes the transcript a
   resume reads on the first prompt — so a CLI booted and never used resumes as nothing. Claude
   ids are checked against the transcripts on disk before the spawn, and one with none boots fresh;
@@ -144,19 +144,19 @@
   instead — the live conversation, which detaching (Ctrl+Z) or archiving the row leaves running. A
   refused resume the job-dir look missed is asked about the same way and re-opened attached. An AGENT created from the PULL REQUESTS MODAL also receives the PR URL and a PR-only
   work rule — Claude and Pi through `--append-system-prompt` and Grok Build through `--rules` on every spawn, Codex, Cursor, Muse and OpenCode as the first prompt of
-  their cold spawn (their transcripts carry it through a resume); nebula persists that URL. An AGENT
+  their cold spawn (their transcripts carry it through a resume); bro persists that URL. An AGENT
   launched from the ISSUES MODAL (`i`) carries the GitHub issue's URL the same way — persisted with
   the row, rebuilt into an issue-context rule on every spawn and resume — so the harness knows which
   issue the session is for (see [Sessions](sessions.md#the-issues-modal-and-issue-sessions)).
-- **Status via agent-CLI hooks, not MCP.** At agent spawn, nebula merges managed hooks into the
+- **Status via agent-CLI hooks, not MCP.** At agent spawn, bro merges managed hooks into the
   worktree's `.claude/settings.local.json` (Claude Code) or `.cursor/hooks.json` (Cursor CLI), and into
   `~/.codex/hooks.json` (Codex — codex records hook approvals against the hook file's path, so a
-  per-worktree file would re-prompt forever; from its home, you approve nebula's hooks once at codex's
+  per-worktree file would re-prompt forever; from its home, you approve bro's hooks once at codex's
   "Hooks need review" prompt and every later worktree is silent). Groups are tagged `_nebulaManaged`,
   user hooks preserved, rebuilt each spawn. Each hook is a fail-soft curl to the daemon's loopback HTTP
   endpoint, authenticated with a per-boot bearer token injected into the agent's environment only.
 - **…plus the progress bar, for the cancel no hook reports.** Escaping out of a turn fires no `Stop` and
-  suppresses the idle notification that normally un-sticks one, so nebula also reads the CLI's terminal
+  suppresses the idle notification that normally un-sticks one, so bro also reads the CLI's terminal
   progress-bar escapes (OSC 9;4) straight off the PTY. That signal survives a cancel, and it stays busy
   while a permission prompt is open — so it can't mark an agent done while it is actually waiting on you.
 - **…and the IDLE PROMPT, which is a hold rather than a finish.** Claude posts a
@@ -164,7 +164,7 @@
   keyboard, and that is the notification which un-sticks a turn that ended without a `Stop` — a
   rejected prompt, an escape mid-turn. Since Claude Code 2.1 the Agent tool runs subagents in the
   *background*, so it also fires while workers are still going: the foreground turn ended and the input
-  box came back, but the session is anything but done. So nebula treats an IDLE PROMPT as a hold —
+  box came back, but the session is anything but done. So bro treats an IDLE PROMPT as a hold —
   exactly the hold a gated `Stop` gets — whenever any subagent is still tracked, and only a set that
   has gone quiet is ever presumed orphaned and finished on the strength of it.
 - **The STOP GATE's four graces, on a 30 s tick.** A `Stop` (or an IDLE PROMPT) is held while
@@ -179,13 +179,13 @@
   An individually tracked subagent older than 2 h is dropped from the set outright.
 - **Answering is a hook too — just not its own.** Approving a permission prompt fires nothing: the
   gated tool simply runs, and its `PostToolUse` is the first word that you said yes. So the
-  `PostToolUse` group is unmatched — every tool's end reaches nebula — and a tool event from the same
+  `PostToolUse` group is unmatched — every tool's end reaches bro — and a tool event from the same
   origin as the open dialog (the foreground turn, or the one subagent whose prompt it was) moves the
   row from red back to yellow; another subagent's traffic says nothing about a dialog it did not
   raise. An `AskUserQuestion` is answered only by that tool's own `PostToolUse`: Claude runs a question
   alongside the other calls of the response that asked it, so a read-only `Bash` or `Read` batched
   beside it finishes with the question still on screen, and its tool events leave the row red. The
-  one signal nebula treats with suspicion is Claude's `permission_prompt` notification: Claude sends
+  one signal bro treats with suspicion is Claude's `permission_prompt` notification: Claude sends
   it from a timer once a dialog has sat 6 s with no keystroke, detached from the turn, and its
   question dialog sends the same type — so one can land just *after* the answer that closed the
   dialog. Inside 5 s of the row leaving red that notification is taken as the echo it is and
@@ -205,14 +205,14 @@
   model of each Cursor session and watches for the dialog's key legend: it goes red the moment the
   legend is drawn and back to running once the legend has stayed gone for 150 ms — long enough that
   a repaint split across two PTY reads is not mistaken for a close. Pi runs TypeScript extensions
-  instead of shell hooks, so nebula writes one managed extension into its global agent dir
+  instead of shell hooks, so bro writes one managed extension into its global agent dir
   (`~/.pi/agent/extensions/nebula.ts`, or `$PI_CODING_AGENT_DIR/extensions/` — global because pi loads
   those without the trust prompt a per-project `.pi/extensions/` raises) that maps pi's events onto the
   same names: `session_start` → `SessionStart`, `before_agent_start` → `UserPromptSubmit`,
   `agent_end` → `Stop` (it fires on an abort too, so a cancelled pi turn goes green on its own), the
   `ask_question` tool's start and end → `PreToolUse` / `PostToolUse`, and a blocking extension prompt
-  mid-run → `PermissionRequest`. The file is env-guarded, so a `pi` you run outside nebula loads it and
-  does nothing. OpenCode runs TypeScript plugins the same way, so nebula writes one managed plugin into
+  mid-run → `PermissionRequest`. The file is env-guarded, so a `pi` you run outside bro loads it and
+  does nothing. OpenCode runs TypeScript plugins the same way, so bro writes one managed plugin into
   its global config dir (`~/.config/opencode/plugins/nebula.ts`, or `$XDG_CONFIG_HOME/opencode/plugins/`
   — globbed at startup with no trust prompt, and always on the list whatever `OPENCODE_CONFIG_DIR` adds)
   that maps its server events onto the same names: `chat.message` → `UserPromptSubmit` (the typed text
@@ -224,30 +224,30 @@
   own next tool event. The file is env-guarded like pi's.
 - **Sessions title themselves.** Create a session with the default name and the agent renames it after
   your first prompt — a 3-4 word title describing the ask (e.g. `Fix Login Redirect`), via a
-  `nebula rename <title>` command the CLI runs in its own turn (no extra API calls, no MCP server).
+  `bro rename <title>` command the CLI runs in its own turn (no extra API calls, no MCP server).
   Claude Code and Codex get the instruction injected through the `UserPromptSubmit` hook response — as
   `hookSpecificOutput.additionalContext`, the one envelope both read (the daemon sends it only while the
   session is untitled) — Pi's extension reads the same envelope and appends it to that run's system
   prompt, and OpenCode's plugin carries it into the turn's system prompt through OpenCode's
   system-transform hook; Cursor gets a managed `.cursor/rules/nebula-title.mdc` project rule instead,
   since its hooks can't inject context. Titling is one-shot and never clobbers a name you typed or set
-  with `r` — a late agent attempt is politely declined. `nebula rename --force` overrides.
+  with `r` — a late agent attempt is politely declined. `bro rename --force` overrides.
 - **A Claude session's own name and its row stay tied.** `/rename <name>` inside Claude Code retitles
   the row within a moment — the same name then shows on the session's card, Claude's prompt box, its
   `/resume` picker and `/rc` list, and survives a restart. Claude fires no hook for `/rename`; it
   rewrites the window title (`✳ <name>`) and writes `custom-title.json` beside the transcript, so the
   DAEMON reads that file when the PTY's title changes (and on every hook), and adopts a title Claude
-  did not hold before as if you had pressed `r`. The other way round, a name set in nebula — typed at
+  did not hold before as if you had pressed `r`. The other way round, a name set in bro — typed at
   creation, set with `r`, or chosen by AUTO-TITLE — reaches Claude on your next prompt through the
   same `UserPromptSubmit` hook reply, as `hookSpecificOutput.sessionTitle`. Whichever side changed
-  last wins; a name you set in nebula is never undone by re-reading Claude's older one. Claude only —
+  last wins; a name you set in bro is never undone by re-reading Claude's older one. Claude only —
   Codex and Cursor have no session name of their own.
 - **A Claude session's card names the model it is on.** Switch with `/model` inside Claude Code and
   the card follows within a second (`claude opus` → `claude fable`, `[1m]` kept for the 1M context
   window). Claude fires no hook for that either; it writes `Set model to …` into the transcript at
   once, and a `model` line naming the exact id with each session's first prompt. The DAEMON checks the
   size of every live session's transcript each second and reads only what was appended since. The
-  new model is what the row stores, so a restart or resume comes back on it and `nebula spawn`
+  new model is what the row stores, so a restart or resume comes back on it and `bro spawn`
   inherits it. A session launched on the default model gets its model named after the first prompt.
   Built-in Claude only; a row on an exact id (a Bedrock id from `claude_models`) keeps it while
   Claude stays in that family.
@@ -267,13 +267,13 @@
   ISSUES MODAL for that project, as `v` and `i` do. See [Configuration](configuration.md#every-setting).
 - **Ask the agent for a worktree and it moves there.** Tell a Claude session "do this in a worktree"
   or "do this in a new worktree" and
-  it runs `nebula worktree <name>` instead of its own `EnterWorktree` tool (whose checkouts land under
-  `<repo>/.claude/worktrees/` on a `worktree-*` branch). nebula creates the checkout in its usual
+  it runs `bro worktree <name>` instead of its own `EnterWorktree` tool (whose checkouts land under
+  `<repo>/.claude/worktrees/` on a `worktree-*` branch). bro creates the checkout in its usual
   `<repo-name>-worktrees/<branch>` spot — or takes the existing one for that branch — re-homes the
   session's row under it at once, and the moment that turn ends restarts the CLI resumed inside the
   worktree, opening with a note saying where it now runs, so the conversation carries on there without
-  you typing anything. Claude learns the rule from a short `--append-system-prompt` nebula passes at
-  spawn, plus a `Bash(nebula worktree:*)` permission so the command never prompts; Pi gets the same
+  you typing anything. Claude learns the rule from a short `--append-system-prompt` bro passes at
+  spawn, plus a `Bash(bro worktree:*)` permission so the command never prompts; Pi gets the same
   appended prompt and reopens on the same note, and Grok Build gets it through `--rules`. Codex, Cursor, Muse and OpenCode have no system-prompt flag to learn
   the rule from, but run the same command when you ask. Codex then reopens on the same note —
   `codex resume <id> --cd <worktree> "<note>"`, the `--cd` because Codex otherwise reopens a resumed
@@ -281,19 +281,19 @@
   and wait for your next prompt (`opencode --session <id> --prompt "<note>"` loads the session but never
   submits the note); Muse reboots fresh with no note (no resume flag mapped). The restart is the only way there: an agent CLI can't `cd` out of the
   directory it was started in.
-- **Ask the agent for another session and it starts one.** Tell a Claude session "start a new nebula
-  session that fixes the login redirect" and it runs `nebula spawn "<task>"`: the daemon starts a second
+- **Ask the agent for another session and it starts one.** Tell a Claude session "start a new bro
+  session that fixes the login redirect" and it runs `bro spawn "<task>"`: the daemon starts a second
   agent beside it — same worktree, same harness, model and effort unless `--kind claude|codex|cursor|pi|muse|grok|opencode`
   names another — opening on that task as its first prompt, so it is working before you look. The new
   card appears on the grid on its own (default name, so it titles itself), and the session you
   asked from is untouched: no restart, no focus change. Ask for that separate session "on branch
   fix-login" or say "spin up another agent in a new worktree" and the agent adds `--worktree <branch>`:
   the session starts in the project's worktree on
-  that branch — cut first, from the same base `nebula worktree` uses, when there is none — while the
+  that branch — cut first, from the same base `bro worktree` uses, when there is none — while the
   one you asked from stays in its own checkout. Claude learns this from the same appended system
-  prompt as the worktree rule, plus a `Bash(nebula spawn:*)` permission.
-- **Ask the agent to show you a file, image or diagram and it opens in nebula.** Say "open it",
-  "show me the examples" or "show the diagram" and the session runs `nebula open <file>…`; every TUI
+  prompt as the worktree rule, plus a `Bash(bro spawn:*)` permission.
+- **Ask the agent to show you a file, image or diagram and it opens in bro.** Say "open it",
+  "show me the examples" or "show the diagram" and the session runs `bro open <file>…`; every TUI
   attached to the daemon raises its file tabs on them — a modal with one tab per file, the focused one
   previewed with syntax highlighting, rendered Markdown, inline images or Mermaid diagrams, `Enter`
   editing it in place — so the agent puts the file in front of you instead of pasting it into the
@@ -304,8 +304,8 @@
   fetching) and drawn with the inline graphics setting's portable half-block renderer; Mermaid uses a
   local `mmdc` when one is on PATH and otherwise shows the source plus a one-line install hint. The
   daemon only checks the caller is a known session and passes the agent's checkout along as the
-  editor's working directory. Same appended prompt, plus a `Bash(nebula open:*)` permission.
-- **Everything persists in SQLite** (`~/.local/share/nebula/nebula.db` or the platform equivalent):
+  editor's working directory. Same appended prompt, plus a `Bash(bro open:*)` permission.
+- **Everything persists in SQLite** (`~/.local/share/bro/nebula.db` or the platform equivalent):
   projects, worktrees, agents (with kind + CLI session ids), links, and your last selection.
 - **Sessions warm up, then get reaped.** The daemon can pre-spawn an agent CLI in the selected worktree
   before you ask for one, and pre-boot a worktree's dead sessions while your selection rests on it, so attaching
@@ -327,7 +327,7 @@
 
 ## Pull requests
 
-nebula finds the pull request on each branch with `gh` and shows it on the band's rule and on its
+bro finds the pull request on each branch with `gh` and shows it on the band's rule and on its
 cards' `#42 title` line. The row outlives
 the pull request: once it is merged or closed the row stays, badged `merged` or `closed` (an open one is
 badged `ready` — ready for review, the state and nothing more — and a draft is dimmed and badged `draft`;
@@ -338,16 +338,16 @@ you are about to archive or delete, and the PR is what you check first. A merged
 checkout's band: purple dot and purple branch name, so the checkout to
 delete stands out from across the room (a session still running or asking there keeps its yellow or red —
 that is not a checkout to pull out from under it). The name sweeps the way a running row's does for about
-five seconds after nebula sees the merge land, then holds still in solid purple — nothing about a landed
+five seconds after bro sees the merge land, then holds still in solid purple — nothing about a landed
 checkout is live, so it says so once; one found already merged (last run's cache, a first lookup) never
-sweeps, and a merged checkout left lying around costs an idle nebula no repaints. Jump to it with
+sweeps, and a merged checkout left lying around costs an idle bro no repaints. Jump to it with
 `/` and the pane reads the pull request — description, stats, conversation — exactly as the PULL REQUESTS
 MODAL does (whose list retires a pull request on merge, and which `hide_draft_prs` never thins — the
 modal lists drafts too); `g` shows its diff. Manual link
 attachment is gone; links an earlier version saved stay in the database, so no data is discarded,
 though the grid draws none of them.
 
-This is the one part of nebula the TUI asks for itself rather than the DAEMON: every `gh pr view`,
+This is the one part of bro the TUI asks for itself rather than the DAEMON: every `gh pr view`,
 open-list query (`gh api graphql`) and `gh pr diff` — and the ISSUES MODAL's `gh issue list`, `gh issue view` and `gh issue comment` — is spawned by the client, which is why the lookups stop the moment you
 quit, and why a machine with no `gh` — or one that is unauthenticated, or pointed at a checkout with no
 remote — just shows no rows instead of an error. The selected project is asked about most: its

@@ -452,9 +452,9 @@ mod tests {
 
         // `r` in nebula afterwards: a re-read of Claude's older title
         // (every hook triggers one) must not undo it.
-        daemon.rename_agent(&id, "From Nebula").unwrap();
+        daemon.rename_agent(&id, "From Bro").unwrap();
         assert!(!daemon.sync_claude_title(&id));
-        assert_eq!(name(&daemon), "From Nebula");
+        assert_eq!(name(&daemon), "From Bro");
 
         // The next `/rename` in Claude wins again.
         write(&sidecar, r#"{"customTitle":"Claude Again"}"#);

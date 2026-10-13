@@ -22,7 +22,7 @@ pub fn runtime_dir() -> PathBuf {
         return PathBuf::from(dir);
     }
     if let Some(dir) = xdg_runtime_dir() {
-        return dir.join("nebula");
+        return dir.join("bro");
     }
     fallback_runtime_dir()
 }
@@ -107,7 +107,7 @@ fn xdg_runtime_dir() -> Option<PathBuf> {
 #[cfg(unix)]
 fn fallback_runtime_dir() -> PathBuf {
     let uid = libc_geteuid();
-    Path::new(FALLBACK_RUNTIME_ROOT).join(format!("nebula-{uid}"))
+    Path::new(FALLBACK_RUNTIME_ROOT).join(format!("bro-{uid}"))
 }
 
 // Avoid a libc dependency in this dep-light crate for one call.
@@ -192,7 +192,7 @@ pub fn restart_state_path() -> PathBuf {
 /// Support/dev.nebula.nebula` on macOS, `~/.local/share/nebula` on Linux).
 #[cfg(unix)]
 fn project_dirs() -> Option<directories::ProjectDirs> {
-    directories::ProjectDirs::from("dev", "nebula", "nebula")
+    directories::ProjectDirs::from("dev", "bro", "bro")
 }
 
 #[cfg(unix)]
@@ -202,7 +202,7 @@ pub fn data_dir() -> PathBuf {
     }
     project_dirs()
         .map(|d| d.data_dir().to_path_buf())
-        .unwrap_or_else(|| env::home_dir().unwrap_or_default().join(".nebula"))
+        .unwrap_or_else(|| env::home_dir().unwrap_or_default().join(".bro"))
 }
 
 /// `%LOCALAPPDATA%\bro\data`, beside the runtime dir, rather than the
@@ -363,11 +363,10 @@ mod tests {
 
         #[cfg(unix)]
         {
-            let xdg =
-                std::env::temp_dir().join(format!("nebula-paths-xdg-{}", std::process::id()));
+            let xdg = std::env::temp_dir().join(format!("nebula-paths-xdg-{}", std::process::id()));
             std::fs::create_dir_all(&xdg).unwrap();
             std::env::set_var("XDG_RUNTIME_DIR", &xdg);
-            assert_eq!(runtime_dir(), xdg.join("nebula"));
+            assert_eq!(runtime_dir(), xdg.join("bro"));
 
             std::fs::remove_dir_all(&xdg).unwrap();
             assert_eq!(runtime_dir(), fallback_runtime_dir());
@@ -376,7 +375,11 @@ mod tests {
         {
             // Both defaults sit side by side under one `bro` dir.
             assert_eq!(runtime_dir().parent(), data_dir().parent());
-            assert!(runtime_dir().ends_with(r"bro\run"), "{}", runtime_dir().display());
+            assert!(
+                runtime_dir().ends_with(r"bro\run"),
+                "{}",
+                runtime_dir().display()
+            );
             assert_eq!(log_dir(), data_dir().join("state"));
         }
     }
@@ -386,7 +389,11 @@ mod tests {
     fn canonical_paths_drop_the_verbatim_prefix() {
         let dir = tempfile::tempdir().unwrap();
         let canon = canonical(dir.path()).unwrap();
-        assert!(!canon.to_string_lossy().starts_with(r"\\?\"), "{}", canon.display());
+        assert!(
+            !canon.to_string_lossy().starts_with(r"\\?\"),
+            "{}",
+            canon.display()
+        );
         assert!(canon.is_absolute() && canon.is_dir());
         // The same directory spelled with git's `/` compares equal to it.
         let slashed = PathBuf::from(canon.to_string_lossy().replace('\\', "/"));

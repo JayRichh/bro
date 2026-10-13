@@ -167,10 +167,10 @@ pub(crate) fn open_prompt(app: &mut App, kind: PromptKind) {
                     "branch new worktrees start from (empty = auto: origin's default branch)"
                 }
                 crate::config::SettingKind::RunCommand => {
-                    "shell line r runs in this project's worktrees (empty = the checkout's .nebula.json \"run\")"
+                    "shell line r runs in this project's worktrees (empty = the checkout's .bro.json \"run\")"
                 }
                 crate::config::SettingKind::OpenCommand => {
-                    "shell line Shift+Enter / Shift+O runs to open a worktree of this project (empty = the checkout's .nebula.json \"open\")"
+                    "shell line Shift+Enter / Shift+O runs to open a worktree of this project (empty = the checkout's .bro.json \"open\")"
                 }
                 _ => "value (empty = default)",
             };

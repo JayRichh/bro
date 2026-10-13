@@ -170,9 +170,9 @@ pub use ipc::RenameMode;
 pub fn run_kill() -> Result<()> {
     runtime()?.block_on(async {
         if ipc::kill_daemon().await? {
-            println!("nebula daemon shut down");
+            println!("bro daemon shut down");
         } else {
-            println!("no nebula daemon running");
+            println!("no bro daemon running");
         }
         Ok(())
     })

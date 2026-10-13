@@ -2648,7 +2648,7 @@ fn draw_empty(f: &mut Frame, app: &mut App, area: Rect) {
     let th = app.chrome.theme;
     let t = crate::splash::scene_time(app, app.chrome.splash_epoch);
     let mut welcome = vec![Span::styled("Welcome to ", Style::default().fg(th.text))];
-    welcome.extend(crate::splash::wordmark_word("nebula", t));
+    welcome.extend(crate::splash::wordmark_word("bro", t));
     // The key line is a button, and marked as one under the pointer the
     // way the header's are.
     let mut words = Style::default().fg(th.muted);

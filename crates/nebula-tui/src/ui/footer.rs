@@ -117,9 +117,9 @@ fn overlay_footer_hint(app: &App, overlay: &Overlay, th: Theme) -> FooterHint {
         ),
         Overlay::Hosts(view) => dim_hint(
             if view.input.is_some() {
-                "type user@host [dir]  Enter: connect (restarts nebula over ssh)  Esc: cancel"
+                "type user@host [dir]  Enter: connect (restarts bro over ssh)  Esc: cancel"
             } else {
-                "↑/↓: select  Enter: connect (restarts nebula over ssh)  a: new  d: remove  Esc: close"
+                "↑/↓: select  Enter: connect (restarts bro over ssh)  a: new  d: remove  Esc: close"
             },
             th,
         ),
@@ -478,7 +478,7 @@ fn render_footer_left(
 }
 
 fn prepend_version_plate(app: &App, spans: &mut Vec<Span<'static>>, width: u16, th: Theme) {
-    let plate = format!("nebula v{}", env!("CARGO_PKG_VERSION"));
+    let plate = format!("bro v{}", env!("CARGO_PKG_VERSION"));
     let update = app
         .chrome
         .update_available

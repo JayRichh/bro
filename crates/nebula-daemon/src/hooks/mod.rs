@@ -38,10 +38,10 @@ use tokio::sync::mpsc;
 /// carries it uses: the UserPromptSubmit context injection (claude/codex)
 /// and cursor's always-on project rule. Repeats on every prompt until a
 /// title sticks, so it has to read sanely on a session that already has one.
-pub const AUTO_TITLE_INSTRUCTION: &str = "[nebula] Before addressing the \
-user's request, run this shell command exactly once:\n\n  nebula rename \
+pub const AUTO_TITLE_INSTRUCTION: &str = "[bro] Before addressing the \
+user's request, run this shell command exactly once:\n\n  bro rename \
 <title>\n\nReplace <title> with 3-4 Title Case words describing the user's \
-request, unquoted (example: nebula rename Fix Login Redirect). If it reports \
+request, unquoted (example: bro rename Fix Login Redirect). If it reports \
 the session is already titled, accept that and move on. Then continue with \
 the request. Don't mention the rename to the user.";
 
@@ -249,7 +249,11 @@ pub struct InheritedHooks {
 pub async fn start_hook_server(
     store: Arc<Store>,
     inherited: Option<InheritedHooks>,
-) -> anyhow::Result<(HookEnv, mpsc::Receiver<HookDelivery>, crate::platform::RawFd)> {
+) -> anyhow::Result<(
+    HookEnv,
+    mpsc::Receiver<HookDelivery>,
+    crate::platform::RawFd,
+)> {
     #[cfg(unix)]
     use std::os::fd::AsRawFd;
     let (listener, token) = match inherited {
@@ -660,7 +664,7 @@ mod tests {
         // reads as the documented equivalent of bare text.
         assert_eq!(body, auto_title_injection());
         assert!(body.contains("hookSpecificOutput"), "envelope: {body}");
-        assert!(body.contains("nebula rename"), "instruction: {body}");
+        assert!(body.contains("bro rename"), "instruction: {body}");
         let delivery = rx.recv().await.unwrap();
         assert_eq!(delivery.agent_id.as_str(), "pending");
         assert_eq!(delivery.event, HookEvent::UserPromptSubmit);
@@ -806,7 +810,7 @@ mod tests {
         for body in [
             r#"{"session_id":"s1","prompt":"   "}"#,
             r#"{"session_id":"s1"}"#,
-            r#"{"session_id":"s1","prompt":"[nebula] This session now runs inside a worktree"}"#,
+            r#"{"session_id":"s1","prompt":"[bro] This session now runs inside a worktree"}"#,
         ] {
             post("UserPromptSubmit", body).await;
             let delivery = rx.recv().await.unwrap();

@@ -118,7 +118,7 @@ const CURSOR_EVENTS: &[(&str, &str)] = &[
 fn hook_subcommand(endpoint: &str, event: &str) -> String {
     let exe = std::env::current_exe()
         .map(|p| shell_neutral_path(&p.display().to_string()))
-        .unwrap_or_else(|_| "nebula".into());
+        .unwrap_or_else(|_| "bro".into());
     format!("{exe} {HOOK_SUBCOMMAND} {endpoint} {event}")
 }
 
@@ -129,7 +129,10 @@ fn hook_subcommand(endpoint: &str, event: &str) -> String {
 /// string, not a command): `C:"/Program Files/bro/bro.exe"`.
 #[cfg(windows)]
 fn shell_neutral_path(path: &str) -> String {
-    let path = path.strip_prefix(r"\\?\").unwrap_or(path).replace('\\', "/");
+    let path = path
+        .strip_prefix(r"\\?\")
+        .unwrap_or(path)
+        .replace('\\', "/");
     let bytes = path.as_bytes();
     if bytes.len() > 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
         format!("{}\"{}\"", &path[..2], &path[2..])
@@ -208,13 +211,13 @@ fn hook_command(endpoint: &str, event: &str) -> String {
 /// its appended system prompt tells it to use (codex/cursor run with their
 /// skip-permissions flags).
 const CLAUDE_ALLOW_RULES: &[&str] = &[
-    "Bash(nebula rename:*)",
-    "Bash(nebula worktree:*)",
-    "Bash(nebula spawn:*)",
-    "Bash(nebula open:*)",
-    "Bash(nebula sessions:*)",
-    "Bash(nebula read:*)",
-    "Bash(nebula ask:*)",
+    "Bash(bro rename:*)",
+    "Bash(bro worktree:*)",
+    "Bash(bro spawn:*)",
+    "Bash(bro open:*)",
+    "Bash(bro sessions:*)",
+    "Bash(bro read:*)",
+    "Bash(bro ask:*)",
 ];
 
 /// Cursor variant: the payload arrives on stdin like Claude's, but cursor
@@ -538,12 +541,12 @@ pub fn install_cursor_title_rule(cwd: &Path) -> Result<()> {
 fn cursor_title_rule() -> String {
     format!(
         "---
-description: Nebula session auto-title (managed by nebula — edits are overwritten)
+description: Bro session auto-title (managed by bro — edits are overwritten)
 alwaysApply: true
 ---
 
 This rule applies only when the environment variable NEBULA_AGENT_ID is set
-(the session runs inside nebula). If it is unset, ignore this rule entirely.
+(the session runs inside bro). If it is unset, ignore this rule entirely.
 
 On the first user message of a new conversation:
 
@@ -666,18 +669,23 @@ mod tests {
             shell_neutral_path(r"C:\Program Files\bro\bro.exe"),
             r#"C:"/Program Files/bro/bro.exe""#
         );
+        assert_eq!(shell_neutral_path(r"\\?\D:\b\bro.exe"), r#"D:"/b/bro.exe""#);
         assert_eq!(
-            shell_neutral_path(r"\\?\D:\b\bro.exe"),
-            r#"D:"/b/bro.exe""#
+            shell_neutral_path(r"\\host\share\bro.exe"),
+            r#""//host/share/bro.exe""#
         );
-        assert_eq!(shell_neutral_path(r"\\host\share\bro.exe"), r#""//host/share/bro.exe""#);
         assert_eq!(
             hook_command("claude", "UserPromptSubmit"),
             format!("{exe} _hook claude UserPromptSubmit")
         );
-        assert_eq!(cursor_hook_command("Stop"), format!("{exe} _hook cursor Stop"));
+        assert_eq!(
+            cursor_hook_command("Stop"),
+            format!("{exe} _hook cursor Stop")
+        );
         assert!(!hook_command("codex", "Stop").contains('\\'));
-        assert!(is_nebula_command(Some(&json!(hook_command("codex", "Stop")))));
+        assert!(is_nebula_command(Some(&json!(hook_command(
+            "codex", "Stop"
+        )))));
         assert!(!is_nebula_command(Some(&json!("my-own-hook Stop"))));
     }
 
@@ -858,13 +866,13 @@ mod tests {
         let path = tmp.path().join(".cursor/rules/nebula-title.mdc");
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("alwaysApply: true"));
-        assert!(text.contains("nebula rename"));
+        assert!(text.contains("bro rename"));
         assert!(text.contains("NEBULA_AGENT_ID"), "must be env-guarded");
         // Wholly nebula-owned: a scribbled-on file is simply replaced.
         std::fs::write(&path, "user scribbles").unwrap();
         install_cursor_title_rule(tmp.path()).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("nebula rename"));
+        assert!(text.contains("bro rename"));
     }
 
     #[test]
@@ -890,7 +898,7 @@ mod tests {
         let settings = read_settings(tmp.path());
         assert_eq!(settings["permissions"]["allow"][0], json!("Bash(ls:*)"));
         let stop = settings["hooks"]["Stop"].as_array().unwrap();
-        assert_eq!(stop.len(), 2, "user group + nebula group");
+        assert_eq!(stop.len(), 2, "user group + bro group");
         assert_eq!(stop[0]["hooks"][0]["command"], json!("say done"));
         assert_eq!(stop[1]["_nebulaManaged"], json!(true));
     }
@@ -973,7 +981,7 @@ mod tests {
         install_codex_hooks(tmp.path()).unwrap();
         let hooks = read_json(tmp.path(), "hooks.json");
         let stop = hooks["hooks"]["Stop"].as_array().unwrap();
-        assert_eq!(stop.len(), 2, "foreign managed group + nebula group");
+        assert_eq!(stop.len(), 2, "foreign managed group + bro group");
         assert_eq!(stop[0]["_mcManaged"], json!(true));
         assert_eq!(stop[1]["_nebulaManaged"], json!(true));
     }
@@ -1089,7 +1097,7 @@ mod tests {
         assert!(hooks["hooks"].get("UserPromptSubmit").is_none());
         // Foreign managed group survives ahead of ours.
         let stop = hooks["hooks"]["stop"].as_array().unwrap();
-        assert_eq!(stop.len(), 2, "mc group + nebula group");
+        assert_eq!(stop.len(), 2, "mc group + bro group");
         assert_eq!(stop[0]["_mcManaged"], json!(true));
         assert_eq!(stop[1]["_nebulaManaged"], json!(true));
     }

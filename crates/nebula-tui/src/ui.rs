@@ -1758,12 +1758,12 @@ fn draw_empty_terminal_hero(f: &mut Frame, inner: Rect, th: Theme) {
     lines.push(Line::from(vec![
         Span::styled("◆ ", Style::default().fg(th.accent)),
         Span::styled(
-            "nebula",
+            "bro",
             Style::default().fg(th.text).add_modifier(Modifier::BOLD),
         ),
     ]));
     lines.push(Line::from(Span::styled(
-        "your agents keep running, even when you leave",
+        "Sweet as agent management.",
         Style::default().fg(th.dim),
     )));
     lines.push(Line::from(""));

@@ -16,7 +16,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 SCENE="${1:-${SCENE:-open-prs}}"
 COLS="${COLS:-190}"; ROWS="${ROWS:-50}"
-BIN="$REPO/target/debug/nebula"
+BIN="$REPO/target/debug/bro"
 OUT="$REPO/design-screenshots"; mkdir -p "$OUT"
 ID="$$"
 RUNTIME="/tmp/nshot-$ID"                                   # short on purpose

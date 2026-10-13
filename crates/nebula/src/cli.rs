@@ -21,16 +21,17 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
-    name = "nebula",
+    name = "bro",
+    bin_name = "bro",
     version,
     max_term_width = 100,
     about = "Terminal multiplexer for Claude Code agents",
     long_about = "Terminal multiplexer for Claude Code agents.\n\n\
-        Nebula keeps a tree — projects hold worktrees, worktrees hold sessions — \
+        Bro keeps a tree — projects hold worktrees, worktrees hold sessions — \
         and a background daemon owns every PTY in it. \
         Agents keep running after the TUI quits, and their scrollback is replayed \
         when you come back.\n\n\
-        A bare `nebula` opens the TUI. The commands below drive the same tree from \
+        A bare `bro` opens the TUI. The commands below drive the same tree from \
         a shell; `rename`, `worktree`, `spawn` and `open` are the ones an agent \
         runs on your behalf from inside a session.",
     after_help = ROOT_EXAMPLES
@@ -38,22 +39,22 @@ use clap::{Parser, Subcommand};
 pub(crate) struct Cli {
     #[command(subcommand)]
     pub(crate) command: Option<Command>,
-    /// Directory to add as a project — shorthand for `nebula add <dir>`.
+    /// Directory to add as a project — shorthand for `bro add <dir>`.
     ///
     /// A directory whose name collides with a subcommand needs the long form
-    /// (`nebula add browser`) or a `./` prefix.
+    /// (`bro add browser`) or a `./` prefix.
     pub(crate) dir: Option<String>,
 }
 
 const ROOT_EXAMPLES: &str = "\
 Examples:
-  nebula                            open the TUI (auto-starts the daemon)
-  nebula add ~/code/my-app          register a project
-  nebula browser --port 8080        serve this TUI in a browser tab
+  bro                            open the TUI (auto-starts the daemon)
+  bro add ~/code/my-app          register a project
+  bro browser --port 8080        serve this TUI in a browser tab
 
-Run `nebula <command> --help` for a command's flags and examples.";
+Run `bro <command> --help` for a command's flags and examples.";
 
-/// `--kind` for `nebula spawn`: one of the agent CLIs nebula runs. A bare
+/// `--kind` for `bro spawn`: one of the agent CLIs bro runs. A bare
 /// `custom` is never accepted: custom harnesses carry a registry id the
 /// flag cannot name, so they launch from the TUI picker and presets.
 fn parse_agent_kind(s: &str) -> Result<nebula_core::AgentKind, String> {
@@ -85,8 +86,8 @@ pub(crate) enum Command {
     /// Register a git checkout as a project.
     ///
     /// Adds a directory to the project list, named after the repository's
-    /// root directory. Bare `nebula <dir>` is the same
-    /// command, so `nebula .` and `nebula add .` do the same thing.
+    /// root directory. Bare `bro <dir>` is the same
+    /// command, so `bro .` and `bro add .` do the same thing.
     #[command(after_help = ADD_EXAMPLES)]
     Add {
         /// Path to a git repository (default: the current directory).
@@ -115,22 +116,22 @@ pub(crate) enum Command {
     /// it gets SIGTERM instead, which it handles the same clean way.
     /// Quitting the TUI does not do this — the daemon outlives its clients on
     /// purpose — so this is how you stop everything. To move onto a newly
-    /// installed binary without stopping anything, use `nebula reload`.
+    /// installed binary without stopping anything, use `bro reload`.
     #[command(after_help = KILL_EXAMPLES)]
     Kill,
     /// Move the daemon onto the installed binary, keeping every session.
     ///
-    /// Restarts the running daemon in place: it execs the `nebula` binary
+    /// Restarts the running daemon in place: it execs the `bro` binary
     /// this command runs from, and every session — agents mid-turn included —
     /// keeps running, its scrollback intact. Open TUIs lose their connection;
-    /// relaunch `nebula` to pick the sessions back up. `nebula upgrade` does
+    /// relaunch `bro` to pick the sessions back up. `bro upgrade` does
     /// this on its own after installing. Needs a daemon from a build that
-    /// has this command; an older one can only be restarted by `nebula kill`.
+    /// has this command; an older one can only be restarted by `bro kill`.
     #[command(after_help = RELOAD_EXAMPLES)]
     Reload,
     /// Title the session this command runs inside.
     ///
-    /// Run from inside a nebula agent session: it titles that session's row.
+    /// Run from inside a bro agent session: it titles that session's row.
     /// Agents run it themselves to auto-title on your first prompt. Without
     /// --force it only fills in a title that is still missing, so an agent
     /// can never overwrite a name you chose.
@@ -145,7 +146,7 @@ pub(crate) enum Command {
     },
     /// Move this session into a worktree of its project.
     ///
-    /// Run from inside a nebula agent session; agents run it when you ask them
+    /// Run from inside a bro agent session; agents run it when you ask them
     /// to work in a worktree. Creates the git worktree when the branch has
     /// none, re-homes the session onto it at once, and restarts the session
     /// resumed inside the new checkout as soon as the current turn ends.
@@ -166,8 +167,8 @@ pub(crate) enum Command {
     },
     /// Start another agent session beside this one.
     ///
-    /// Run from inside a nebula agent session; agents run it when you ask for
-    /// a new nebula session. The new session starts in the same worktree (or
+    /// Run from inside a bro agent session; agents run it when you ask for
+    /// a new bro session. The new session starts in the same worktree (or
     /// the one `--worktree` names), on the task you name as its first
     /// prompt, and shows up on the grid on its own — this session carries
     /// on untouched.
@@ -188,20 +189,20 @@ pub(crate) enum Command {
         #[arg(long, value_name = "BRANCH")]
         worktree: Option<String>,
         /// Start point for a new `--worktree` branch, resolved as
-        /// `nebula worktree --base` resolves it (default: the
+        /// `bro worktree --base` resolves it (default: the
         /// `worktree_base_branch` setting, else origin's default branch).
         /// Refused when the branch already exists.
         #[arg(long, value_name = "REF", requires = "worktree")]
         base: Option<String>,
     },
-    /// Show files to the user inside this nebula.
+    /// Show files to the user inside this bro.
     ///
-    /// Run from inside a nebula agent session; agents run it only when you
+    /// Run from inside a bro agent session; agents run it only when you
     /// ask to see a file, image, mockup or diagram, never unprompted.
     /// Opens text, supported local images and Mermaid diagrams; other
     /// binaries are refused.
-    /// The files open in nebula's file tabs — a modal with one tab per file,
-    /// the focused one previewed, Enter editing it — in every nebula
+    /// The files open in bro's file tabs — a modal with one tab per file,
+    /// the focused one previewed, Enter editing it — in every bro
     /// attached to this daemon, and this session carries on untouched.
     #[command(after_help = OPEN_EXAMPLES)]
     Open {
@@ -213,7 +214,7 @@ pub(crate) enum Command {
     ///
     /// Prints the session id/name, project, worktree branch, harness, status
     /// and a one-line recent summary. Agents run this when you refer to
-    /// another nebula session by name and they need its exact id.
+    /// another bro session by name and they need its exact id.
     #[command(after_help = SESSIONS_EXAMPLES)]
     Sessions {
         /// Print JSON instead of compact text.
@@ -224,7 +225,7 @@ pub(crate) enum Command {
     ///
     /// Resolves a session by id or unambiguous fuzzy name, then prints clean
     /// recent conversation text. Claude transcript text is preferred when
-    /// available; otherwise nebula falls back to stripped PTY scrollback.
+    /// available; otherwise bro falls back to stripped PTY scrollback.
     #[command(after_help = READ_EXAMPLES)]
     Read {
         /// Session id or unambiguous fuzzy name.
@@ -266,7 +267,7 @@ pub(crate) enum Command {
     /// Back up, restore or locate this machine's settings.
     ///
     /// Settings live in `config.json` — the portable file an export, an
-    /// import and `nebula ssh` carry — with `config.local.json` over it for
+    /// import and `bro ssh` carry — with `config.local.json` over it for
     /// what only makes sense on this machine, beside `agent_presets.json` and
     /// `ssh_hosts.json`. An export is one JSON file holding all but the local
     /// layer; an import merges one in. Changes apply without a restart.
@@ -277,8 +278,8 @@ pub(crate) enum Command {
     },
     /// Serve this TUI in a web browser via ttyd.
     ///
-    /// Runs ttyd in front of a nebula TUI and opens a tab on it, so a phone or
-    /// another machine can drive this nebula. Needs ttyd on PATH
+    /// Runs ttyd in front of a bro TUI and opens a tab on it, so a phone or
+    /// another machine can drive this bro. Needs ttyd on PATH
     /// (`brew install ttyd`); Ctrl+C takes the server down. It listens on
     /// loopback unless --bind or --public widens it.
     #[command(after_help = BROWSER_EXAMPLES)]
@@ -293,13 +294,13 @@ pub(crate) enum Command {
         port: Option<u16>,
         /// Address to listen on (default 127.0.0.1).
         ///
-        /// Name a specific interface address to reach this nebula from another
+        /// Name a specific interface address to reach this bro from another
         /// host — e.g. `--bind 10.0.1.7`. See --public for every interface.
         #[arg(long, value_name = "ADDR", conflicts_with = "public")]
         bind: Option<std::net::IpAddr>,
         /// Listen on every interface (0.0.0.0).
         ///
-        /// For a nebula on a remote box. This serves a live, writable terminal
+        /// For a bro on a remote box. This serves a live, writable terminal
         /// to anything that can reach the port — put a firewall, security
         /// group, or VPN in front of it, and consider --credential.
         #[arg(long)]
@@ -312,14 +313,14 @@ pub(crate) enum Command {
         credential: Option<String>,
         /// Serve the URL but do not open a desktop browser.
         ///
-        /// For a machine with no desktop to open it on — `nebula tunnel` runs
+        /// For a machine with no desktop to open it on — `bro tunnel` runs
         /// the remote half this way.
         #[arg(long)]
         no_open: bool,
     },
-    /// Open nebula on a remote host over ssh.
+    /// Open bro on a remote host over ssh.
     ///
-    /// Connects with ssh and runs nebula there, installing it on the remote
+    /// Connects with ssh and runs bro there, installing it on the remote
     /// first when it is missing, so what you drive is the remote's own daemon
     /// and sessions. This machine's `config.json` and agent presets ride
     /// along and are merged into the remote's settings, where its own
@@ -337,13 +338,13 @@ pub(crate) enum Command {
         #[arg(long)]
         no_sync_config: bool,
     },
-    /// Open a remote host's nebula in a browser tab here.
+    /// Open a remote host's bro in a browser tab here.
     ///
-    /// One ssh tunnel does the whole thing: it installs nebula on the remote
-    /// if missing, runs `nebula browser` on the remote's own loopback,
+    /// One ssh tunnel does the whole thing: it installs bro on the remote
+    /// if missing, runs `bro browser` on the remote's own loopback,
     /// forwards the port, and opens the local URL. Nothing is exposed on the
     /// remote's network — the tunnel is the only way in — so it needs no
-    /// --credential. A `nebula browser` already serving that port is reused
+    /// --credential. A `bro browser` already serving that port is reused
     /// rather than treated as a clash. Needs ttyd on the remote; Ctrl+C takes
     /// both ends down.
     #[command(after_help = TUNNEL_EXAMPLES)]
@@ -366,18 +367,18 @@ pub(crate) enum Command {
         /// Leave this machine's settings behind for this connection.
         ///
         /// By default `config.json` and the agent presets ride along, as they
-        /// do for `nebula ssh`; the `ssh_sync_config` setting turns that off
+        /// do for `bro ssh`; the `ssh_sync_config` setting turns that off
         /// for good.
         #[arg(long)]
         no_sync_config: bool,
     },
-    /// Install the latest published nebula over this one.
+    /// Install the latest published bro over this one.
     ///
     /// Runs the install script for the newest release, then moves a running
-    /// daemon onto the new binary in place (see `nebula reload`): every
+    /// daemon onto the new binary in place (see `bro reload`): every
     /// session keeps running. A daemon from before in-place restarts can't
     /// be moved; its sessions keep running on the old binary until you
-    /// restart it with `nebula kill` (which stops all sessions), and when the
+    /// restart it with `bro kill` (which stops all sessions), and when the
     /// new build can't attach to it, upgrade says so and offers that restart.
     #[command(after_help = UPGRADE_EXAMPLES)]
     Upgrade {
@@ -390,7 +391,7 @@ pub(crate) enum Command {
     #[command(hide = true, name = "_stale-daemon-note")]
     StaleDaemonNote,
     /// Upgrade hook: print the protocol version this binary speaks, so the
-    /// `nebula upgrade` that installed it can tell whether it will still
+    /// `bro upgrade` that installed it can tell whether it will still
     /// attach to the daemon left running.
     #[command(hide = true, name = "_protocol-version")]
     ProtocolVersion,
@@ -404,7 +405,7 @@ pub(crate) enum Command {
     RestartVersion,
     /// Agent-CLI hook (the Windows hook command): POST the hook payload on
     /// stdin to the daemon's hook receiver, as the unix `curl` one-liner
-    /// does. Inert outside a nebula agent session; always exits 0.
+    /// does. Inert outside a bro agent session; always exits 0.
     #[command(hide = true, name = "_hook")]
     Hook {
         /// The receiver route: claude, codex, cursor, pi or opencode.
@@ -444,7 +445,7 @@ pub(crate) enum OrchestratorCommand {
         #[arg(long)]
         project: String,
         /// Worktree id or branch. Existing checkouts are reused; a missing
-        /// branch is cut using nebula's normal worktree base rules.
+        /// branch is cut using bro's normal worktree base rules.
         #[arg(long)]
         worktree: Option<String>,
         /// Start point when a new worktree has to be cut.
@@ -469,108 +470,108 @@ pub(crate) enum OrchestratorCommand {
 
 const ADD_EXAMPLES: &str = "\
 Examples:
-  nebula add .                     add the repo you are standing in
-  nebula add ~/code/my-app         add one by path
-  nebula ~/code/my-app             the same, without the subcommand";
+  bro add .                     add the repo you are standing in
+  bro add ~/code/my-app         add one by path
+  bro ~/code/my-app             the same, without the subcommand";
 
 const DAEMON_EXAMPLES: &str = "\
 Examples:
-  nebula daemon --foreground       run it attached, logs on stdout
-  NEBULA_LOG=debug nebula daemon --foreground
+  bro daemon --foreground       run it attached, logs on stdout
+  NEBULA_LOG=debug bro daemon --foreground
                                    the same, at debug level";
 
 const KILL_EXAMPLES: &str = "\
 Examples:
-  nebula kill                      stop the daemon and every session";
+  bro kill                      stop the daemon and every session";
 
 const RELOAD_EXAMPLES: &str = "\
 Examples:
-  nebula reload                    restart the daemon, sessions and all
-  make install && nebula reload    cut over to a local build";
+  bro reload                    restart the daemon, sessions and all
+  make install && bro reload    cut over to a local build";
 
 const RENAME_EXAMPLES: &str = "\
 Examples:
-  nebula rename Fix Login Redirect   title this session
-  nebula rename --force Auth Rework  replace a title already set";
+  bro rename Fix Login Redirect   title this session
+  bro rename --force Auth Rework  replace a title already set";
 
 const WORKTREE_EXAMPLES: &str = "\
 Examples:
-  nebula worktree fix-login-redirect  branch off the configured base and move there
-  nebula worktree fix login redirect  the same; the words are slugified
-  nebula worktree                     invent a random branch name
-  nebula worktree hotfix --base v0.21.0
+  bro worktree fix-login-redirect  branch off the configured base and move there
+  bro worktree fix login redirect  the same; the words are slugified
+  bro worktree                     invent a random branch name
+  bro worktree hotfix --base v0.21.0
                                       branch from a named start point";
 
 const SPAWN_EXAMPLES: &str = "\
 Examples:
-  nebula spawn \"port the tests to the new fixture\"
-  nebula spawn --kind codex \"review the diff on this branch\"
-  nebula spawn --worktree fix-login \"fix the login redirect\"
+  bro spawn \"port the tests to the new fixture\"
+  bro spawn --kind codex \"review the diff on this branch\"
+  bro spawn --worktree fix-login \"fix the login redirect\"
                                    start it in that branch's worktree, made if new
-  nebula spawn --worktree hotfix --base v0.21.0 \"backport the fix\"";
+  bro spawn --worktree hotfix --base v0.21.0 \"backport the fix\"";
 
 const OPEN_EXAMPLES: &str = "\
 Examples:
-  nebula open README.md                one tab
-  nebula open mockup.png flow.mmd      image and diagram previews
-  nebula open src/main.rs docs/keys.md a tab each, in this order";
+  bro open README.md                one tab
+  bro open mockup.png flow.mmd      image and diagram previews
+  bro open src/main.rs docs/keys.md a tab each, in this order";
 
 const SESSIONS_EXAMPLES: &str = "\
 Examples:
-  nebula sessions
-  nebula sessions --json";
+  bro sessions
+  bro sessions --json";
 
 const READ_EXAMPLES: &str = "\
 Examples:
-  nebula read research
-  nebula read 01HZY8QHA4AYM7M4XTA2G3KC9B --lines 80";
+  bro read research
+  bro read 01HZY8QHA4AYM7M4XTA2G3KC9B --lines 80";
 
 const ASK_EXAMPLES: &str = "\
 Examples:
-  nebula ask research \"which library did you recommend?\"
-  nebula ask \"feature spike\" \"summarize your Redis findings\" --timeout 60
-  nebula ask research \"are you idle?\" --no-wait";
+  bro ask research \"which library did you recommend?\"
+  bro ask \"feature spike\" \"summarize your Redis findings\" --timeout 60
+  bro ask research \"are you idle?\" --no-wait";
 
 const ORCHESTRATOR_EXAMPLES: &str = "\
 Examples:
-  nebula orchestrator list --json
-  nebula orchestrator read agent-2 --bytes 12000
-  nebula orchestrator send agent-2 \"continue after the test failure\"
-  nebula orchestrator spawn --project nebula --worktree fix-auth \"fix the login redirect\"
-  nebula orchestrator review agent-2 --tab diff --tab terminal";
+  bro orchestrator list --json
+  bro orchestrator read agent-2 --bytes 12000
+  bro orchestrator send agent-2 \"continue after the test failure\"
+  bro orchestrator spawn --project bro --worktree fix-auth \"fix the login redirect\"
+  bro orchestrator review agent-2 --tab diff --tab terminal";
 
 const BROWSER_EXAMPLES: &str = "\
 Examples:
-  nebula browser                   serve on 127.0.0.1:7681, open a tab
-  nebula browser --port 8080       take a specific port
-  nebula browser --no-open         serve only; print the URL
-  nebula browser --public --credential me:secret
+  bro browser                   serve on 127.0.0.1:7681, open a tab
+  bro browser --port 8080       take a specific port
+  bro browser --no-open         serve only; print the URL
+  bro browser --public --credential me:secret
                                    reachable off-box, behind basic auth";
 
 const SSH_EXAMPLES: &str = "\
 Examples:
-  nebula ssh user@server           open the remote's nebula
-  nebula ssh user@server /srv/app  start in a directory there
-  nebula ssh user@server --no-sync-config
+  bro ssh user@server           open the remote's bro
+  bro ssh user@server /srv/app  start in a directory there
+  bro ssh user@server --no-sync-config
                                    keep this machine's settings here";
 
 const CONFIG_EXAMPLES: &str = "\
 Examples:
-  nebula config path               where each settings file lives
-  nebula config export ~/backups   write ~/backups/nebula-settings.json
-  nebula config import ~/backups   merge it back in, here or elsewhere";
+  bro config path               where each settings file lives
+  bro config export ~/backups   write ~/backups/nebula-settings.json
+  bro config import ~/backups   merge it back in, here or elsewhere";
 
 const TUNNEL_EXAMPLES: &str = "\
 Examples:
-  nebula tunnel user@server           the remote's TUI in a tab here
-  nebula tunnel user@server /srv/app  start in a directory there
-  nebula tunnel user@server --port 9000
+  bro tunnel user@server           the remote's TUI in a tab here
+  bro tunnel user@server /srv/app  start in a directory there
+  bro tunnel user@server --port 9000
                                       pick the local end of the tunnel";
 
 const UPGRADE_EXAMPLES: &str = "\
 Examples:
-  nebula upgrade                   install the latest release
-  nebula upgrade --force           do it over a local cargo build";
+  bro upgrade                   install the latest release
+  bro upgrade --force           do it over a local cargo build";
 
 #[derive(Subcommand)]
 pub(crate) enum ConfigCommand {
@@ -578,16 +579,16 @@ pub(crate) enum ConfigCommand {
     ///
     /// `NEBULA_CONFIG_FILE` moves `config.json` alone — into a dotfiles
     /// checkout, say; `NEBULA_DATA_DIR` moves them all.
-    #[command(after_help = "Example:\n  nebula config path")]
+    #[command(after_help = "Example:\n  bro config path")]
     Path,
     /// Write this machine's settings to one JSON file.
     ///
     /// Carries `config.json`, the agent presets and the ssh host list, never
     /// `config.local.json`. Keys and presets this build doesn't know are
-    /// carried as they are, so a newer nebula's settings survive the trip.
+    /// carried as they are, so a newer bro's settings survive the trip.
     #[command(
-        after_help = "Examples:\n  nebula config export > nebula-settings.json\n  \
-                            nebula config export ~/backups   writes ~/backups/nebula-settings.json"
+        after_help = "Examples:\n  bro config export > nebula-settings.json\n  \
+                            bro config export ~/backups   writes ~/backups/nebula-settings.json"
     )]
     Export {
         /// File, or existing folder, to write (default: stdout; `-` too).
@@ -601,20 +602,18 @@ pub(crate) enum ConfigCommand {
     /// the file sets replace this machine's and keys it lacks are left alone;
     /// presets merge by name and hosts by destination. `config.local.json` is
     /// never written, and still wins.
-    #[command(
-        after_help = "Examples:\n  nebula config import nebula-settings.json\n  \
-                            nebula config import ~/dotfiles/nebula   a folder holding config.json"
-    )]
+    #[command(after_help = "Examples:\n  bro config import nebula-settings.json\n  \
+                            bro config import ~/dotfiles/nebula   a folder holding config.json")]
     Import {
         /// The file, the folder, or `-` for stdin.
         #[arg(value_name = "SOURCE")]
         source: String,
     },
-    /// Print the effective harness registry: every harness nebula knows —
+    /// Print the effective harness registry: every harness bro knows —
     /// the built-ins, `custom_harnesses` entries and `harnesses` map ids —
     /// with the program, flags, resume shape, hook dialect and defaults a
     /// launch actually uses. Copy a row into config.json `harnesses` to
     /// override it.
-    #[command(after_help = "Example:\n  nebula config harnesses")]
+    #[command(after_help = "Example:\n  bro config harnesses")]
     Harnesses,
 }

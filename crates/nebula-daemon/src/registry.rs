@@ -85,7 +85,7 @@ const RUN_TERMINAL_NAME: &str = "run";
 /// places a RUN COMMAND can come from.
 const NO_RUN_COMMAND: &str =
     "no run command for this worktree — set one in Settings (s) → Project, \
-                              or add .nebula.json with {\"run\": \"npm run dev\"}";
+                              or add .bro.json with {\"run\": \"npm run dev\"}";
 /// Why a RUN TERMINAL with nothing left to replay will not attach — its
 /// run ended before a DAEMON restart, typically.
 const RUN_NOT_RUNNING: &str = "this run has stopped — press r on its worktree to start it again";
@@ -397,17 +397,17 @@ fn test_custom_harness(
 /// keeps their worktrees. Claude and pi (both take `--append-system-prompt`;
 /// pi has no EnterWorktree, but does run `git worktree add` on its own
 /// unless told otherwise): codex and cursor have no system-prompt flag.
-pub const CLAUDE_WORKTREE_GUIDANCE: &str = "[nebula] This session runs inside nebula, which \
+pub const CLAUDE_WORKTREE_GUIDANCE: &str = "[bro] This session runs inside bro, which \
 manages this project's git worktrees. When the user asks this session to work in a worktree or move \
 to one (\"do this in a worktree\", \"do this in a new worktree\", \"move to a worktree\", \"branch \
 this off in its own checkout\"), do not use the EnterWorktree tool and do not run `git worktree add` \
-yourself. Run this shell command instead, exactly once:\n\n  nebula worktree <name>\n\nwhere <name> \
-is the branch name the user gave, or a short kebab-case name for the task (`nebula worktree` with no \
-name invents one; `--base <ref>` picks the start point). nebula creates or reuses the worktree, \
+yourself. Run this shell command instead, exactly once:\n\n  bro worktree <name>\n\nwhere <name> \
+is the branch name the user gave, or a short kebab-case name for the task (`bro worktree` with no \
+name invents one; `--base <ref>` picks the start point). bro creates or reuses the worktree, \
 associates this current session with it, and relocates the session into it once your current turn \
 ends. So when the command succeeds, end your turn at once: tell the user in one line that the \
 session is moving into the worktree, and make no further tool calls or edits — you will be resumed \
-inside the worktree with a prompt to carry on there. Do not use `nebula spawn --worktree` for these \
+inside the worktree with a prompt to carry on there. Do not use `bro spawn --worktree` for these \
 relocation requests; that belongs to the spawn guidance and is only for starting or handing off to a \
 separate new/parallel session. If the command fails, report the error and carry on in the current \
 checkout.";
@@ -424,7 +424,7 @@ checkout.";
 fn relocation_prompt(relocate: bool, worktree: &Worktree) -> Option<String> {
     relocate.then(|| {
         format!(
-            "[nebula] This session now runs inside the worktree `{}` at {} — your working \
+            "[bro] This session now runs inside the worktree `{}` at {} — your working \
              directory is that checkout. Continue the user's most recent request there.",
             worktree.branch,
             worktree.path.display()
@@ -2271,7 +2271,7 @@ mod tests {
         let missing = daemon.start_run(&worktree.id).unwrap_err();
         assert!(
             missing.to_string().contains("Settings (s) → Project")
-                && missing.to_string().contains(".nebula.json"),
+                && missing.to_string().contains(".bro.json"),
             "names both places: {missing}"
         );
         assert!(daemon
@@ -2280,7 +2280,7 @@ mod tests {
             .unwrap()
             .is_empty());
 
-        std::fs::write(dir.path().join(".nebula.json"), r#"{"run": "sleep 30"}"#).unwrap();
+        std::fs::write(dir.path().join(".bro.json"), r#"{"run": "sleep 30"}"#).unwrap();
         let EntityId::Terminal(id) = daemon.start_run(&worktree.id).unwrap() else {
             panic!("a run lives in a terminal");
         };
@@ -2338,7 +2338,7 @@ mod tests {
         // No file: the setting is the whole answer.
         assert_eq!(run_with(&entry(dir.path(), "sleep 31")), "sleep 31");
         // Both: the setting wins.
-        std::fs::write(dir.path().join(".nebula.json"), r#"{"run": "sleep 30"}"#).unwrap();
+        std::fs::write(dir.path().join(".bro.json"), r#"{"run": "sleep 30"}"#).unwrap();
         assert_eq!(run_with(&entry(dir.path(), "sleep 31")), "sleep 31");
         // Blank, or another project's: the file.
         assert_eq!(run_with(&entry(dir.path(), "   ")), "sleep 30");
@@ -2347,17 +2347,17 @@ mod tests {
             "sleep 30"
         );
         // Neither: the message names both.
-        std::fs::remove_file(dir.path().join(".nebula.json")).unwrap();
+        std::fs::remove_file(dir.path().join(".bro.json")).unwrap();
         let err = daemon
             .start_run_with(&worktree.id, &entry(dir.path(), ""))
             .unwrap_err();
         assert!(err.to_string().contains("Settings (s) → Project"), "{err}");
         // A broken file is its own complaint, whatever the setting isn't.
-        std::fs::write(dir.path().join(".nebula.json"), "{").unwrap();
+        std::fs::write(dir.path().join(".bro.json"), "{").unwrap();
         let err = daemon
             .start_run_with(&worktree.id, &crate::config::Config::default())
             .unwrap_err();
-        assert!(err.to_string().contains(".nebula.json:"), "{err}");
+        assert!(err.to_string().contains(".bro.json:"), "{err}");
         assert_eq!(
             run_with(&entry(dir.path(), "sleep 31")),
             "sleep 31",
@@ -2373,7 +2373,7 @@ mod tests {
         let daemon = test_daemon();
         let (dir, worktree) = run_worktree(&daemon);
         std::fs::write(
-            dir.path().join(".nebula.json"),
+            dir.path().join(".bro.json"),
             r#"{"run": "echo run-finished"}"#,
         )
         .unwrap();

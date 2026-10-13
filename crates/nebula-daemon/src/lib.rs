@@ -77,11 +77,11 @@ async fn serve(opts: DaemonOpts) -> Result<()> {
             bail!("{}", handoff::UNSUPPORTED);
         }
         let Some(lock) = lifecycle::PidfileLock::try_acquire()? else {
-            bail!("another nebula daemon is already running");
+            bail!("another bro daemon is already running");
         };
         let pipe = paths::pipe_name();
-        let listener = platform::PipeListener::bind(&pipe)
-            .with_context(|| format!("create pipe {pipe}"))?;
+        let listener =
+            platform::PipeListener::bind(&pipe).with_context(|| format!("create pipe {pipe}"))?;
         tracing::info!(%pipe, "daemon pipe created");
         (lock, listener, None, None::<handoff::Carry>)
     };
@@ -100,7 +100,7 @@ async fn serve(opts: DaemonOpts) -> Result<()> {
         }
         None => {
             let Some(lock) = lifecycle::PidfileLock::try_acquire()? else {
-                bail!("another nebula daemon is already running");
+                bail!("another bro daemon is already running");
             };
             lifecycle::unlink_stale_socket(&sock);
             let listener = tokio::net::UnixListener::bind(&sock)
@@ -121,7 +121,7 @@ async fn serve(opts: DaemonOpts) -> Result<()> {
         pid = std::process::id(),
         socket = %sock.display(),
         restarted = carry.is_some(),
-        "nebula daemon listening"
+        "bro daemon listening"
     );
 
     let store = std::sync::Arc::new(store::Store::open(&paths::db_path())?);

@@ -13,7 +13,7 @@ use tokio::process::Command;
 /// blames the directory they just picked. Kept to one line: the TUI shows it
 /// in the footer flash, which truncates.
 pub const GIT_MISSING: &str =
-    "git was not found on your PATH — nebula needs it. Install git (https://git-scm.com/downloads), then restart nebula.";
+    "git was not found on your PATH — bro needs it. Install git (https://git-scm.com/downloads), then restart bro.";
 
 /// True when `err` came from `git` being absent, so callers can pass the
 /// message through instead of layering their own (wrong) explanation on top.

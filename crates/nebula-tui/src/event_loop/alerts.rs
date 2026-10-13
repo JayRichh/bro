@@ -91,14 +91,14 @@ fn notifier_command(alert: &FeedbackAlert, macos: bool) -> (&'static str, Vec<St
     let summary = format!("{} needs feedback", alert.session);
     if macos {
         let mut script = format!(
-            "display notification {} with title \"nebula\" subtitle {}",
+            "display notification {} with title \"bro\" subtitle {}",
             applescript_str(&alert.place),
             applescript_str(&summary)
         );
         if alert.place.is_empty() {
             // No body to show: the subtitle carries the whole message.
             script = format!(
-                "display notification {} with title \"nebula\"",
+                "display notification {} with title \"bro\"",
                 applescript_str(&summary)
             );
         }
@@ -106,7 +106,7 @@ fn notifier_command(alert: &FeedbackAlert, macos: bool) -> (&'static str, Vec<St
     } else {
         (
             "notify-send",
-            vec!["--app-name=nebula".into(), summary, alert.place.clone()],
+            vec!["--app-name=bro".into(), summary, alert.place.clone()],
         )
     }
 }
@@ -165,25 +165,21 @@ mod tests {
             args,
             [
                 "-e",
-                r#"display notification "demo · main" with title "nebula" subtitle "Fix Login needs feedback""#,
+                r#"display notification "demo · main" with title "bro" subtitle "Fix Login needs feedback""#,
             ]
         );
 
         let (_, args) = notifier_command(&alert("agent-2", ""), true);
         assert_eq!(
             args[1],
-            r#"display notification "agent-2 needs feedback" with title "nebula""#
+            r#"display notification "agent-2 needs feedback" with title "bro""#
         );
 
         let (program, args) = notifier_command(&alert("Fix Login", "demo · main"), false);
         assert_eq!(program, "notify-send");
         assert_eq!(
             args,
-            [
-                "--app-name=nebula",
-                "Fix Login needs feedback",
-                "demo · main"
-            ]
+            ["--app-name=bro", "Fix Login needs feedback", "demo · main"]
         );
     }
 
