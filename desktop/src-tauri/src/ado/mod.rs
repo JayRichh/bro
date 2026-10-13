@@ -1,10 +1,12 @@
 //! Azure DevOps: remote parsing, branch naming, tokens, the REST client,
 //! the `ado.json` store, and the per-repo context the commands work in.
-#![allow(dead_code)]
 
 pub mod auth;
 pub mod branches;
 pub mod client;
+// The slug and template helpers wait for a branch-name suggestion
+// command; only `initials` and `validate_branch_name` are called today.
+#[allow(dead_code)]
 pub mod naming;
 pub mod prs;
 pub mod remote;
@@ -15,7 +17,7 @@ use auth::TokenSource;
 use client::{AdoClient, AdoError};
 use remote::{parse_remote, AdoRemote};
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use store::{AdoStore, RepoKey};
@@ -32,13 +34,19 @@ pub struct WitState {
 /// States per `org/project/type`, kept for the app's lifetime.
 pub type StateCache = Arc<Mutex<HashMap<String, Vec<WitState>>>>;
 
-/// The app-wide ADO state Tauri manages: one token source (so its per-org
-/// cache is shared), one store, one client per org.
+/// The app-wide ADO state Tauri manages, once: one token source (so its
+/// per-org cache is shared), one store, and per org one client for the
+/// commands and one silent client for background work.
 pub struct AdoState {
     pub store: Arc<AdoStore>,
     pub tokens: Arc<TokenSource>,
     clients: Mutex<HashMap<String, Arc<AdoClient>>>,
+    silent_clients: Mutex<HashMap<String, Arc<AdoClient>>>,
     states: StateCache,
+    /// Orgs whose background PR poll stopped after a sign-in failure, so
+    /// the poll never keeps failing on its own. A command that works for
+    /// the org starts it again.
+    paused: Mutex<HashSet<String>>,
 }
 
 impl AdoState {
@@ -54,16 +62,57 @@ impl AdoState {
             store,
             tokens,
             clients: Mutex::new(HashMap::new()),
+            silent_clients: Mutex::new(HashMap::new()),
             states: StateCache::default(),
+            paused: Mutex::new(HashSet::new()),
         }
     }
 
     pub fn client(&self, org_url: &str) -> Arc<AdoClient> {
-        let mut clients = self.clients.lock().unwrap_or_else(|p| p.into_inner());
+        self.client_in(&self.clients, org_url, false)
+    }
+
+    /// The org's client that never opens a sign-in window: it finds a
+    /// token once a command has signed in, or fails.
+    pub fn silent_client(&self, org_url: &str) -> Arc<AdoClient> {
+        self.client_in(&self.silent_clients, org_url, true)
+    }
+
+    fn client_in(
+        &self,
+        map: &Mutex<HashMap<String, Arc<AdoClient>>>,
+        org_url: &str,
+        silent: bool,
+    ) -> Arc<AdoClient> {
+        let mut clients = map.lock().unwrap_or_else(|p| p.into_inner());
         clients
             .entry(org_url.to_string())
-            .or_insert_with(|| Arc::new(AdoClient::new(org_url, self.tokens.clone())))
+            .or_insert_with(|| {
+                let c = AdoClient::new(org_url, self.tokens.clone());
+                Arc::new(if silent { c.silent() } else { c })
+            })
             .clone()
+    }
+
+    pub fn is_paused(&self, org_url: &str) -> bool {
+        self.paused
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .contains(org_url)
+    }
+
+    pub fn pause(&self, org_url: &str) {
+        self.paused
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(org_url.to_string());
+    }
+
+    pub fn resume(&self, org_url: &str) {
+        self.paused
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(org_url);
     }
 
     /// The ADO context for `worktree`: a daemon worktree id, or a path.
@@ -78,16 +127,44 @@ impl AdoState {
     /// The ADO context for the checkout at `path`, from its git remote.
     /// No HTTP happens here.
     pub async fn context(&self, path: &Path) -> Result<AdoContext, String> {
-        let (remote_name, remote) = ado_remote(path).await?;
-        let client = self.client(&remote.org_url);
-        Ok(AdoContext::new(
+        let (remote_name, remote) = ado_remote(path)
+            .await?
+            .ok_or_else(|| "This repo has no Azure DevOps remote.".to_string())?;
+        // A user command for the org (PRs, tasks, anything) may sign in, so
+        // its paused PR poll tries again; still failing, it pauses again.
+        self.resume(&remote.org_url);
+        Ok(self.make_context(path, remote_name, remote, false))
+    }
+
+    /// As [`context`](Self::context), for background work: its client
+    /// never opens a sign-in window, and a checkout without an ADO remote
+    /// is `None` rather than an error.
+    pub async fn silent_context(&self, path: &Path) -> Result<Option<AdoContext>, String> {
+        Ok(ado_remote(path)
+            .await?
+            .map(|(name, remote)| self.make_context(path, name, remote, true)))
+    }
+
+    fn make_context(
+        &self,
+        path: &Path,
+        remote_name: String,
+        remote: AdoRemote,
+        silent: bool,
+    ) -> AdoContext {
+        let client = if silent {
+            self.silent_client(&remote.org_url)
+        } else {
+            self.client(&remote.org_url)
+        };
+        AdoContext::new(
             path.to_path_buf(),
             remote_name,
             remote,
             client,
             self.store.clone(),
             self.states.clone(),
-        ))
+        )
     }
 }
 
@@ -108,15 +185,11 @@ pub struct AdoContext {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectMeta {
-    pub id: String,
-    pub name: String,
     pub default_team: Option<TeamRef>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TeamRef {
-    #[serde(default)]
-    pub id: String,
     pub name: String,
 }
 
@@ -325,11 +398,12 @@ pub async fn git_out(cwd: &Path, args: &[&str]) -> Result<String, String> {
 }
 
 /// The repo's ADO remote and its name: `origin` when it is one, else the
-/// only remote that is.
-pub async fn ado_remote(path: &Path) -> Result<(String, AdoRemote), String> {
+/// only remote that is. `None` when no remote is; several and none of
+/// them `origin` is an error.
+pub async fn ado_remote(path: &Path) -> Result<Option<(String, AdoRemote)>, String> {
     if let Ok(url) = git_out(path, &["remote", "get-url", "origin"]).await {
         if let Some(r) = parse_remote(&url) {
-            return Ok(("origin".into(), r));
+            return Ok(Some(("origin".into(), r)));
         }
     }
     let names = git_out(path, &["remote"]).await?;
@@ -342,8 +416,8 @@ pub async fn ado_remote(path: &Path) -> Result<(String, AdoRemote), String> {
         }
     }
     match found.len() {
-        1 => Ok(found.remove(0)),
-        0 => Err("This repo has no Azure DevOps remote.".into()),
+        1 => Ok(Some(found.remove(0))),
+        0 => Ok(None),
         _ => Err("This repo has several Azure DevOps remotes and none is origin.".into()),
     }
 }
@@ -392,6 +466,119 @@ pub(crate) mod testing {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ado::auth::fake::Fake;
+    use httpmock::prelude::*;
+
+    fn temp_repo(remote: Option<&str>) -> PathBuf {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static N: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "kete-ado-state-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::SeqCst)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = |args: &[&str]| {
+            let ok = std::process::Command::new("git")
+                .current_dir(&dir)
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        if let Some(url) = remote {
+            git(&["remote", "add", "origin", url]);
+        }
+        dir
+    }
+
+    #[tokio::test]
+    async fn one_state_gives_prompting_and_silent_contexts() {
+        let fake = Fake::new().on("git", "password=pat\n");
+        let ado = AdoState::new(testing::temp_store(), Arc::new(TokenSource::new(fake)));
+        let repo = temp_repo(Some("https://dev.azure.com/tnt/Platform/_git/api"));
+
+        let loud = ado.context(&repo).await.unwrap();
+        let quiet = ado.silent_context(&repo).await.unwrap().unwrap();
+        assert_eq!(quiet.remote_name, "origin");
+        assert_eq!(quiet.key, loud.key);
+        let org = "https://dev.azure.com/tnt";
+        assert!(Arc::ptr_eq(&loud.client, &ado.client(org)));
+        assert!(Arc::ptr_eq(&quiet.client, &ado.silent_client(org)));
+        assert!(!Arc::ptr_eq(&loud.client, &quiet.client));
+        // One store for both.
+        assert!(Arc::ptr_eq(&loud.store, &quiet.store));
+        assert!(Arc::ptr_eq(&loud.store, &ado.store));
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    #[tokio::test]
+    async fn a_silent_client_from_the_state_never_prompts() {
+        let s = MockServer::start();
+        s.mock(|w, t| {
+            w.path("/p/_apis/x");
+            t.status(200).json_body(serde_json::json!({}));
+        });
+        let fake = Fake::new().on("git", "password=pat\n");
+        let ado = AdoState::new(
+            testing::temp_store(),
+            Arc::new(TokenSource::new(fake.clone())),
+        );
+        let _: serde_json::Value = ado
+            .silent_client(&s.base_url())
+            .get("/p/_apis/x")
+            .await
+            .unwrap();
+        assert_eq!(fake.count("git", "credential.interactive=never"), 1);
+    }
+
+    #[tokio::test]
+    async fn no_ado_remote_is_none_when_silent_and_an_error_otherwise() {
+        let ado = AdoState::new(
+            testing::temp_store(),
+            Arc::new(TokenSource::fixed(auth::Credential::Bearer("tok".into()))),
+        );
+        let repo = temp_repo(Some("https://github.com/JayRichh/kete.git"));
+        assert!(ado.silent_context(&repo).await.unwrap().is_none());
+        assert_eq!(
+            ado.context(&repo).await.err().as_deref(),
+            Some("This repo has no Azure DevOps remote.")
+        );
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    #[tokio::test]
+    async fn a_command_context_resumes_the_poll_and_the_poll_does_not() {
+        let ado = AdoState::new(
+            testing::temp_store(),
+            Arc::new(TokenSource::fixed(auth::Credential::Bearer("tok".into()))),
+        );
+        let repo = temp_repo(Some("https://dev.azure.com/tnt/Platform/_git/api"));
+        let org = "https://dev.azure.com/tnt";
+        ado.pause(org);
+        ado.silent_context(&repo).await.unwrap().unwrap();
+        assert!(ado.is_paused(org));
+        ado.context(&repo).await.unwrap();
+        assert!(!ado.is_paused(org));
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn pausing_is_per_org() {
+        let ado = AdoState::new(
+            testing::temp_store(),
+            Arc::new(TokenSource::fixed(auth::Credential::Bearer("tok".into()))),
+        );
+        ado.pause("https://dev.azure.com/a");
+        assert!(ado.is_paused("https://dev.azure.com/a"));
+        assert!(!ado.is_paused("https://dev.azure.com/b"));
+        ado.resume("https://dev.azure.com/a");
+        assert!(!ado.is_paused("https://dev.azure.com/a"));
+    }
 
     #[test]
     fn encodes_path_segments() {

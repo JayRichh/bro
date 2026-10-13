@@ -2,7 +2,8 @@
 //! state, the last commit, the linked task and any worktree or session,
 //! grouped by the person prefix before the first `/`.
 
-use super::{naming, remote, store};
+use super::prs::{self, PrSummary};
+use super::{naming, remote, AdoContext, AdoState};
 use crate::daemon::{Client, Model};
 use anyhow::{anyhow, bail, Result};
 use nebula_core::{ClientRequest, EntityId, ProjectId, WorktreeId};
@@ -11,13 +12,13 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::State;
 
 /// The group for branches with no `/` prefix.
 pub const OTHER: &str = "other";
 
-/// A branch's pull request. Filled by the PR module; `None` until then.
+/// A branch's active pull request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PrRef {
     pub id: u32,
@@ -379,26 +380,59 @@ fn locate(client: &Client, worktree: &str) -> std::result::Result<(PathBuf, Proj
         .ok_or_else(|| "that worktree is gone".to_string())
 }
 
-fn branch_tree(repo: &Path, model: &Model, project: &ProjectId) -> Result<BranchTree> {
-    let remote_name = pick_remote(repo);
-    let mut rows = collect(repo, &remote_name)?;
-    let tasks = remote_url(repo, &remote_name)
-        .and_then(|u| remote::parse_remote(&u))
-        .map(|r| {
-            let key = store::RepoKey {
-                org: r.org,
-                project: r.project,
-                repo: r.repo,
-            };
-            store::AdoStore::open(store::AdoStore::default_path())
-                .read_repo(&key, |s| s.branch_tasks.clone())
-        })
-        .unwrap_or_default();
-    for row in &mut rows {
-        row.task = resolve_task(&row.name, &tasks, None);
+/// Fill each row's PR (the first active one from that branch, by
+/// `sourceRefName`) and its task, which the PR's work items inform.
+pub fn attach_prs(rows: &mut [BranchRow], prs: &[PrSummary], tasks: &BTreeMap<String, u32>) {
+    for row in rows {
+        let pr = prs.iter().find(|p| p.source == row.name);
+        row.pr = pr.map(|p| PrRef {
+            id: p.id,
+            status: p.status.clone(),
+            is_draft: p.is_draft,
+        });
+        row.task = resolve_task(&row.name, tasks, pr.map(|p| p.work_items.as_slice()));
     }
-    attach_sessions(&mut rows, model, project);
-    Ok(group(rows, &my_initials(repo)))
+}
+
+/// How long the branch list waits for the PR list before it shows the
+/// branches without PRs.
+const PR_LIST_TIMEOUT: Duration = Duration::from_secs(10);
+/// The separate budget for the PRs' work items: running out keeps the
+/// PRs and whatever work items arrived.
+const WORK_ITEMS_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The repo's active PRs, with work items for branches that have no
+/// stored task. Empty when the list fails (offline, not signed in) or
+/// takes too long: the branches show without PRs. Slow work items never
+/// cost the PRs.
+async fn branch_prs(ctx: &AdoContext, tasks: &BTreeMap<String, u32>) -> Vec<PrSummary> {
+    branch_prs_within(ctx, tasks, PR_LIST_TIMEOUT, WORK_ITEMS_TIMEOUT).await
+}
+
+async fn branch_prs_within(
+    ctx: &AdoContext,
+    tasks: &BTreeMap<String, u32>,
+    list_budget: Duration,
+    work_items_budget: Duration,
+) -> Vec<PrSummary> {
+    let Ok(Ok(mut found)) = tokio::time::timeout(list_budget, prs::active(ctx)).await else {
+        return Vec::new();
+    };
+    let fill = prs::fill_work_items(ctx, &mut found, |source| !tasks.contains_key(source));
+    let _ = tokio::time::timeout(work_items_budget, fill).await;
+    found
+}
+
+/// The remote the branch commands read: the ADO context's, else
+/// [`pick_remote`]'s for a repo with no ADO remote.
+async fn remote_of(ctx: Option<&AdoContext>, repo: &Path) -> std::result::Result<String, String> {
+    match ctx {
+        Some(c) => Ok(c.remote_name.clone()),
+        None => {
+            let repo = repo.to_path_buf();
+            blocking(move || Ok(pick_remote(&repo))).await
+        }
+    }
 }
 
 async fn blocking<T: Send + 'static>(
@@ -410,27 +444,45 @@ async fn blocking<T: Send + 'static>(
         .map_err(|e| e.to_string())
 }
 
+/// Every branch, grouped by person, with its task, PR, worktree and
+/// session. The PR lookup uses the silent client, so opening the list
+/// never brings up a sign-in window; when it fails the branches come back
+/// without PRs.
 #[tauri::command]
 pub async fn ado_branches(
     client: State<'_, Arc<Client>>,
+    ado: State<'_, AdoState>,
     worktree: String,
 ) -> std::result::Result<BranchTree, String> {
     let (repo, project) = locate(&client, &worktree)?;
-    let model = client.snapshot();
-    blocking(move || branch_tree(&repo, &model, &project)).await
+    let ctx = ado.silent_context(&repo).await.ok().flatten();
+    let remote_name = remote_of(ctx.as_ref(), &repo).await?;
+    let tasks = ctx
+        .as_ref()
+        .map(|c| c.store.read_repo(&c.key, |s| s.branch_tasks.clone()))
+        .unwrap_or_default();
+    let r = repo.clone();
+    let (mut rows, me) =
+        blocking(move || Ok((collect(&r, &remote_name)?, my_initials(&r)))).await?;
+    let prs = match &ctx {
+        Some(c) => branch_prs(c, &tasks).await,
+        None => Vec::new(),
+    };
+    attach_prs(&mut rows, &prs, &tasks);
+    attach_sessions(&mut rows, &client.snapshot(), &project);
+    Ok(group(rows, &me))
 }
 
 #[tauri::command]
 pub async fn ado_fetch(
     client: State<'_, Arc<Client>>,
+    ado: State<'_, AdoState>,
     worktree: String,
 ) -> std::result::Result<(), String> {
     let (repo, _) = locate(&client, &worktree)?;
-    blocking(move || {
-        let remote_name = pick_remote(&repo);
-        fetch(&repo, &remote_name)
-    })
-    .await
+    let ctx = ado.silent_context(&repo).await.ok().flatten();
+    let remote_name = remote_of(ctx.as_ref(), &repo).await?;
+    blocking(move || fetch(&repo, &remote_name)).await
 }
 
 /// Check `branch` out in a worktree through the daemon. A branch already
@@ -439,6 +491,7 @@ pub async fn ado_fetch(
 #[tauri::command]
 pub async fn ado_checkout_worktree(
     client: State<'_, Arc<Client>>,
+    ado: State<'_, AdoState>,
     worktree: String,
     branch: String,
 ) -> std::result::Result<String, String> {
@@ -451,6 +504,8 @@ pub async fn ado_checkout_worktree(
     {
         return Ok(w.id.0.clone());
     }
+    let ctx = ado.silent_context(&repo).await.ok().flatten();
+    let remote_name = remote_of(ctx.as_ref(), &repo).await?;
     let name = branch.clone();
     let base = blocking(move || {
         let local = git(
@@ -466,7 +521,6 @@ pub async fn ado_checkout_worktree(
         if local {
             return Ok(None);
         }
-        let remote_name = pick_remote(&repo);
         let remote_ref = format!("refs/remotes/{remote_name}/{name}");
         if remote_name.is_empty()
             || git(&repo, &["show-ref", "--verify", "--quiet", &remote_ref]).is_err()
@@ -723,6 +777,165 @@ mod tests {
         assert_eq!(resolve_task("jari/x_1234", &map, None), None);
         assert_eq!(resolve_task("jari/no-number", &map, None), None);
         assert_eq!(resolve_task("12/345-x", &map, None), Some(345));
+    }
+
+    fn summary(id: u32, source: &str, work_items: Vec<u32>) -> PrSummary {
+        PrSummary {
+            id,
+            title: format!("PR {id}"),
+            source: source.into(),
+            target: "main".into(),
+            is_draft: id.is_multiple_of(2),
+            status: "active".into(),
+            created_by: "Jay".into(),
+            reviewers: Vec::new(),
+            work_items,
+            threads: 0,
+            url: String::new(),
+        }
+    }
+
+    #[test]
+    fn prs_attach_by_source_and_inform_the_task() {
+        let mut rows = vec![
+            sample("jari/fix-890"),
+            sample("jari/stored"),
+            sample("ga/no-pr"),
+        ];
+        let prs = vec![
+            summary(4, "jari/fix-890", vec![4321]),
+            summary(5, "jari/stored", vec![999]),
+            summary(7, "jari/fix-890", vec![]),
+        ];
+        let mut tasks = BTreeMap::new();
+        tasks.insert("jari/stored".to_string(), 111);
+        attach_prs(&mut rows, &prs, &tasks);
+        assert_eq!(
+            rows[0].pr,
+            Some(PrRef {
+                id: 4,
+                status: "active".into(),
+                is_draft: true
+            })
+        );
+        // The PR's work item beats the number in the name.
+        assert_eq!(rows[0].task, Some(4321));
+        // A stored link beats the PR's work item.
+        assert_eq!(rows[1].pr.as_ref().map(|p| p.id), Some(5));
+        assert_eq!(rows[1].task, Some(111));
+        assert_eq!(rows[2].pr, None);
+        assert_eq!(rows[2].task, None);
+    }
+
+    #[tokio::test]
+    async fn branch_prs_take_one_list_call_and_work_items_where_needed() {
+        use httpmock::prelude::*;
+        use serde_json::json;
+        let s = MockServer::start();
+        s.mock(|w, t| {
+            w.method(GET).path("/Platform/_apis/git/repositories/api");
+            t.status(200)
+                .json_body(json!({"id": "r1", "project": {"id": "p1"}}));
+        });
+        let pr = |id: u32, source: &str| {
+            json!({
+                "pullRequestId": id, "title": "x", "status": "active", "isDraft": false,
+                "sourceRefName": format!("refs/heads/{source}"),
+                "targetRefName": "refs/heads/main",
+                "repository": {"webUrl": "https://x"}
+            })
+        };
+        let list = s.mock(|w, t| {
+            w.method(GET)
+                .path("/_apis/git/repositories/r1/pullrequests")
+                .query_param("searchCriteria.status", "active");
+            t.status(200)
+                .json_body(json!({"value": [pr(4, "jari/fix-890"), pr(5, "jari/stored")]}));
+        });
+        let wanted = s.mock(|w, t| {
+            w.method(GET)
+                .path("/_apis/git/repositories/r1/pullrequests/4/workitems");
+            t.status(200).json_body(json!({"value": [{"id": "4321"}]}));
+        });
+        let unwanted = s.mock(|w, t| {
+            w.method(GET)
+                .path("/_apis/git/repositories/r1/pullrequests/5/workitems");
+            t.status(200).json_body(json!({"value": [{"id": "999"}]}));
+        });
+        let ctx = crate::ado::testing::context(&s.base_url(), crate::ado::testing::temp_store());
+        let mut tasks = BTreeMap::new();
+        tasks.insert("jari/stored".to_string(), 111);
+        let prs = branch_prs(&ctx, &tasks).await;
+        list.assert();
+        wanted.assert();
+        assert_eq!(unwanted.hits(), 0);
+        assert_eq!(prs.len(), 2);
+        assert_eq!(prs[0].source, "jari/fix-890");
+        assert_eq!(prs[0].work_items, vec![4321]);
+    }
+
+    #[tokio::test]
+    async fn slow_work_items_keep_the_prs() {
+        use httpmock::prelude::*;
+        use serde_json::json;
+        let s = MockServer::start();
+        s.mock(|w, t| {
+            w.method(GET).path("/Platform/_apis/git/repositories/api");
+            t.status(200)
+                .json_body(json!({"id": "r1", "project": {"id": "p1"}}));
+        });
+        s.mock(|w, t| {
+            w.method(GET)
+                .path("/_apis/git/repositories/r1/pullrequests")
+                .query_param("searchCriteria.status", "active");
+            t.status(200).json_body(json!({"value": [{
+                "pullRequestId": 4, "status": "active", "isDraft": true,
+                "sourceRefName": "refs/heads/jari/fix-890",
+                "targetRefName": "refs/heads/main",
+                "repository": {"webUrl": "https://x"}
+            }]}));
+        });
+        s.mock(|w, t| {
+            w.method(GET)
+                .path("/_apis/git/repositories/r1/pullrequests/4/workitems");
+            t.status(200)
+                .delay(Duration::from_secs(3))
+                .json_body(json!({"value": [{"id": "4321"}]}));
+        });
+        let ctx = crate::ado::testing::context(&s.base_url(), crate::ado::testing::temp_store());
+        let tasks = BTreeMap::new();
+        let prs = branch_prs_within(
+            &ctx,
+            &tasks,
+            Duration::from_secs(10),
+            Duration::from_millis(200),
+        )
+        .await;
+        assert_eq!(prs.len(), 1);
+        assert!(prs[0].work_items.is_empty());
+        let mut rows = vec![sample("jari/fix-890")];
+        attach_prs(&mut rows, &prs, &tasks);
+        assert_eq!(rows[0].pr.as_ref().map(|p| p.id), Some(4));
+        // No work items arrived, so the task comes from the name.
+        assert_eq!(rows[0].task, Some(890));
+    }
+
+    #[tokio::test]
+    async fn a_failed_pr_lookup_leaves_the_rows_without_prs() {
+        use httpmock::prelude::*;
+        let s = MockServer::start();
+        s.mock(|w, t| {
+            w.path_contains("/_apis/");
+            t.status(401);
+        });
+        let ctx = crate::ado::testing::context(&s.base_url(), crate::ado::testing::temp_store());
+        let tasks = BTreeMap::new();
+        let prs = branch_prs(&ctx, &tasks).await;
+        assert!(prs.is_empty());
+        let mut rows = vec![sample("jari/fix-890")];
+        attach_prs(&mut rows, &prs, &tasks);
+        assert_eq!(rows[0].pr, None);
+        assert_eq!(rows[0].task, Some(890));
     }
 
     #[test]

@@ -1,149 +1,56 @@
 //! Azure DevOps pull requests: lists, votes, policies and threads.
 
-use crate::ado::auth::{AuthError, TokenSource};
+use crate::ado::auth::AuthError;
 use crate::ado::client::{AdoClient, AdoError};
-use crate::ado::remote::{parse_remote, AdoRemote};
-use crate::ado::store::{AdoStore, RepoKey, Reviewer};
-use crate::attribution::strip_ai_trailers;
+use crate::ado::remote::AdoRemote;
+use crate::ado::store::Reviewer;
+use crate::ado::{AdoContext, AdoState};
+use crate::attribution::{strip_ai_trailers, LocalUpstream};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::collections::HashMap;
+use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 
 /// Policy evaluations are only offered as a preview API.
 const POLICY_API_VERSION: &str = "7.1-preview.1";
 /// `connectionData` is a preview-only resource.
 const CONNECTION_API_VERSION: &str = "7.1-preview.1";
 
-/// What a PR command needs: the org's client and the repo's ids.
+/// What a PR command needs: the repo's ADO context and its ids.
 pub struct PrCtx {
-    pub client: AdoClient,
+    pub ado: AdoContext,
     pub repo_id: String,
     pub project_id: String,
-    pub org_url: String,
-    pub remote_name: String,
-    pub repo_path: PathBuf,
     /// `https://vssps.dev.azure.com/{org}`, for identity search.
     pub vssps_base: String,
-    pub key: RepoKey,
 }
 
 impl PrCtx {
-    /// The context for the ADO repo behind `path`'s remote, or None when
-    /// the checkout has no Azure DevOps remote.
-    pub async fn from_worktree(
-        path: &Path,
-        tokens: Arc<TokenSource>,
-    ) -> Result<Option<PrCtx>, AdoError> {
-        let p = path.to_path_buf();
-        let found = tokio::task::spawn_blocking(move || find_ado_remote(&p))
-            .await
-            .map_err(|e| AdoError::Local(e.to_string()))?
-            .map_err(AdoError::Local)?;
-        let Some((remote_name, remote)) = found else {
-            return Ok(None);
-        };
-        Self::from_remote(path, remote_name, remote, tokens)
-            .await
-            .map(Some)
-    }
-
-    /// The context for a remote already found with [`find_ado_remote`].
-    pub async fn from_remote(
-        path: &Path,
-        remote_name: String,
-        remote: AdoRemote,
-        tokens: Arc<TokenSource>,
-    ) -> Result<PrCtx, AdoError> {
-        Self::build(path, remote_name, remote, maker(tokens, false)).await
-    }
-
-    /// As [`from_remote`](Self::from_remote), but its client never opens a
-    /// sign-in window: for the background PR poll.
-    pub async fn from_remote_silent(
-        path: &Path,
-        remote_name: String,
-        remote: AdoRemote,
-        tokens: Arc<TokenSource>,
-    ) -> Result<PrCtx, AdoError> {
-        Self::build(path, remote_name, remote, maker(tokens, true)).await
-    }
-
-    async fn build(
-        path: &Path,
-        remote_name: String,
-        remote: AdoRemote,
-        make: impl FnOnce(&str) -> AdoClient,
-    ) -> Result<PrCtx, AdoError> {
-        let client = make(&remote.org_url);
-        let (repo_id, project_id) = repo_ids(&client, &remote).await?;
+    /// The PR context over `ado`: one GET for the repo and project ids,
+    /// cached per repo.
+    pub async fn new(ado: AdoContext) -> Result<PrCtx, AdoError> {
+        let (repo_id, project_id) = repo_ids(&ado.client, &ado.remote).await?;
         Ok(PrCtx {
-            vssps_base: vssps_base(&remote.org_url)
-                .unwrap_or_else(|| format!("https://vssps.dev.azure.com/{}", remote.org)),
-            org_url: remote.org_url.clone(),
-            key: RepoKey {
-                org: remote.org.clone(),
-                project: remote.project.clone(),
-                repo: remote.repo.clone(),
-            },
-            client,
+            vssps_base: vssps_base(&ado.remote.org_url)
+                .unwrap_or_else(|| format!("https://vssps.dev.azure.com/{}", ado.remote.org)),
+            ado,
             repo_id,
             project_id,
-            remote_name,
-            repo_path: path.to_path_buf(),
         })
     }
-}
 
-/// The ADO state the PR commands and the PR poll share: one token source
-/// (one cache, one sign-in prompt per org) and the store.
-pub struct PrState {
-    pub tokens: Arc<TokenSource>,
-    pub store: Arc<AdoStore>,
-    /// Orgs whose background poll stopped after a sign-in failure, so the
-    /// poll never opens a sign-in window on its own. A command that works
-    /// for the org starts it again.
-    paused: Mutex<HashSet<String>>,
-}
-
-impl PrState {
-    pub fn new(tokens: Arc<TokenSource>, store: Arc<AdoStore>) -> Self {
-        Self {
-            tokens,
-            store,
-            paused: Mutex::new(HashSet::new()),
-        }
-    }
-
-    pub fn is_paused(&self, org_url: &str) -> bool {
-        self.paused.lock().unwrap().contains(org_url)
-    }
-
-    pub fn pause(&self, org_url: &str) {
-        self.paused.lock().unwrap().insert(org_url.to_string());
-    }
-
-    pub fn resume(&self, org_url: &str) {
-        self.paused.lock().unwrap().remove(org_url);
-    }
-
-    /// The context for a worktree, for a user-initiated command. No ADO
-    /// remote is an error here.
-    pub async fn ctx(&self, path: &Path) -> Result<PrCtx, String> {
-        let p = path.to_path_buf();
-        let found = tokio::task::spawn_blocking(move || find_ado_remote(&p))
-            .await
-            .map_err(|e| e.to_string())??;
-        let Some((name, remote)) = found else {
-            return Err("This checkout has no Azure DevOps remote.".into());
-        };
-        let ctx = PrCtx::from_remote(path, name, remote, self.tokens.clone())
-            .await
-            .map_err(|e| e.user_message())?;
-        self.resume(&ctx.org_url);
-        Ok(ctx)
+    /// The PR context for a user-initiated command on `worktree` (a daemon
+    /// worktree id or a path). Like every command context it starts the
+    /// org's paused PR poll again ([`AdoState::context`]).
+    pub async fn for_command(
+        state: &AdoState,
+        client: &crate::daemon::Client,
+        worktree: &str,
+    ) -> Result<PrCtx, String> {
+        let ado = state.context_for(client, worktree).await?;
+        PrCtx::new(ado).await.map_err(|e| e.user_message())
     }
 }
 
@@ -151,17 +58,6 @@ impl PrState {
 /// keep asking for.
 pub fn is_auth_error(e: &AdoError) -> bool {
     matches!(e, AdoError::Auth(_) | AdoError::Unauthorized)
-}
-
-fn maker(tokens: Arc<TokenSource>, silent: bool) -> impl FnOnce(&str) -> AdoClient {
-    move |org_url| {
-        let c = AdoClient::new(org_url, tokens);
-        if silent {
-            c.silent()
-        } else {
-            c
-        }
-    }
 }
 
 /// The identity search host for an org URL: `dev.azure.com/{org}` and
@@ -192,42 +88,6 @@ fn git_command(cwd: &Path) -> Command {
     #[cfg(windows)]
     nebula_core::platform::no_window(&mut cmd);
     cmd
-}
-
-fn git_out(cwd: &Path, args: &[&str]) -> Option<String> {
-    let out = git_command(cwd)
-        .args(args)
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
-}
-
-/// The ADO remote to use: `origin` when it is one, else the only ADO
-/// remote. Several ADO remotes without an ADO `origin` is an error.
-pub fn find_ado_remote(repo: &Path) -> Result<Option<(String, AdoRemote)>, String> {
-    let Some(names) = git_out(repo, &["remote"]) else {
-        return Ok(None);
-    };
-    let mut found: Vec<(String, AdoRemote)> = names
-        .lines()
-        .map(str::trim)
-        .filter(|n| !n.is_empty())
-        .filter_map(|n| {
-            let url = git_out(repo, &["remote", "get-url", n])?;
-            Some((n.to_string(), parse_remote(&url)?))
-        })
-        .collect();
-    if let Some(i) = found.iter().position(|(n, _)| n == "origin") {
-        return Ok(Some(found.swap_remove(i)));
-    }
-    match found.len() {
-        0 => Ok(None),
-        1 => Ok(found.pop()),
-        _ => Err("This checkout has several Azure DevOps remotes and none is origin.".into()),
-    }
 }
 
 fn cache<V: Clone>(
@@ -319,6 +179,9 @@ pub struct ReviewerVote {
     /// 10 approved, 5 approved with suggestions, 0 no vote, -5 waiting for
     /// author, -10 rejected.
     pub vote: i8,
+    /// The vote in words ([`vote_label`]), so the UI never shows it as
+    /// colour alone.
+    pub label: &'static str,
     pub required: bool,
 }
 
@@ -414,15 +277,19 @@ fn summary_from(v: &Value, org_url: &str) -> Option<PrSummary> {
         .and_then(Value::as_array)
         .map(|rs| {
             rs.iter()
-                .map(|r| ReviewerVote {
-                    id: str_at(r, &["id"]),
-                    name: str_at(r, &["displayName"]),
-                    vote: r
+                .map(|r| {
+                    let vote = r
                         .get("vote")
                         .and_then(Value::as_i64)
                         .unwrap_or(0)
-                        .clamp(-10, 10) as i8,
-                    required: r.get("isRequired").and_then(Value::as_bool) == Some(true),
+                        .clamp(-10, 10) as i8;
+                    ReviewerVote {
+                        id: str_at(r, &["id"]),
+                        name: str_at(r, &["displayName"]),
+                        vote,
+                        label: vote_label(vote),
+                        required: r.get("isRequired").and_then(Value::as_bool) == Some(true),
+                    }
                 })
                 .collect()
         })
@@ -496,6 +363,33 @@ pub async fn for_source(
 ) -> Result<Vec<PrSummary>, AdoError> {
     let r = format!("refs/heads/{}", strip_heads(source));
     query(client, repo_id, &[("sourceRefName", &r)]).await
+}
+
+/// The repo's active PRs in one list call, without work items.
+pub async fn active(ado: &AdoContext) -> Result<Vec<PrSummary>, AdoError> {
+    let (repo_id, _) = repo_ids(&ado.client, &ado.remote).await?;
+    query(&ado.client, &repo_id, &[]).await
+}
+
+/// Fill the linked work items of each PR whose source branch
+/// `wanted` picks, one call each, in place: a failed call leaves that
+/// PR's list empty, and a caller that gives up midway keeps what was
+/// filled so far.
+pub async fn fill_work_items(
+    ado: &AdoContext,
+    prs: &mut [PrSummary],
+    wanted: impl Fn(&str) -> bool,
+) {
+    let Ok((repo_id, _)) = repo_ids(&ado.client, &ado.remote).await else {
+        return;
+    };
+    for pr in prs {
+        if pr.work_items.is_empty() && wanted(&pr.source) {
+            if let Ok(w) = work_items(&ado.client, &repo_id, pr.id).await {
+                pr.work_items = w;
+            }
+        }
+    }
 }
 
 /// The ids of the work items linked to a PR.
@@ -686,21 +580,82 @@ pub enum CreateOutcome {
     Existing(u32),
 }
 
-impl Serialize for CreateOutcome {
+/// What [`create`] hands the composer: the outcome and, when commits
+/// already on the server carry co-author lines, a one-line note saying
+/// they were left alone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreateResult {
+    pub outcome: CreateOutcome,
+    pub note: Option<String>,
+}
+
+/// The note for co-author lines in commits that were already pushed.
+pub const PUSHED_TRAILERS_NOTE: &str =
+    "Some commits on the server still carry co-author lines; they were left as they are.";
+
+impl Serialize for CreateResult {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
-        let (kind, id, reason) = match self {
+        let (kind, id, reason) = match &self.outcome {
             CreateOutcome::Created(id) => ("created", id, None),
             CreateOutcome::CreatedTaskNotLinked(id, why) => {
                 ("createdTaskNotLinked", id, Some(why.as_str()))
             }
             CreateOutcome::Existing(id) => ("existing", id, None),
         };
-        let mut st = s.serialize_struct("CreateOutcome", 3)?;
+        let mut st = s.serialize_struct("CreateResult", 4)?;
         st.serialize_field("kind", kind)?;
         st.serialize_field("id", id)?;
         st.serialize_field("reason", &reason)?;
+        st.serialize_field("note", &self.note)?;
         st.end()
+    }
+}
+
+/// How long the fetch of the PR target may take before the clean goes
+/// ahead without it.
+const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Fetch `target` from `remote` into its remote-tracking ref, never
+/// asking for a sign-in, and return that ref when it exists afterwards.
+/// A failed or slow fetch is not an error: an earlier fetch may have left
+/// the ref, and without it the clean is bounded by the remotes alone.
+async fn fetch_target(repo: &Path, remote: &str, target: &str) -> Option<String> {
+    let tracking = format!("refs/remotes/{remote}/{target}");
+    let refspec = format!("+refs/heads/{target}:{tracking}");
+    let args = [
+        "-c",
+        "credential.interactive=never",
+        "fetch",
+        "--quiet",
+        "--no-tags",
+        "--end-of-options",
+        remote,
+        &refspec,
+    ];
+    let _ = tokio::time::timeout(FETCH_TIMEOUT, crate::ado::git_out(repo, &args)).await;
+    crate::ado::git_out(
+        repo,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{tracking}^{{commit}}"),
+        ],
+    )
+    .await
+    .ok()
+    .map(|_| tracking)
+}
+
+/// The note when commits between `base` and the pushed `source` still
+/// carry co-author lines. After the clean, any that do were already on
+/// the server before this push.
+fn pushed_trailers_note(repo: &Path, base: &str, remote: &str, source: &str) -> Option<String> {
+    let range = format!("{base}..refs/remotes/{remote}/{source}");
+    match crate::attribution::find_ai_commits(repo, &range) {
+        Ok(found) if !found.is_empty() => Some(PUSHED_TRAILERS_NOTE.to_string()),
+        _ => None,
     }
 }
 
@@ -752,6 +707,7 @@ async fn link_artifact(ctx: &PrCtx, task: u32, artifact: &str) -> Result<(), Ado
         }
     }]);
     let _: Value = ctx
+        .ado
         .client
         .patch_json_patch(&format!("/_apis/wit/workitems/{task}"), &body)
         .await?;
@@ -760,13 +716,14 @@ async fn link_artifact(ctx: &PrCtx, task: u32, artifact: &str) -> Result<(), Ado
 
 /// Link `task` to PR `pr_id` (the Retry for "Created, task not linked").
 pub async fn link_task(ctx: &PrCtx, pr_id: u32, task: u32) -> Result<(), AdoError> {
-    if work_items(&ctx.client, &ctx.repo_id, pr_id)
+    if work_items(&ctx.ado.client, &ctx.repo_id, pr_id)
         .await?
         .contains(&task)
     {
         return Ok(());
     }
     let v: Value = ctx
+        .ado
         .client
         .get(&format!("{}/{pr_id}", pulls_path(&ctx.repo_id)))
         .await?;
@@ -779,15 +736,19 @@ pub async fn link_task(ctx: &PrCtx, pr_id: u32, task: u32) -> Result<(), AdoErro
 }
 
 /// Push `pr.source` and open a pull request for it, never twice:
-/// 1. clean AI trailers from the branch's unpushed commits,
-/// 2. `git push --set-upstream`,
+/// 1. fetch the target, then clean co-author lines and footers from the
+///    branch's unpushed commits (bounded by the target when it is there,
+///    and by the remote-tracking refs either way),
+/// 2. `git push --set-upstream`; pushed commits that still carry
+///    co-author lines give the result its note,
 /// 3. an active PR from the branch already there is returned as `Existing`,
 /// 4. POST the PR with reviewers and the task link,
 /// 5. a create that may have landed (timeout, 409, 5xx) is reconciled by
 ///    listing again, never by posting again,
 /// 6. a task the reply does not show as linked is linked with a PATCH; if
 ///    that fails the PR is still returned, as `CreatedTaskNotLinked`.
-pub async fn create(ctx: &PrCtx, repo_path: &Path, pr: NewPr) -> Result<CreateOutcome, AdoError> {
+pub async fn create(ctx: &PrCtx, pr: NewPr) -> Result<CreateResult, AdoError> {
+    let repo_path = ctx.ado.path.as_path();
     let source = strip_heads(pr.source.trim());
     let target = strip_heads(pr.target.trim());
     if source.is_empty() || target.is_empty() {
@@ -798,22 +759,39 @@ pub async fn create(ctx: &PrCtx, repo_path: &Path, pr: NewPr) -> Result<CreateOu
     if pr.title.trim().is_empty() {
         return Err(AdoError::Local("Add a title".into()));
     }
+    // The target goes into a fetch refspec, so it must be a branch name.
+    crate::ado::naming::validate_branch_name(&target, &[]).map_err(AdoError::Local)?;
 
-    let (repo, remote, src, tgt) = (
+    let base = fetch_target(repo_path, &ctx.ado.remote_name, &target).await;
+    let (repo, remote, src) = (
         repo_path.to_path_buf(),
-        ctx.remote_name.clone(),
+        ctx.ado.remote_name.clone(),
         source.clone(),
-        target.clone(),
     );
-    tokio::task::spawn_blocking(move || -> Result<(), AdoError> {
-        crate::attribution::rewrite_unpushed(&repo, &format!("{remote}/{tgt}"), &src)
+    let note = tokio::task::spawn_blocking(move || -> Result<Option<String>, AdoError> {
+        // Publishing: commits shared with a local upstream are about to be
+        // pushed too, so they are cleaned as well.
+        crate::attribution::rewrite_unpushed(&repo, base.as_deref(), &src, LocalUpstream::Clean)
             .map_err(|e| AdoError::Local(format!("Could not clean the commit messages: {e}")))?;
-        push(&repo, &remote, &src)
+        push(&repo, &remote, &src)?;
+        // Without the target there is no telling the branch's own commits
+        // from the target's history, so no note.
+        Ok(base.and_then(|b| pushed_trailers_note(&repo, &b, &remote, &src)))
     })
     .await
     .map_err(|e| AdoError::Local(e.to_string()))??;
+    let outcome = open(ctx, &source, &target, &pr).await?;
+    Ok(CreateResult { outcome, note })
+}
 
-    if let Some(p) = for_source(&ctx.client, &ctx.repo_id, &source)
+/// Steps 3 to 6 of [`create`], once the branch is on the server.
+async fn open(
+    ctx: &PrCtx,
+    source: &str,
+    target: &str,
+    pr: &NewPr,
+) -> Result<CreateOutcome, AdoError> {
+    if let Some(p) = for_source(&ctx.ado.client, &ctx.repo_id, source)
         .await?
         .first()
     {
@@ -833,10 +811,15 @@ pub async fn create(ctx: &PrCtx, repo_path: &Path, pr: NewPr) -> Result<CreateOu
         body["workItemRefs"] = serde_json::json!([{ "id": task.to_string() }]);
     }
 
-    let reply: Value = match ctx.client.post_json(&pulls_path(&ctx.repo_id), &body).await {
+    let reply: Value = match ctx
+        .ado
+        .client
+        .post_json(&pulls_path(&ctx.repo_id), &body)
+        .await
+    {
         Ok(v) => v,
         Err(e) if ambiguous(&e) => {
-            return match for_source(&ctx.client, &ctx.repo_id, &source).await {
+            return match for_source(&ctx.ado.client, &ctx.repo_id, source).await {
                 Ok(found) if !found.is_empty() => Ok(CreateOutcome::Existing(found[0].id)),
                 _ => Err(e),
             };
@@ -859,7 +842,7 @@ pub async fn create(ctx: &PrCtx, repo_path: &Path, pr: NewPr) -> Result<CreateOu
         let linked = if in_reply {
             true
         } else {
-            match work_items(&ctx.client, &ctx.repo_id, id).await {
+            match work_items(&ctx.ado.client, &ctx.repo_id, id).await {
                 Ok(w) => w.contains(&task),
                 // Unknown: linking blind could add the link twice, so
                 // leave it to Retry.
@@ -888,6 +871,7 @@ pub async fn create(ctx: &PrCtx, repo_path: &Path, pr: NewPr) -> Result<CreateOu
 /// Take a draft out of draft.
 pub async fn publish(ctx: &PrCtx, id: u32) -> Result<(), AdoError> {
     let _: Value = ctx
+        .ado
         .client
         .patch_json(
             &format!("{}/{id}", pulls_path(&ctx.repo_id)),
@@ -903,6 +887,7 @@ pub async fn vote(ctx: &PrCtx, id: u32, vote: i8) -> Result<(), AdoError> {
         return Err(AdoError::Local(format!("{vote} is not a vote")));
     }
     let pr: Value = ctx
+        .ado
         .client
         .get(&format!("{}/{id}", pulls_path(&ctx.repo_id)))
         .await?;
@@ -911,8 +896,9 @@ pub async fn vote(ctx: &PrCtx, id: u32, vote: i8) -> Result<(), AdoError> {
             "Voting opens when the PR is published".into(),
         ));
     }
-    let me = my_id(&ctx.client).await?;
+    let me = my_id(&ctx.ado.client).await?;
     let _: Value = ctx
+        .ado
         .client
         .put_json(
             &format!("{}/{id}/reviewers/{}", pulls_path(&ctx.repo_id), enc(&me)),
@@ -930,6 +916,7 @@ pub async fn reply(ctx: &PrCtx, id: u32, thread: u32, text: &str) -> Result<Comm
         return Err(AdoError::Local("The reply is empty".into()));
     }
     let v: Value = ctx
+        .ado
         .client
         .post_json(
             &format!(
@@ -962,7 +949,11 @@ pub async fn search_identities(ctx: &PrCtx, q: &str) -> Result<Vec<Reviewer>, Ad
     if q.is_empty() {
         return Ok(Vec::new());
     }
-    let v: Value = ctx.client.get(&identities_url(&ctx.vssps_base, q)).await?;
+    let v: Value = ctx
+        .ado
+        .client
+        .get(&identities_url(&ctx.vssps_base, q))
+        .await?;
     Ok(v["value"]
         .as_array()
         .map(|a| {
@@ -994,6 +985,8 @@ mod tests {
     use crate::ado::auth::{Credential, TokenSource};
     use httpmock::prelude::*;
     use serde_json::json;
+    use std::path::PathBuf;
+    use std::sync::Arc;
 
     fn client(s: &MockServer) -> AdoClient {
         AdoClient::new(
@@ -1102,7 +1095,7 @@ mod tests {
         assert_eq!(votes, vec![10, 5, 0, -5, -10]);
         assert!(pr.reviewers[0].required);
         assert!(!pr.reviewers[1].required);
-        let labels: Vec<&str> = votes.iter().map(|v| vote_label(*v)).collect();
+        let labels: Vec<&str> = pr.reviewers.iter().map(|r| r.label).collect();
         assert_eq!(
             labels,
             vec![
@@ -1317,22 +1310,13 @@ mod tests {
     }
 
     fn ctx_for(base: &str, repo: &Path) -> PrCtx {
+        let mut ado = crate::ado::testing::context(base, crate::ado::testing::temp_store());
+        ado.path = repo.to_path_buf();
         PrCtx {
-            client: AdoClient::new(
-                base,
-                Arc::new(TokenSource::fixed(Credential::Bearer("tok".into()))),
-            ),
+            ado,
             repo_id: "r1".into(),
             project_id: "p1".into(),
-            org_url: base.into(),
-            remote_name: "origin".into(),
-            repo_path: repo.to_path_buf(),
             vssps_base: "/vssps/tnt".into(),
-            key: RepoKey {
-                org: "tnt".into(),
-                project: "Platform".into(),
-                repo: "api".into(),
-            },
         }
     }
 
@@ -1376,10 +1360,16 @@ mod tests {
             t.status(201).json_body(json!({"pullRequestId": 5}));
         });
         assert!(!remote_has(&r.bare, "ja/fix"));
-        let out = create(&ctx_for(&s.base_url(), &r.work), &r.work, new_pr(None, "x"))
+        let out = create(&ctx_for(&s.base_url(), &r.work), new_pr(None, "x"))
             .await
             .unwrap();
-        assert_eq!(out, CreateOutcome::Created(5));
+        assert_eq!(
+            out,
+            CreateResult {
+                outcome: CreateOutcome::Created(5),
+                note: None
+            }
+        );
         assert!(remote_has(&r.bare, "ja/fix"));
         assert_eq!(
             git(&r.work, &["rev-parse", "--abbrev-ref", "ja/fix@{upstream}"]),
@@ -1400,10 +1390,12 @@ mod tests {
             t.status(201).json_body(json!({"pullRequestId": 5}));
         });
         let mut ctx = ctx_for(&s.base_url(), &r.work);
-        ctx.remote_name = "nowhere".into();
-        let e = create(&ctx, &r.work, new_pr(None, "x")).await.unwrap_err();
+        ctx.ado.remote_name = "nowhere".into();
+        let e = create(&ctx, new_pr(None, "x")).await.unwrap_err();
+        // The push itself failed: the fetch of the target could not run
+        // either, so the clean went ahead on the remote refs alone.
         assert!(
-            matches!(&e, AdoError::Local(m) if m.contains("git push")),
+            matches!(&e, AdoError::Local(m) if m.starts_with("The git push of ja/fix to nowhere failed")),
             "{e}"
         );
         assert!(!e.user_message().contains("Azure DevOps"), "{e}");
@@ -1427,10 +1419,10 @@ mod tests {
                 .path("/_apis/git/repositories/r1/pullrequests");
             t.status(201).json_body(json!({"pullRequestId": 5}));
         });
-        let out = create(&ctx_for(&s.base_url(), &r.work), &r.work, new_pr(None, "x"))
+        let out = create(&ctx_for(&s.base_url(), &r.work), new_pr(None, "x"))
             .await
             .unwrap();
-        assert_eq!(out, CreateOutcome::Existing(77));
+        assert_eq!(out.outcome, CreateOutcome::Existing(77));
         assert_eq!(post.hits(), 0);
     }
 
@@ -1498,10 +1490,10 @@ mod tests {
             Some(json!({"value": [pr_json(88, true, &[])]})),
         ])
         .await;
-        let out = create(&ctx_for(&base, &r.work), &r.work, new_pr(None, "x"))
+        let out = create(&ctx_for(&base, &r.work), new_pr(None, "x"))
             .await
             .unwrap();
-        assert_eq!(out, CreateOutcome::Existing(88));
+        assert_eq!(out.outcome, CreateOutcome::Existing(88));
         let seen = server.await.unwrap();
         assert_eq!(seen.len(), 3);
         assert_eq!(seen.iter().filter(|l| l.starts_with("POST ")).count(), 1);
@@ -1525,14 +1517,10 @@ mod tests {
                 .path("/_apis/wit/workitems/42");
             t.status(200).json_body(json!({}));
         });
-        let out = create(
-            &ctx_for(&s.base_url(), &r.work),
-            &r.work,
-            new_pr(Some(42), "x"),
-        )
-        .await
-        .unwrap();
-        assert_eq!(out, CreateOutcome::Created(6));
+        let out = create(&ctx_for(&s.base_url(), &r.work), new_pr(Some(42), "x"))
+            .await
+            .unwrap();
+        assert_eq!(out.outcome, CreateOutcome::Created(6));
         post.assert();
         assert_eq!(patch.hits(), 0);
     }
@@ -1570,16 +1558,12 @@ mod tests {
                 }]));
             t.status(400).json_body(json!({"message": "link refused"}));
         });
-        let out = create(
-            &ctx_for(&s.base_url(), &r.work),
-            &r.work,
-            new_pr(Some(42), "x"),
-        )
-        .await
-        .unwrap();
+        let out = create(&ctx_for(&s.base_url(), &r.work), new_pr(Some(42), "x"))
+            .await
+            .unwrap();
         patch.assert();
         assert!(
-            matches!(&out, CreateOutcome::CreatedTaskNotLinked(9, why) if why.contains("link refused")),
+            matches!(&out.outcome, CreateOutcome::CreatedTaskNotLinked(9, why) if why.contains("link refused")),
             "{out:?}"
         );
     }
@@ -1597,25 +1581,202 @@ mod tests {
         });
         let desc =
             "Summary\n\n\u{1f916} Generated with [Claude Code](https://claude.com/claude-code)\n";
-        create(
-            &ctx_for(&s.base_url(), &r.work),
-            &r.work,
-            new_pr(None, desc),
-        )
-        .await
-        .unwrap();
+        create(&ctx_for(&s.base_url(), &r.work), new_pr(None, desc))
+            .await
+            .unwrap();
         post.assert();
     }
 
     #[test]
-    fn create_outcome_serialises_with_a_kind() {
+    fn create_result_serialises_with_a_kind() {
         assert_eq!(
-            serde_json::to_value(CreateOutcome::CreatedTaskNotLinked(4, "no".into())).unwrap(),
-            json!({"kind": "createdTaskNotLinked", "id": 4, "reason": "no"})
+            serde_json::to_value(CreateResult {
+                outcome: CreateOutcome::CreatedTaskNotLinked(4, "no".into()),
+                note: None
+            })
+            .unwrap(),
+            json!({"kind": "createdTaskNotLinked", "id": 4, "reason": "no", "note": null})
         );
         assert_eq!(
-            serde_json::to_value(CreateOutcome::Existing(2)).unwrap(),
-            json!({"kind": "existing", "id": 2, "reason": null})
+            serde_json::to_value(CreateResult {
+                outcome: CreateOutcome::Existing(2),
+                note: Some(PUSHED_TRAILERS_NOTE.into())
+            })
+            .unwrap(),
+            json!({"kind": "existing", "id": 2, "reason": null, "note": PUSHED_TRAILERS_NOTE})
+        );
+    }
+
+    fn mock_post(s: &MockServer, id: u32) -> httpmock::Mock<'_> {
+        s.mock(|w, t| {
+            w.method(POST)
+                .path("/_apis/git/repositories/r1/pullrequests");
+            t.status(201).json_body(json!({ "pullRequestId": id }));
+        })
+    }
+
+    #[tokio::test]
+    async fn create_fetches_the_target_before_the_clean() {
+        let r = temp_repo();
+        // A co-author commit reached the server's main, and ja/fix shares
+        // it. Locally nothing says so: the tracking ref for main is gone,
+        // and the only remote ref left predates it. Cleaned before the
+        // fetch, that shared commit would be rewritten.
+        git(
+            &r.work,
+            &[
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "Shared\n\nCo-authored-by: Sam Lee <sam@tnt.co.nz>",
+            ],
+        );
+        let shared = git(&r.work, &["rev-parse", "HEAD"]);
+        git(&r.work, &["push", "-q", "origin", "HEAD:refs/heads/main"]);
+        git(&r.work, &["update-ref", "refs/remotes/origin/old", "main"]);
+        git(&r.work, &["update-ref", "-d", "refs/remotes/origin/main"]);
+        let server_main = git(&r.bare, &["rev-parse", "main"]);
+        assert_eq!(server_main, shared);
+        git(
+            &r.work,
+            &[
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "More\n\nCo-authored-by: Sam Lee <sam@tnt.co.nz>",
+            ],
+        );
+
+        let s = MockServer::start();
+        mock_no_existing(&s);
+        let post = mock_post(&s, 5);
+        let out = create(&ctx_for(&s.base_url(), &r.work), new_pr(None, "x"))
+            .await
+            .unwrap();
+        post.assert();
+        assert_eq!(out.outcome, CreateOutcome::Created(5));
+        assert_eq!(out.note, None);
+        assert_eq!(git(&r.work, &["rev-parse", "origin/main"]), server_main);
+        assert_eq!(
+            git(&r.bare, &["log", "-1", "--format=%B", "ja/fix"]),
+            "More"
+        );
+        // The shared commit kept its SHA: the fetch came first.
+        assert_eq!(git(&r.bare, &["rev-parse", "ja/fix~1"]), shared);
+    }
+
+    #[tokio::test]
+    async fn a_publish_cleans_commits_from_a_local_upstream() {
+        let r = temp_repo();
+        // ja/fix tracks the LOCAL main, which holds an unpushed co-author
+        // commit that ja/fix is about to publish.
+        git(&r.work, &["checkout", "-q", "main"]);
+        git(
+            &r.work,
+            &[
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "Local\n\nCo-authored-by: Sam Lee <sam@tnt.co.nz>",
+            ],
+        );
+        let local_main = git(&r.work, &["rev-parse", "main"]);
+        git(&r.work, &["checkout", "-q", "-B", "ja/fix", "main"]);
+        git(
+            &r.work,
+            &["branch", "-q", "--set-upstream-to=main", "ja/fix"],
+        );
+        git(&r.work, &["commit", "-q", "--allow-empty", "-m", "Mine"]);
+
+        let s = MockServer::start();
+        mock_no_existing(&s);
+        mock_post(&s, 8);
+        let out = create(&ctx_for(&s.base_url(), &r.work), new_pr(None, "x"))
+            .await
+            .unwrap();
+        assert_eq!(out.outcome, CreateOutcome::Created(8));
+        // Cleaned on the way out, so no false "already on the server".
+        assert_eq!(out.note, None);
+        assert_eq!(
+            git(&r.bare, &["log", "-1", "--format=%B", "ja/fix~1"]),
+            "Local"
+        );
+        // The local upstream itself never moved.
+        assert_eq!(git(&r.work, &["rev-parse", "main"]), local_main);
+    }
+
+    #[tokio::test]
+    async fn a_bad_target_is_refused_before_any_git() {
+        let r = temp_repo();
+        let s = MockServer::start();
+        let list = mock_no_existing(&s);
+        let mut pr = new_pr(None, "x");
+        pr.target = "main:refs/heads/evil".into();
+        let e = create(&ctx_for(&s.base_url(), &r.work), pr)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&e, AdoError::Local(m) if m.contains("not a valid branch name")),
+            "{e}"
+        );
+        assert_eq!(list.hits(), 0);
+        assert!(!remote_has(&r.bare, "ja/fix"));
+    }
+
+    #[tokio::test]
+    async fn a_target_found_nowhere_still_pushes_and_posts() {
+        let r = temp_repo();
+        let s = MockServer::start();
+        mock_no_existing(&s);
+        let post = mock_post(&s, 6);
+        let mut pr = new_pr(None, "x");
+        pr.target = "release/never".into();
+        let out = create(&ctx_for(&s.base_url(), &r.work), pr).await.unwrap();
+        post.assert();
+        assert_eq!(out.outcome, CreateOutcome::Created(6));
+        assert_eq!(out.note, None);
+        assert!(remote_has(&r.bare, "ja/fix"));
+    }
+
+    #[tokio::test]
+    async fn co_author_lines_already_pushed_are_left_with_a_note() {
+        let r = temp_repo();
+        // A commit with a co-author line reached the server before Kete
+        // saw the branch; a plain one follows locally.
+        git(
+            &r.work,
+            &[
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "Early\n\nCo-authored-by: Sam Lee <sam@tnt.co.nz>",
+            ],
+        );
+        git(&r.work, &["push", "-q", "-u", "origin", "ja/fix"]);
+        let pushed = git(&r.bare, &["rev-parse", "ja/fix"]);
+        git(&r.work, &["commit", "-q", "--allow-empty", "-m", "Later"]);
+
+        let s = MockServer::start();
+        mock_no_existing(&s);
+        mock_post(&s, 7);
+        let out = create(&ctx_for(&s.base_url(), &r.work), new_pr(None, "x"))
+            .await
+            .unwrap();
+        assert_eq!(out.outcome, CreateOutcome::Created(7));
+        assert_eq!(out.note.as_deref(), Some(PUSHED_TRAILERS_NOTE));
+        assert_eq!(
+            PUSHED_TRAILERS_NOTE,
+            "Some commits on the server still carry co-author lines; they were left as they are."
+        );
+        // The pushed commit is exactly as it was, under the new tip.
+        assert_eq!(git(&r.bare, &["rev-parse", "ja/fix~1"]), pushed);
+        assert_eq!(
+            git(&r.bare, &["log", "-1", "--format=%B", "ja/fix"]),
+            "Later"
         );
     }
 
@@ -1723,7 +1884,7 @@ mod tests {
         let list = mock_no_existing(&s);
         let mut pr = new_pr(None, "x");
         pr.title = "  ".into();
-        let e = create(&ctx_for(&s.base_url(), &r.work), &r.work, pr)
+        let e = create(&ctx_for(&s.base_url(), &r.work), pr)
             .await
             .unwrap_err();
         assert_eq!(e, AdoError::Local("Add a title".into()));
@@ -1752,15 +1913,11 @@ mod tests {
                 .path("/_apis/wit/workitems/42");
             t.status(200).json_body(json!({}));
         });
-        let out = create(
-            &ctx_for(&s.base_url(), &r.work),
-            &r.work,
-            new_pr(Some(42), "x"),
-        )
-        .await
-        .unwrap();
+        let out = create(&ctx_for(&s.base_url(), &r.work), new_pr(Some(42), "x"))
+            .await
+            .unwrap();
         assert!(
-            matches!(&out, CreateOutcome::CreatedTaskNotLinked(11, why) if why.contains("busy")),
+            matches!(&out.outcome, CreateOutcome::CreatedTaskNotLinked(11, why) if why.contains("busy")),
             "{out:?}"
         );
         assert_eq!(patch.hits(), 0);

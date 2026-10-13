@@ -10,9 +10,8 @@ mod attribution;
 mod daemon;
 mod git;
 
-use ado::auth::TokenSource;
-use ado::prs::{self, PrState};
-use ado::store::AdoStore;
+use ado::prs::{self, PrCtx};
+use ado::{AdoContext, AdoState};
 use daemon::{Client, Model, PtyEvent};
 use nebula_core::{AgentId, AgentKind, ClientRequest, EntityId, SessionRef, WorktreeId};
 use serde::{Deserialize, Serialize};
@@ -430,12 +429,12 @@ struct PrDetail {
 #[tauri::command]
 async fn ado_prs(
     client: State<'_, Arc<Client>>,
-    ado: State<'_, Arc<PrState>>,
+    ado: State<'_, AdoState>,
     worktree: String,
 ) -> Res<PrLists> {
-    let ctx = ado.ctx(&worktree_path(&client, &worktree)?).await?;
-    let me = prs::my_id(&ctx.client).await.map_err(err)?;
-    let (mine, review) = prs::list(&ctx.client, &ctx.repo_id, &me)
+    let ctx = PrCtx::for_command(&ado, &client, &worktree).await?;
+    let me = prs::my_id(&ctx.ado.client).await.map_err(err)?;
+    let (mine, review) = prs::list(&ctx.ado.client, &ctx.repo_id, &me)
         .await
         .map_err(err)?;
     Ok(PrLists { mine, review })
@@ -444,13 +443,15 @@ async fn ado_prs(
 #[tauri::command]
 async fn ado_pr_detail(
     client: State<'_, Arc<Client>>,
-    ado: State<'_, Arc<PrState>>,
+    ado: State<'_, AdoState>,
     worktree: String,
     id: u32,
 ) -> Res<PrDetail> {
-    let ctx = ado.ctx(&worktree_path(&client, &worktree)?).await?;
-    let (pr, threads) = prs::get(&ctx.client, &ctx.repo_id, id).await.map_err(err)?;
-    let policies = prs::policies(&ctx.client, &ctx.project_id, id, pr.is_draft)
+    let ctx = PrCtx::for_command(&ado, &client, &worktree).await?;
+    let (pr, threads) = prs::get(&ctx.ado.client, &ctx.repo_id, id)
+        .await
+        .map_err(err)?;
+    let policies = prs::policies(&ctx.ado.client, &ctx.project_id, id, pr.is_draft)
         .await
         .map_err(err)?;
     Ok(PrDetail {
@@ -463,16 +464,15 @@ async fn ado_pr_detail(
 #[tauri::command]
 async fn ado_create_pr(
     client: State<'_, Arc<Client>>,
-    ado: State<'_, Arc<PrState>>,
+    ado: State<'_, AdoState>,
     worktree: String,
     pr: prs::NewPr,
-) -> Res<prs::CreateOutcome> {
-    let ctx = ado.ctx(&worktree_path(&client, &worktree)?).await?;
+) -> Res<prs::CreateResult> {
+    let ctx = PrCtx::for_command(&ado, &client, &worktree).await?;
     let reviewers = pr.reviewers.clone();
-    let repo = ctx.repo_path.clone();
-    let out = prs::create(&ctx, &repo, pr).await.map_err(err)?;
+    let out = prs::create(&ctx, pr).await.map_err(err)?;
     for r in reviewers.into_iter().rev() {
-        ado.store.remember_reviewer(&ctx.key, r);
+        ctx.ado.store.remember_reviewer(&ctx.ado.key, r);
     }
     Ok(out)
 }
@@ -481,103 +481,91 @@ async fn ado_create_pr(
 #[tauri::command]
 async fn ado_link_pr_task(
     client: State<'_, Arc<Client>>,
-    ado: State<'_, Arc<PrState>>,
+    ado: State<'_, AdoState>,
     worktree: String,
     id: u32,
     task: u32,
 ) -> Res<()> {
-    let ctx = ado.ctx(&worktree_path(&client, &worktree)?).await?;
+    let ctx = PrCtx::for_command(&ado, &client, &worktree).await?;
     prs::link_task(&ctx, id, task).await.map_err(err)
 }
 
 #[tauri::command]
 async fn ado_publish_pr(
     client: State<'_, Arc<Client>>,
-    ado: State<'_, Arc<PrState>>,
+    ado: State<'_, AdoState>,
     worktree: String,
     id: u32,
 ) -> Res<()> {
-    let ctx = ado.ctx(&worktree_path(&client, &worktree)?).await?;
+    let ctx = PrCtx::for_command(&ado, &client, &worktree).await?;
     prs::publish(&ctx, id).await.map_err(err)
 }
 
 #[tauri::command]
 async fn ado_vote(
     client: State<'_, Arc<Client>>,
-    ado: State<'_, Arc<PrState>>,
+    ado: State<'_, AdoState>,
     worktree: String,
     id: u32,
     vote: i8,
 ) -> Res<()> {
-    let ctx = ado.ctx(&worktree_path(&client, &worktree)?).await?;
+    let ctx = PrCtx::for_command(&ado, &client, &worktree).await?;
     prs::vote(&ctx, id, vote).await.map_err(err)
 }
 
 #[tauri::command]
 async fn ado_reply(
     client: State<'_, Arc<Client>>,
-    ado: State<'_, Arc<PrState>>,
+    ado: State<'_, AdoState>,
     worktree: String,
     id: u32,
     thread: u32,
     text: String,
 ) -> Res<prs::Comment> {
-    let ctx = ado.ctx(&worktree_path(&client, &worktree)?).await?;
+    let ctx = PrCtx::for_command(&ado, &client, &worktree).await?;
     prs::reply(&ctx, id, thread, &text).await.map_err(err)
 }
 
 #[tauri::command]
 async fn ado_search_identities(
     client: State<'_, Arc<Client>>,
-    ado: State<'_, Arc<PrState>>,
+    ado: State<'_, AdoState>,
     worktree: String,
     q: String,
 ) -> Res<Vec<ado::store::Reviewer>> {
-    let ctx = ado.ctx(&worktree_path(&client, &worktree)?).await?;
+    let ctx = PrCtx::for_command(&ado, &client, &worktree).await?;
     prs::search_identities(&ctx, &q).await.map_err(err)
 }
 
-/// Reviewers picked before in this repo, newest first. Local only.
+/// Reviewers picked before in this repo, newest first. Local only: a
+/// checkout without an ADO remote has none.
 #[tauri::command]
 async fn ado_recent_reviewers(
     client: State<'_, Arc<Client>>,
-    ado: State<'_, Arc<PrState>>,
+    ado: State<'_, AdoState>,
     worktree: String,
 ) -> Res<Vec<ado::store::Reviewer>> {
-    let path = worktree_path(&client, &worktree)?;
-    let found = tauri::async_runtime::spawn_blocking(move || prs::find_ado_remote(&path))
-        .await
-        .map_err(err)??;
-    let Some((_, r)) = found else {
+    let path = ado::checkout_path(&client, &worktree)?;
+    let Some(ctx) = ado.silent_context(&path).await? else {
         return Ok(Vec::new());
     };
-    let key = ado::store::RepoKey {
-        org: r.org,
-        project: r.project,
-        repo: r.repo,
-    };
-    Ok(ado.store.read_repo(&key, |s| s.recent_reviewers.clone()))
+    Ok(ctx
+        .store
+        .read_repo(&ctx.key, |s| s.recent_reviewers.clone()))
 }
 
-/// The open ADO pull request from `branch`, for the PR open lane. A
-/// sign-in failure pauses the org's poll (see [`PrState`]).
-async fn ado_open_pr(
-    ado: &PrState,
-    path: PathBuf,
-    remote_name: String,
-    remote: ado::remote::AdoRemote,
-    branch: &str,
-) -> Option<daemon::PrInfo> {
-    if ado.is_paused(&remote.org_url) {
+/// The open ADO pull request from `branch`, for the PR open lane. Its
+/// client is silent: the poll never opens a sign-in window, and finds a
+/// token once a user-initiated command has signed in. A sign-in failure
+/// pauses the org's poll until a command works for it again.
+async fn ado_open_pr(ado: &AdoState, ctx: AdoContext, branch: &str) -> Option<daemon::PrInfo> {
+    let org = ctx.remote.org_url.clone();
+    if ado.is_paused(&org) {
         return None;
     }
-    let org = remote.org_url.clone();
     let res = async {
-        // Silent: the poll never opens a sign-in window. It finds a token
-        // once a user-initiated command has signed in.
-        let ctx =
-            prs::PrCtx::from_remote_silent(&path, remote_name, remote, ado.tokens.clone()).await?;
-        prs::for_source(&ctx.client, &ctx.repo_id, branch).await
+        let ctx = PrCtx::new(ctx).await?;
+        prs::for_source(&ctx.ado.client, &ctx.repo_id, branch).await
     }
     .await;
     match res {
@@ -599,7 +587,8 @@ async fn ado_open_pr(
 /// Ask for each worktree's open pull request, now and then, for the PR
 /// open lane: Azure DevOps for ADO remotes, `gh` for the rest. Only
 /// checkouts with agent sessions are asked.
-async fn poll_prs(client: Arc<Client>, ado: Arc<PrState>) {
+async fn poll_prs(client: Arc<Client>, app: tauri::AppHandle) {
+    let ado = app.state::<AdoState>();
     let have_gh = tauri::async_runtime::spawn_blocking(git::have_gh)
         .await
         .unwrap_or(false);
@@ -613,14 +602,9 @@ async fn poll_prs(client: Arc<Client>, ado: Arc<PrState>) {
             .collect();
         let mut out = HashMap::new();
         for (id, path, branch) in wanted {
-            let p = path.clone();
-            let remote = tauri::async_runtime::spawn_blocking(move || prs::find_ado_remote(&p))
-                .await
-                .ok()
-                .and_then(Result::ok)
-                .flatten();
-            let pr = match remote {
-                Some((name, remote)) => ado_open_pr(&ado, path, name, remote, &branch).await,
+            // Several ADO remotes and none of them origin reads as none.
+            let pr = match ado.silent_context(&path).await.ok().flatten() {
+                Some(ctx) => ado_open_pr(&ado, ctx, &branch).await,
                 None if have_gh => {
                     tauri::async_runtime::spawn_blocking(move || git::open_pr(&path, &branch))
                         .await
@@ -653,20 +637,17 @@ fn main() {
     // window has no console to say so on; `kete` says it when it moves them.
     let _ = nebula_core::paths::migrate_legacy_dirs();
     let client = Client::new();
-    // One token source and one ado.json store for every ADO command.
-    let ado_tokens = Arc::new(TokenSource::system());
-    let ado_store = Arc::new(AdoStore::open(AdoStore::default_path()));
-    let ado_prs_state = Arc::new(PrState::new(ado_tokens.clone(), ado_store.clone()));
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(client.clone())
-        .manage(ado_prs_state.clone())
-        .manage(ado::AdoState::new(ado_store, ado_tokens))
+        // One token source, one ado.json store and one set of clients for
+        // every ADO command and the PR poll.
+        .manage(AdoState::system())
         .setup(move |app| {
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(daemon::run(client.clone()));
-            tauri::async_runtime::spawn(emit_state(handle, client.clone()));
-            tauri::async_runtime::spawn(poll_prs(client.clone(), ado_prs_state.clone()));
+            tauri::async_runtime::spawn(emit_state(handle.clone(), client.clone()));
+            tauri::async_runtime::spawn(poll_prs(client.clone(), handle));
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.set_title("kete");
             }
