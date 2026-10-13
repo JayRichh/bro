@@ -372,11 +372,8 @@ async fn ado_pr_detail(
     id: u32,
 ) -> Res<PrDetail> {
     let ctx = ado.ctx(&worktree_path(&client, &worktree)?).await?;
-    let pr = prs::get(&ctx.client, &ctx.repo_id, id).await.map_err(err)?;
+    let (pr, threads) = prs::get(&ctx.client, &ctx.repo_id, id).await.map_err(err)?;
     let policies = prs::policies(&ctx.client, &ctx.project_id, id, pr.is_draft)
-        .await
-        .map_err(err)?;
-    let threads = prs::threads(&ctx.client, &ctx.repo_id, id)
         .await
         .map_err(err)?;
     Ok(PrDetail {
@@ -499,7 +496,10 @@ async fn ado_open_pr(
     }
     let org = remote.org_url.clone();
     let res = async {
-        let ctx = prs::PrCtx::from_remote(&path, remote_name, remote, ado.tokens.clone()).await?;
+        // Silent: the poll never opens a sign-in window. It finds a token
+        // once a user-initiated command has signed in.
+        let ctx =
+            prs::PrCtx::from_remote_silent(&path, remote_name, remote, ado.tokens.clone()).await?;
         prs::for_source(&ctx.client, &ctx.repo_id, branch).await
     }
     .await;

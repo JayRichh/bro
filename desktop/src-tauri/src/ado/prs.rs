@@ -1,6 +1,6 @@
 //! Azure DevOps pull requests: lists, votes, policies and threads.
 
-use crate::ado::auth::TokenSource;
+use crate::ado::auth::{AuthError, TokenSource};
 use crate::ado::client::{AdoClient, AdoError};
 use crate::ado::remote::{parse_remote, AdoRemote};
 use crate::ado::store::{AdoStore, RepoKey, Reviewer};
@@ -40,8 +40,8 @@ impl PrCtx {
         let p = path.to_path_buf();
         let found = tokio::task::spawn_blocking(move || find_ado_remote(&p))
             .await
-            .map_err(|e| AdoError::Network(e.to_string()))?
-            .map_err(AdoError::Conflict)?;
+            .map_err(|e| AdoError::Local(e.to_string()))?
+            .map_err(AdoError::Local)?;
         let Some((remote_name, remote)) = found else {
             return Ok(None);
         };
@@ -57,7 +57,27 @@ impl PrCtx {
         remote: AdoRemote,
         tokens: Arc<TokenSource>,
     ) -> Result<PrCtx, AdoError> {
-        let client = AdoClient::new(&remote.org_url, tokens);
+        Self::build(path, remote_name, remote, maker(tokens, false)).await
+    }
+
+    /// As [`from_remote`](Self::from_remote), but its client never opens a
+    /// sign-in window: for the background PR poll.
+    pub async fn from_remote_silent(
+        path: &Path,
+        remote_name: String,
+        remote: AdoRemote,
+        tokens: Arc<TokenSource>,
+    ) -> Result<PrCtx, AdoError> {
+        Self::build(path, remote_name, remote, maker(tokens, true)).await
+    }
+
+    async fn build(
+        path: &Path,
+        remote_name: String,
+        remote: AdoRemote,
+        make: impl FnOnce(&str) -> AdoClient,
+    ) -> Result<PrCtx, AdoError> {
+        let client = make(&remote.org_url);
         let (repo_id, project_id) = repo_ids(&client, &remote).await?;
         Ok(PrCtx {
             vssps_base: vssps_base(&remote.org_url)
@@ -131,6 +151,17 @@ impl PrState {
 /// keep asking for.
 pub fn is_auth_error(e: &AdoError) -> bool {
     matches!(e, AdoError::Auth(_) | AdoError::Unauthorized)
+}
+
+fn maker(tokens: Arc<TokenSource>, silent: bool) -> impl FnOnce(&str) -> AdoClient {
+    move |org_url| {
+        let c = AdoClient::new(org_url, tokens);
+        if silent {
+            c.silent()
+        } else {
+            c
+        }
+    }
 }
 
 /// The identity search host for an org URL: `dev.azure.com/{org}` and
@@ -245,10 +276,7 @@ pub async fn my_id(client: &AdoClient) -> Result<String, AdoError> {
         .await?;
     let id = str_at(&v, &["authenticatedUser", "id"]);
     if id.is_empty() {
-        return Err(AdoError::Http(
-            200,
-            "no signed-in user in connectionData".into(),
-        ));
+        return Err(AdoError::Auth(AuthError::NoCredential));
     }
     cache(&MY_IDS).lock().unwrap().insert(org, id.clone());
     Ok(id)
@@ -486,10 +514,16 @@ pub async fn work_items(
 }
 
 /// Fill in work items and the thread count.
-async fn hydrate(client: &AdoClient, repo_id: &str, pr: &mut PrSummary) -> Result<(), AdoError> {
+/// Fill in work items and the thread count, handing back the threads.
+async fn hydrate(
+    client: &AdoClient,
+    repo_id: &str,
+    pr: &mut PrSummary,
+) -> Result<Vec<Thread>, AdoError> {
     pr.work_items = work_items(client, repo_id, pr.id).await?;
-    pr.threads = threads(client, repo_id, pr.id).await?.len() as u32;
-    Ok(())
+    let ts = threads(client, repo_id, pr.id).await?;
+    pr.threads = ts.len() as u32;
+    Ok(ts)
 }
 
 /// My active PRs (created by `mine`) and the active ones I review.
@@ -506,14 +540,18 @@ pub async fn list(
     Ok((created, review))
 }
 
-/// One PR, hydrated.
-pub async fn get(client: &AdoClient, repo_id: &str, pr_id: u32) -> Result<PrSummary, AdoError> {
+/// One PR, hydrated, with its threads (fetched once).
+pub async fn get(
+    client: &AdoClient,
+    repo_id: &str,
+    pr_id: u32,
+) -> Result<(PrSummary, Vec<Thread>), AdoError> {
     let v: Value = client
         .get(&format!("{}/{pr_id}", pulls_path(repo_id)))
         .await?;
     let mut pr = summary_from(&v, client.org_url()).ok_or(AdoError::NotFound)?;
-    hydrate(client, repo_id, &mut pr).await?;
-    Ok(pr)
+    let ts = hydrate(client, repo_id, &mut pr).await?;
+    Ok((pr, ts))
 }
 
 /// The server's policy evaluations for a PR. While the PR is a draft
@@ -673,7 +711,7 @@ fn push(repo: &Path, remote: &str, source: &str) -> Result<(), AdoError> {
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .output()
-        .map_err(|e| AdoError::Network(format!("could not run git: {e}")))?;
+        .map_err(|e| AdoError::Local(format!("Could not run git: {e}")))?;
     if out.status.success() {
         return Ok(());
     }
@@ -684,8 +722,8 @@ fn push(repo: &Path, remote: &str, source: &str) -> Result<(), AdoError> {
         .find(|l| l.starts_with("error:") || l.starts_with("fatal:") || l.starts_with('!'))
         .or_else(|| stderr.lines().map(str::trim).find(|l| !l.is_empty()))
         .unwrap_or("unknown error");
-    Err(AdoError::Conflict(format!(
-        "git push of {source} to {remote} failed: {why}"
+    Err(AdoError::Local(format!(
+        "The git push of {source} to {remote} failed: {why}"
     )))
 }
 
@@ -753,9 +791,12 @@ pub async fn create(ctx: &PrCtx, repo_path: &Path, pr: NewPr) -> Result<CreateOu
     let source = strip_heads(pr.source.trim());
     let target = strip_heads(pr.target.trim());
     if source.is_empty() || target.is_empty() {
-        return Err(AdoError::Conflict(
-            "a pull request needs a source and a target branch".into(),
+        return Err(AdoError::Local(
+            "A pull request needs a source and a target branch.".into(),
         ));
+    }
+    if pr.title.trim().is_empty() {
+        return Err(AdoError::Local("Add a title".into()));
     }
 
     let (repo, remote, src, tgt) = (
@@ -766,11 +807,11 @@ pub async fn create(ctx: &PrCtx, repo_path: &Path, pr: NewPr) -> Result<CreateOu
     );
     tokio::task::spawn_blocking(move || -> Result<(), AdoError> {
         crate::attribution::rewrite_unpushed(&repo, &format!("{remote}/{tgt}"), &src)
-            .map_err(|e| AdoError::Conflict(format!("could not clean the commit messages: {e}")))?;
+            .map_err(|e| AdoError::Local(format!("Could not clean the commit messages: {e}")))?;
         push(&repo, &remote, &src)
     })
     .await
-    .map_err(|e| AdoError::Network(e.to_string()))??;
+    .map_err(|e| AdoError::Local(e.to_string()))??;
 
     if let Some(p) = for_source(&ctx.client, &ctx.repo_id, &source)
         .await?
@@ -815,10 +856,21 @@ pub async fn create(ctx: &PrCtx, repo_path: &Path, pr: NewPr) -> Result<CreateOu
             .is_some_and(|w| w.iter().filter_map(work_item_id).any(|w| w == task));
         // The create reply may not echo workItemRefs; ask before linking,
         // so an existing link is never added twice.
-        let linked = in_reply
-            || work_items(&ctx.client, &ctx.repo_id, id)
-                .await
-                .is_ok_and(|w| w.contains(&task));
+        let linked = if in_reply {
+            true
+        } else {
+            match work_items(&ctx.client, &ctx.repo_id, id).await {
+                Ok(w) => w.contains(&task),
+                // Unknown: linking blind could add the link twice, so
+                // leave it to Retry.
+                Err(e) => {
+                    return Ok(CreateOutcome::CreatedTaskNotLinked(
+                        id,
+                        format!("Could not check the task link: {}", e.user_message()),
+                    ))
+                }
+            }
+        };
         if !linked {
             let artifact = reply
                 .get("artifactId")
@@ -848,7 +900,16 @@ pub async fn publish(ctx: &PrCtx, id: u32) -> Result<(), AdoError> {
 /// Vote on a PR as me: 10, 5, 0, -5 or -10.
 pub async fn vote(ctx: &PrCtx, id: u32, vote: i8) -> Result<(), AdoError> {
     if ![10, 5, 0, -5, -10].contains(&vote) {
-        return Err(AdoError::Conflict(format!("{vote} is not a vote")));
+        return Err(AdoError::Local(format!("{vote} is not a vote")));
+    }
+    let pr: Value = ctx
+        .client
+        .get(&format!("{}/{id}", pulls_path(&ctx.repo_id)))
+        .await?;
+    if pr.get("isDraft").and_then(Value::as_bool) == Some(true) {
+        return Err(AdoError::Local(
+            "Voting opens when the PR is published".into(),
+        ));
     }
     let me = my_id(&ctx.client).await?;
     let _: Value = ctx
@@ -866,7 +927,7 @@ pub async fn reply(ctx: &PrCtx, id: u32, thread: u32, text: &str) -> Result<Comm
     let (text, _) = strip_ai_trailers(text);
     let text = text.trim_end();
     if text.is_empty() {
-        return Err(AdoError::Conflict("the reply is empty".into()));
+        return Err(AdoError::Local("The reply is empty".into()));
     }
     let v: Value = ctx
         .client
@@ -1028,7 +1089,7 @@ mod tests {
                 .path("/_apis/git/repositories/r1/pullrequests/7/threads");
             t.status(200).json_body(json!({"value":[]}));
         });
-        let pr = get(&client(&s), "r1", 7).await.unwrap();
+        let (pr, _) = get(&client(&s), "r1", 7).await.unwrap();
         wi.assert();
         assert_eq!(pr.work_items, vec![42, 43]);
     }
@@ -1341,7 +1402,11 @@ mod tests {
         let mut ctx = ctx_for(&s.base_url(), &r.work);
         ctx.remote_name = "nowhere".into();
         let e = create(&ctx, &r.work, new_pr(None, "x")).await.unwrap_err();
-        assert!(e.user_message().contains("git push"), "{e}");
+        assert!(
+            matches!(&e, AdoError::Local(m) if m.contains("git push")),
+            "{e}"
+        );
+        assert!(!e.user_message().contains("Azure DevOps"), "{e}");
         assert_eq!(list.hits(), 0);
         assert_eq!(post.hits(), 0);
     }
@@ -1568,10 +1633,15 @@ mod tests {
                 .json_body(json!({"vote": 10}));
             t.status(200).json_body(json!({"vote": 10}));
         });
+        s.mock(|w, t| {
+            w.method(GET)
+                .path("/_apis/git/repositories/r1/pullrequests/5");
+            t.status(200).json_body(pr_json(5, false, &[]));
+        });
         let ctx = ctx_for(&s.base_url(), Path::new("."));
         vote(&ctx, 5, 10).await.unwrap();
         put.assert();
-        assert!(vote(&ctx, 5, 7).await.is_err());
+        assert!(matches!(vote(&ctx, 5, 7).await, Err(AdoError::Local(_))));
     }
 
     #[tokio::test]
@@ -1644,5 +1714,105 @@ mod tests {
                 email: "sam@tnt.co.nz".into()
             }]
         );
+    }
+
+    #[tokio::test]
+    async fn an_empty_title_is_refused_locally() {
+        let r = temp_repo();
+        let s = MockServer::start();
+        let list = mock_no_existing(&s);
+        let mut pr = new_pr(None, "x");
+        pr.title = "  ".into();
+        let e = create(&ctx_for(&s.base_url(), &r.work), &r.work, pr)
+            .await
+            .unwrap_err();
+        assert_eq!(e, AdoError::Local("Add a title".into()));
+        assert_eq!(e.user_message(), "Add a title");
+        assert_eq!(list.hits(), 0);
+        assert!(!remote_has(&r.bare, "ja/fix"));
+    }
+
+    #[tokio::test]
+    async fn an_unknown_link_state_is_not_linked_without_a_patch() {
+        let r = temp_repo();
+        let s = MockServer::start();
+        mock_no_existing(&s);
+        s.mock(|w, t| {
+            w.method(POST)
+                .path("/_apis/git/repositories/r1/pullrequests");
+            t.status(201).json_body(json!({"pullRequestId": 11}));
+        });
+        s.mock(|w, t| {
+            w.method(GET)
+                .path("/_apis/git/repositories/r1/pullrequests/11/workitems");
+            t.status(500).json_body(json!({"message": "busy"}));
+        });
+        let patch = s.mock(|w, t| {
+            w.method(httpmock::Method::PATCH)
+                .path("/_apis/wit/workitems/42");
+            t.status(200).json_body(json!({}));
+        });
+        let out = create(
+            &ctx_for(&s.base_url(), &r.work),
+            &r.work,
+            new_pr(Some(42), "x"),
+        )
+        .await
+        .unwrap();
+        assert!(
+            matches!(&out, CreateOutcome::CreatedTaskNotLinked(11, why) if why.contains("busy")),
+            "{out:?}"
+        );
+        assert_eq!(patch.hits(), 0);
+    }
+
+    #[tokio::test]
+    async fn voting_on_a_draft_is_refused() {
+        let s = MockServer::start();
+        s.mock(|w, t| {
+            w.method(GET).path("/_apis/connectionData");
+            t.status(200)
+                .json_body(json!({"authenticatedUser": {"id": "me-1"}}));
+        });
+        s.mock(|w, t| {
+            w.method(GET)
+                .path("/_apis/git/repositories/r1/pullrequests/5");
+            t.status(200).json_body(pr_json(5, true, &[]));
+        });
+        let put = s.mock(|w, t| {
+            w.method(PUT)
+                .path("/_apis/git/repositories/r1/pullrequests/5/reviewers/me-1");
+            t.status(200).json_body(json!({}));
+        });
+        let e = vote(&ctx_for(&s.base_url(), Path::new(".")), 5, 10)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            e,
+            AdoError::Local("Voting opens when the PR is published".into())
+        );
+        assert_eq!(put.hits(), 0);
+    }
+
+    #[tokio::test]
+    async fn no_signed_in_user_is_an_auth_error() {
+        let s = MockServer::start();
+        s.mock(|w, t| {
+            w.method(GET).path("/_apis/connectionData");
+            t.status(200).json_body(json!({"authenticatedUser": {}}));
+        });
+        assert_eq!(
+            my_id(&client(&s)).await.unwrap_err(),
+            AdoError::Auth(AuthError::NoCredential)
+        );
+    }
+
+    #[tokio::test]
+    async fn an_empty_reply_is_refused_locally() {
+        let s = MockServer::start();
+        let e = reply(&ctx_for(&s.base_url(), Path::new(".")), 5, 3, " \n")
+            .await
+            .unwrap_err();
+        assert!(matches!(e, AdoError::Local(_)));
     }
 }

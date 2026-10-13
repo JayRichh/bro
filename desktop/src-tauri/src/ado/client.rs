@@ -25,6 +25,8 @@ pub enum AdoError {
     NotFound,
     /// 409, with ADO's message.
     Conflict(String),
+    /// A local or validation failure (git, input), shown as is.
+    Local(String),
     Http(u16, String),
     Network(String),
 }
@@ -42,6 +44,7 @@ impl AdoError {
             }
             AdoError::NotFound => "Azure DevOps could not find that.".into(),
             AdoError::Conflict(msg) => format!("Azure DevOps refused the change: {msg}"),
+            AdoError::Local(msg) => msg.clone(),
             AdoError::Http(code, msg) if msg.is_empty() => {
                 format!("Azure DevOps answered with error {code}.")
             }
@@ -89,6 +92,8 @@ pub struct AdoClient {
     http: reqwest::Client,
     tokens: Arc<TokenSource>,
     org_url: String,
+    /// Never prompt for a sign-in (background work).
+    silent: bool,
 }
 
 impl AdoClient {
@@ -101,7 +106,23 @@ impl AdoClient {
             http,
             tokens,
             org_url: org_url.trim_end_matches('/').to_string(),
+            silent: false,
         }
+    }
+
+    /// A client whose tokens come from [`TokenSource::token_silent`], so
+    /// it never opens a sign-in window.
+    pub fn silent(mut self) -> Self {
+        self.silent = true;
+        self
+    }
+
+    async fn credential(&self) -> Result<crate::ado::auth::Credential, AdoError> {
+        Ok(if self.silent {
+            self.tokens.token_silent(&self.org_url).await?
+        } else {
+            self.tokens.token(&self.org_url).await?
+        })
     }
 
     pub fn org_url(&self) -> &str {
@@ -182,7 +203,7 @@ impl AdoClient {
         content_type: Option<&str>,
     ) -> Result<T, AdoError> {
         let url = self.url(path);
-        let mut auth = self.tokens.token(&self.org_url).await?.header();
+        let mut auth = self.credential().await?.header();
         let mut retried = false;
         let mut reauthed = false;
         loop {
@@ -210,7 +231,7 @@ impl AdoClient {
                 // once more with a fresh one.
                 reauthed = true;
                 self.tokens.reject(&self.org_url).await;
-                auth = self.tokens.token(&self.org_url).await?.header();
+                auth = self.credential().await?.header();
                 continue;
             }
             if !retried
@@ -377,6 +398,27 @@ mod tests {
         assert_eq!(m.hits(), 2);
         assert_eq!(r.count("git", "reject"), 1);
         assert_eq!(r.count("git", "fill"), 2);
+    }
+
+    #[tokio::test]
+    async fn a_silent_client_never_lets_gcm_prompt() {
+        let s = MockServer::start();
+        s.mock(|w, t| {
+            w.path("/p/_apis/x");
+            t.status(200).json_body(json!({}));
+        });
+        let r = Fake::new().on("git", "password=pat\n");
+        let c = AdoClient::new(&s.base_url(), Arc::new(TokenSource::new(r.clone()))).silent();
+        let _: serde_json::Value = c.get("/p/_apis/x").await.unwrap();
+        assert_eq!(r.count("git", "credential.interactive=never"), 1);
+    }
+
+    #[test]
+    fn local_errors_read_as_written() {
+        assert_eq!(
+            AdoError::Local("Add a title".into()).user_message(),
+            "Add a title"
+        );
     }
 
     #[tokio::test]

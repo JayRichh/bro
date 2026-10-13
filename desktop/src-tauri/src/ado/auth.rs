@@ -194,6 +194,17 @@ impl TokenSource {
     }
 
     pub async fn token(&self, org_url: &str) -> Result<Credential, AuthError> {
+        self.token_with(org_url, false).await
+    }
+
+    /// As [`token`](Self::token), but never shows a sign-in: the cache,
+    /// then GCM with `credential.interactive=never`, then az (which never
+    /// prompts). For background work such as the PR poll.
+    pub async fn token_silent(&self, org_url: &str) -> Result<Credential, AuthError> {
+        self.token_with(org_url, true).await
+    }
+
+    async fn token_with(&self, org_url: &str, silent: bool) -> Result<Credential, AuthError> {
         #[cfg(test)]
         if let Some(c) = &self.fixed {
             return Ok(c.clone());
@@ -213,13 +224,13 @@ impl TokenSource {
         if let Some(c) = self.cached(org_url) {
             return Ok(c);
         }
-        let cred = self.fetch(org_url).await?;
+        let cred = self.fetch(org_url, silent).await?;
         self.remember(org_url, &cred);
         Ok(cred)
     }
 
-    async fn fetch(&self, org_url: &str) -> Result<Credential, AuthError> {
-        let gcm = match self.gcm(org_url).await {
+    async fn fetch(&self, org_url: &str, silent: bool) -> Result<Credential, AuthError> {
+        let gcm = match self.gcm(org_url, silent).await {
             Ok(c) => return Ok(c),
             Err(e) => e,
         };
@@ -230,21 +241,18 @@ impl TokenSource {
         }
     }
 
-    async fn gcm(&self, org_url: &str) -> Result<Credential, AuthError> {
+    async fn gcm(&self, org_url: &str, silent: bool) -> Result<Credential, AuthError> {
         let input = credential_input(org_url);
+        let mut args = vec!["-c", "credential.azreposCredentialType=oauth"];
+        if silent {
+            // GCM's own switch (GCM_INTERACTIVE=never as config): fail
+            // rather than open a sign-in window.
+            args.extend(["-c", "credential.interactive=never"]);
+        }
+        args.extend(["credential", "fill"]);
         let out = self
             .runner
-            .run(
-                "git",
-                &[
-                    "-c",
-                    "credential.azreposCredentialType=oauth",
-                    "credential",
-                    "fill",
-                ],
-                Some(&input),
-                AUTH_TIMEOUT,
-            )
+            .run("git", &args, Some(&input), AUTH_TIMEOUT)
             .await
             .map_err(|e| match e {
                 AuthError::Other(msg) => AuthError::Other(first_line(&msg)),
@@ -699,6 +707,27 @@ mod tests {
                 .unwrap_err(),
             AuthError::NoCredential
         );
+    }
+
+    #[tokio::test]
+    async fn silent_token_asks_gcm_never_to_prompt() {
+        let r = Fake::new().on("git", "password=pat\n");
+        let src = TokenSource::new(r.clone());
+        src.token_silent("https://dev.azure.com/tnt").await.unwrap();
+        assert!(r
+            .last_args("git")
+            .windows(2)
+            .any(|w| w == ["-c", "credential.interactive=never"]));
+        // A cached credential is reused without running anything.
+        src.token_silent("https://dev.azure.com/tnt").await.unwrap();
+        assert_eq!(r.count("git", "fill"), 1);
+        // The interactive path does not pass the switch.
+        src.invalidate("https://dev.azure.com/tnt");
+        src.token("https://dev.azure.com/tnt").await.unwrap();
+        assert!(!r
+            .last_args("git")
+            .iter()
+            .any(|a| a == "credential.interactive=never"));
     }
 
     #[test]
