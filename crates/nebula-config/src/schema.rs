@@ -63,33 +63,6 @@ pub const TERMINAL_ONLY: &[SettingKind] = &[
 /// the two lists to the tabs.
 pub const DESKTOP_EXCLUDED: &[SettingKind] = &[];
 
-/// Rows a running terminal app mirrors into its own state at start (and
-/// when its own settings overlay saves) rather than reading at each use:
-/// a change from the window reaches it on its next start. Every other row
-/// is read fresh where it is used, by the TUI and the daemon alike.
-pub const TERMINAL_RESTART: &[SettingKind] = &[
-    SettingKind::Theme,
-    SettingKind::Animations,
-    SettingKind::BlackBackground,
-    SettingKind::Icons,
-    SettingKind::DiffMode,
-    SettingKind::DiffContext,
-    SettingKind::CardIssueNumber,
-    SettingKind::ShowAllWorktrees,
-    SettingKind::AutoCleanupMerged,
-    SettingKind::HideCardMarks,
-    SettingKind::HighlightCurrentCard,
-    SettingKind::SessionPane,
-    SettingKind::WorktreeLayout,
-    SettingKind::Kanban,
-    SettingKind::KanbanScope,
-    SettingKind::ExpandAllWorktrees,
-    SettingKind::HideDraftPrs,
-];
-
-/// What the restart note says.
-pub const RESTART_NOTE: &str = "A running terminal app picks this up when it next starts";
-
 /// The browsers a project's localhost preview can remember (`w` in the
 /// terminal app); empty is none remembered.
 pub const BROWSERS: &[&str] = &["chrome", "edge", "firefox", "default"];
@@ -183,7 +156,8 @@ pub struct Row {
     pub value: Value,
     pub default: Value,
     /// Set when a running terminal app won't see a change until it
-    /// restarts ([`TERMINAL_RESTART`]).
+    /// restarts. None on every row: a running TUI reloads config.json
+    /// live (its config beat), mirrored values and hotkeys included.
     pub restart: Option<String>,
     /// Shipped in the last week, as the overlay's `(new)` says.
     pub is_new: bool,
@@ -430,9 +404,7 @@ fn global_row(cfg: &Config, spec: &SettingSpec, today: i64) -> Row {
         control: control(cfg, spec.kind),
         value: get_value(cfg, spec.kind),
         default: get_value(&defaults, spec.kind),
-        restart: TERMINAL_RESTART
-            .contains(&spec.kind)
-            .then(|| RESTART_NOTE.into()),
+        restart: None,
         is_new: spec.kind.is_new(today),
     }
 }

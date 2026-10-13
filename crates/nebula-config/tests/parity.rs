@@ -4,7 +4,7 @@
 use nebula_config::desktop::DesktopPrefs;
 use nebula_config::schema::{
     self, export, rendered_kinds, set_in, Control, ProjectRef, Target, DESKTOP_EXCLUDED,
-    TERMINAL_ONLY, TERMINAL_RESTART,
+    TERMINAL_ONLY,
 };
 use nebula_config::{all_settings, Config, SettingKind};
 use serde_json::{json, Value};
@@ -45,11 +45,39 @@ fn every_overlay_row_is_rendered_or_explicitly_excluded() {
             "{kind:?}: rendered {shown}, excluded {excluded} (exactly one, please)"
         );
     }
-    for kind in TERMINAL_ONLY.iter().chain(TERMINAL_RESTART) {
+    for kind in TERMINAL_ONLY {
         assert!(
             declared().contains(kind),
             "{kind:?} is listed but no tab declares it"
         );
+    }
+}
+
+/// A running TUI reloads config.json on its config beat — the values it
+/// mirrors into its own state and the hotkeys too — so no row tells the
+/// window's user to restart the terminal app, the once-mirrored ones
+/// (theme, kanban, worktree layout...) included.
+#[test]
+fn no_row_carries_a_restart_note() {
+    let schema = export(&Config::default(), &DesktopPrefs::default(), &one_project());
+    let mut seen = Vec::new();
+    for tab in &schema.tabs {
+        for group in &tab.groups {
+            for row in &group.rows {
+                assert_eq!(row.restart, None, "{} in {:?}", row.label, tab.title);
+                if let Target::Global { key } = &row.target {
+                    seen.push(schema::kind_for_key(key).unwrap());
+                }
+            }
+        }
+    }
+    for kind in [
+        SettingKind::Theme,
+        SettingKind::Kanban,
+        SettingKind::WorktreeLayout,
+        SettingKind::HideDraftPrs,
+    ] {
+        assert!(seen.contains(&kind), "{kind:?} was checked");
     }
 }
 

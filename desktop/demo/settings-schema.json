@@ -432,7 +432,7 @@
               },
               "value": false,
               "default": false,
-              "restart": "A running terminal app picks this up when it next starts",
+              "restart": null,
               "is_new": false
             },
             {
@@ -447,7 +447,7 @@
               },
               "value": true,
               "default": true,
-              "restart": "A running terminal app picks this up when it next starts",
+              "restart": null,
               "is_new": false
             },
             {
@@ -543,7 +543,7 @@
               },
               "value": "kete-dark",
               "default": "kete-dark",
-              "restart": "A running terminal app picks this up when it next starts",
+              "restart": null,
               "is_new": false
             },
             {
@@ -570,7 +570,7 @@
               },
               "value": "auto",
               "default": "auto",
-              "restart": "A running terminal app picks this up when it next starts",
+              "restart": null,
               "is_new": true
             },
             {
@@ -585,7 +585,7 @@
               },
               "value": true,
               "default": true,
-              "restart": "A running terminal app picks this up when it next starts",
+              "restart": null,
               "is_new": false
             },
             {
@@ -600,7 +600,7 @@
               },
               "value": true,
               "default": true,
-              "restart": "A running terminal app picks this up when it next starts",
+              "restart": null,
               "is_new": false
             },
             {
@@ -623,7 +623,7 @@
               },
               "value": "right",
               "default": "right",
-              "restart": "A running terminal app picks this up when it next starts",
+              "restart": null,
               "is_new": false
             },
             {
@@ -650,7 +650,7 @@
               },
               "value": "cards",
               "default": "cards",
-              "restart": "A running terminal app picks this up when it next starts",
+              "restart": null,
               "is_new": false
             },
             {
@@ -696,7 +696,7 @@
               },
               "value": false,
               "default": false,
-              "restart": "A running terminal app picks this up when it next starts",
+              "restart": null,
               "is_new": false
             },
             {
@@ -711,7 +711,7 @@
               },
               "value": false,
               "default": false,
-              "restart": "A running terminal app picks this up when it next starts",
+              "restart": null,
               "is_new": true
             },
             {
@@ -734,7 +734,7 @@
               },
               "value": "project",
               "default": "project",
-              "restart": "A running terminal app picks this up when it next starts",
+              "restart": null,
               "is_new": true
             },
             {
@@ -749,7 +749,7 @@
               },
               "value": true,
               "default": true,
-              "restart": "A running terminal app picks this up when it next starts",
+              "restart": null,
               "is_new": false
             },
             {
@@ -764,7 +764,7 @@
               },
               "value": true,
               "default": true,
-              "restart": "A running terminal app picks this up when it next starts",
+              "restart": null,
               "is_new": false
             },
             {
@@ -787,7 +787,7 @@
               },
               "value": "shown",
               "default": "shown",
-              "restart": "A running terminal app picks this up when it next starts",
+              "restart": null,
               "is_new": false
             },
             {
@@ -810,7 +810,7 @@
               },
               "value": "shown",
               "default": "shown",
-              "restart": "A running terminal app picks this up when it next starts",
+              "restart": null,
               "is_new": false
             },
             {
@@ -835,7 +835,7 @@
               },
               "value": "side-by-side",
               "default": "side-by-side",
-              "restart": "A running terminal app picks this up when it next starts",
+              "restart": null,
               "is_new": true
             },
             {
@@ -858,7 +858,7 @@
               },
               "value": "collapsed",
               "default": "collapsed",
-              "restart": "A running terminal app picks this up when it next starts",
+              "restart": null,
               "is_new": true
             },
             {
