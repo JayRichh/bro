@@ -16,6 +16,15 @@
   import { isDiffMode } from '../diff-api';
   import { nav } from '../shell/history.svelte';
   import { chordLabel, hotkeyGroups, matches, segmented, targetKey } from './settings';
+  import Presets from './Presets.svelte';
+  import Profiles from './Profiles.svelte';
+
+  /** Tabs the window draws itself, after the schema's: their data is not
+   *  settings rows but lists (agent_presets.json, config.json profiles). */
+  const LOCAL_TABS = [
+    { id: 'presets', title: 'Presets' },
+    { id: 'profiles', title: 'Profiles' },
+  ];
 
   let schema = $state<SettingsSchema | null>(null);
   let error = $state<string | null>(null);
@@ -25,7 +34,8 @@
   /** Rows with a write in flight, by target key. */
   let pending = $state<Record<string, boolean>>({});
 
-  const tabs = $derived(schema?.tabs ?? []);
+  const tabs = $derived([...(schema?.tabs ?? []), ...LOCAL_TABS.map((t) => ({ ...t, note: null, groups: [], hotkeys: [] }) as SettingsTab)]);
+  const local = $derived(LOCAL_TABS.some((t) => t.id === tabId));
   const tabId = $derived(nav.current.item && tabs.some((t) => t.id === nav.current.item) ? nav.current.item : (tabs[0]?.id ?? 'desktop'));
   const tab = $derived<SettingsTab | undefined>(tabs.find((t) => t.id === tabId));
 
@@ -214,7 +224,7 @@
       <h1 id="settings-title" class="m-0 text-[28px] leading-tight font-semibold tracking-tight text-ink">Settings</h1>
       <span class={label}>shared with the terminal app</span>
       <span class="flex-1"></span>
-      <label class="flex h-7 w-64 items-center border border-rule focus-within:border-rule-strong">
+      <label class="flex h-7 w-64 items-center border border-rule focus-within:border-rule-strong {local ? 'invisible' : ''}">
         <span class="sr-only">Filter settings</span>
         <input
           class="h-full min-w-0 flex-1 border-0 bg-transparent px-2.5 font-mono text-[12px] text-ink outline-none placeholder:text-faint"
@@ -284,6 +294,11 @@
       </nav>
 
       <div class="min-h-0 min-w-0 flex-1 overflow-y-auto pb-10" role="tabpanel" aria-labelledby="settings-tab-{tabId}">
+        {#if tabId === 'presets'}
+          <Presets />
+        {:else if tabId === 'profiles'}
+          <Profiles />
+        {:else}
         <div class="max-w-[920px]">
           {#if tab?.note}
             <p class="m-0 px-6 pt-5 text-[13px] text-muted">{tab.note}</p>
@@ -350,6 +365,7 @@
             <p class="m-0 px-6 pt-6 text-[13px] text-muted">No key matches.</p>
           {/if}
         </div>
+        {/if}
       </div>
     </div>
   {/if}
