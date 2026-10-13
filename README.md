@@ -37,16 +37,16 @@ it builds from source with `cargo install` and tells you. Run it again to update
 
 On x64 it also installs the desktop window (`kete desktop`): it runs the release's
 `kete-desktop-x86_64-setup.exe` silently, for your user only with no admin prompt, into
-`%LOCALAPPDATA%\kete\desktop`, and copies `kete-desktop.exe` beside `kete.exe`. The installer isn't
-code signed yet, so Windows SmartScreen may warn the first time it runs; choose **More info**, then
-**Run anyway**. To skip the desktop window:
+`%LOCALAPPDATA%\Programs\Kete`, where `kete desktop` finds it. The installer isn't code signed yet,
+so Windows SmartScreen may warn the first time it runs; choose **More info**, then **Run anyway**.
+To skip the desktop window:
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/JayRichh/kete/main/install.ps1))) -NoDesktop
 ```
 
-or set `KETE_NO_DESKTOP=1` first. Uninstalling "Kete" from Settings → Apps removes the desktop
-folder but leaves the copy in `kete\bin`; delete `kete-desktop.exe` there by hand.
+or set `KETE_NO_DESKTOP=1` first. Uninstall it from Settings → Apps ("Kete"); that leaves `kete`
+and your data alone.
 
 **macOS and Linux:**
 
@@ -205,8 +205,10 @@ from inside a terminal too. It follows the OS theme, One Dark or One Light, and 
 overrides it.
 
 `kete-desktop` is a separate binary, built from `desktop/` (see Building). `kete desktop` looks for
-it beside `kete`, then on `PATH`. On Windows x64 the installer puts it there for you; each release
-also carries it as `kete-desktop-x86_64-setup.exe`, a per-user installer you can run by hand.
+it beside `kete`, then (on Windows) in `%LOCALAPPDATA%\Programs\Kete`, then on `PATH`. On Windows x64
+the installer puts it there for you; each release also carries it as
+`kete-desktop-x86_64-setup.exe`, a per-user installer you can run by hand. The window starts its
+daemon through `kete.exe` on your `PATH`, so install `kete` first.
 
 ## Where things live
 
