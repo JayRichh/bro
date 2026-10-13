@@ -359,13 +359,21 @@ mod tests {
     fn a_cmd_line_rides_in_its_env_var() {
         let launch = launch(
             r"C:\Windows\System32\cmd.exe",
-            &["/d".into(), "/s".into(), "/c".into(), "npm run dev && echo \"done\"".into()],
+            &[
+                "/d".into(),
+                "/s".into(),
+                "/c".into(),
+                "npm run dev && echo \"done\"".into(),
+            ],
         )
         .unwrap();
         assert_eq!(launch.args, ["/d", "/s", "/c", "%BRO_CMDLINE%"]);
         assert_eq!(
             launch.env,
-            [(CMD_LINE_VAR.to_string(), "npm run dev && echo \"done\"".to_string())]
+            [(
+                CMD_LINE_VAR.to_string(),
+                "npm run dev && echo \"done\"".to_string()
+            )]
         );
         assert!(cmd_line_launch("cmd".into(), "a\nb".into()).is_err());
     }

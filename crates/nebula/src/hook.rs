@@ -40,7 +40,10 @@ fn post(endpoint: &str, event: &str) -> Option<String> {
     let agent = env::non_empty(env::AGENT_ID)?;
     let url = env::non_empty(env::API_URL)?;
     let token = env::non_empty(env::API_TOKEN).unwrap_or_default();
-    if ![endpoint, event, &agent].iter().all(|word| is_query_safe(word)) {
+    if ![endpoint, event, &agent]
+        .iter()
+        .all(|word| is_query_safe(word))
+    {
         return None;
     }
     let mut payload = Vec::new();

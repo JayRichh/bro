@@ -18,8 +18,8 @@ mod windows {
     };
     use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
     use windows_sys::Win32::System::Threading::{
-        GetExitCodeProcess, OpenProcess, TerminateProcess, CREATE_NO_WINDOW,
-        PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
+        GetExitCodeProcess, OpenProcess, TerminateProcess, CREATE_NO_WINDOW, PROCESS_ACCESS_RIGHTS,
+        PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
     };
 
     /// A process handle, closed on drop.
@@ -55,8 +55,8 @@ mod windows {
     /// politely, so this is the last resort a caller reaches for once its
     /// own channel to the process (the daemon's `Shutdown`) has failed.
     pub fn terminate_process(pid: u32) -> std::io::Result<()> {
-        let process = Process::open(pid, PROCESS_TERMINATE)
-            .ok_or_else(std::io::Error::last_os_error)?;
+        let process =
+            Process::open(pid, PROCESS_TERMINATE).ok_or_else(std::io::Error::last_os_error)?;
         // SAFETY: `process` is a live handle with terminate access.
         if unsafe { TerminateProcess(process.0, 1) } == 0 {
             return Err(std::io::Error::last_os_error());

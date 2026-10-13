@@ -77,11 +77,16 @@ mod windows {
     fn create(name: &str, security: &PipeSecurity, first: bool) -> io::Result<NamedPipeServer> {
         let mut attrs = security.attributes();
         let mut options = ServerOptions::new();
-        options.first_pipe_instance(first).reject_remote_clients(true);
+        options
+            .first_pipe_instance(first)
+            .reject_remote_clients(true);
         // SAFETY: `attrs` points at a security descriptor `security` owns,
         // which outlives the call; the API copies what it needs.
         unsafe {
-            options.create_with_security_attributes_raw(name, (&mut attrs as *mut SECURITY_ATTRIBUTES).cast())
+            options.create_with_security_attributes_raw(
+                name,
+                (&mut attrs as *mut SECURITY_ATTRIBUTES).cast(),
+            )
         }
     }
 

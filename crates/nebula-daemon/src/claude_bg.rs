@@ -305,7 +305,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let listing = dir.path().join("listing.json");
         std::fs::write(&listing, LISTING).unwrap();
-        let args = vec!["/d".to_string(), "/c".to_string(), format!("type {}", listing.display())];
+        let args = vec![
+            "/d".to_string(),
+            "/c".to_string(),
+            format!("type {}", listing.display()),
+        ];
         assert_eq!(probe("cmd.exe", &args, SID).as_deref(), Some("1a3138b9"));
         let fail = vec!["/d".to_string(), "/c".to_string(), "exit 3".to_string()];
         assert_eq!(probe("cmd.exe", &fail, SID), None);
@@ -316,7 +320,11 @@ mod tests {
     #[test]
     fn a_hung_probe_is_killed_at_the_timeout() {
         let started = Instant::now();
-        let args = vec!["/d".to_string(), "/c".to_string(), "ping -n 30 127.0.0.1".to_string()];
+        let args = vec![
+            "/d".to_string(),
+            "/c".to_string(),
+            "ping -n 30 127.0.0.1".to_string(),
+        ];
         assert_eq!(
             run_captured("cmd.exe", &args, Duration::from_millis(150)),
             None

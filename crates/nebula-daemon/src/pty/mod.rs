@@ -7,6 +7,7 @@ pub mod question;
 pub mod ring;
 pub mod title;
 
+use crate::platform::RawFd;
 use anyhow::{Context, Result};
 use cloud::CloudScanner;
 use cursor::CursorTracker;
@@ -18,7 +19,6 @@ use question::QuestionScanner;
 use ring::ScrollbackRing;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use crate::platform::RawFd;
 use std::io::{Read, Write};
 #[cfg(unix)]
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -338,15 +338,15 @@ impl PtySession {
 
         let child_pid = child.process_id();
         #[cfg(windows)]
-        let job = child
-            .as_raw_handle()
-            .and_then(|process| match crate::platform::Job::for_process(process) {
+        let job = child.as_raw_handle().and_then(
+            |process| match crate::platform::Job::for_process(process) {
                 Ok(job) => Some(job),
                 Err(e) => {
                     tracing::warn!(error = %e, pid = ?child_pid, "child left out of a job object");
                     None
                 }
-            });
+            },
+        );
         let reader = pair.master.try_clone_reader().context("clone pty reader")?;
         let writer = pair.master.take_writer().context("take pty writer")?;
         #[cfg(unix)]
