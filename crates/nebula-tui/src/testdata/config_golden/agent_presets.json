@@ -1,0 +1,28 @@
+[
+  {
+    "custom_harness": null,
+    "effort": "high",
+    "kind": "codex",
+    "model": "gpt-x",
+    "name": "reviewer",
+    "pinned": true,
+    "postfix": "",
+    "prefix": "Be strict.",
+    "skip_task": false
+  },
+  {
+    "custom_harness": "aider",
+    "effort": null,
+    "kind": "custom",
+    "model": null,
+    "name": "scratch",
+    "postfix": "Run the tests.",
+    "prefix": "",
+    "skip_task": true
+  },
+  {
+    "kind": "antigravity",
+    "model": "x",
+    "name": "future"
+  }
+]

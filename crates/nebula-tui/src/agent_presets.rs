@@ -385,3 +385,54 @@ mod tests {
         assert_eq!(model_only.spec_label(), "codex · gpt-5.5");
     }
 }
+
+/// Byte-for-byte pin on what a preset save writes (unknown fields and
+/// unreadable entries kept), so moving the store between crates can't
+/// change a byte unnoticed. `KETE_BLESS=1` rewrites the golden.
+#[cfg(test)]
+mod golden {
+    use super::*;
+
+    const GOLDEN: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/testdata/config_golden/agent_presets.json"
+    );
+
+    #[test]
+    fn a_preset_save_writes_these_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("agent_presets.json");
+        std::fs::write(
+            &path,
+            r#"[
+                {"name": "reviewer", "kind": "codex", "pinned": true, "model": "gpt-x"},
+                {"name": "future", "kind": "antigravity", "model": "x"},
+                {"name": "gone", "kind": "claude"}
+            ]"#,
+        )
+        .unwrap();
+        let mut presets = load_from(&path);
+        presets.retain(|p| p.name != "gone");
+        presets[0].prefix = "Be strict.".into();
+        presets[0].effort = Some("high".into());
+        presets.push(AgentPreset {
+            name: "scratch".into(),
+            kind: AgentKind::Custom,
+            custom_harness: Some("aider".into()),
+            model: None,
+            effort: None,
+            prefix: String::new(),
+            postfix: "Run the tests.".into(),
+            skip_task: true,
+        });
+        save_to(&path, &presets).unwrap();
+        let actual = std::fs::read_to_string(&path).unwrap();
+        if std::env::var_os("KETE_BLESS").is_some() {
+            std::fs::write(GOLDEN, &actual).unwrap();
+            return;
+        }
+        let want = std::fs::read_to_string(GOLDEN)
+            .unwrap_or_else(|e| panic!("{GOLDEN}: {e} (run with KETE_BLESS=1)"));
+        assert_eq!(actual, want.replace("\r\n", "\n"), "preset save drifted");
+    }
+}
