@@ -63,6 +63,32 @@ pub mod vim_term;
 pub mod vscode_theme;
 pub mod wt_settings;
 
+/// One lock over the process environment for this crate's tests. Tests
+/// run on parallel threads and PATH is process-wide: a test that points
+/// PATH elsewhere made the git-spawning tests fail with "program not
+/// found" while it ran. A test that spawns git (or any program) holds
+/// [`spawning`](test_env::spawning), which many may hold at once; a test
+/// that changes PATH holds [`changing_path`](test_env::changing_path),
+/// which waits for all of them and keeps them out until it is done.
+#[cfg(test)]
+pub(crate) mod test_env {
+    use std::sync::{PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
+
+    static ENV: RwLock<()> = RwLock::new(());
+
+    /// Hold for a test that spawns a process found on PATH.
+    pub(crate) fn spawning() -> RwLockReadGuard<'static, ()> {
+        // A test that panicked holding the lock left nothing half-done
+        // that matters here, so its poison means nothing.
+        ENV.read().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Hold for a test that changes PATH, and restore it before dropping.
+    pub(crate) fn changing_path() -> RwLockWriteGuard<'static, ()> {
+        ENV.write().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
 use anyhow::Result;
 
 fn runtime() -> Result<tokio::runtime::Runtime> {

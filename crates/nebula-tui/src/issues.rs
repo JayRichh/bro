@@ -2251,6 +2251,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn the_comment_body_goes_down_stdin_and_a_refusal_is_a_miss() {
+        let _env = crate::test_env::spawning();
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let script = |name: &str, sh: &str| {
@@ -3123,6 +3124,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn the_edit_sends_the_title_on_argv_and_the_body_down_stdin() {
+        let _env = crate::test_env::spawning();
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let script = |name: &str, sh: &str| {

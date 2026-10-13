@@ -5037,6 +5037,8 @@ mod tests {
         // is on PATH, built-ins and customs alike.
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("agy"), "").unwrap();
+        // No other test may spawn a program while PATH points here.
+        let _env = crate::test_env::changing_path();
         let prior = std::env::var_os("PATH");
         std::env::set_var("PATH", dir.path());
         let hiding = Config {

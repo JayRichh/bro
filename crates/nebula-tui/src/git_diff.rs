@@ -980,6 +980,7 @@ mod tests {
 
     #[test]
     fn changed_files_and_diff_for_from_real_repo() {
+        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = make_repo(&dir);
         std::fs::write(repo.join("tracked.txt"), "new line\n").unwrap();
@@ -1002,6 +1003,7 @@ mod tests {
 
     #[test]
     fn list_files_includes_untracked_and_respects_gitignore() {
+        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = make_repo(&dir);
         std::fs::write(repo.join("fresh.txt"), "hello\n").unwrap();
@@ -1016,6 +1018,7 @@ mod tests {
 
     #[test]
     fn list_files_errors_outside_a_repo() {
+        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let err = list_files(dir.path()).unwrap_err();
         assert!(err.contains("git ls-files failed"), "{err}");
@@ -1023,6 +1026,7 @@ mod tests {
 
     #[test]
     fn head_oid_moves_with_commits() {
+        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = make_repo(&dir);
         let first = head_oid(&repo).expect("committed repo has a HEAD");
@@ -1035,6 +1039,7 @@ mod tests {
 
     #[test]
     fn unborn_head_falls_back_to_plain_diff() {
+        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = dir.path().join("repo");
         std::fs::create_dir(&repo).unwrap();
@@ -1058,6 +1063,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn changed_files_never_rewrites_the_index() {
+        let _env = crate::test_env::spawning();
         use std::os::unix::fs::MetadataExt;
         use std::time::{Duration, UNIX_EPOCH};
         let dir = tempfile::tempdir().unwrap();
@@ -1135,6 +1141,7 @@ mod tests {
     /// and an unborn HEAD counts its tracked files from nothing.
     #[test]
     fn line_changes_counts_staged_unstaged_and_untracked() {
+        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = dir.path();
         let git = |args: &[&str]| {
@@ -1206,6 +1213,7 @@ mod tests {
     /// one has nothing left to stage.
     #[test]
     fn accepting_a_change_stages_that_change_alone() {
+        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = make_repo(&dir);
         let (file, doc) = two_changes(&repo, false);
@@ -1234,6 +1242,7 @@ mod tests {
     /// worktree only — CRLF line endings and all.
     #[test]
     fn rejecting_a_change_reverts_that_change_in_the_worktree() {
+        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = make_repo(&dir);
         git(&repo, &["config", "core.autocrlf", "false"]);
@@ -1259,6 +1268,7 @@ mod tests {
     /// three-line text — what the ✓ marks fingerprint — as it was.
     #[test]
     fn full_context_reads_the_whole_file() {
+        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = make_repo(&dir);
         let (file, _) = two_changes(&repo, false);
@@ -1271,6 +1281,7 @@ mod tests {
 
     #[test]
     fn changed_files_errors_outside_a_repo() {
+        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let err = changed_files(dir.path()).unwrap_err();
         assert!(err.contains("git status failed"), "{err}");
