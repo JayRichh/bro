@@ -32,6 +32,14 @@ describe('the shortcut table', () => {
     expect(clashes).toEqual([]);
   });
 
+  it('never lets a window key take a home view walking key (Board d, j/k, h/l, Enter)', () => {
+    const home = SHORTCUTS.filter((s) => s.scope === 'overview' || s.scope === 'board').flatMap((s) => s.keys);
+    const window = SHORTCUTS.filter((s) => s.scope !== 'overview' && s.scope !== 'board').flatMap((s) => s.keys);
+    expect(home).toContain('d');
+    expect(window.filter((k) => home.includes(k))).toEqual([]);
+    expect(shortcutFor(key('d'), row)).toBeUndefined();
+  });
+
   it('has unique ids and every action a key', () => {
     const ids = SHORTCUTS.map((s) => s.id);
     expect(new Set(ids).size).toBe(ids.length);
@@ -40,7 +48,7 @@ describe('the shortcut table', () => {
 
   it('keeps Board d as diff and the terminal app row letters', () => {
     const keys = (id: string) => SHORTCUTS.find((s) => s.id === id)!.keys;
-    expect(SHORTCUTS.some((s) => s.keys.includes('d'))).toBe(false);
+    expect(SHORTCUTS.filter((s) => s.keys.includes('d')).map((s) => s.id)).toEqual(['board_diff']);
     expect(keys('rename')).toEqual(['r']);
     expect(keys('archive')).toEqual(['a']);
     expect(keys('unarchive')).toEqual(['u']);
@@ -80,7 +88,7 @@ describe('chordOf and shortcutFor', () => {
 
   it('groups the help in table order', () => {
     const groups = helpGroups();
-    expect(groups.map((g) => g.group)).toEqual(['General', 'Views', 'Sessions']);
+    expect(groups.map((g) => g.group)).toEqual(['General', 'Views', 'Sessions', 'Overview and board']);
     const keys = (n: number, g: { rows: { keys: string[] }[] }) => n + g.rows.reduce((m, r) => m + r.keys.length, 0);
     expect(groups.reduce(keys, 0)).toBe(SHORTCUTS.reduce((n, s) => n + s.keys.length, 0));
     const palette = groups[0].rows.find((r) => r.label === 'Command palette')!;
@@ -90,6 +98,6 @@ describe('chordOf and shortcutFor', () => {
 
   it('every scope is reachable', () => {
     const scopes = new Set<Scope>(SHORTCUTS.map((s) => s.scope));
-    expect([...scopes].sort()).toEqual(['anywhere', 'fields', 'global', 'row']);
+    expect([...scopes].sort()).toEqual(['anywhere', 'board', 'fields', 'global', 'overview', 'row']);
   });
 });

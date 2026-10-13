@@ -204,7 +204,7 @@
 
 <form
   bind:this={form}
-  class="flex flex-none flex-col border-t border-rule-strong bg-bg"
+  class="relative flex flex-none flex-col border-t border-rule-strong bg-bg"
   aria-label="Start a session"
   onfocusin={() => (focused = true)}
   onfocusout={onFocusOut}
@@ -214,7 +214,13 @@
   }}
 >
   {#if expanded}
-    <div class="flex h-8 items-stretch border-b border-rule" role="group" aria-label="Launch options">
+    <!-- Over the column, not in it: opening it must not shrink the split
+         (a session terminal would refit and redraw on every focus). -->
+    <div
+      class="absolute right-0 bottom-full left-0 z-10 flex h-8 items-stretch border-t border-rule-strong bg-bg"
+      role="group"
+      aria-label="Launch options"
+    >
       <span class="relative flex max-w-60 min-w-0 items-center border-r border-rule">
         <span class={optLabel}>model</span>
         <select class="{pick} font-mono text-[12px]" bind:value={model} disabled={isTerminal || !models.length} aria-label="Model">

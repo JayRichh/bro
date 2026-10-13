@@ -354,3 +354,61 @@ mod tests {
         assert!(remove_at(&config, &root, "work").is_err());
     }
 }
+
+/// The real command wrappers resolve every file under `NEBULA_DATA_DIR`
+/// (never the user's own config): presets and profiles written through
+/// them land in a temp data dir.
+#[cfg(test)]
+mod wrappers {
+    use std::sync::Mutex;
+
+    static ENV: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn preset_and_profile_commands_write_under_the_data_dir() {
+        let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        let keep_data = std::env::var_os("NEBULA_DATA_DIR");
+        let keep_file = std::env::var_os("NEBULA_CONFIG_FILE");
+        std::env::set_var("NEBULA_DATA_DIR", dir.path());
+        std::env::remove_var("NEBULA_CONFIG_FILE");
+
+        let result = std::panic::catch_unwind(|| {
+            assert!(crate::presets::presets_list().is_empty());
+            crate::presets::preset_save(
+                None,
+                serde_json::from_value(serde_json::json!({"name": "r", "harness": "claude"}))
+                    .unwrap(),
+            )
+            .unwrap();
+            assert!(dir.path().join("agent_presets.json").is_file());
+            assert_eq!(crate::presets::presets_list().len(), 1);
+
+            let saved = super::profile_add(super::ProfileForm {
+                name: "work".into(),
+                harness: "claude".into(),
+                default: true,
+                use_default: false,
+                env: String::new(),
+            })
+            .unwrap();
+            assert_eq!(saved.login.as_deref(), Some("kete profile login work"));
+            assert!(dir.path().join("config.json").is_file());
+            assert!(dir.path().join("profiles").join("work").is_dir());
+            assert_eq!(super::profiles_list().len(), 1);
+            super::profile_remove("work".into()).unwrap();
+            assert!(super::profiles_list().is_empty());
+        });
+
+        match keep_data {
+            Some(v) => std::env::set_var("NEBULA_DATA_DIR", v),
+            None => std::env::remove_var("NEBULA_DATA_DIR"),
+        }
+        if let Some(v) = keep_file {
+            std::env::set_var("NEBULA_CONFIG_FILE", v);
+        }
+        if let Err(e) = result {
+            std::panic::resume_unwind(e);
+        }
+    }
+}

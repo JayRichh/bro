@@ -1,6 +1,7 @@
 <script lang="ts">
   // ? or F1: every shortcut the window answers, from the one table App.svelte
   // dispatches through, so this list can't drift from the keys.
+  import { tick } from 'svelte';
   import { ui } from './ui/ui.svelte';
   import { helpGroups, keyLabel, type Scope } from './shortcuts';
 
@@ -10,7 +11,16 @@
     fields: 'not in a terminal',
     global: '',
     row: '',
+    overview: '',
+    board: '',
   };
+
+  // Take the keys when it opens, so Esc, ? and F1 reach it (the window's
+  // own key handler stands down while a layer is up).
+  let box = $state<HTMLDivElement>();
+  $effect(() => {
+    if (ui.help) tick().then(() => box?.focus());
+  });
 
   function onKey(e: KeyboardEvent) {
     e.stopPropagation();
@@ -21,14 +31,13 @@
 {#if ui.help}
   <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
   <div class="fixed inset-0 z-40 bg-[rgb(28_25_23/0.18)]" onmousedown={() => (ui.help = false)}></div>
-  <!-- svelte-ignore a11y_autofocus -->
   <div
+    bind:this={box}
     class="fixed top-[8%] left-1/2 z-50 flex max-h-[84vh] w-[min(860px,94vw)] -translate-x-1/2 flex-col border border-rule-strong bg-bg text-ink outline-none"
     role="dialog"
     aria-modal="true"
     aria-labelledby="help-title"
     tabindex="-1"
-    autofocus
     onkeydown={onKey}
   >
     <header class="flex flex-none items-baseline gap-4 border-b border-rule-strong px-5 py-3">

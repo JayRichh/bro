@@ -52,7 +52,7 @@ const model = {
 
 // Wave 2 shots (menu, palette, help, quick) want a fuller overview: a
 // session per state, a nested one, a terminal and a PR.
-const W2 = ['menu', 'palette', 'help', 'quick'].includes(q.get('view'));
+const W2 = ['menu', 'palette', 'help', 'quick', 'selftest'].includes(q.get('view'));
 if (W2) {
   const a = (id, worktree_id, name, status, extra = {}) => ({
     id, worktree_id, name, status, archived: false, unseen: false, status_changed_at: now - 60_000,
@@ -315,6 +315,41 @@ window.addEventListener('load', async () => {
   if (view === 'help') {
     await ready();
     key('?', { shiftKey: true });
+    return;
+  }
+  // view=selftest: each layer takes the keys when it opens and Esc on
+  // whatever has the focus closes it. The verdict goes in the title, for
+  // a headless --dump-dom to read.
+  if (view === 'selftest') {
+    await ready();
+    const esc = () => (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    const out = [];
+    const check = async (name, open, sel) => {
+      open();
+      await wait(150);
+      const opened = !!document.querySelector(sel);
+      esc();
+      await wait(150);
+      out.push(name + ':' + (opened && !document.querySelector(sel) ? 'ok' : opened ? 'stuck' : 'no-open'));
+    };
+    await check('help', () => key('?', { shiftKey: true }), '[aria-labelledby="help-title"]');
+    await check('palette', () => key('k', { ctrlKey: true }), '[aria-label="Command palette"]');
+    await check('menu', () => {
+      const row = document.querySelector('[data-target="agent:a1"]');
+      row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 400, clientY: 120 }));
+    }, '[role="menu"]');
+    await check('rowkey-rename', () => {
+      document.querySelector('[data-target="agent:a1"]').focus();
+      document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', bubbles: true }));
+    }, '[role="dialog"][aria-labelledby="dialog-title"]');
+    // The quick prompt's options row opens over the column, not in it.
+    const col = document.querySelector('main > div.relative');
+    const before = col.getBoundingClientRect().height;
+    document.querySelector('textarea[aria-label="Prompt"]').focus();
+    await wait(150);
+    const opened = !!document.querySelector('[aria-label="Launch options"]');
+    out.push('quick-height:' + (opened && col.getBoundingClientRect().height === before ? 'ok' : opened ? 'shrank' : 'no-open'));
+    document.title = 'SELFTEST ' + out.join(' ');
     return;
   }
   if (view === 'quick') {

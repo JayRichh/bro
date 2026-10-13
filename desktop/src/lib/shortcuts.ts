@@ -37,7 +37,12 @@ export type ShortcutId =
   | 'new_terminal'
   | 'open_editor'
   | 'open_remote'
-  | 'row_menu';
+  | 'row_menu'
+  | 'list_move'
+  | 'list_open'
+  | 'overview_fold'
+  | 'board_lanes'
+  | 'board_diff';
 
 /**
  * Where a key counts:
@@ -45,9 +50,12 @@ export type ShortcutId =
  * - `fields`: while typing in a field, but not inside a terminal (whose
  *   shell owns the key: Ctrl+K is kill-line, Alt+arrows are words);
  * - `global`: only when no field or terminal has the keys;
- * - `row`: like `global`, acting on the focused session row or card.
+ * - `row`: like `global`, acting on the focused session row or card;
+ * - `overview`, `board`: the home view's own walking keys, handled by
+ *   Overview.svelte and Board.svelte (listed here for the help and the
+ *   clash test; App.svelte never dispatches them).
  */
-export type Scope = 'anywhere' | 'fields' | 'global' | 'row';
+export type Scope = 'anywhere' | 'fields' | 'global' | 'row' | 'overview' | 'board';
 
 export interface Shortcut {
   id: ShortcutId;
@@ -55,7 +63,7 @@ export interface Shortcut {
   keys: string[];
   scope: Scope;
   label: string;
-  group: 'General' | 'Views' | 'Sessions';
+  group: 'General' | 'Views' | 'Sessions' | 'Overview and board';
 }
 
 export const SHORTCUTS: Shortcut[] = [
@@ -94,6 +102,12 @@ export const SHORTCUTS: Shortcut[] = [
   { id: 'open_editor', keys: ['shift+o'], scope: 'row', label: 'Open its worktree in the editor', group: 'Sessions' },
   { id: 'open_remote', keys: ['shift+g'], scope: 'row', label: 'Open the repo remote in the browser', group: 'Sessions' },
   { id: 'row_menu', keys: ['shift+f10', 'contextmenu'], scope: 'row', label: 'Actions menu', group: 'Sessions' },
+
+  { id: 'list_move', keys: ['j', 'k', 'arrowdown', 'arrowup'], scope: 'overview', label: 'Move through the rows (cards on the board)', group: 'Overview and board' },
+  { id: 'list_open', keys: ['enter', 'space'], scope: 'overview', label: 'Open the session', group: 'Overview and board' },
+  { id: 'overview_fold', keys: ['arrowright', 'arrowleft'], scope: 'overview', label: 'Overview: unfold, fold nested sessions', group: 'Overview and board' },
+  { id: 'board_lanes', keys: ['h', 'l'], scope: 'board', label: 'Board: across lanes (also the side arrows)', group: 'Overview and board' },
+  { id: 'board_diff', keys: ['d'], scope: 'board', label: 'Board: diff the selected card', group: 'Overview and board' },
 ];
 
 /** The chord a key event spells: modifiers in ctrl, alt, shift order, then
@@ -128,6 +142,9 @@ export function inScope(scope: Scope, ctx: KeyContext): boolean {
       return !ctx.typing;
     case 'row':
       return !ctx.typing && ctx.onRow;
+    case 'overview':
+    case 'board':
+      return false;
   }
 }
 
