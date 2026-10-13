@@ -1699,7 +1699,7 @@ impl Config {
             "Config::save() in a test without a path override: wrap the \
              test body in config::with_config_path (or with_default_config)"
         );
-        self.write_layers(&settings_path(), &local_settings_path(), false)
+        self.write_layers(&settings_path(), &local_settings_path(), false, None)
     }
 
     /// Put every setting back to its default and return the result.
@@ -1720,14 +1720,71 @@ impl Config {
             _ => {}
         }
         let cfg = Self::default();
-        cfg.write_layers(&settings_path(), &local, true)?;
+        cfg.write_layers(&settings_path(), &local, true, None)?;
         Ok(cfg)
+    }
+
+    /// Load the settings fresh, apply `change`, and write back only the
+    /// top-level keys it changed — every other key, known or not, stays as
+    /// the files hold it. The read and the write sit back to back, so a
+    /// TUI and a desktop window saving different settings at the same time
+    /// keep each other's values (a [`Config::save`] writes every known key
+    /// from whatever it loaded, which is why the desktop goes through here).
+    /// Returns the config as written.
+    pub fn update(change: impl FnOnce(&mut Config)) -> std::io::Result<Config> {
+        #[cfg(any(test, feature = "test-support"))]
+        assert!(
+            CONFIG_PATH_OVERRIDE.with(|p| p.borrow().is_some()),
+            "Config::update() in a test without a path override: wrap the              test body in config::with_config_path, or call update_in"
+        );
+        Self::update_in(&settings_path(), &local_settings_path(), change)
+    }
+
+    /// [`Config::update`] on explicit layers: `path` with `local` over it.
+    pub fn update_in(
+        path: &Path,
+        local: &Path,
+        change: impl FnOnce(&mut Config),
+    ) -> std::io::Result<Config> {
+        let before = load_layers(path, local);
+        let mut after = before.clone();
+        change(&mut after);
+        let old = serde_json::to_value(&before).map_err(invalid_data)?;
+        let new = serde_json::to_value(&after).map_err(invalid_data)?;
+        let changed: BTreeSet<String> = match (&old, &new) {
+            (serde_json::Value::Object(old), serde_json::Value::Object(new)) => new
+                .iter()
+                .filter(|(key, value)| old.get(*key) != Some(*value))
+                .map(|(key, _)| key.clone())
+                .chain(old.keys().filter(|key| !new.contains_key(*key)).cloned())
+                .collect(),
+            _ => BTreeSet::new(),
+        };
+        if !changed.is_empty() {
+            after.write_layers(path, local, false, Some(&changed))?;
+        }
+        Ok(after)
+    }
+
+    /// The settings at `path` with `local` over them — [`Config::load`]
+    /// on explicit layers, for a caller that is not this process's TUI.
+    pub fn load_at(path: &Path, local: &Path) -> Config {
+        load_layers(path, local)
     }
 
     /// Write this config's known keys into the two layers and swap each
     /// file that changed into place atomically. `fresh` starts `config.json`
-    /// from an empty object instead of patching what is there.
-    fn write_layers(&self, path: &Path, local: &Path, fresh: bool) -> std::io::Result<()> {
+    /// from an empty object instead of patching what is there. `only`
+    /// limits the write to those keys ([`Config::update`]); a key in it the
+    /// config no longer serializes (an emptied, skip-if-empty map) is
+    /// removed from whichever layer holds it.
+    fn write_layers(
+        &self,
+        path: &Path,
+        local: &Path,
+        fresh: bool,
+        only: Option<&BTreeSet<String>>,
+    ) -> std::io::Result<()> {
         use nebula_core::settings;
         let mut root = if fresh {
             settings::Object::new()
@@ -1744,7 +1801,12 @@ impl Config {
         let defaults = serde_json::to_value(Self::default()).map_err(invalid_data)?;
         let mut local_changed = false;
         for (old, new) in RENAMED_KEYS {
-            root.remove(*old);
+            let moved = root.remove(*old);
+            // A partial write (`only`) may not rewrite the new key: carry the
+            // old key's value over to it, so the rename loses nothing.
+            if let (Some(value), Some(_)) = (moved, only) {
+                root.entry(new.to_string()).or_insert(value);
+            }
             // An old key the local layer holds stays local under its new
             // name, so the loop below writes the value back there.
             if let Some(held) = local_root.as_mut() {
@@ -1754,7 +1816,18 @@ impl Config {
                 }
             }
         }
+        if let Some(only) = only {
+            for key in only.iter().filter(|key| !known.contains_key(*key)) {
+                root.remove(key);
+                if let Some(held) = local_root.as_mut() {
+                    local_changed |= held.remove(key).is_some();
+                }
+            }
+        }
         for (key, value) in known {
+            if only.is_some_and(|only| !only.contains(&key)) {
+                continue;
+            }
             // A stored value this build couldn't read loaded as its default.
             // Unless it has been changed since, leave the stored one alone.
             if self.skipped.contains(&key) && defaults.get(&key) == Some(&value) {
@@ -2909,7 +2982,7 @@ pub fn with_config_path<T>(path: PathBuf, f: impl FnOnce() -> T) -> T {
 impl Config {
     /// [`Config::save`] into `path`, with its local layer beside it.
     pub fn save_to(&self, path: &Path) -> std::io::Result<()> {
-        self.write_layers(path, &sibling_local_path(path), false)
+        self.write_layers(path, &sibling_local_path(path), false, None)
     }
 }
 
@@ -2946,4 +3019,152 @@ pub fn project_tab() -> usize {
         .iter()
         .position(|t| matches!(t.body, TabBody::Project(_)))
         .expect("SETTINGS_TABS declares a Project tab")
+}
+
+/// The two settings layers this process reads: `config.json`, and
+/// `config.local.json` over it (a test's path override moves both).
+pub fn layer_paths() -> (PathBuf, PathBuf) {
+    (settings_path(), local_settings_path())
+}
+
+/// Write one top-level key that [`Config`] has no field for — the desktop
+/// window's own `desktop` object — leaving every other key as the files
+/// hold it: into `config.local.json` when that layer already holds the key,
+/// else into `config.json`. Read, patch and atomic write sit back to back.
+pub fn patch_raw_key(
+    path: &Path,
+    local: &Path,
+    key: &str,
+    value: serde_json::Value,
+) -> std::io::Result<()> {
+    use nebula_core::settings;
+    if let Some(mut held) = settings::read_object(local).ok().flatten() {
+        if held.contains_key(key) {
+            held.insert(key.to_string(), value);
+            return settings::write_json(local, &serde_json::Value::Object(held));
+        }
+    }
+    let mut root = patchable_object(path)?;
+    root.insert(key.to_string(), value);
+    settings::write_json(path, &serde_json::Value::Object(root))
+}
+
+/// One top-level key out of the merged layers, `local` over `path`, raw.
+pub fn read_raw_key(path: &Path, local: &Path, key: &str) -> Option<serde_json::Value> {
+    use nebula_core::settings;
+    [local, path].into_iter().find_map(|layer| {
+        settings::read_object(layer)
+            .ok()
+            .flatten()
+            .and_then(|mut obj| obj.remove(key))
+    })
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    fn layers(dir: &tempfile::TempDir) -> (PathBuf, PathBuf) {
+        (
+            dir.path().join("config.json"),
+            dir.path().join("config.local.json"),
+        )
+    }
+
+    fn read(path: &Path) -> Value {
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn an_update_writes_only_the_keys_it_changed() {
+        let dir = tempfile::tempdir().unwrap();
+        let (path, local) = layers(&dir);
+        std::fs::write(&path, r#"{"editor": "nvim", "someone_elses": [1]}"#).unwrap();
+        Config::update_in(&path, &local, |cfg| cfg.kanban = true).unwrap();
+        assert_eq!(
+            read(&path),
+            json!({"editor": "nvim", "someone_elses": [1], "kanban": true}),
+            "no defaults materialised, unknown keys kept"
+        );
+    }
+
+    #[test]
+    fn two_writers_changing_different_keys_keep_both() {
+        // The TUI and the desktop each load, change one key and save; the
+        // second must not put the first one's key back to what it loaded.
+        let dir = tempfile::tempdir().unwrap();
+        let (path, local) = layers(&dir);
+        let stale_desktop_view = Config::load_at(&path, &local);
+        assert!(!stale_desktop_view.kanban);
+        Config::update_in(&path, &local, |cfg| cfg.kanban = true).unwrap();
+        Config::update_in(&path, &local, |cfg| cfg.theme = "ocean".into()).unwrap();
+        let now = Config::load_at(&path, &local);
+        assert!(now.kanban);
+        assert_eq!(now.theme, "ocean");
+    }
+
+    #[test]
+    fn an_update_keeps_a_local_key_local() {
+        let dir = tempfile::tempdir().unwrap();
+        let (path, local) = layers(&dir);
+        std::fs::write(&local, r#"{"theme": "forest"}"#).unwrap();
+        Config::update_in(&path, &local, |cfg| cfg.theme = "rose".into()).unwrap();
+        assert_eq!(read(&local), json!({"theme": "rose"}));
+        assert!(read(&path).get("theme").is_none());
+    }
+
+    #[test]
+    fn an_update_carries_a_renamed_key_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let (path, local) = layers(&dir);
+        std::fs::write(&path, r#"{"hide_terminal_glyphs": true}"#).unwrap();
+        Config::update_in(&path, &local, |cfg| cfg.kanban = true).unwrap();
+        assert_eq!(
+            read(&path),
+            json!({"hide_card_marks": true, "kanban": true})
+        );
+        assert!(Config::load_at(&path, &local).hide_card_marks);
+    }
+
+    #[test]
+    fn an_update_that_empties_a_map_removes_its_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let (path, local) = layers(&dir);
+        std::fs::write(
+            &path,
+            r#"{"harnesses": {"codex": {"enabled": false}}, "x": 1}"#,
+        )
+        .unwrap();
+        Config::update_in(&path, &local, |cfg| cfg.harnesses.clear()).unwrap();
+        assert_eq!(read(&path), json!({"x": 1}));
+    }
+
+    #[test]
+    fn an_update_leaves_an_unreadable_value_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let (path, local) = layers(&dir);
+        std::fs::write(&path, r#"{"kanban": "maybe", "theme": "rose"}"#).unwrap();
+        Config::update_in(&path, &local, |cfg| cfg.theme = "sand".into()).unwrap();
+        assert_eq!(read(&path), json!({"kanban": "maybe", "theme": "sand"}));
+    }
+
+    #[test]
+    fn a_raw_key_patch_goes_where_the_key_lives() {
+        let dir = tempfile::tempdir().unwrap();
+        let (path, local) = layers(&dir);
+        std::fs::write(&path, r#"{"kanban": true}"#).unwrap();
+        patch_raw_key(&path, &local, "desktop", json!({"theme": "dark"})).unwrap();
+        assert_eq!(
+            read(&path),
+            json!({"kanban": true, "desktop": {"theme": "dark"}})
+        );
+        std::fs::write(&local, r#"{"desktop": {}}"#).unwrap();
+        patch_raw_key(&path, &local, "desktop", json!({"theme": "light"})).unwrap();
+        assert_eq!(read(&local), json!({"desktop": {"theme": "light"}}));
+        assert_eq!(
+            read_raw_key(&path, &local, "desktop"),
+            Some(json!({"theme": "light"}))
+        );
+    }
 }

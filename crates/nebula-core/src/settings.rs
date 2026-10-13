@@ -162,21 +162,46 @@ pub fn write_json(path: &Path, value: &Value) -> io::Result<()> {
     write_atomic(path, &bytes)
 }
 
-/// Replace a file's contents atomically: write `<name>.tmp` beside it and
+/// Replace a file's contents atomically: write a temp file beside it and
 /// rename that into place, so a crash mid-write never leaves half a file. A
 /// symlink at `path` is written through rather than replaced — a dotfiles
 /// setup links `config.json` into a repo, and the rename would otherwise
 /// swap the link for a plain file (#50).
+///
+/// The temp file's name is this writer's own (`<name>.<pid>-<n>.tmp`):
+/// the TUI and the desktop window save the same settings files, and two
+/// saves sharing one temp name could rename the other's half-written bytes
+/// into place. On Windows a rename onto a file another process has open
+/// for reading fails for a moment; it is retried briefly before giving up.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
     let target = resolve_links(path);
     if let Some(parent) = target.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent)?;
     }
     let mut tmp_name = target.file_name().map(OsString::from).unwrap_or_default();
-    tmp_name.push(".tmp");
+    tmp_name.push(format!(
+        ".{}-{}.tmp",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
     let tmp = target.with_file_name(tmp_name);
     std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, &target)
+    let mut tries = 0;
+    loop {
+        match std::fs::rename(&tmp, &target) {
+            Ok(()) => return Ok(()),
+            Err(err) if err.kind() == io::ErrorKind::PermissionDenied && tries < 20 => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(err) => {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(err);
+            }
+        }
+    }
 }
 
 /// `path` followed through any symlinks to the file they name, which need
@@ -355,8 +380,7 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(real.join("nebula.json")).unwrap())
                 .unwrap();
         assert_eq!(saved["theme"], "ocean", "the file it names took the write");
-        assert!(!real.join("nebula.json.tmp").exists());
-        assert!(!dir.path().join("config.json.tmp").exists());
+        assert!(no_temp_files(&real) && no_temp_files(dir.path()));
     }
 
     #[test]
@@ -365,7 +389,35 @@ mod tests {
         let path = dir.path().join("nested").join("list.json");
         write_atomic(&path, b"[]\n").unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "[]\n");
-        assert!(!path.with_extension("json.tmp").exists());
+        assert!(no_temp_files(path.parent().unwrap()));
+    }
+
+    fn no_temp_files(dir: &Path) -> bool {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .all(|e| !e.unwrap().file_name().to_string_lossy().ends_with(".tmp"))
+    }
+
+    #[test]
+    fn writers_racing_on_one_file_each_land_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let writers: Vec<_> = (0..8)
+            .map(|n| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    for i in 0..25 {
+                        write_json(&path, &json!({ "writer": n, "i": i })).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for w in writers {
+            w.join().unwrap();
+        }
+        let last: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(last["i"], 24, "a whole document, never a torn one");
+        assert!(no_temp_files(dir.path()));
     }
 
     #[test]
