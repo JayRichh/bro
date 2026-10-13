@@ -5687,3 +5687,71 @@ mod tests {
         assert_eq!(saved["session_idle_timeout"], "5m");
     }
 }
+
+/// Byte-for-byte pins on what a save writes, so moving `Config` between
+/// crates (or touching its save path) can't change a byte of either layer
+/// unnoticed. `KETE_BLESS=1` rewrites the goldens.
+#[cfg(test)]
+mod golden {
+    use super::*;
+
+    const DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/testdata/config_golden");
+
+    fn check(name: &str, actual: &str) {
+        let path = Path::new(DIR).join(name);
+        if std::env::var_os("KETE_BLESS").is_some() {
+            std::fs::write(&path, actual).unwrap();
+            return;
+        }
+        let want = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("{}: {e} (run with KETE_BLESS=1)", path.display()));
+        assert_eq!(actual, want.replace("\r\n", "\n"), "{name} drifted");
+    }
+
+    #[test]
+    fn a_default_save_writes_these_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        Config::default().save_to(&path).unwrap();
+        check("default.json", &std::fs::read_to_string(&path).unwrap());
+    }
+
+    #[test]
+    fn a_patched_save_writes_these_bytes_in_both_layers() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let local = dir.path().join("config.local.json");
+        std::fs::write(
+            &path,
+            r#"{"future_key": {"nested": [1, 2]}, "hide_terminal_glyphs": true, "editor": "nvim",
+               "projects": {"/repo/a": {"run_command": "npm run dev", "mystery": 7}}}"#,
+        )
+        .unwrap();
+        std::fs::write(&local, r#"{"theme": "ocean", "local_only": "x"}"#).unwrap();
+        let mut cfg = load_from(&path);
+        cfg.kanban = true;
+        cfg.claude_model = "opus".into();
+        cfg.theme = "forest".into();
+        cfg.set_project_text(
+            Path::new("/repo/b"),
+            SettingKind::OpenCommand,
+            "open http://x",
+        );
+        cfg.save_to(&path).unwrap();
+        check("patched.json", &std::fs::read_to_string(&path).unwrap());
+        check(
+            "patched.local.json",
+            &std::fs::read_to_string(&local).unwrap(),
+        );
+    }
+
+    #[test]
+    fn a_reset_writes_these_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, r#"{"future_key": 1, "kanban": true}"#).unwrap();
+        let cfg = with_config_path(path.clone(), Config::reset_to_defaults).unwrap();
+        assert!(!cfg.kanban);
+        check("reset.json", &std::fs::read_to_string(&path).unwrap());
+    }
+}
