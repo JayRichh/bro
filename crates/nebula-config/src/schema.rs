@@ -308,10 +308,17 @@ fn choice_options(cfg: &Config, kind: SettingKind) -> Option<Vec<String>> {
 
 fn control(cfg: &Config, kind: SettingKind) -> Control {
     if let Some(options) = choice_options(cfg, kind) {
-        return Control::Choice {
-            labels: options.clone(),
-            options,
+        // The quick prompt's harness reads by its label (Claude Code),
+        // and stores its id.
+        let labels = if kind == SettingKind::QuickPromptKind {
+            options
+                .iter()
+                .map(|id| cfg.effective_harness_by_id(id).display_label().to_string())
+                .collect()
+        } else {
+            options.clone()
         };
+        return Control::Choice { labels, options };
     }
     if kind.is_text() {
         let placeholder = if kind.is_project() {
