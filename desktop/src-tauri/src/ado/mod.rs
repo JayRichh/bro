@@ -78,10 +78,11 @@ impl AdoState {
     /// The ADO context for the checkout at `path`, from its git remote.
     /// No HTTP happens here.
     pub async fn context(&self, path: &Path) -> Result<AdoContext, String> {
-        let remote = ado_remote(path).await?;
+        let (remote_name, remote) = ado_remote(path).await?;
         let client = self.client(&remote.org_url);
         Ok(AdoContext::new(
             path.to_path_buf(),
+            remote_name,
             remote,
             client,
             self.store.clone(),
@@ -94,6 +95,8 @@ impl AdoState {
 /// the store.
 pub struct AdoContext {
     pub path: PathBuf,
+    /// The git remote's name (`origin`).
+    pub remote_name: String,
     pub remote: AdoRemote,
     pub key: RepoKey,
     pub client: Arc<AdoClient>,
@@ -130,6 +133,7 @@ pub struct Me {
 impl AdoContext {
     pub fn new(
         path: PathBuf,
+        remote_name: String,
         remote: AdoRemote,
         client: Arc<AdoClient>,
         store: Arc<AdoStore>,
@@ -142,6 +146,7 @@ impl AdoContext {
         };
         Self {
             path,
+            remote_name,
             remote,
             key,
             client,
@@ -184,10 +189,34 @@ impl AdoContext {
             }
         }
         let meta = self.project_meta().await?;
-        Ok(meta
-            .default_team
+        meta.default_team
             .map(|t| t.name)
-            .unwrap_or_else(|| format!("{} Team", self.remote.project)))
+            .filter(|n| !n.is_empty())
+            .ok_or_else(|| AdoError::Local("Choose a team".into()))
+    }
+
+    /// The repo's ADO default branch as a remote ref (`origin/main`),
+    /// from the repository's metadata. None for an empty repo.
+    pub async fn default_branch_ref(&self) -> Result<Option<String>, AdoError> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Repo {
+            #[serde(default)]
+            default_branch: Option<String>,
+        }
+        let repo: Repo = self
+            .client
+            .get(&format!(
+                "/{}/_apis/git/repositories/{}",
+                enc(&self.remote.project),
+                enc(&self.remote.repo)
+            ))
+            .await?;
+        Ok(repo
+            .default_branch
+            .map(|b| b.trim_start_matches("refs/heads/").to_string())
+            .filter(|b| !b.is_empty())
+            .map(|b| format!("{}/{b}", self.remote_name)))
     }
 
     /// Who is signed in.
@@ -295,12 +324,12 @@ pub async fn git_out(cwd: &Path, args: &[&str]) -> Result<String, String> {
     }
 }
 
-/// The repo's ADO remote: `origin` when it is one, else the only remote
-/// that is.
-pub async fn ado_remote(path: &Path) -> Result<AdoRemote, String> {
+/// The repo's ADO remote and its name: `origin` when it is one, else the
+/// only remote that is.
+pub async fn ado_remote(path: &Path) -> Result<(String, AdoRemote), String> {
     if let Ok(url) = git_out(path, &["remote", "get-url", "origin"]).await {
         if let Some(r) = parse_remote(&url) {
-            return Ok(r);
+            return Ok(("origin".into(), r));
         }
     }
     let names = git_out(path, &["remote"]).await?;
@@ -308,7 +337,7 @@ pub async fn ado_remote(path: &Path) -> Result<AdoRemote, String> {
     for name in names.lines().map(str::trim).filter(|n| !n.is_empty()) {
         if let Ok(url) = git_out(path, &["remote", "get-url", name]).await {
             if let Some(r) = parse_remote(&url) {
-                found.push(r);
+                found.push((name.to_string(), r));
             }
         }
     }
@@ -351,6 +380,7 @@ pub(crate) mod testing {
         ));
         AdoContext::new(
             PathBuf::from("."),
+            "origin".into(),
             remote,
             client,
             store,

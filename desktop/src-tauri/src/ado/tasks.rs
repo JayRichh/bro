@@ -19,17 +19,33 @@ pub const BATCH: usize = 200;
 /// Most ids a WIQL query returns.
 const WIQL_TOP: usize = 500;
 
+/// Which tasks to list. The two sprint "mine" scopes show the whole
+/// iteration's worth of my work, Completed items included (Removed ones
+/// never); the two "open" scopes leave Completed and Removed out.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TaskScope {
-    /// The team's current iteration, my items.
+    /// The team's current iteration, my items, Completed included.
     CurrentSprint,
-    /// A chosen iteration (by id), my items.
+    /// A chosen iteration (by id), my items, Completed included.
     Iteration(String),
     /// Everything open assigned to me, in the team's areas.
     MyOpen,
     /// Everyone's open items in the current iteration.
     SprintAll,
+}
+
+impl TaskScope {
+    /// The `ado.json` cache entry for this scope's last list.
+    fn cache_name(&self, team: Option<&str>) -> String {
+        let scope = match self {
+            TaskScope::CurrentSprint => "currentSprint".to_string(),
+            TaskScope::Iteration(id) => format!("iteration:{id}"),
+            TaskScope::MyOpen => "myOpen".to_string(),
+            TaskScope::SprintAll => "sprintAll".to_string(),
+        };
+        format!("tasks:{}:{scope}", team.unwrap_or(""))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -67,6 +83,10 @@ pub struct TaskList {
     pub stale: bool,
     pub next: Option<Iteration>,
     pub groups: Vec<TaskGroup>,
+    /// Set when ADO could not be reached and this is the last list saved
+    /// for the scope: when it was saved, in Unix milliseconds.
+    #[serde(default)]
+    pub cached_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -326,6 +346,7 @@ pub async fn tasks(ctx: &AdoContext, scope: &TaskScope, today: &str) -> Result<T
             stale: false,
             next: None,
             groups,
+            cached_at: None,
         });
     }
 
@@ -353,6 +374,7 @@ pub async fn tasks(ctx: &AdoContext, scope: &TaskScope, today: &str) -> Result<T
             stale: false,
             next: None,
             groups: Vec::new(),
+            cached_at: None,
         });
     };
     let (stale, next) = stale_and_next(&iteration, &all, today);
@@ -383,6 +405,7 @@ pub async fn tasks(ctx: &AdoContext, scope: &TaskScope, today: &str) -> Result<T
             stale,
             next,
             groups: Vec::new(),
+            cached_at: None,
         });
     }
 
@@ -405,7 +428,93 @@ pub async fn tasks(ctx: &AdoContext, scope: &TaskScope, today: &str) -> Result<T
         stale,
         next,
         groups,
+        cached_at: None,
     })
+}
+
+/// Whether `e` means ADO could not be reached or signed in to, when the
+/// last saved list beats an error.
+fn is_offline(e: &AdoError) -> bool {
+    matches!(
+        e,
+        AdoError::Network(_) | AdoError::Auth(_) | AdoError::Unauthorized
+    )
+}
+
+/// [`tasks`], saving each list in `ado.json`. When ADO cannot be reached
+/// or signed in to, the last list saved for the scope comes back instead,
+/// with `cached_at` set.
+pub async fn tasks_or_cached(
+    ctx: &AdoContext,
+    scope: &TaskScope,
+    today: &str,
+) -> Result<TaskList, AdoError> {
+    let team = ctx.store.read_repo(&ctx.key, |r| r.team.clone());
+    let name = scope.cache_name(team.as_deref());
+    match tasks(ctx, scope, today).await {
+        Ok(list) => {
+            let value = serde_json::to_value(&list)
+                .map_err(|e| AdoError::Local(format!("Could not save the task list: {e}")))?;
+            ctx.store.cache_put(&ctx.key, &name, value);
+            Ok(list)
+        }
+        Err(e) if is_offline(&e) => {
+            let saved = ctx
+                .store
+                .read_repo(&ctx.key, |r| r.cache.get(&name).cloned());
+            let cached = saved.and_then(|c| {
+                serde_json::from_value::<TaskList>(c.value)
+                    .ok()
+                    .map(|l| (l, c.at))
+            });
+            match cached {
+                Some((mut list, at)) => {
+                    list.cached_at = Some(at);
+                    Ok(list)
+                }
+                None => Err(e),
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Remember `team` for this repo's views; empty goes back to the
+/// project's default team.
+pub fn set_team(ctx: &AdoContext, team: &str) -> Result<(), AdoError> {
+    let team = team.trim();
+    ctx.store
+        .try_with_repo(&ctx.key, |r| {
+            r.team = (!team.is_empty()).then(|| team.to_string());
+        })
+        .map_err(|e| AdoError::Local(format!("Could not save the team: {e}")))
+}
+
+/// Work item `id` and its parent, hydrated.
+async fn item_and_parent(
+    ctx: &AdoContext,
+    id: u32,
+    states: &mut HashMap<String, Vec<WitState>>,
+) -> Result<(Hydrated, Option<WorkItem>), AdoError> {
+    let mut found = hydrate(ctx, &[id], states).await?;
+    if found.is_empty() {
+        return Err(AdoError::NotFound);
+    }
+    let item = found.remove(0);
+    let parent = match item.item.parent {
+        Some(p) => hydrate(ctx, &[p], states)
+            .await
+            .ok()
+            .and_then(|mut v| (!v.is_empty()).then(|| v.remove(0).item)),
+        None => None,
+    };
+    Ok((item, parent))
+}
+
+/// The prompt Start would give an agent for task `id`.
+pub async fn prompt_for(ctx: &AdoContext, id: u32) -> Result<String, AdoError> {
+    let (item, parent) = item_and_parent(ctx, id, &mut HashMap::new()).await?;
+    Ok(task_prompt(&item.item, parent.as_ref()))
 }
 
 /// Fetch the parents `shown` points at that it does not hold, fill each
@@ -639,7 +748,12 @@ async fn my_open_ids(ctx: &AdoContext, team: &str) -> Result<Vec<u32>, AdoError>
         .await?;
     let mut closed_by_type = Vec::new();
     for t in types.value.into_iter().filter(|t| !t.is_disabled) {
-        let states = ctx.states(&t.name).await?;
+        // A type whose states cannot be read gets no exclusion clause
+        // rather than failing the list; its closed items are filtered out
+        // after hydration if their category is known by then.
+        let Ok(states) = ctx.states(&t.name).await else {
+            continue;
+        };
         let closed: Vec<String> = states
             .into_iter()
             .filter(|s| is_closed(&s.category))
@@ -743,8 +857,17 @@ pub async fn start_task(
     validate_branch_name(&req.branch, &[])?;
     let taken = ws.taken_branches().await?;
     validate_branch_name(&req.branch, &taken)?;
-    let base = req.base.as_deref().map(str::trim).filter(|b| !b.is_empty());
-    let worktree_id = ws.create_worktree(&req.branch, base).await?;
+    let base = match req.base.as_deref().map(str::trim).filter(|b| !b.is_empty()) {
+        Some(b) => Some(b.to_string()),
+        // The repo's ADO default branch, never whatever origin/HEAD says.
+        None => ctx.default_branch_ref().await.map_err(|e| {
+            format!(
+                "Could not read the repo's default branch, so no base to cut from: {}",
+                e.user_message()
+            )
+        })?,
+    };
+    let worktree_id = ws.create_worktree(&req.branch, base.as_deref()).await?;
     let mut out = StartedTask {
         worktree_id,
         ..Default::default()
@@ -765,24 +888,16 @@ pub async fn start_task(
         );
     }
 
-    let mut states = HashMap::new();
-    let item = match hydrate(ctx, &[req.id], &mut states).await {
-        Ok(mut v) if !v.is_empty() => Some(v.remove(0)),
-        Ok(_) => {
+    let (item, parent) = match item_and_parent(ctx, req.id, &mut HashMap::new()).await {
+        Ok((item, parent)) => (Some(item), parent),
+        Err(AdoError::NotFound) => {
             problem("read", format!("Work item {} was not found.", req.id));
-            None
+            (None, None)
         }
         Err(e) => {
             problem("read", e.user_message());
-            None
+            (None, None)
         }
-    };
-    let parent = match item.as_ref().and_then(|h| h.item.parent) {
-        Some(p) => hydrate(ctx, &[p], &mut states)
-            .await
-            .ok()
-            .and_then(|mut v| (!v.is_empty()).then(|| v.remove(0).item)),
-        None => None,
     };
     let item_path = ctx.project_api(&format!("wit/workitems/{}", req.id));
 
@@ -793,13 +908,22 @@ pub async fn start_task(
                 "Not assigned: the work item could not be read.".into(),
             ),
             Some(h) if h.assignee_id.is_some() || h.assignee_unique.is_some() => {
-                let me = ctx.me().await.ok();
-                if !me.as_ref().is_some_and(|me| h.is_mine(me)) {
-                    let who = h.item.assigned_to.as_deref().unwrap_or("someone else");
-                    problem(
+                match ctx.me().await {
+                    Err(e) => problem(
                         "assign",
-                        format!("Left as it is: the task is assigned to {who}."),
-                    );
+                        format!(
+                            "Could not check who you are signed in as: {}",
+                            e.user_message()
+                        ),
+                    ),
+                    Ok(me) if h.is_mine(&me) => {}
+                    Ok(_) => {
+                        let who = h.item.assigned_to.as_deref().unwrap_or("someone else");
+                        problem(
+                            "assign",
+                            format!("Left as it is: the task is assigned to {who}."),
+                        );
+                    }
                 }
             }
             Some(_) => match ctx.me().await {
@@ -886,11 +1010,28 @@ pub async fn start_task(
     Ok(out)
 }
 
+/// Branch names `for-each-ref --format=%(refname)` output takes up: every
+/// local branch, and every branch on `remote` (`refs/remotes/origin/x`
+/// takes `x`). Other remotes' branches and `HEAD` do not count.
+fn taken_from_refs(refs: &str, remote: &str) -> Vec<String> {
+    let remote_prefix = format!("refs/remotes/{remote}/");
+    refs.lines()
+        .map(str::trim)
+        .filter_map(|r| {
+            r.strip_prefix("refs/heads/")
+                .or_else(|| r.strip_prefix(&remote_prefix).filter(|b| *b != "HEAD"))
+        })
+        .filter(|b| !b.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 /// [`Workspace`] over the daemon and the project's repo.
 struct DaemonWorkspace {
     client: Arc<Client>,
     project: ProjectId,
     repo: PathBuf,
+    remote_name: String,
 }
 
 #[async_trait::async_trait]
@@ -898,15 +1039,15 @@ impl Workspace for DaemonWorkspace {
     async fn taken_branches(&self) -> Result<Vec<String>, String> {
         let refs = git_out(
             &self.repo,
-            &["for-each-ref", "--format=%(refname:short)", "refs/heads"],
+            &[
+                "for-each-ref",
+                "--format=%(refname)",
+                "refs/heads",
+                "refs/remotes",
+            ],
         )
         .await?;
-        let mut taken: Vec<String> = refs
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty())
-            .map(str::to_string)
-            .collect();
+        let mut taken = taken_from_refs(&refs, &self.remote_name);
         taken.extend(
             self.client
                 .snapshot()
@@ -933,10 +1074,17 @@ impl Workspace for DaemonWorkspace {
             )
             .await
             .map_err(|e| e.to_string())?;
-        match created {
-            Some(EntityId::Worktree(id)) => Ok(id.0),
-            _ => Err("The daemon did not report the new worktree.".into()),
+        let id = match created {
+            Some(EntityId::Worktree(id)) => id.0,
+            _ => return Err("The daemon did not report the new worktree.".into()),
+        };
+        // The daemon cuts from an already-qualified `origin/main` with
+        // tracking on, which would make main the task branch's upstream.
+        // The branch is new work: it gets its own upstream when pushed.
+        if base.is_some_and(|b| b.starts_with(&format!("{}/", self.remote_name))) {
+            let _ = git_out(&self.repo, &["branch", "--unset-upstream", branch]).await;
         }
+        Ok(id)
     }
 
     async fn create_agent(&self, spec: NewAgent) -> Result<String, String> {
@@ -977,9 +1125,33 @@ pub async fn ado_tasks(
     scope: TaskScope,
 ) -> Result<TaskList, String> {
     let ctx = ado.context_for(&client, &worktree).await?;
-    tasks(&ctx, &scope, &today_utc())
+    tasks_or_cached(&ctx, &scope, &today_utc())
         .await
         .map_err(|e| e.user_message())
+}
+
+/// Remember the team this repo's views use (empty: the default team).
+#[tauri::command]
+pub async fn ado_set_team(
+    client: State<'_, Arc<Client>>,
+    ado: State<'_, AdoState>,
+    worktree: String,
+    team: String,
+) -> Result<(), String> {
+    let ctx = ado.context_for(&client, &worktree).await?;
+    set_team(&ctx, &team).map_err(|e| e.user_message())
+}
+
+/// The prompt Start would give an agent for task `id`, for the dialog.
+#[tauri::command]
+pub async fn ado_task_prompt(
+    client: State<'_, Arc<Client>>,
+    ado: State<'_, AdoState>,
+    worktree: String,
+    id: u32,
+) -> Result<String, String> {
+    let ctx = ado.context_for(&client, &worktree).await?;
+    prompt_for(&ctx, id).await.map_err(|e| e.user_message())
 }
 
 /// Start a task: branch, worktree, task link, and optionally assign,
@@ -1004,6 +1176,7 @@ pub async fn ado_start_task(
         client: client.inner().clone(),
         project: row.project_id,
         repo: row.path,
+        remote_name: ctx.remote_name.clone(),
     };
     start_task(&ctx, &ws, req).await
 }
@@ -1279,21 +1452,41 @@ mod tests {
         })
     }
 
-    /// Project (default team), states for every type, me.
+    const REPO: &str = include_str!("../../tests/fixtures/ado/repository.json");
+
+    /// Project (default team), repo metadata, states for every type, me.
     fn common(s: &MockServer) {
+        common_except(s, &[]);
+    }
+
+    /// [`common`], with the named parts (`me`, or a type's URL name)
+    /// answering 500.
+    fn common_except(s: &MockServer, failing: &[&str]) {
         get(s, "/_apis/projects/Platform", PROJECT);
-        get(s, "/_apis/connectionData", CONN);
+        get(s, "/Platform/_apis/git/repositories/api", REPO);
+        let fail = |s: &MockServer, path: String| {
+            s.mock(move |w, t| {
+                w.path(path);
+                t.status(500).body(r#"{"message":"boom"}"#);
+            });
+        };
+        if failing.contains(&"me") {
+            fail(s, "/_apis/connectionData".into());
+        } else {
+            get(s, "/_apis/connectionData", CONN);
+        }
         for (kind, body) in [
             ("Task", ST_TASK),
             ("User%20Story", ST_STORY),
             ("Bug", ST_BUG),
             ("Feature", ST_FEATURE),
         ] {
-            get(
-                s,
-                &format!("/Platform/_apis/wit/workitemtypes/{kind}/states"),
-                body,
-            );
+            let path = format!("/Platform/_apis/wit/workitemtypes/{kind}/states");
+            if failing.contains(&kind) {
+                fail(s, path);
+            } else {
+                get(s, &path, body);
+            }
         }
     }
 
@@ -1954,6 +2147,198 @@ mod tests {
         .unwrap();
         assert!(req.assign_to_me && !req.activate);
         assert_eq!(req.spawn.unwrap().worktree, "");
+    }
+
+    // ---- fix round 1 ----
+
+    #[tokio::test]
+    async fn start_cuts_from_the_ado_default_branch_when_no_base_is_given() {
+        let s = MockServer::start();
+        start_mocks(&s, 200);
+        let ctx = testing::context(&s.base_url(), testing::temp_store());
+        let ws = FakeWs::default();
+        start_task(&ctx, &ws, start(101, "jari/fix")).await.unwrap();
+        assert_eq!(ws.calls.lock().unwrap()[1], "worktree jari/fix origin/main");
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_default_branch_stops_before_the_worktree() {
+        let s = MockServer::start();
+        s.mock(|w, t| {
+            w.path("/Platform/_apis/git/repositories/api");
+            t.status(500);
+        });
+        let ctx = testing::context(&s.base_url(), testing::temp_store());
+        let ws = FakeWs::default();
+        let e = start_task(&ctx, &ws, start(101, "jari/fix"))
+            .await
+            .unwrap_err();
+        assert!(e.contains("default branch"), "{e}");
+        assert_eq!(*ws.calls.lock().unwrap(), vec!["branches"]);
+    }
+
+    #[test]
+    fn remote_branches_on_the_repo_remote_are_taken() {
+        let refs = "refs/heads/main\nrefs/heads/jari/a\nrefs/remotes/origin/HEAD\n\
+                    refs/remotes/origin/ga/b\nrefs/remotes/fork/jari/c\n";
+        assert_eq!(
+            taken_from_refs(refs, "origin"),
+            vec!["main", "jari/a", "ga/b"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_identity_check_is_reported_as_such() {
+        let s = MockServer::start();
+        common_except(&s, &["me"]);
+        s.mock(|w, t| {
+            w.method(POST).path("/Platform/_apis/wit/workitemsbatch");
+            t.status(200).body(BATCH_MAIN);
+        });
+        let ctx = testing::context(&s.base_url(), testing::temp_store());
+        let ws = FakeWs::default();
+        let mut req = start(102, "jari/tests");
+        req.activate = false;
+        let out = start_task(&ctx, &ws, req).await.unwrap();
+        assert_eq!(out.problems.len(), 1);
+        assert!(
+            out.problems[0].message.starts_with("Could not check who"),
+            "{:?}",
+            out.problems
+        );
+        assert!(!out.problems[0].message.contains("Sam Lee"));
+    }
+
+    #[tokio::test]
+    async fn task_prompt_command_hydrates_item_and_parent() {
+        let s = MockServer::start();
+        common(&s);
+        s.mock(|w, t| {
+            w.method(POST).path("/Platform/_apis/wit/workitemsbatch");
+            t.status(200).body(BATCH_MAIN);
+        });
+        let ctx = testing::context(&s.base_url(), testing::temp_store());
+        let p = prompt_for(&ctx, 101).await.unwrap();
+        assert!(p.starts_with("# Task 101: Fix GST rounding"));
+        assert!(p.contains("Parent: User Story 100: GST rounding on invoices"));
+        assert!(p.contains("## Description\n\na\n\n- b"));
+        assert_eq!(prompt_for(&ctx, 999).await, Err(AdoError::NotFound));
+    }
+
+    #[tokio::test]
+    async fn set_team_persists_and_empty_clears() {
+        let store = testing::temp_store();
+        let ctx = testing::context("http://127.0.0.1:1", store.clone());
+        set_team(&ctx, " Billing ").unwrap();
+        assert_eq!(
+            store.read_repo(&ctx.key, |r| r.team.clone()).as_deref(),
+            Some("Billing")
+        );
+        // Read back from the file, not just memory.
+        let again = crate::ado::store::AdoStore::open(store.path());
+        assert_eq!(
+            again.read_repo(&ctx.key, |r| r.team.clone()).as_deref(),
+            Some("Billing")
+        );
+        assert_eq!(ctx.team().await.unwrap(), "Billing");
+        set_team(&ctx, "").unwrap();
+        assert_eq!(store.read_repo(&ctx.key, |r| r.team.clone()), None);
+    }
+
+    #[tokio::test]
+    async fn no_default_team_asks_for_one() {
+        let s = MockServer::start();
+        get(
+            &s,
+            "/_apis/projects/Platform",
+            r#"{"id":"p","name":"Platform"}"#,
+        );
+        let ctx = testing::context(&s.base_url(), testing::temp_store());
+        assert_eq!(
+            ctx.team().await,
+            Err(AdoError::Local("Choose a team".into()))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_saved_list_comes_back_offline_with_its_age() {
+        let s = MockServer::start();
+        common(&s);
+        sprint_mocks(&s, IT_ITEMS);
+        batch_mocks(&s);
+        let store = testing::temp_store();
+        let online = testing::context(&s.base_url(), store.clone());
+        let fresh = tasks_or_cached(&online, &TaskScope::SprintAll, "2026-10-10")
+            .await
+            .unwrap();
+        assert_eq!(fresh.cached_at, None);
+        assert_eq!(fresh.groups.len(), 3);
+
+        // Unreachable: the saved list, stamped.
+        let offline = testing::context("http://127.0.0.1:1", store.clone());
+        let cached = tasks_or_cached(&offline, &TaskScope::SprintAll, "2026-10-10")
+            .await
+            .unwrap();
+        assert!(cached.cached_at.is_some());
+        assert_eq!(cached.groups, fresh.groups);
+        // Another scope has nothing saved: the error stands.
+        let e = tasks_or_cached(&offline, &TaskScope::MyOpen, "2026-10-10")
+            .await
+            .unwrap_err();
+        assert!(matches!(e, AdoError::Network(_)), "{e:?}");
+
+        // Signed out (401): the saved list too.
+        let denied = MockServer::start();
+        denied.mock(|w, t| {
+            w.path_contains("/");
+            t.status(401);
+        });
+        let signed_out = testing::context(&denied.base_url(), store.clone());
+        let cached = tasks_or_cached(&signed_out, &TaskScope::SprintAll, "2026-10-10")
+            .await
+            .unwrap();
+        assert!(cached.cached_at.is_some());
+        // A 403 is not offline: it stays an error.
+        let forbidden = MockServer::start();
+        forbidden.mock(|w, t| {
+            w.path_contains("/");
+            t.status(403);
+        });
+        let ctx = testing::context(&forbidden.base_url(), store);
+        assert!(tasks_or_cached(&ctx, &TaskScope::SprintAll, "2026-10-10")
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn one_unreadable_type_does_not_fail_my_open() {
+        let s = MockServer::start();
+        common_except(&s, &["Bug"]);
+        get(&s, &format!("{TEAM_BASE}/teamfieldvalues"), TFV);
+        get(&s, "/Platform/_apis/wit/workitemtypes", TYPES);
+        let wiql = s.mock(|w, t| {
+            w.method(POST)
+                .path("/Platform/_apis/wit/wiql")
+                .body_contains("([System.WorkItemType] = 'Task'")
+                .matches(|req| {
+                    let body = String::from_utf8_lossy(req.body.as_deref().unwrap_or_default());
+                    !body.contains("[System.WorkItemType] = 'Bug'")
+                });
+            t.status(200).body(WIQL);
+        });
+        s.mock(|w, t| {
+            w.method(POST).path("/Platform/_apis/wit/workitemsbatch");
+            t.status(200).body(BATCH_MAIN);
+        });
+        let ctx = testing::context(&s.base_url(), testing::temp_store());
+        let list = tasks(&ctx, &TaskScope::MyOpen, "2026-10-10").await.unwrap();
+        wiql.assert();
+        let all: Vec<u32> = list
+            .groups
+            .iter()
+            .flat_map(|g| g.items.iter().map(|i| i.id))
+            .collect();
+        assert_eq!(all, vec![101, 200]);
     }
 
     #[test]

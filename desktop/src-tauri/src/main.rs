@@ -635,6 +635,8 @@ fn main() {
             ado::tasks::ado_teams,
             ado::tasks::ado_iterations,
             ado::tasks::ado_tasks,
+            ado::tasks::ado_set_team,
+            ado::tasks::ado_task_prompt,
             ado::tasks::ado_start_task,
         ])
         .run(tauri::generate_context!())
