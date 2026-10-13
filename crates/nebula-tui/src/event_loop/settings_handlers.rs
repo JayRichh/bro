@@ -420,7 +420,7 @@ pub(crate) fn recheck_theme(app: &mut App) {
 /// BEAT. True when it reloaded.
 ///
 /// Deferred while the settings overlay is up, or a typed setting's prompt
-/// stands in for it: the change is left untaken (no poll), so the first
+/// or the reset confirm stands in for it: the change is left untaken (no poll), so the first
 /// beat after the overlay closes applies it. Swapping state under the
 /// open overlay — a hotkey capture in progress, the row being typed —
 /// would be the surprise; the overlay's own saves load fresh and keep a
@@ -430,6 +430,7 @@ pub(crate) fn reload_foreign_config(app: &mut App) -> bool {
     let settings_up = match &app.modals.overlay {
         Some(Overlay::Settings(_)) => true,
         Some(Overlay::Prompt(prompt)) => matches!(prompt.kind, PromptKind::SettingText { .. }),
+        Some(Overlay::Confirm(confirm)) => matches!(confirm.action, PendingAction::ResetSettings),
         _ => false,
     };
     if settings_up || !app.chrome.config_watch.poll() {
@@ -442,9 +443,10 @@ pub(crate) fn reload_foreign_config(app: &mut App) -> bool {
     true
 }
 
-/// Adopt every config value the running app mirrors. Shared by startup and
-/// the settings overlay so a new setting can't reach one and miss the
-/// other — the overlay is a live editor, not a restart-to-apply screen.
+/// Adopt every config value the running app mirrors. Shared by startup,
+/// the settings overlay and the config beat's live reload
+/// (`reload_foreign_config`) so a new setting can't reach one and miss
+/// another — the overlay is a live editor, not a restart-to-apply screen.
 pub(crate) fn apply_config(app: &mut App, cfg: &crate::config::Config) {
     app.chrome.theme = app.chrome.live_theme.resolve(&cfg.theme);
     app.chrome.animations = cfg.animations;

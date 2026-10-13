@@ -4116,13 +4116,15 @@ pub struct ChromeState {
     pub welcome_on_screen: bool,
     /// The `animations` setting: master switch for the status-text sweep
     /// and the splash's motion (off = fewer repaints). Mirrors the config,
-    /// refreshed at startup and when the settings overlay applies a change.
+    /// refreshed at startup, when the settings overlay applies a change, and
+    /// when the config beat sees the file change (`reload_foreign_config`).
     pub animations: bool,
     /// The `black_background` setting: every cell still on the terminal's
     /// default background is painted pure black at the end of a frame
     /// (`ui::draw`). On in the config by default; off here until startup
-    /// applies it. Mirrors the config, refreshed at startup and when the
-    /// settings overlay applies a change.
+    /// applies it. Mirrors the config, refreshed at startup, when the
+    /// settings overlay applies a change, and when the config beat sees the
+    /// file change (`reload_foreign_config`).
     pub black_background: bool,
     /// The ROWS MEMO, armed by the frame and by [`App::reading_url`].
     pub rows_memo: RowsMemo,

@@ -22323,3 +22323,25 @@ fn a_desktop_write_waits_for_a_setting_prompt_too() {
         assert!(app.launcher.launcher_kanban);
     });
 }
+
+/// The reset confirm stands in for the overlay as well (Esc puts the
+/// overlay back): still deferred.
+#[test]
+fn a_desktop_write_waits_for_the_reset_confirm_too() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    crate::config::with_config_path(path.clone(), || {
+        let mut app = started_on(&path);
+        app.modals.overlay = Some(Overlay::Confirm(crate::app::ConfirmDialog {
+            title: "Reset settings".into(),
+            message: String::new(),
+            action: PendingAction::ResetSettings,
+            area: ratatui::layout::Rect::default(),
+        }));
+        desktop_write(&path, 2_000_000);
+        assert!(!reload_foreign_config(&mut app));
+        app.modals.overlay = None;
+        assert!(reload_foreign_config(&mut app));
+        assert!(app.launcher.launcher_kanban);
+    });
+}
