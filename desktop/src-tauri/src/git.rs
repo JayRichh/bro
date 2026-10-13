@@ -49,6 +49,8 @@ fn git_raw(cwd: &Path, args: &[&str]) -> Result<Output, String> {
     command("git", cwd)
         .args(["-c", "core.quotepath=off"])
         .args(args)
+        // No window to answer a credential prompt in: fail, don't hang.
+        .env("GIT_TERMINAL_PROMPT", "0")
         .stderr(Stdio::piped())
         .output()
         .map_err(|e| format!("could not run git: {e}"))
@@ -178,6 +180,8 @@ pub fn file_pair(root: &Path, file: &DiffFile) -> Result<DiffPair, String> {
         Blob::Text(String::new())
     } else {
         match blob(root, &DiffSide::Commit("HEAD".into()), head_path)? {
+            // Both sides added it: a conflict with no HEAD copy.
+            Blob::Missing if file.status == 'C' => Blob::Text(String::new()),
             Blob::Missing => return Err(format!("{head_path} is missing at HEAD")),
             b => b,
         }
@@ -186,6 +190,8 @@ pub fn file_pair(root: &Path, file: &DiffFile) -> Result<DiffPair, String> {
         Blob::Text(String::new())
     } else {
         match blob(root, &DiffSide::Worktree, &file.path)? {
+            // Staged as added then deleted on disk, or a delete conflict.
+            Blob::Missing if matches!(file.status, 'A' | 'C') => Blob::Text(String::new()),
             Blob::Missing => return Err(format!("{} is missing on disk", file.path)),
             b => b,
         }
@@ -802,7 +808,13 @@ mod tests {
             path: "ghost.txt".into(),
             ..ok
         };
-        assert!(file_pair(&repo.0, &ghost).is_err());
+        assert!(file_pair(&repo.0, &ghost.clone()).is_err());
+        // Added then deleted on disk: an empty side, as before.
+        let added_gone = DiffFile {
+            status: 'A',
+            ..ghost
+        };
+        assert!(file_pair(&repo.0, &added_gone).is_ok());
     }
 
     #[test]
