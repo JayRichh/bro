@@ -551,7 +551,7 @@ async fn poll_prs(client: Arc<Client>, app: tauri::AppHandle) {
     }
 }
 
-// Push the model to the window whenever it changes, at most every 50 ms.
+/// Push the model to the window whenever it changes, at most every 50 ms.
 async fn emit_state(app: tauri::AppHandle, client: Arc<Client>) {
     loop {
         client.changed.notified().await;

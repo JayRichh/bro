@@ -130,6 +130,9 @@ impl AdoState {
         let (remote_name, remote) = ado_remote(path)
             .await?
             .ok_or_else(|| "This repo has no Azure DevOps remote.".to_string())?;
+        // A user command for the org (PRs, tasks, anything) may sign in, so
+        // its paused PR poll tries again; still failing, it pauses again.
+        self.resume(&remote.org_url);
         Ok(self.make_context(path, remote_name, remote, false))
     }
 
@@ -545,6 +548,22 @@ mod tests {
             ado.context(&repo).await.err().as_deref(),
             Some("This repo has no Azure DevOps remote.")
         );
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    #[tokio::test]
+    async fn a_command_context_resumes_the_poll_and_the_poll_does_not() {
+        let ado = AdoState::new(
+            testing::temp_store(),
+            Arc::new(TokenSource::fixed(auth::Credential::Bearer("tok".into()))),
+        );
+        let repo = temp_repo(Some("https://dev.azure.com/tnt/Platform/_git/api"));
+        let org = "https://dev.azure.com/tnt";
+        ado.pause(org);
+        ado.silent_context(&repo).await.unwrap().unwrap();
+        assert!(ado.is_paused(org));
+        ado.context(&repo).await.unwrap();
+        assert!(!ado.is_paused(org));
         let _ = std::fs::remove_dir_all(&repo);
     }
 
