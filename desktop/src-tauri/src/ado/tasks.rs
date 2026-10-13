@@ -330,16 +330,21 @@ pub async fn tasks(ctx: &AdoContext, scope: &TaskScope, today: &str) -> Result<T
     }
 
     let all = all_iterations(ctx, &team).await?;
+    // ADO names no current iteration once the last one has ended (by the
+    // org's own date, which can be a day ahead of UTC): that one is shown,
+    // stale, whatever today's UTC date says.
+    let mut ended = false;
     let iteration = match scope {
         TaskScope::Iteration(id) => all.iter().find(|i| &i.id == id).cloned(),
         _ => match current_iteration(ctx, &team).await? {
             Some(i) => Some(i),
-            // No iteration covers today: the latest one that has ended.
-            None => all
-                .iter()
-                .filter(|i| i.finish.as_deref().is_some_and(|f| day(f) < today))
-                .max_by(|a, b| a.finish.cmp(&b.finish))
-                .cloned(),
+            None => {
+                ended = true;
+                all.iter()
+                    .filter(|i| i.start.as_deref().is_some_and(|s| day(s) <= today))
+                    .max_by(|a, b| a.start.cmp(&b.start))
+                    .cloned()
+            }
         },
     };
     let Some(iteration) = iteration else {
@@ -351,7 +356,7 @@ pub async fn tasks(ctx: &AdoContext, scope: &TaskScope, today: &str) -> Result<T
         });
     };
     let (stale, next) = stale_and_next(&iteration, &all, today);
-    let stale = stale && !matches!(scope, TaskScope::Iteration(_));
+    let stale = (stale || ended) && !matches!(scope, TaskScope::Iteration(_));
 
     let reply: IterationItems = ctx
         .client
@@ -1462,6 +1467,43 @@ mod tests {
             .await
             .unwrap();
         assert!(!list.stale);
+    }
+
+    /// ADO's date can be ahead of UTC (NZ): on the finish day in UTC it
+    /// may already name no current iteration.
+    #[tokio::test]
+    async fn no_current_iteration_means_the_last_one_ended() {
+        let s = MockServer::start();
+        common(&s);
+        s.mock(|w, t| {
+            w.method(GET)
+                .path(format!("{TEAM_BASE}/iterations"))
+                .query_param("$timeframe", "current");
+            t.status(200).body(r#"{"count":0,"value":[]}"#);
+        });
+        s.mock(|w, t| {
+            w.method(GET)
+                .path(format!("{TEAM_BASE}/iterations"))
+                .matches(|req| {
+                    !req.query_params
+                        .iter()
+                        .flatten()
+                        .any(|(k, _)| k == "$timeframe")
+                });
+            t.status(200).body(IT_ALL);
+        });
+        get(
+            &s,
+            &format!("{TEAM_BASE}/iterations/{SPRINT_42}/workitems"),
+            IT_EMPTY,
+        );
+        let ctx = testing::context(&s.base_url(), testing::temp_store());
+        let list = tasks(&ctx, &TaskScope::CurrentSprint, "2026-10-14")
+            .await
+            .unwrap();
+        assert_eq!(list.iteration.unwrap().name, "Sprint 42");
+        assert!(list.stale);
+        assert_eq!(list.next.unwrap().name, "Sprint 43");
     }
 
     #[test]
