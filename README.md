@@ -146,6 +146,28 @@ that runs `bro` with Bro's icon, that font and a One Dark color scheme. It backs
 first and keeps its comments. Run it again and it changes nothing. `icons` in Settings → Appearance
 picks `nerd`, `ascii` or `off` by hand.
 
+## The desktop window
+
+`bro desktop` opens Bro in a native window: a Tauri app over the same daemon, so the TUI and the
+window show the same sessions and either can close without stopping one.
+
+- **Board:** every agent session in five lanes, Needs input, Running, Unseen, Done and PR open. A card
+  shows its name, harness, profile, project and branch, its last prompt and how long it has been in
+  that state.
+- **Session:** the live terminal, xterm.js on the daemon's PTY. It replays the scrollback, then
+  streams; Claude Code and Codex draw in it as they do in Windows Terminal.
+- **Diff:** the worktree against `HEAD` in Monaco's diff editor, side by side or inline, with
+  Material Icon Theme icons on the file list.
+- **Sidebar:** projects, worktrees and their sessions, with each worktree's live ports (`:3010 ●`)
+  one click from the browser.
+
+`Ctrl+Shift+N` starts a session (project, worktree, harness, profile, prompt). `Ctrl+Shift+B`,
+`Ctrl+Shift+T` and `Ctrl+Shift+D` switch views, from inside a terminal too. It follows the OS theme,
+One Dark or One Light; `Ctrl+Shift+L` overrides it.
+
+`bro-desktop` is a separate binary, built from `desktop/` (see Building). `bro desktop` looks for it
+beside `bro`, then on PATH.
+
 ## Where things live
 
 | | Windows | macOS | Linux |
@@ -162,7 +184,6 @@ These are planned and not in Bro yet:
 
 - **Kanban:** sessions laid out by status.
 - **A VS Code-grade diff:** side-by-side, inline and replacement modes, with per-hunk accept and reject.
-- **A desktop GUI:** a Tauri window over the same daemon.
 
 ## Building
 
@@ -170,6 +191,17 @@ These are planned and not in Bro yet:
 cargo build --release     # target/release/bro (bro.exe on Windows)
 cargo test
 ```
+
+The desktop window is its own Cargo workspace under `desktop/`, kept out of the root one so the core
+build never compiles Tauri. It needs Node 20+ and, on Windows, the WebView2 runtime Windows 11 ships:
+
+```sh
+cd desktop
+npm ci
+npm run tauri build       # desktop/target/release/bro-desktop (.exe on Windows)
+```
+
+Put `bro-desktop` next to `bro` and `bro desktop` finds it.
 
 The crates keep their upstream names (`nebula-core`, `nebula-daemon`, `nebula-tui`, `nebula`) so
 rebasing on nebula stays cheap. The rebrand is applied by `scripts/rebrand.sh`, which is safe to run
