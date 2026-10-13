@@ -2599,7 +2599,8 @@ fn cursor_or_first(app: &App) -> Option<SessionRef> {
 // ---- the box's own keys ----
 
 /// Is `prompt`'s key one of the view's box chords? `^P` (project), `^T`
-/// (worktree), `^O` (model) and `^N` (fresh worktree or not) — the rest
+/// (worktree), `^O` (model), `^A` (profile) and `^N` (fresh worktree or
+/// not) — the rest
 /// of the box's keys are the QUICK PROMPT's own. True when the key was
 /// taken.
 pub(super) fn handle_box_key(
@@ -2620,6 +2621,7 @@ pub(super) fn handle_box_key(
         KeyCode::Char('p' | 'P') => open_box_field(app, BoxField::Project, back),
         KeyCode::Char('t' | 'T') => open_box_field(app, BoxField::Worktree, back),
         KeyCode::Char('o' | 'O') => open_box_field(app, BoxField::Model, back),
+        KeyCode::Char('a' | 'A') => open_box_field(app, BoxField::Profile, back),
         KeyCode::Char('n' | 'N') => toggle_new_worktree(app, launch.clone(), input.clone()),
         _ => return false,
     }
@@ -2639,6 +2641,8 @@ pub(super) fn open_box_field(app: &mut App, field: BoxField, back: QuickReturn) 
         BoxField::Worktree => open_worktree_picker(app, back),
         BoxField::Agent => crate::quick_prompt::open_launch_picker(app, back),
         BoxField::Model => open_model_picker(app, back),
+        // No picker: the field steps to the next account in place.
+        BoxField::Profile => crate::quick_prompt::cycle_box_profile(app),
     }
 }
 
@@ -3112,6 +3116,7 @@ mod tests {
             app,
             ServerEvent::EntityUpserted {
                 entity: Entity::Agent(Agent {
+                    profile: None,
                     id: AgentId("a2".into()),
                     worktree_id: WorktreeId("w2".into()),
                     name: "polish-nav".into(),
@@ -3153,6 +3158,7 @@ mod tests {
             app,
             ServerEvent::EntityUpserted {
                 entity: Entity::Agent(Agent {
+                    profile: None,
                     id: AgentId(id.into()),
                     worktree_id: WorktreeId(worktree.into()),
                     name: name.into(),
@@ -3206,6 +3212,7 @@ mod tests {
             app,
             ServerEvent::EntityUpserted {
                 entity: Entity::Agent(Agent {
+                    profile: None,
                     id: AgentId("a3".into()),
                     worktree_id: WorktreeId("w2root".into()),
                     name: "tidy-css".into(),
@@ -8510,6 +8517,40 @@ mod tests {
         });
     }
 
+    /// `^A` steps the box through its harness's PROFILES in place, the
+    /// typed task kept, and a click on the field does the same.
+    #[test]
+    fn ctrl_a_steps_the_profile_and_a_click_on_the_field_does_too() {
+        with_config_json(
+            r#"{"profiles": [
+                {"name": "main", "harness": "claude", "default": true, "use_default": true},
+                {"name": "max2", "harness": "claude"}
+            ]}"#,
+            || {
+                let mut app = two_sessions();
+                draw(&mut app);
+                key(&mut app, KeyCode::Char('p'), KeyModifiers::NONE);
+                type_text(&mut app, "fix it");
+                assert_eq!(launch(&app).0.profile.as_deref(), Some("main"));
+                key(&mut app, KeyCode::Char('a'), KeyModifiers::CONTROL);
+                let (after, text) = launch(&app);
+                assert_eq!(after.profile.as_deref(), Some("max2"));
+                assert_eq!(text, "fix it", "the task stays as typed");
+
+                draw_at(&mut app, 140, 40);
+                let field = detail(&app, BoxField::Profile);
+                assert!(field.width > 0, "the profile field was drawn");
+                mouse(
+                    &mut app,
+                    MouseEventKind::Down(MouseButton::Left),
+                    field.x + 1,
+                    field.y,
+                );
+                assert_eq!(launch(&app).0.profile.as_deref(), Some("main"), "it wraps");
+            },
+        );
+    }
+
     /// A BACKGROUND LAUNCH: a box re-aimed at another project with `^P`
     /// starts its session over there and leaves the screen here. The
     /// SESSIONS level, the card under the cursor and the pane are all
@@ -8620,6 +8661,7 @@ mod tests {
                 &mut app,
                 ServerEvent::EntityUpserted {
                     entity: Entity::Agent(Agent {
+                        profile: None,
                         id: AgentId("a9".into()),
                         worktree_id: WorktreeId("w2root".into()),
                         name: "agent-1".into(),

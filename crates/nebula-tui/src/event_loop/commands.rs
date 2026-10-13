@@ -612,7 +612,10 @@ pub(crate) fn run_menu_action(app: &mut App, action: MenuAction, out: &mut Vec<C
                 // The Claude row's `Tab` toggle rides the pick: the box
                 // comes back a CLAUDE CLOUD one, where it can be one.
                 .with_cloud(cloud)
-                .with_under(back.launch.under.clone());
+                .with_under(back.launch.under.clone())
+                // A model picked for the same harness keeps the account
+                // `^A` chose; another harness starts on its own default.
+                .with_profile_of(&back.launch);
                 if back.from_box {
                     crate::quick_prompt::reopen(app, launch, &back.text);
                 } else {

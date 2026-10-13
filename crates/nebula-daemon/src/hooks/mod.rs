@@ -1,14 +1,16 @@
 //! Agent-CLI hook receiver: a loopback-only HTTP endpoint the shell hook
 //! one-liners POST to (`/api/hooks/claude`, `/api/hooks/codex`,
-//! `/api/hooks/cursor`, `/api/hooks/pi` and `/api/hooks/opencode`). Codex
-//! mirrors Claude's hook
+//! `/api/hooks/cursor`, `/api/hooks/pi`, `/api/hooks/opencode` and
+//! `/api/hooks/copilot`). Codex mirrors Claude's hook
 //! events and payload shape; cursor speaks its own dialect, but its
 //! installer translates event names into the `hookEvent` query param and
 //! the payload fields are aliased here (`conversation_id`, `subagent_id`,
-//! `workspace_roots`); pi has no shell hooks at all — its managed extension
+//! `workspace_roots`), and Copilot's the same way (camelCase events, and
+//! `sessionId` / `toolName` in its payloads); pi has no shell hooks at all
+//! — its managed extension
 //! (`pi_extension.rs`) maps pi's events onto the same names and POSTs
 //! Claude-shaped payloads, and so does OpenCode's managed plugin
-//! (`opencode_plugin.rs`) — so one handler serves all five. Fail-soft on
+//! (`opencode_plugin.rs`) — so one handler serves all six. Fail-soft on
 //! both sides — a malformed payload still gets a 200 so a broken hook never
 //! faults the user's agent turn.
 //!
@@ -101,6 +103,7 @@ enum HookCli {
     Cursor,
     Pi,
     OpenCode,
+    Copilot,
 }
 
 impl HookCli {
@@ -109,7 +112,9 @@ impl HookCli {
             HookCli::Claude | HookCli::Codex | HookCli::Pi | HookCli::OpenCode => {
                 HookDialect::Injectable
             }
-            HookCli::Cursor => HookDialect::Plain,
+            // Copilot reads nothing back from a `userPromptSubmitted`
+            // hook, so its sessions get no AUTO-TITLE instruction.
+            HookCli::Cursor | HookCli::Copilot => HookDialect::Plain,
         }
     }
 }
@@ -154,6 +159,8 @@ pub struct HookDelivery {
 #[serde(default)]
 pub struct HookPayload {
     pub hook_event_name: Option<String>,
+    /// Copilot spells it `sessionId`.
+    #[serde(alias = "sessionId")]
     pub session_id: Option<String>,
     /// The prompt text on `UserPromptSubmit` — Claude, Codex and Cursor
     /// (`beforeSubmitPrompt`) all name it `prompt`, and pi's extension
@@ -166,6 +173,8 @@ pub struct HookPayload {
     /// `session_id`, but only the alias is guaranteed on every event).
     pub conversation_id: Option<String>,
     pub notification_type: Option<String>,
+    /// Copilot spells it `toolName`.
+    #[serde(alias = "toolName")]
     pub tool_name: Option<String>,
     pub agent_id: Option<String>,
     /// Cursor's name for the subagent id in subagentStart/subagentStop.
@@ -292,6 +301,7 @@ pub async fn start_hook_server(
         .route("/api/hooks/cursor", post(receive_cursor_hook))
         .route("/api/hooks/pi", post(receive_pi_hook))
         .route("/api/hooks/opencode", post(receive_opencode_hook))
+        .route("/api/hooks/copilot", post(receive_copilot_hook))
         .with_state(state);
 
     tokio::spawn(async move {
@@ -367,6 +377,18 @@ async fn receive_opencode_hook(
     receive_hook(HookCli::OpenCode, state, query, headers, body).await
 }
 
+/// `/api/hooks/copilot`: Copilot's managed hooks file posts its camelCase
+/// payloads under the nebula event names its installer translated to; the
+/// body is discarded on the CLI's side, so the diagnostics stay.
+async fn receive_copilot_hook(
+    State(state): State<Arc<HookServerState>>,
+    Query(query): Query<HookQuery>,
+    headers: HeaderMap,
+    body: String,
+) -> (StatusCode, String) {
+    receive_hook(HookCli::Copilot, state, query, headers, body).await
+}
+
 async fn receive_hook(
     cli: HookCli,
     state: Arc<HookServerState>,
@@ -415,7 +437,9 @@ async fn receive_hook(
             payload.transcript_path.as_deref(),
             payload.session_id.as_deref(),
         ),
-        HookCli::Codex | HookCli::Cursor | HookCli::Pi | HookCli::OpenCode => None,
+        HookCli::Codex | HookCli::Cursor | HookCli::Pi | HookCli::OpenCode | HookCli::Copilot => {
+            None
+        }
     };
     // The prompt rides only its own event, condensed here so the channel
     // never carries a pasted file whole.
@@ -462,7 +486,11 @@ async fn receive_hook(
                     // `TitleState::to_push`, which resolves the dialect).
                     s.to_push().map(str::to_string)
                 }),
-            HookCli::Codex | HookCli::Cursor | HookCli::Pi | HookCli::OpenCode => None,
+            HookCli::Codex
+            | HookCli::Cursor
+            | HookCli::Pi
+            | HookCli::OpenCode
+            | HookCli::Copilot => None,
         };
         return (
             StatusCode::OK,
@@ -523,6 +551,7 @@ mod tests {
             })
             .unwrap();
         let agent = |id: &str| Agent {
+            profile: None,
             id: AgentId(id.into()),
             worktree_id: WorktreeId("w1".into()),
             name: "agent-1".into(),
@@ -864,5 +893,28 @@ mod tests {
             }
             other => panic!("unexpected event: {other:?}"),
         }
+    }
+
+    #[test]
+    fn copilot_payload_aliases_map_to_claude_fields() {
+        // A real Copilot CLI 1.0.96 `permissionRequest` payload.
+        let payload: HookPayload = serde_json::from_str(
+            r#"{"hookName":"permissionRequest","sessionId":"5cdc1641","timestamp":1791879873165,
+                "cwd":"C:\\w\\feat","toolName":"powershell","toolInput":{"command":"echo hi"},
+                "permissionSuggestions":[]}"#,
+        )
+        .unwrap();
+        assert_eq!(payload.session_id().as_deref(), Some("5cdc1641"));
+        assert_eq!(payload.cwd().as_deref(), Some(r"C:\w\feat"));
+        match parse_event("PostToolUse", &payload) {
+            Some(HookEvent::PostToolUse { tool_name, .. }) => {
+                assert_eq!(tool_name.as_deref(), Some("powershell"));
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+        // `userPromptSubmitted` carries the prompt under Claude's own key.
+        let payload: HookPayload =
+            serde_json::from_str(r#"{"sessionId":"s","prompt":"fix the bug"}"#).unwrap();
+        assert_eq!(payload.prompt.as_deref(), Some("fix the bug"));
     }
 }

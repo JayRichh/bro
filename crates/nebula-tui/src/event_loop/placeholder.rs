@@ -191,6 +191,7 @@ pub(super) fn stage_agent(
         .is_some_and(|landed| crate::launcher::is_background(app, &landed));
     let before = selection_snapshot(app);
     app.tree.agents.push(Agent {
+        profile: None,
         id: agent.clone(),
         worktree_id: worktree.clone(),
         name,
@@ -674,6 +675,7 @@ mod tests {
 
     fn real_agent(id: &str, worktree: &str) -> Agent {
         Agent {
+            profile: None,
             id: AgentId(id.into()),
             worktree_id: WorktreeId(worktree.into()),
             name: "agent-1".into(),

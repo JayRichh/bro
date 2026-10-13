@@ -178,7 +178,7 @@ pub(crate) enum Command {
         #[arg(required = true, num_args = 1..)]
         task: Vec<String>,
         /// Harness for the new session: claude, codex, cursor, pi, muse,
-        /// grok or opencode.
+        /// grok, opencode or copilot.
         ///
         /// Defaults to the harness this session is running.
         #[arg(long, value_name = "KIND", value_parser = parse_agent_kind)]
@@ -275,6 +275,19 @@ pub(crate) enum Command {
     Config {
         #[command(subcommand)]
         command: ConfigCommand,
+    },
+    /// Manage PROFILES: several accounts per harness.
+    ///
+    /// A profile is a named account for one harness — a second Claude
+    /// subscription, another ChatGPT login for Codex. Sessions launched under
+    /// it get its own config dir (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
+    /// `COPILOT_HOME`) under `<data dir>/profiles/<name>/`, and inherited
+    /// credential variables (`ANTHROPIC_API_KEY`, `GH_TOKEN`, …) stripped.
+    /// The quick prompt's `^A` picks one per launch.
+    #[command(after_help = PROFILE_EXAMPLES)]
+    Profile {
+        #[command(subcommand)]
+        command: ProfileCommand,
     },
     /// Serve this TUI in a web browser via ttyd.
     ///
@@ -408,7 +421,7 @@ pub(crate) enum Command {
     /// does. Inert outside a bro agent session; always exits 0.
     #[command(hide = true, name = "_hook")]
     Hook {
-        /// The receiver route: claude, codex, cursor, pi or opencode.
+        /// The receiver route: claude, codex, cursor, pi, opencode or copilot.
         endpoint: String,
         /// The hook event, as the daemon names it (`Stop`, …).
         event: String,
@@ -572,6 +585,66 @@ const UPGRADE_EXAMPLES: &str = "\
 Examples:
   bro upgrade                   install the latest release
   bro upgrade --force           do it over a local cargo build";
+
+const PROFILE_EXAMPLES: &str = "\
+Examples:
+  bro profile add main --harness claude --use-default --default
+  bro profile add max2 --harness claude
+  bro profile login max2        sign the new account in
+  bro profile list              accounts, homes and last seen usage";
+
+#[derive(Subcommand)]
+pub(crate) enum ProfileCommand {
+    /// List the profiles: harness, default flag, home, last usage seen.
+    List,
+    /// Add a profile.
+    ///
+    /// Without --use-default it gets a home of its own, empty until
+    /// `bro profile login <name>` signs it in.
+    Add {
+        /// Letters, digits, `-` and `_`; unique across harnesses.
+        name: String,
+        /// The harness it is an account for: claude, codex, copilot, or
+        /// any other harness id (which then only gets --env).
+        #[arg(long, value_name = "HARNESS")]
+        harness: String,
+        /// Adopt the CLI's existing default login (`~/.claude`, `~/.codex`,
+        /// …) instead of a home of its own: no dir is moved, nothing is
+        /// copied.
+        #[arg(long)]
+        use_default: bool,
+        /// Make it the harness's default: launches that pick no profile
+        /// take it.
+        #[arg(long)]
+        default: bool,
+        /// Extra variable for its sessions, `KEY=VALUE`; repeatable.
+        #[arg(long, value_name = "KEY=VALUE")]
+        env: Vec<String>,
+    },
+    /// Remove a profile. Its home (and the login in it) stays unless
+    /// --purge.
+    Remove {
+        name: String,
+        /// Delete the profile's home too.
+        #[arg(long)]
+        purge: bool,
+    },
+    /// Make a profile its harness's default.
+    Default { name: String },
+    /// Sign a profile in: runs `claude auth login --claudeai`, `codex
+    /// login` or `copilot login` here, under the profile's environment.
+    ///
+    /// The CLI opens the browser for its OAuth flow (or prints the URL and
+    /// asks for the code); the credentials land in the profile's home.
+    /// Anything after `--` is passed on: `bro profile login max2 -- --email
+    /// you@example.com`.
+    Login {
+        name: String,
+        /// Extra arguments for the harness's sign-in.
+        #[arg(last = true, value_name = "ARGS")]
+        args: Vec<String>,
+    },
+}
 
 #[derive(Subcommand)]
 pub(crate) enum ConfigCommand {

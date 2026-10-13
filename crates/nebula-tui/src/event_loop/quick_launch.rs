@@ -265,6 +265,9 @@ pub(super) fn draft(
         // A PR SESSION's: the create goes to the PROJECT as a
         // `CreatePrAgent`, and `worktree` only names which.
         pr: launch.pr.clone(),
+        // The account `^A` picked; None lets the DAEMON take the
+        // harness's default.
+        profile: launch.profile.clone(),
         reopen_on_error: Some((PromptKind::QuickPrompt(launch), text)),
         focus_pane,
         placeholder,
@@ -341,6 +344,7 @@ mod tests {
             app,
             ServerEvent::EntityUpserted {
                 entity: Entity::Agent(Agent {
+                    profile: None,
                     id: AgentId("a9".into()),
                     worktree_id: worktree.clone(),
                     name: "agent-2".into(),

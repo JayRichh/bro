@@ -332,6 +332,11 @@ const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE agents ADD COLUMN role TEXT NOT NULL DEFAULT 'worker';
     ",
+    // 30: the PROFILE a session runs under, by name. Nullable: every
+    // existing session keeps the daemon's own environment.
+    "
+    ALTER TABLE agents ADD COLUMN profile TEXT;
+    ",
 ];
 
 pub struct Store {
@@ -534,8 +539,8 @@ impl Store {
         issue_url: Option<&str>,
     ) -> Result<()> {
         self.conn.lock().execute(
-            "INSERT INTO agents (id, worktree_id, name, status, archived, archived_at, kind, claude_session_id, sort_order, created_at, status_changed_at, model, effort, auto_title_pending, unseen, cloud_session_id, pr_url, issue_url, custom_harness, role)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+            "INSERT INTO agents (id, worktree_id, name, status, archived, archived_at, kind, claude_session_id, sort_order, created_at, status_changed_at, model, effort, auto_title_pending, unseen, cloud_session_id, pr_url, issue_url, custom_harness, role, profile)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
             params![
                 a.id.as_str(),
                 a.worktree_id.as_str(),
@@ -557,6 +562,7 @@ impl Store {
                 issue_url,
                 a.custom_harness,
                 a.role.as_str(),
+                a.profile,
             ],
         )?;
         Ok(())
@@ -1081,7 +1087,7 @@ const WORKTREE_COLUMNS: &str = "id, project_id, path, branch, is_main, sort_orde
 const AGENT_COLUMNS: &str = "id, worktree_id, name, status, archived, kind, \
                              claude_session_id, sort_order, status_changed_at, model, effort, \
                              archived_at, unseen, cloud_session_id, recent_prompts, custom_harness, \
-                             issue_url, role";
+                             issue_url, role, profile";
 const TERMINAL_COLUMNS: &str = "id, worktree_id, name, sort_order, run_command";
 const LINK_COLUMNS: &str = "id, worktree_id, url, sort_order";
 
@@ -1109,6 +1115,7 @@ fn row_to_worktree(r: &rusqlite::Row) -> rusqlite::Result<Worktree> {
 /// its session table after the read.
 fn row_to_agent(r: &rusqlite::Row) -> rusqlite::Result<Agent> {
     Ok(Agent {
+        profile: r.get(18)?,
         id: AgentId(r.get(0)?),
         worktree_id: WorktreeId(r.get(1)?),
         name: r.get(2)?,
@@ -1211,6 +1218,7 @@ mod tests {
         };
         store.insert_worktree(&worktree).unwrap();
         let agent = Agent {
+            profile: None,
             id: AgentId::generate(),
             worktree_id: worktree.id.clone(),
             name: "agent-1".into(),
@@ -1236,6 +1244,7 @@ mod tests {
             .insert_agent_with_launch_context(&agent, false, Some(pr_url), None)
             .unwrap();
         let codex_agent = Agent {
+            profile: None,
             id: AgentId::generate(),
             worktree_id: worktree.id.clone(),
             name: "agent-2".into(),
@@ -1258,6 +1267,7 @@ mod tests {
         };
         store.insert_agent(&codex_agent).unwrap();
         let cursor_agent = Agent {
+            profile: None,
             id: AgentId::generate(),
             worktree_id: worktree.id.clone(),
             name: "agent-3".into(),
@@ -1281,6 +1291,7 @@ mod tests {
         store.insert_agent(&cursor_agent).unwrap();
         let issue_url = "https://github.com/AgentSystemLabs/nebula/issues/15";
         let issue_agent = Agent {
+            profile: None,
             id: AgentId::generate(),
             worktree_id: worktree.id.clone(),
             name: "agent-4".into(),
@@ -1324,6 +1335,7 @@ mod tests {
         // A Custom row round-trips its registry id beside the kind, so
         // respawns find the same entry (migration 27).
         let custom = Agent {
+            profile: None,
             id: AgentId::generate(),
             worktree_id: worktree.id.clone(),
             name: "agy-1".into(),
@@ -1830,6 +1842,7 @@ mod tests {
         };
         store.insert_worktree(&wt).unwrap();
         let agent = |id: &str| Agent {
+            profile: None,
             id: AgentId(id.into()),
             worktree_id: wt.id.clone(),
             name: "agent-1".into(),
@@ -1919,6 +1932,7 @@ mod tests {
         store
             .insert_agent_with_auto_title(
                 &Agent {
+                    profile: None,
                     id: id.clone(),
                     worktree_id: wt.id.clone(),
                     name: "agent-1".into(),
@@ -2049,6 +2063,7 @@ mod tests {
         ] {
             store
                 .insert_agent(&Agent {
+                    profile: None,
                     id: AgentId(format!("agent-{name}")),
                     worktree_id: wt.id.clone(),
                     name: name.into(),
@@ -2114,6 +2129,7 @@ mod tests {
         for name in ["kept", "gone"] {
             store
                 .insert_agent(&Agent {
+                    profile: None,
                     id: AgentId(format!("agent-{name}")),
                     worktree_id: wt.id.clone(),
                     name: name.into(),
@@ -2176,6 +2192,7 @@ mod tests {
         store.insert_worktree(&worktree).unwrap();
         let seed = |name: &str, status: AgentStatus| {
             let agent = Agent {
+                profile: None,
                 id: AgentId::generate(),
                 worktree_id: worktree.id.clone(),
                 name: name.into(),
@@ -2277,6 +2294,7 @@ mod tests {
         let id = AgentId("a1".into());
         store
             .insert_agent(&Agent {
+                profile: None,
                 id: id.clone(),
                 worktree_id: WorktreeId("w1".into()),
                 name: "agent-1".into(),

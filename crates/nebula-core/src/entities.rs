@@ -69,6 +69,12 @@ pub enum AgentKind {
     /// its positional is the project path, and a session resumes by
     /// `--session <id>`.
     OpenCode,
+    /// GitHub Copilot CLI: the `copilot` CLI (npm `@github/copilot`, or
+    /// the shim VS Code's Copilot Chat extension puts on PATH). Status
+    /// comes from managed hooks in its home (`$COPILOT_HOME/hooks/`), the
+    /// first prompt rides `-i` (its positional is a subcommand), and a
+    /// session resumes by `--resume <id>`.
+    Copilot,
     /// A user-defined harness from the `custom_harnesses` registry: the
     /// entry id travels beside the session (see `Agent::custom_harness`),
     /// never in this variant. Launches with the entry's program and model
@@ -81,7 +87,7 @@ impl AgentKind {
     /// boot-time CLI probe warm) and should fail to compile if one is added.
     /// `Custom` rides along: it never launches without its registry entry,
     /// so loops over ALL skip it explicitly where a bare kind is meaningless.
-    pub const ALL: [AgentKind; 8] = [
+    pub const ALL: [AgentKind; 9] = [
         AgentKind::Claude,
         AgentKind::Codex,
         AgentKind::Cursor,
@@ -89,6 +95,7 @@ impl AgentKind {
         AgentKind::Muse,
         AgentKind::Grok,
         AgentKind::OpenCode,
+        AgentKind::Copilot,
         AgentKind::Custom,
     ];
 
@@ -101,6 +108,7 @@ impl AgentKind {
             AgentKind::Muse => "muse",
             AgentKind::Grok => "grok",
             AgentKind::OpenCode => "opencode",
+            AgentKind::Copilot => "copilot",
             AgentKind::Custom => "custom",
         }
     }
@@ -117,6 +125,7 @@ impl AgentKind {
             "muse" => AgentKind::Muse,
             "grok" => AgentKind::Grok,
             "opencode" => AgentKind::OpenCode,
+            "copilot" => AgentKind::Copilot,
             _ => return None,
         })
     }
@@ -136,6 +145,7 @@ impl AgentKind {
             AgentKind::Muse => "muse",
             AgentKind::Grok => "grok",
             AgentKind::OpenCode => "opencode",
+            AgentKind::Copilot => "copilot",
             AgentKind::Custom => "custom",
         }
     }
@@ -275,6 +285,13 @@ pub struct Agent {
     /// the bottom. Empty for every row that predates the capture.
     #[serde(default)]
     pub recent_prompts: Vec<PromptEntry>,
+    /// The PROFILE the session runs under (`nebula_core::profiles`): the
+    /// account whose config dirs its environment points at. Resolved at
+    /// create — a launch naming none takes its harness's default — and
+    /// kept, so a RESUME or restart boots under the same account. None =
+    /// no profile: the daemon's own environment, as before profiles.
+    #[serde(default)]
+    pub profile: Option<String>,
 }
 
 impl Agent {

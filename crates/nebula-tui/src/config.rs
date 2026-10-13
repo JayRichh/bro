@@ -1348,6 +1348,13 @@ pub struct Config {
     /// the whole file (see `nebula_core::settings`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub harnesses: BTreeMap<String, nebula_core::harness::HarnessOverride>,
+    /// PROFILES (`profiles` in config.json): the accounts a launch can run
+    /// under, several per harness. `bro profile` edits the list; the
+    /// QUICK PROMPT's `^A` cycles a launch through its harness's ones, and
+    /// a card names the one its session runs on when it is not the
+    /// harness's default. See `nebula_core::profiles`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub profiles: Vec<nebula_core::profiles::Profile>,
     /// Which AGENT KIND the QUICK PROMPT hotkey launches. Its model and
     /// effort come from that kind's own defaults above, so the setting is
     /// one name, not a third model/effort pair. Read through
@@ -1549,6 +1556,7 @@ impl Default for Config {
             hide_uninstalled_harnesses: false,
             custom_harnesses: Vec::new(),
             harnesses: BTreeMap::new(),
+            profiles: Vec::new(),
             quick_prompt_kind: AgentKind::Claude.as_str().into(),
             quick_prompt_focus: false,
             follow_new_session: true,
@@ -4748,7 +4756,8 @@ mod tests {
                 AgentKind::Pi,
                 AgentKind::Muse,
                 AgentKind::Grok,
-                AgentKind::OpenCode
+                AgentKind::OpenCode,
+                AgentKind::Copilot
             ],
             "the disabled kind drops out, order kept"
         );
@@ -4776,7 +4785,7 @@ mod tests {
 
         // Every kind off is representable (a hand edit), and reads as empty.
         let cfg: Config = serde_json::from_str(
-            r#"{"claude_enabled":false,"codex_enabled":false,"cursor_enabled":false,"pi_enabled":false,"muse_enabled":false,"opencode_enabled":false,"harnesses":{"grok":{"enabled":false}}}"#,
+            r#"{"claude_enabled":false,"codex_enabled":false,"cursor_enabled":false,"pi_enabled":false,"muse_enabled":false,"opencode_enabled":false,"harnesses":{"grok":{"enabled":false},"copilot":{"enabled":false}}}"#,
         )
         .unwrap();
         assert!(cfg.enabled_kinds().is_empty());
@@ -4824,6 +4833,7 @@ mod tests {
                 (AgentKind::Muse, None),
                 (AgentKind::Grok, None),
                 (AgentKind::OpenCode, None),
+                (AgentKind::Copilot, None),
             ]
         );
 
@@ -4838,8 +4848,8 @@ mod tests {
         )
         .unwrap();
         let offered = cfg.offered_harnesses();
-        assert_eq!(offered.len(), 8);
-        assert_eq!(offered[7], (AgentKind::Custom, Some("agy".into())));
+        assert_eq!(offered.len(), 9);
+        assert_eq!(offered[8], (AgentKind::Custom, Some("agy".into())));
         let rows = cfg.agent_rows();
         assert!(rows.contains(&("off".to_string(), HarnessField::Enabled)));
         assert!(rows.contains(&("broken".to_string(), HarnessField::Enabled)));
@@ -5349,6 +5359,14 @@ mod tests {
                         "OpenCode".to_string(),
                         vec!["Enabled".to_string(), "Model".to_string()]
                     ),
+                    (
+                        "Copilot".to_string(),
+                        vec![
+                            "Enabled".to_string(),
+                            "Model".to_string(),
+                            "Effort".to_string()
+                        ]
+                    ),
                 ]
             );
 
@@ -5404,6 +5422,7 @@ mod tests {
                         "Muse",
                         "Grok Build",
                         "OpenCode",
+                        "Copilot",
                         "agy"
                     ]
                 );

@@ -2604,6 +2604,19 @@ fn harness_line(a: &nebula_core::Agent, cfg: &mut Option<crate::config::Config>)
     } else {
         a.kind.as_str().to_string()
     };
+    // The PROFILE a session runs on, when it is not the one its harness
+    // would take anyway: `claude@max2 opus`. A session on the default
+    // account (or on none) reads as it always did.
+    if let Some(profile) = a.profile.as_deref() {
+        let cfg = cfg.get_or_insert_with(crate::config::Config::load);
+        let harness = a.custom_harness.as_deref().unwrap_or(a.kind.as_str());
+        let default = nebula_core::profiles::default_for(&cfg.profiles, harness)
+            .is_some_and(|d| d.name.trim() == profile);
+        if !default {
+            out.push('@');
+            out.push_str(profile);
+        }
+    }
     if let Some(model) = a.model.as_deref().filter(|m| !m.is_empty()) {
         out.push(' ');
         out.push_str(model);
@@ -3139,9 +3152,13 @@ pub(super) fn crumb_frame(f: &mut Frame, app: &mut App, area: Rect) -> Rect {
 pub(super) fn detail_line(app: &App, launch: &QuickLaunch, width: u16, th: Theme) -> DetailLine {
     let details = Details::of(app, launch);
     let width = usize::from(width);
+    // The PROFILE field rides last, and only while the harness has
+    // profiles: it is the first to go for room.
+    let all = 4 + usize::from(details.profile.is_some());
     for (labels, gap, fields, cuts) in [
-        (true, DETAIL_GAP, 4, false),
-        (true, DETAIL_TIGHT, 4, true),
+        (true, DETAIL_GAP, all, false),
+        (true, DETAIL_TIGHT, all, true),
+        (false, DETAIL_TIGHT, all, true),
         (false, DETAIL_TIGHT, 4, true),
         (false, DETAIL_TIGHT, 3, true),
         (false, DETAIL_TIGHT, 2, true),
@@ -3198,6 +3215,10 @@ struct Details {
     branch: String,
     harness: String,
     model: String,
+    /// The PROFILE the launch runs under — its name, or `none`, with the
+    /// account's last PLAN USAGE beside it when one is known — or None
+    /// when the harness has no profiles, and no field is drawn.
+    profile: Option<String>,
     /// The branch is the WORKTREE PICKER's button — anything but a PR
     /// SESSION's head.
     pickable: bool,
@@ -3233,11 +3254,19 @@ impl Details {
             None => crate::quick_prompt::target_branch(app, launch)
                 .unwrap_or_else(|| "(worktree gone)".into()),
         };
+        let profile = (!launch.profile_choices(&app.launcher.profiles).is_empty()).then(|| {
+            let name = launch.profile.clone().unwrap_or_else(|| "none".into());
+            match app.launcher.profile_usage.get(&name) {
+                Some(usage) => format!("{name} {}%", usage.percent),
+                None => name,
+            }
+        });
         Self {
             project: launch_project(app, launch),
             branch,
             harness,
             model,
+            profile,
             pickable: launch.pr.is_none(),
             fresh: launch.is_new_worktree(),
             root: launch.pr.is_none()
@@ -3315,6 +3344,13 @@ impl Details {
                 Some("Tab"),
             ),
             (BoxField::Model, "model", &self.model, th.text, Some("^O")),
+            (
+                BoxField::Profile,
+                "profile",
+                self.profile.as_ref().unwrap_or(&self.model),
+                th.text,
+                Some("^A"),
+            ),
         ]
         .into_iter()
         .take(fields)
@@ -3757,6 +3793,7 @@ mod tests {
                     BoxField::Worktree => "^T",
                     BoxField::Agent => "Tab",
                     BoxField::Model => "^O",
+                    BoxField::Profile => "^A",
                 };
                 assert!(
                     cut.ends_with(chord),
@@ -3818,6 +3855,7 @@ mod tests {
             .collect();
         app.tree.agents = (0..2)
             .map(|i| Agent {
+                profile: None,
                 id: AgentId(format!("a{i}")),
                 worktree_id: WorktreeId(format!("w{i}")),
                 name: format!("s{i}"),
@@ -5036,6 +5074,7 @@ mod tests {
             pr: None,
             cards: vec![crate::launcher::Card::Session(LauncherRow {
                 agent: Agent {
+                    profile: None,
                     id: AgentId("a1".into()),
                     worktree_id: WorktreeId("w1".into()),
                     name: "fix login".into(),
@@ -5272,6 +5311,7 @@ mod tests {
     fn a_cards_frame_answers_to_its_status_under_the_focus() {
         use nebula_core::{Agent, AgentId, AgentKind, AgentStatus, WorktreeId};
         let base = Agent {
+            profile: None,
             id: AgentId("a1".into()),
             worktree_id: WorktreeId("w1".into()),
             name: "fix login".into(),
@@ -5381,6 +5421,7 @@ mod tests {
         use nebula_core::{Agent, AgentId, AgentKind, AgentStatus, WorktreeId};
         let row = LauncherRow {
             agent: Agent {
+                profile: None,
                 id: AgentId("a1".into()),
                 worktree_id: WorktreeId("w1".into()),
                 name: "fix login".into(),
@@ -5437,6 +5478,7 @@ mod tests {
         use nebula_core::{Agent, AgentId, AgentKind, AgentStatus, WorktreeId};
         let row = LauncherRow {
             agent: Agent {
+                profile: None,
                 id: AgentId("a1".into()),
                 worktree_id: WorktreeId("w1".into()),
                 name: "fix login".into(),
@@ -5586,6 +5628,7 @@ mod tests {
         fn card(archived: bool) -> LauncherRow {
             LauncherRow {
                 agent: Agent {
+                    profile: None,
                     id: AgentId("a1".into()),
                     worktree_id: WorktreeId("w1".into()),
                     name: "fix login".into(),

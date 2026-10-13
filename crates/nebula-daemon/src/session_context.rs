@@ -235,6 +235,7 @@ fn agent_summary(
         status: public_status(agent.status).to_string(),
         alive: agent.alive,
         summary,
+        profile: agent.profile,
     })
 }
 
@@ -263,6 +264,7 @@ fn terminal_summary(
         status: if terminal.alive { "running" } else { "idle" }.into(),
         alive: terminal.alive,
         summary,
+        profile: None,
     })
 }
 
@@ -594,6 +596,7 @@ mod tests {
 
     fn agent(id: &str, name: &str, status: AgentStatus) -> Agent {
         Agent {
+            profile: None,
             id: AgentId(id.into()),
             worktree_id: WorktreeId("w".into()),
             name: name.into(),

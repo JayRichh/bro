@@ -38,6 +38,7 @@ impl Daemon {
             pr_url,
             issue_url,
             role,
+            profile,
         } = spec;
         let cloud_prompt = match cloud_prompt {
             Some(_) if kind != AgentKind::Claude => {
@@ -76,6 +77,10 @@ impl Daemon {
         // way at boot.
         let harness = resolve_harness(kind, custom_harness.as_deref())?;
         let program = harness.program.trim().to_string();
+        // The account it runs on: the PROFILE the launch named, else its
+        // harness's default — resolved now and stored with the row, so a
+        // later change of default never moves a session to another login.
+        let profile = resolve_profile_name(&harness, profile.as_deref())?;
         // A launch that hands the CLI a first prompt is working from the
         // moment it spawns, so the row says so now instead of staying gray
         // until the CLI has booted and its first hook has landed — seconds
@@ -103,7 +108,15 @@ impl Daemon {
             && pr_url.is_none()
             && issue_url.is_none()
             && starting_prompt.is_none())
-        .then(|| self.take_prewarmed(&worktree_id, kind, model.as_deref(), effort.as_deref()))
+        .then(|| {
+            self.take_prewarmed(
+                &worktree_id,
+                kind,
+                model.as_deref(),
+                effort.as_deref(),
+                profile.as_deref(),
+            )
+        })
         .flatten();
         // Only the cold path needs asking: an adopted warm session is proof
         // the CLI runs. Without this, a missing CLI still "succeeds" — the
@@ -113,6 +126,7 @@ impl Daemon {
             bail!("{}", cli_missing_message(&program));
         }
         let agent = Agent {
+            profile,
             id: adopted
                 .as_ref()
                 .map(|e| e.agent_id.clone())
@@ -410,6 +424,27 @@ impl Daemon {
         // its reason rather than launching the wrong CLI, and the same
         // descriptor picks the hook dialect below.
         let harness = resolve_harness(agent.kind, agent.custom_harness.as_deref())?;
+        // The PROFILE the session runs under: its config dirs made (and a
+        // fresh Claude one seeded, so its first session asks for a login
+        // and nothing else), and the environment edit that points the CLI
+        // at them. A profile removed since refuses the boot with why.
+        let profile = session_profile(agent, &harness)?;
+        let launch_env = match &profile {
+            Some(profile) => {
+                if let Err(e) = profile.prepare(Some(&worktree.path)) {
+                    tracing::warn!(profile = %profile.name, error = %e, "profile home setup failed");
+                }
+                profile.launch_env()
+            }
+            None => Default::default(),
+        };
+        // The homes this session's hooks go in: a profile's own, where it
+        // moves them, else the CLI's default.
+        let profile_dir = |var: &str| {
+            profile
+                .as_ref()
+                .and_then(|p| p.dir_for(&nebula_core::profiles::profiles_root(), var))
+        };
         // Managed status hooks; a failure here degrades to "no status
         // updates", never blocks the spawn. The dialect is data: a custom
         // harness naming one reports status, prompts and permission waits
@@ -420,10 +455,11 @@ impl Daemon {
             // Codex's hooks live in its home, not the worktree, so one
             // trust approval covers every worktree (see installer docs);
             // any per-worktree copy an older nebula left is pruned.
-            Some(AgentKind::Codex) => {
-                hooks::installer::install_codex_hooks(&hooks::installer::codex_home())
-                    .and_then(|()| hooks::installer::prune_codex_worktree_hooks(&worktree.path))
-            }
+            // A second Codex profile is a second home: its hooks go there.
+            Some(AgentKind::Codex) => hooks::installer::install_codex_hooks(
+                &profile_dir(env::CODEX_HOME).unwrap_or_else(hooks::installer::codex_home),
+            )
+            .and_then(|()| hooks::installer::prune_codex_worktree_hooks(&worktree.path)),
             // Cursor also gets the managed auto-title project rule — its
             // hook dialect has no context-injection channel.
             Some(AgentKind::Cursor) => hooks::installer::install_cursor_hooks(&worktree.path)
@@ -441,6 +477,11 @@ impl Daemon {
             Some(AgentKind::OpenCode) => {
                 hooks::opencode_plugin::install(&hooks::opencode_plugin::opencode_config_dir())
             }
+            // Copilot loads every file in its home's `hooks/` dir, trust
+            // dialog or not: one managed file there serves every worktree.
+            Some(AgentKind::Copilot) => hooks::installer::install_copilot_hooks(
+                &profile_dir(env::COPILOT_HOME).unwrap_or_else(hooks::installer::copilot_home),
+            ),
             _ => Ok(()),
         };
         if let Err(e) = install_result {
@@ -553,22 +594,30 @@ impl Daemon {
         let (program, args) = if cmd_override.is_some() {
             (program, args)
         } else {
-            login_shell_wrap(&nebula_core::shell::user_shell(), &program, &args)
+            login_shell_wrap_env(
+                &nebula_core::shell::user_shell(),
+                &program,
+                &args,
+                &launch_env,
+            )
         };
 
+        let mut session_env = vec![
+            (env::AGENT_ID.into(), agent.id.to_string()),
+            (
+                env::API_URL.into(),
+                format!("http://127.0.0.1:{}", self.hook_env.port),
+            ),
+            (env::API_TOKEN.into(), self.hook_env.token.clone()),
+        ];
+        session_env.extend(launch_env.set.iter().cloned());
         let spec = SpawnSpec {
             program,
             args,
             cwd: worktree.path.clone(),
-            env: vec![
-                (env::AGENT_ID.into(), agent.id.to_string()),
-                (
-                    env::API_URL.into(),
-                    format!("http://127.0.0.1:{}", self.hook_env.port),
-                ),
-                (env::API_TOKEN.into(), self.hook_env.token.clone()),
-            ],
+            env: session_env,
             scrub_env: env::AGENT_SESSION_VARS,
+            unset_env: launch_env.removals(),
             cols,
             rows,
         };
@@ -602,7 +651,31 @@ impl Daemon {
         if agent.kind == AgentKind::Cursor {
             session.arm_question_scan();
         }
+        // Only a session under a PROFILE has somewhere to file a reading.
+        if agent.kind == AgentKind::Claude && agent.profile.is_some() {
+            session.arm_usage_scan();
+        }
         Ok(session)
+    }
+
+    /// A PLAN USAGE reading off `id`'s screen: kept as its PROFILE's latest
+    /// (`<data dir>/profiles/.usage/<name>.json`), stamped now. A row with
+    /// no profile has nowhere to keep it.
+    pub(crate) fn on_pty_usage(&self, id: &AgentId, mut usage: nebula_core::profiles::Usage) {
+        let Ok(Some(agent)) = self.store.get_agent(id) else {
+            return;
+        };
+        let Some(name) = agent.profile else {
+            return;
+        };
+        usage.at = nebula_core::clock::now_ms();
+        if let Err(e) = nebula_core::profiles::write_usage_in(
+            &nebula_core::profiles::profiles_root(),
+            &name,
+            &usage,
+        ) {
+            tracing::warn!(profile = %name, error = %e, "recording plan usage failed");
+        }
     }
 
     /// A resumed session (`claude --resume` / `codex resume` /
@@ -713,12 +786,20 @@ impl Daemon {
     pub(super) fn claude_background_id(&self, agent: &Agent) -> Option<String> {
         let sid = claude_resumable_session(agent)?;
         let listing = ["agents".to_string(), "--json".to_string()];
-        let (program, args) = login_shell_wrap(
+        // Under the session's PROFILE: its Claude lists its own config's
+        // background sessions, not the default login's.
+        let launch_env = resolve_harness(agent.kind, agent.custom_harness.as_deref())
+            .ok()
+            .and_then(|harness| session_profile(agent, &harness).ok().flatten())
+            .map(|profile| profile.launch_env())
+            .unwrap_or_default();
+        let (program, args) = login_shell_wrap_env(
             &nebula_core::shell::user_shell(),
             agent.kind.cli_program(),
             &listing,
+            &launch_env,
         );
-        let id = claude_bg::probe(&program, &args, sid)?;
+        let id = claude_bg::probe(&program, &args, &launch_env, sid)?;
         tracing::info!(agent = %agent.id, session = %sid, attach = %id, "Claude session runs in the background");
         Some(id)
     }
@@ -734,6 +815,17 @@ impl Daemon {
             .filter_map(|t| Some(t.transcript_path.parent()?.parent()?.to_path_buf()))
             .collect();
         dirs.extend(nebula_core::paths::claude_config_dir().map(|dir| dir.join("projects")));
+        // Every Claude PROFILE's config dir too: after a daemon restart no
+        // hook has reported one yet, and a profile session's transcript
+        // missing from this list would read as gone and boot it fresh.
+        let root = nebula_core::profiles::profiles_root();
+        dirs.extend(
+            crate::config::Config::load()
+                .profiles
+                .iter()
+                .filter_map(|p| p.dir_for(&root, env::CLAUDE_CONFIG_DIR))
+                .map(|dir| dir.join("projects")),
+        );
         dirs.sort();
         dirs.dedup();
         dirs
@@ -771,6 +863,7 @@ impl Daemon {
             cwd: worktree.path.clone(),
             env: vec![],
             scrub_env: env::AGENT_SESSION_VARS,
+            unset_env: Vec::new(),
             cols,
             rows,
         };

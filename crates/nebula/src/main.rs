@@ -1,13 +1,14 @@
 mod browser;
 mod cli;
 mod hook;
+mod profile;
 mod ssh;
 mod tunnel;
 mod upgrade;
 
 use anyhow::Result;
 use clap::Parser;
-use cli::{Cli, Command, ConfigCommand, OrchestratorCommand};
+use cli::{Cli, Command, ConfigCommand, OrchestratorCommand, ProfileCommand};
 use std::path::Path;
 
 fn main() -> Result<()> {
@@ -38,6 +39,25 @@ fn main() -> Result<()> {
             ConfigCommand::Export { path } => nebula_tui::ConfigOp::Export { path },
             ConfigCommand::Import { source } => nebula_tui::ConfigOp::Import { source },
             ConfigCommand::Harnesses => nebula_tui::ConfigOp::Harnesses,
+        }),
+        Some(Command::Profile { command }) => profile::run_profile(match command {
+            ProfileCommand::List => profile::ProfileOp::List,
+            ProfileCommand::Add {
+                name,
+                harness,
+                use_default,
+                default,
+                env,
+            } => profile::ProfileOp::Add {
+                name,
+                harness,
+                use_default,
+                default,
+                env,
+            },
+            ProfileCommand::Remove { name, purge } => profile::ProfileOp::Remove { name, purge },
+            ProfileCommand::Default { name } => profile::ProfileOp::Default { name },
+            ProfileCommand::Login { name, args } => profile::ProfileOp::Login { name, args },
         }),
         Some(Command::Kill) => nebula_tui::run_kill(),
         Some(Command::Rename { title, force }) => {

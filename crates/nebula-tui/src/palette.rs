@@ -402,6 +402,7 @@ mod tests {
 
     fn agent(id: &str, wt: &str, status: AgentStatus, unseen: bool, stamp: i64) -> Agent {
         Agent {
+            profile: None,
             id: AgentId(id.into()),
             worktree_id: WorktreeId(wt.into()),
             name: id.into(),

@@ -7,7 +7,7 @@ Everything that can start an AGENT, and what each launch path does differently.
 ## The NEW SESSION PICKER
 
 Press `n` on the grid. A menu asks what to
-run — **Claude**, **Codex**, **Cursor**, **Pi**, **Muse**, **Grok Build**, or **OpenCode** (a plain shell is `t` — see [Keys](keys.md)); a CLI you never use can be
+run — **Claude**, **Codex**, **Cursor**, **Pi**, **Muse**, **Grok Build**, **OpenCode**, or **Copilot** (a plain shell is `t` — see [Keys](keys.md)); a CLI you never use can be
 switched off on the settings overlay's Agents tab and drops out of the menu entirely. Turn on `Hide missing CLIs`
 on the Agents tab and the menu lists only enabled harnesses whose CLI is found on PATH (the daemon still
 checks through the login shell at launch). Your own CLIs join the menu too: add them to config.json
@@ -68,7 +68,10 @@ the life of the SESSION, and nothing in the picker or the settings overlay softe
 permission gate to begin with — bro passes no flag, and it runs its tools as it sees fit. Muse is
 the same: no flag mapped yet. OpenCode keeps its own permission prompts: bro passes no `--auto`, so it
 stops and asks like Claude does, and a `permissions_flag` of `--auto` in its `harnesses` entry is how you
-opt out of that. Pick the
+opt out of that. Copilot keeps its prompts too: bro passes no `--yolo`. With `--yolo` in its
+`permissions_flag` Copilot still fires `permissionRequest` before each tool it auto-approves, so its
+row flicks red for a moment per tool. On a folder it has not seen, Copilot first asks whether to trust
+it; answer in the pane. Pick the
 harness with that in mind, especially in the ROOT WORKTREE.
 
 The same choice reaches the STATUS DOT, because an AGENT can only report what its hook set can see.
@@ -97,7 +100,13 @@ inert outside bro) that posts OpenCode's `chat.message` as `UserPromptSubmit`, i
 gated tool's `PostToolUse`, and its `question` tool's `question.asked` / `question.replied` as
 `PreToolUse` / `PostToolUse` — so an OpenCode row goes yellow, red while a permission or a question
 waits on you (one raised from a subagent session included), and green when the turn ends, an aborted
-one included.
+one included. Copilot loads every hook file in its home's `hooks/` dir (`~/.copilot/hooks/`, or
+`$COPILOT_HOME/hooks/`) at startup, whatever you answer to its folder-trust dialog, so bro writes one
+managed file there, `bro.json`, inert outside bro: Copilot's `sessionStart`, `userPromptSubmitted`,
+`agentStop`, `permissionRequest` and `postToolUse` arrive as `SessionStart`, `UserPromptSubmit`,
+`Stop`, `PermissionRequest` and `PostToolUse` — so a Copilot row goes yellow, red while a tool waits
+on your yes, and green when the turn ends. Copilot reads nothing back from its hooks, so a Copilot
+session gets no auto-title.
 
 ## AGENT PRESETS
 

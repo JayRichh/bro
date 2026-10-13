@@ -2217,6 +2217,9 @@ pub struct AgentLaunchDraft {
     /// the user navigated away from: the create is born in
     /// `App::left_behind`, so the manual move still outranks the follow.
     pub follow: bool,
+    /// The PROFILE the session runs under, by name; None = its harness's
+    /// default profile, which the DAEMON resolves.
+    pub profile: Option<String>,
 }
 
 impl AgentLaunchDraft {
@@ -2249,6 +2252,7 @@ impl AgentLaunchDraft {
             focus_pane: true,
             placeholder: None,
             follow: true,
+            profile: None,
         }
     }
 }
@@ -3797,6 +3801,14 @@ pub struct LauncherState {
     /// (`launcher_view::card_tint`). Mirrors the config, refreshed at
     /// startup and when the settings overlay applies a change.
     pub highlight_current_card: bool,
+    /// The PROFILES list (`profiles` in config.json), mirrored at startup
+    /// and whenever a QUICK PROMPT opens — `bro profile add` runs outside
+    /// the TUI — so the box's profile field and the cards read it without
+    /// a file read per frame.
+    pub profiles: Vec<nebula_core::profiles::Profile>,
+    /// Each profile's latest PLAN USAGE, by name, read with
+    /// [`LauncherState::profiles`] (`quick_prompt::refresh_profiles`).
+    pub profile_usage: std::collections::HashMap<String, nebula_core::profiles::Usage>,
 }
 
 pub struct ChromeState {
@@ -6070,6 +6082,7 @@ mod tests {
             .collect();
         app.tree.agents = (0..3)
             .map(|i| Agent {
+                profile: None,
                 id: AgentId(format!("a{i}")),
                 worktree_id: WorktreeId(format!("w{i}")),
                 name: format!("s{i}"),
@@ -6363,6 +6376,7 @@ mod tests {
     fn links_sit_between_terminals_and_archived_sessions() {
         let (mut app, wt) = link_app();
         app.tree.agents.push(Agent {
+            profile: None,
             id: AgentId("a1".into()),
             worktree_id: wt.clone(),
             name: "live".into(),
@@ -6593,6 +6607,7 @@ mod tests {
         // (which count as interacting NOW, the tie the raw stamp breaks).
         for (i, wt) in ["p0w0", "p0w0", "p0w1", "p1w2", "p2w0"].iter().enumerate() {
             tree.agents.push(Agent {
+                profile: None,
                 id: AgentId(format!("a{i}")),
                 worktree_id: WorktreeId((*wt).into()),
                 name: format!("a{i}"),

@@ -23,6 +23,7 @@ bro sessions             list every session across every project     (agents run
 bro read <session>       read recent context from another session    (agents run this)
 bro ask <session> <q>    ask another session and print its answer    (agents run this)
 bro config <cmd>         back up, restore or locate this machine's settings
+bro profile <cmd>        several accounts per harness: add, sign in, list, remove
 bro browser              serve this TUI in a web browser via ttyd
 bro ssh <host>           open bro on a remote host over ssh
 bro tunnel <host>        open a remote host's bro in a tab here
@@ -69,7 +70,7 @@ bro worktree [name] [--base <ref>]  # move the current session into a worktree o
                           # a branch name meaning origin's fetched copy — main is origin/main —
                           # but is ignored when the branch already exists; without it the
                           # worktree_base_branch setting applies, else origin's default)
-bro spawn <task> [--kind <claude|codex|cursor|pi|muse|grok|opencode>] [--worktree <branch> [--base <ref>]]
+bro spawn <task> [--kind <claude|codex|cursor|pi|muse|grok|opencode|copilot>] [--worktree <branch> [--base <ref>]]
                           # start a new agent session beside the current one, in the same worktree,
                           # opening on <task> (agents run this when you ask for a new bro session;
                           # --kind defaults to this session's harness; custom harnesses launch from
@@ -112,6 +113,23 @@ bro config harnesses         # print the effective harness registry: every harne
 ```
 
 See [Configuration](configuration.md#backup-restore-and-other-machines).
+
+## Profiles
+
+```sh
+bro profile add <name> --harness <h> [--use-default] [--default] [--env K=V]…
+                                # a named account for one harness; --use-default adopts the
+                                # CLI's existing login instead of a home of its own
+bro profile login <name> [-- <args>]
+                                # run the harness's sign-in here under the profile:
+                                # claude auth login --claudeai, codex login, copilot login
+bro profile list             # accounts, homes, defaults and the last plan usage seen
+bro profile default <name>   # launches that pick no profile take it
+bro profile remove <name> [--purge]
+                                # drop it; --purge deletes its home (and the login) too
+```
+
+See [Profiles](profiles.md).
 
 ## Other machines, other screens
 

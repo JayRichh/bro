@@ -1,7 +1,8 @@
 //! Managed-hook installation into the agent CLI's config:
 //! `<worktree>/.claude/settings.local.json` (Claude Code),
-//! `~/.codex/hooks.json` (Codex CLI), or `<worktree>/.cursor/hooks.json`
-//! (Cursor CLI). Pi and OpenCode have no hook file — their managed
+//! `~/.codex/hooks.json` (Codex CLI), `<worktree>/.cursor/hooks.json`
+//! (Cursor CLI), or `~/.copilot/hooks/bro.json` (Copilot CLI, a file of
+//! its own in its own dialect). Pi and OpenCode have no hook file — their managed
 //! TypeScript extension and plugin are `pi_extension.rs` and
 //! `opencode_plugin.rs`, which share this module's atomic writer.
 //!
@@ -108,6 +109,34 @@ const CURSOR_EVENTS: &[(&str, &str)] = &[
     ("subagentStop", "SubagentStop"),
 ];
 
+/// (copilot hook event, nebula hookEvent query value), verified against
+/// Copilot CLI 1.0.96 by a probe file logging every payload. Copilot's
+/// events are camelCase and its payloads Claude-shaped under other names
+/// (`sessionId`, `toolName` — aliased by the receiver). `permissionRequest`
+/// fires before a tool that needs asking, and the tool's `postToolUse` is
+/// the first word that the user said yes, as on Claude. No subagent pair:
+/// a `Stop` gated on subagents nobody announced would hold forever.
+/// `sessionEnd` is skipped: PTY-exit synthetics already cover agent death.
+const COPILOT_EVENTS: &[(&str, &str)] = &[
+    ("sessionStart", "SessionStart"),
+    ("userPromptSubmitted", "UserPromptSubmit"),
+    ("agentStop", "Stop"),
+    ("permissionRequest", "PermissionRequest"),
+    ("postToolUse", "PostToolUse"),
+];
+
+/// Copilot's user-level hooks directory under its home: every `*.json` in
+/// it is loaded at startup, before (and whatever the answer to) the folder
+/// trust dialog, so one managed file there serves every worktree.
+const COPILOT_HOOKS_DIR: &str = "hooks";
+/// The managed file in [`COPILOT_HOOKS_DIR`]: wholly nebula's, rewritten
+/// on every spawn, so no merge with the user's own hook files is needed.
+const COPILOT_HOOKS_FILE: &str = "bro.json";
+/// `~/.copilot`, Copilot's home when `$COPILOT_HOME` is unset.
+const COPILOT_DIR: &str = ".copilot";
+/// How long Copilot lets a managed hook run before abandoning it.
+const COPILOT_HOOK_TIMEOUT_SECS: u32 = 10;
+
 /// Windows: no `curl` + POSIX `${VAR}` one-liner — the CLI may run its
 /// hooks under cmd, PowerShell or Git Bash. The hook is this binary's own
 /// `_hook <endpoint> <event>` subcommand instead, which does what the
@@ -154,6 +183,13 @@ fn hook_command(endpoint: &str, event: &str) -> String {
 #[cfg(windows)]
 fn cursor_hook_command(event: &str) -> String {
     hook_subcommand("cursor", event)
+}
+
+/// Copilot runs the `powershell` command of a hook on Windows: the same
+/// subcommand, which keeps its stdout empty for this route.
+#[cfg(windows)]
+fn copilot_hook_command(event: &str) -> String {
+    hook_subcommand("copilot", event)
 }
 
 #[cfg(windows)]
@@ -230,6 +266,17 @@ fn cursor_hook_command(event: &str) -> String {
          {} >/dev/null 2>&1 || true; printf '{{\"continue\": true}}\\n'",
         env_guard(),
         hook_curl("cursor", event)
+    )
+}
+
+/// Copilot variant: fully silent — Copilot reads nothing back from these
+/// events, so no reply body has anywhere to go.
+#[cfg(unix)]
+fn copilot_hook_command(event: &str) -> String {
+    format!(
+        "if {}; then exit 0; fi; {} >/dev/null 2>&1 || true",
+        env_guard(),
+        hook_curl("copilot", event)
     )
 }
 
@@ -427,6 +474,46 @@ pub fn install_cursor_hooks(cwd: &Path) -> Result<()> {
     }
 
     write_hooks_root(&dir, HOOKS_FILE, &root)
+}
+
+/// Copilot's home (`$COPILOT_HOME`, else `~/.copilot`) — where its
+/// user-level hooks directory lives.
+pub fn copilot_home() -> PathBuf {
+    nebula_core::env::non_empty(nebula_core::env::COPILOT_HOME)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            nebula_core::env::home_dir()
+                .unwrap_or_default()
+                .join(COPILOT_DIR)
+        })
+}
+
+/// Write nebula's managed hooks for Copilot into
+/// `<copilot_home>/hooks/bro.json`, in Copilot's own dialect: a top-level
+/// `"version": 1`, camelCase event keys, and per entry a `bash` and a
+/// `powershell` command (Copilot picks the one for its platform) with a
+/// timeout. The file is nebula's alone, so it is written whole — and left
+/// alone when it already says exactly this.
+pub fn install_copilot_hooks(copilot_home: &Path) -> Result<()> {
+    let mut hooks = Map::new();
+    for (copilot_event, nebula_event) in COPILOT_EVENTS {
+        let command = copilot_hook_command(nebula_event);
+        hooks.insert(
+            copilot_event.to_string(),
+            json!([{
+                "type": "command",
+                "bash": command,
+                "powershell": command,
+                "timeoutSec": COPILOT_HOOK_TIMEOUT_SECS,
+            }]),
+        );
+    }
+    let root = json!({ "version": 1, "hooks": hooks });
+    install_unless_unchanged(
+        &copilot_home.join(COPILOT_HOOKS_DIR),
+        COPILOT_HOOKS_FILE,
+        &serde_json::to_string_pretty(&root)?,
+    )
 }
 
 fn load_hooks_root(path: &Path) -> Result<Value> {
@@ -789,6 +876,37 @@ mod tests {
             .as_str()
             .unwrap();
         assert!(!submit.contains(">/dev/null 2>&1"), "stdout: {submit}");
+    }
+
+    #[test]
+    fn copilot_installs_its_own_dialect_into_its_hooks_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        install_copilot_hooks(tmp.path()).unwrap();
+        let hooks = read_json(tmp.path(), "hooks/bro.json");
+        assert_eq!(hooks["version"], json!(1));
+        let events: Vec<&str> = hooks["hooks"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        for (event, _) in COPILOT_EVENTS {
+            assert!(events.contains(event), "{event} missing: {events:?}");
+        }
+        assert!(hooks["hooks"].get("Stop").is_none(), "camelCase only");
+        let stop = &hooks["hooks"]["agentStop"][0];
+        assert_eq!(stop["type"], json!("command"));
+        let cmd = stop["powershell"].as_str().unwrap();
+        assert_eq!(stop["bash"].as_str(), Some(cmd));
+        assert!(routes(cmd, "copilot", "Stop"), "copilot endpoint: {cmd}");
+        assert!(stop["timeoutSec"].as_u64().is_some());
+
+        // Rewritten whole and only when it changed: a second install
+        // leaves the file's bytes as they were.
+        let path = tmp.path().join("hooks").join("bro.json");
+        let before = std::fs::read_to_string(&path).unwrap();
+        install_copilot_hooks(tmp.path()).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
     }
 
     #[test]

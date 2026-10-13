@@ -1104,6 +1104,7 @@ pub(crate) fn create_agent(app: &mut App, draft: AgentLaunchDraft, out: &mut Vec
         focus_pane,
         placeholder,
         follow,
+        profile,
     } = draft;
     // A PR SESSION is addressed to the PROJECT, not to a checkout: the
     // DAEMON runs it in the PR head branch's own worktree, creating that
@@ -1225,6 +1226,7 @@ pub(crate) fn create_agent(app: &mut App, draft: AgentLaunchDraft, out: &mut Vec
                 pr_url: pr.url,
                 head: pr.head,
                 starting_prompt,
+                profile,
             }
         }
         None => ClientRequest::CreateAgent {
@@ -1240,6 +1242,7 @@ pub(crate) fn create_agent(app: &mut App, draft: AgentLaunchDraft, out: &mut Vec
             starting_prompt,
             issue_url,
             role: nebula_core::AgentRole::Worker,
+            profile,
         },
     });
     // The create consumes (or, off-spec, discards) the worktree's warm
