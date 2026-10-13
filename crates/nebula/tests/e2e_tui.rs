@@ -69,6 +69,16 @@ impl TuiHarness {
         let data_dir = PathBuf::from(format!("/tmp/nebtui-data-{pid}-{seq}"));
         let _ = std::fs::remove_dir_all(&runtime_dir);
         let _ = std::fs::remove_dir_all(&data_dir);
+        // Pin the look the assertions read: the indexed `default` theme,
+        // whose selection fill `row_is_selected` matches (the shipped
+        // default is a truecolor preset), and no FILE ICONS, so a row
+        // reads as its status and name alone.
+        std::fs::create_dir_all(&data_dir).unwrap();
+        std::fs::write(
+            data_dir.join(nebula_core::paths::CONFIG_FILE_NAME),
+            r#"{"theme": "default", "icons": "off"}"#,
+        )
+        .unwrap();
         let repos = tempfile::tempdir().unwrap();
 
         let pty = native_pty_system()
