@@ -62,13 +62,30 @@ pub fn auto_title_injection() -> String {
 /// renames and persists exactly as `/rename` does), or nothing at all —
 /// an empty body is the only other thing that may reach the CLI's stdout.
 pub fn user_prompt_reply(instruction: bool, session_title: Option<&str>) -> String {
-    if !instruction && session_title.is_none() {
+    prompt_reply(instruction, session_title, false)
+}
+
+/// The commit-message rule Codex gets on every prompt: it has no
+/// attribution setting of its own and no system-prompt channel.
+pub const CODEX_COMMIT_RULE: &str = "Write plain commit messages without co-author trailers.";
+
+/// [`user_prompt_reply`], plus [`CODEX_COMMIT_RULE`] in the context when
+/// `commit_rule` is set (Codex's route, on every prompt).
+fn prompt_reply(instruction: bool, session_title: Option<&str>, commit_rule: bool) -> String {
+    if !instruction && session_title.is_none() && !commit_rule {
         return String::new();
     }
     let mut output = serde_json::Map::new();
     output.insert("hookEventName".into(), "UserPromptSubmit".into());
-    if instruction {
-        output.insert("additionalContext".into(), AUTO_TITLE_INSTRUCTION.into());
+    let context: Vec<&str> = [
+        instruction.then_some(AUTO_TITLE_INSTRUCTION),
+        commit_rule.then_some(CODEX_COMMIT_RULE),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if !context.is_empty() {
+        output.insert("additionalContext".into(), context.join("\n\n").into());
     }
     if let Some(title) = session_title {
         output.insert("sessionTitle".into(), title.into());
@@ -518,7 +535,7 @@ async fn receive_hook(
         };
         return (
             StatusCode::OK,
-            user_prompt_reply(inject, session_title.as_deref()),
+            prompt_reply(inject, session_title.as_deref(), cli == HookCli::Codex),
         );
     }
     (StatusCode::OK, HOOK_OK.to_string())
@@ -650,7 +667,8 @@ mod tests {
             TranscriptRef::from_payload(Some("/t/p/s1.jsonl"), Some("s1"))
         );
 
-        // Codex: same dialect, but no title exchange and no transcript.
+        // Codex: same dialect, but no title exchange and no transcript;
+        // only its commit rule, which rides every prompt.
         let (_, body) = http_post(
             env.port,
             "/api/hooks/codex?agentId=named&hookEvent=UserPromptSubmit",
@@ -658,7 +676,13 @@ mod tests {
             payload,
         )
         .await;
-        assert_eq!(body, "");
+        assert_eq!(body, prompt_reply(false, None, true));
+        let reply: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(
+            reply["hookSpecificOutput"]["additionalContext"],
+            serde_json::json!(CODEX_COMMIT_RULE)
+        );
+        assert!(!body.contains("sessionTitle"), "{body}");
         assert!(rx.recv().await.unwrap().transcript.is_none());
 
         // Other Claude events deliver the transcript too (the sync reads on
@@ -726,7 +750,7 @@ mod tests {
 
         // Codex shares the injectable dialect, and so do pi's extension
         // and OpenCode's plugin, which unwrap the same envelope.
-        for route in ["codex", "pi", "opencode"] {
+        for route in ["pi", "opencode"] {
             let (_, body) = http_post(
                 env.port,
                 &format!("/api/hooks/{route}?agentId=pending&hookEvent=UserPromptSubmit"),
@@ -736,6 +760,21 @@ mod tests {
             .await;
             assert_eq!(body, auto_title_injection(), "{route}");
         }
+        // Codex gets the instruction and, after it, its commit rule.
+        let (_, body) = http_post(
+            env.port,
+            "/api/hooks/codex?agentId=pending&hookEvent=UserPromptSubmit",
+            &env.token,
+            payload,
+        )
+        .await;
+        let reply: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(
+            reply["hookSpecificOutput"]["additionalContext"],
+            serde_json::json!(format!("{AUTO_TITLE_INSTRUCTION}\n\n{CODEX_COMMIT_RULE}"))
+        );
+        // Claude never gets it: its settings turn attribution off instead.
+        assert!(!auto_title_injection().contains(CODEX_COMMIT_RULE));
 
         // Titled session: strictly empty — anything else would leak into
         // the model's context.
