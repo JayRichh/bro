@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 
 pub mod auth;
+pub mod branches;
 pub mod client;
 pub mod naming;
 pub mod prs;

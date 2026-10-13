@@ -620,6 +620,10 @@ fn main() {
             ado_reply,
             ado_search_identities,
             ado_recent_reviewers,
+            ado::branches::ado_branches,
+            ado::branches::ado_fetch,
+            ado::branches::ado_checkout_worktree,
+            ado::branches::ado_delete_local,
         ])
         .run(tauri::generate_context!())
         .expect("kete-desktop failed to start");
