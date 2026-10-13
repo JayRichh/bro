@@ -8,6 +8,7 @@ pub mod bundle;
 pub use nebula_config::claude_catalogue;
 pub mod completion;
 pub mod config;
+pub mod config_watch;
 pub use nebula_config::cursor_catalogue;
 pub mod diff_layout;
 pub mod diff_tree;

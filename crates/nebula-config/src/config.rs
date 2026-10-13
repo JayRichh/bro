@@ -1740,6 +1740,13 @@ impl Config {
         Self::update_in(&settings_path(), &local_settings_path(), change)
     }
 
+    /// The two files [`Config::load`] reads, `(config.json,
+    /// config.local.json)`, as this process resolves them (a test's path
+    /// override included) — for a reader that watches them for changes.
+    pub fn layer_paths() -> (PathBuf, PathBuf) {
+        (settings_path(), local_settings_path())
+    }
+
     /// [`Config::update`] on explicit layers: `path` with `local` over it.
     pub fn update_in(
         path: &Path,
