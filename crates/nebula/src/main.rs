@@ -94,27 +94,62 @@ fn main() -> Result<()> {
         }) => nebula_tui::run_ask_session(&session, question.join(" "), timeout, !no_wait),
         Some(Command::Orchestrator { command }) => match command {
             OrchestratorCommand::List { json } => nebula_tui::run_orchestrator_list(json),
-            OrchestratorCommand::Read { session, bytes } => {
-                nebula_tui::run_orchestrator_read(&session, bytes)
-            }
-            OrchestratorCommand::Send { session, prompt } => {
-                nebula_tui::run_orchestrator_send(&session, prompt.join(" "))
-            }
+            OrchestratorCommand::Start {
+                kind,
+                model,
+                effort,
+                profile,
+                project,
+                name,
+                replace,
+            } => nebula_tui::run_orchestrator_start(nebula_tui::ipc::StartArgs {
+                kind,
+                model,
+                effort,
+                profile,
+                project,
+                name,
+                replace,
+            }),
+            OrchestratorCommand::Status { json } => nebula_tui::run_orchestrator_status(json),
+            OrchestratorCommand::Clear => nebula_tui::run_orchestrator_clear(),
+            OrchestratorCommand::Read {
+                session,
+                lines,
+                bytes,
+            } => nebula_tui::run_orchestrator_read(&session, lines, bytes),
+            OrchestratorCommand::Send {
+                session,
+                prompt,
+                timeout,
+                no_wait,
+            } => nebula_tui::run_orchestrator_send(&session, prompt.join(" "), timeout, !no_wait),
             OrchestratorCommand::Spawn {
                 project,
                 worktree,
                 base,
                 kind,
+                name,
+                model,
+                effort,
+                profile,
                 task,
-            } => nebula_tui::run_orchestrator_spawn(
-                &project,
-                worktree.as_deref(),
-                base,
-                kind,
-                task.join(" "),
-            ),
-            OrchestratorCommand::Review { session, tabs } => {
-                nebula_tui::run_orchestrator_review(&session, tabs)
+            } => {
+                let task = task.join(" ");
+                nebula_tui::run_orchestrator_spawn(nebula_tui::ipc::SpawnArgs {
+                    project: &project,
+                    worktree: worktree.as_deref(),
+                    base,
+                    kind,
+                    name,
+                    model,
+                    effort,
+                    profile,
+                    task: &task,
+                })
+            }
+            OrchestratorCommand::Review { sessions, tabs } => {
+                nebula_tui::run_orchestrator_review(&sessions, tabs)
             }
         },
         Some(Command::Browser {
