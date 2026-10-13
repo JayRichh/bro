@@ -92,8 +92,9 @@ impl LegacyDir {
         self.old.is_dir() && !self.new.join(self.marker).exists()
     }
 
-    /// Rename `old` to `new`; into a fresh `new` that exists already, each
-    /// entry of `old` it lacks, and `old` goes once empty.
+    /// Rename `old` to `new`; into a fresh `new` that exists already, merge
+    /// `old` in, Bro's files winning (nothing in a fresh dir is real data),
+    /// and `old` goes once empty.
     fn carry_over(&self) -> std::io::Result<()> {
         if !self.new.exists() {
             if let Some(parent) = self.new.parent() {
@@ -101,16 +102,26 @@ impl LegacyDir {
             }
             return std::fs::rename(&self.old, &self.new);
         }
-        for entry in std::fs::read_dir(&self.old)? {
-            let entry = entry?;
-            let to = self.new.join(entry.file_name());
-            if !to.exists() {
-                std::fs::rename(entry.path(), to)?;
-            }
-        }
-        let _ = std::fs::remove_dir(&self.old);
-        Ok(())
+        merge_into(&self.old, &self.new)
     }
+}
+
+/// Move every entry of `from` into `to`: a file replaces one of its name, a
+/// dir merges into one of its name, and `from` is removed once empty. A
+/// file and a dir of one name stay as they are.
+fn merge_into(from: &Path, to: &Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let dest = to.join(entry.file_name());
+        let is_dir = entry.file_type()?.is_dir();
+        if is_dir && dest.is_dir() {
+            merge_into(&entry.path(), &dest)?;
+        } else if is_dir == dest.is_dir() || !dest.exists() {
+            std::fs::rename(entry.path(), dest)?;
+        }
+    }
+    let _ = std::fs::remove_dir(from);
+    Ok(())
 }
 
 /// What [`migrate_dirs`] did.
@@ -213,6 +224,11 @@ pub fn migrate_legacy_dirs() -> Vec<String> {
                     d.old.display()
                 )
             }));
+            // On the record too: the TUI's screen and the desktop window
+            // hide stderr.
+            for note in &notes {
+                crate::crashlog::append(&daemon_log_path(), &format!("migration: {note}"));
+            }
             notes
         }
     }
@@ -722,17 +738,23 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let dirs = bro_install(root.path());
         let data = root.path().join("kete").join("data");
-        std::fs::create_dir_all(&data).unwrap();
+        std::fs::create_dir_all(data.join("profiles")).unwrap();
         std::fs::write(data.join("kete-256.png"), b"png").unwrap();
+        // A file of the same name on both sides: Bro's is the real one.
+        let old_data = root.path().join(LEGACY_NAME).join("data");
+        std::fs::write(old_data.join("reviewed.json"), b"bro's").unwrap();
+        std::fs::write(data.join("reviewed.json"), b"stray").unwrap();
 
         assert!(matches!(
             migrate_dirs(&dirs, &lock_of(root.path())),
             Migration::Moved { ref moved, .. } if moved.len() == 2
         ));
         assert!(data.join("nebula.db").is_file());
-        assert!(data.join("profiles").join("jayrich").is_dir());
+        let profile = data.join("profiles").join("jayrich");
+        assert!(profile.join(".claude.json").is_file());
+        assert_eq!(std::fs::read(data.join("reviewed.json")).unwrap(), b"bro's");
         assert_eq!(std::fs::read(data.join("kete-256.png")).unwrap(), b"png");
-        assert!(!root.path().join(LEGACY_NAME).join("data").exists());
+        assert!(!old_data.exists());
     }
 
     /// Kete's data dir in use (it has its database) is Kete's: Bro's is left

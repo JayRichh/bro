@@ -201,7 +201,7 @@ const LANGUAGE_EXTENSIONS = {
   python: ['py', 'pyi'],
 };
 
-// A few the theme leaves to `languageIds` or does not name, which a Bro
+// A few the theme leaves to `languageIds` or does not name, which a Kete
 // user meets constantly.
 const EXTRA_NAMES = {
   'cargo.toml': 'rust',
@@ -235,7 +235,7 @@ function fill(icon) {
 }
 
 // The canvas the colors have to read on: One Dark's `#282C34`, the theme
-// Bro wears beside a VS Code in Atom One Dark. Material's fills are drawn
+// Kete wears beside a VS Code in Atom One Dark. Material's fills are drawn
 // for VS Code's own sidebar; a few of its slate grays (`folder-github`,
 // `folder-scripts`) all but vanish on it. Each fill is checked against the
 // canvas by WCAG contrast and, below FLOOR, lifted toward white just far
