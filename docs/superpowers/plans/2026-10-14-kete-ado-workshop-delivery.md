@@ -32,7 +32,7 @@ All of it is in a warm Workshop UI with a nested-agent overview, shipped as an i
 - Initials: first 2 letters of the first word + first 2 of the last word of `git config user.name`, lowercase. Override: `ado.initials`.
 - Diff side cap: 2 MB. A missing blob is an error state, never empty.
 - **No attribution, anywhere:**
-  - no `Co-Authored-By` naming an AI, and no "Generated with" footers
+  - no `Co-Authored-By` lines at all (human or AI), and no "Generated with" footers
   - no attribution trailers in this project's own commits either
   - no user-facing copy that mentions the rule
 - No em dashes in any user-facing string.
@@ -54,7 +54,7 @@ docker run --rm -v C:\Code\bro:/src -v bro-cargo-reg:/usr/local/cargo/registry -
 2. **GCM returns nothing within 60 s, or hangs on a sign-in window:** the UI shows "Signing in…", then the fix-it message, and the app never freezes. Test in Task 2 (`TokenSource` times out and returns `AuthError::Timeout`).
 3. **PR create times out after the server already created it:** the retry finds the existing PR and does not create a second. Test in Task 9 (`create_pr` reconciles by listing PRs for the source branch).
 4. **Branch name typed with spaces or `..`, or an existing branch name:** it is refused with the reason before any git call. Test in Task 1 (`validate_branch_name`) and Task 10.
-5. **Commit range contains `Co-Authored-By: Claude …` and a human co-author:** only the AI trailer is removed, and only on unpushed commits. Test in Task 5.
+5. **Commit range contains `Co-Authored-By` lines (AI or human) and a "Generated with" footer:** every one is removed, and only unpushed commits are rewritten. Test in Task 5.
 
 ---
 
@@ -289,22 +289,21 @@ httpmock = "0.7"
 
 **Interfaces:**
 - Produces:
-  - `pub fn strip_ai_trailers(message: &str) -> (String, bool)`, which returns the cleaned message and whether anything changed
+  - `pub fn strip_ai_trailers(message: &str) -> (String, bool)` (it strips every co-author line, human or AI), which returns the cleaned message and whether anything changed
   - `pub fn find_unpushed_ai_commits(repo: &Path, range: &str) -> anyhow::Result<Vec<String>>`, the SHAs whose messages change under `strip_ai_trailers`
   - `pub fn rewrite_unpushed(repo: &Path, base: &str, branch: &str) -> anyhow::Result<usize>`
 - Removal rule:
-  - It removes lines matching, case-insensitively, `^co-authored-by:.*(claude|anthropic|copilot|codex|openai|chatgpt|gpt)`, and lines starting `🤖 Generated with` or `Generated with [Claude`.
+  - It removes every line matching, case-insensitively, `^co-authored-by:`, and lines starting `🤖 Generated with` or `Generated with [`.
   - Then it trims the trailing blank lines left behind.
-  - Human `Co-Authored-By` lines are kept.
 
 - [ ] **Step 1: Failing tests:**
 
 ```rust
-#[test] fn strips_ai_keeps_humans() {
+#[test] fn strips_every_co_author() {
     let m = "Fix rounding\n\nCo-Authored-By: Claude Opus <noreply@anthropic.com>\nCo-authored-by: Sam Lee <sam@tnt.co.nz>\n";
     let (out, changed) = strip_ai_trailers(m);
     assert!(changed);
-    assert!(!out.contains("Claude")); assert!(out.contains("Sam Lee"));
+    assert_eq!(out.trim_end(), "Fix rounding");
 }
 #[test] fn strips_generated_footer() {
     let (out, changed) = strip_ai_trailers("Add x\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n");

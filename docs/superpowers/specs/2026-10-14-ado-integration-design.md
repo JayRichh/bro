@@ -22,10 +22,10 @@ Jay and colleagues at TnT author most of their work from the ADO sprint board. A
 - **Diffs:** always local `git` (source against merge-base with target); ADO is used for metadata only.
 - **Never hard-code a sprint period.** Iterations come from the team's settings at request time. The team defaults to the project's default team, switchable from a team picker, remembered per repo.
 - **No attribution:**
-  - Kete-created PR titles and descriptions are stripped of `Co-Authored-By:` lines and "Generated with" footers.
+  - Kete-created PR titles and descriptions are stripped of every `Co-Authored-By:` line (human or AI) and every "Generated with" footer.
   - Sessions Kete launches get Claude Code's attribution disabled in the per-worktree settings it already writes (`includeCoAuthoredBy: false`, plus `attribution` set to empty strings for commit and PR).
   - Codex and Copilot get their equivalent setting where the harness has one.
-  - Backstop: the PR composer scans the branch's commits for AI co-author trailers. On an unpushed or own-only branch it offers a one-click clean (message rewrite of those commits); once pushed it only notes it.
+  - Backstop: the PR composer scans the branch's commits for any co-author trailers. On an unpushed or own-only branch it offers a one-click clean (message rewrite of those commits); once pushed it only notes it.
   - None of this is surfaced in docs; the composer note is the only UI.
 - **Out of scope:** environments (dev/UAT/prod), databases, CI pipelines beyond reading PR build-policy status, and GitHub.
 
@@ -164,6 +164,6 @@ These decisions override anything above that conflicts.
 - **Claude:** per-worktree settings get `attribution: { commit: "", pr: "" }`, plus `includeCoAuthoredBy: false` for older versions. Managed settings can override this; if they do, Kete can't, and the gate below catches it.
 - **Copilot CLI:** `includeCoAuthoredBy: false` in `.github/copilot/settings.local.json` in each Kete worktree, kept out of git via the worktree's `info/exclude`.
 - **Codex:** no switch exists. Its session instructions ask for plain commit messages without co-author trailers.
-- **Gate:** before Kete pushes or creates a PR, it scans the commits being published for AI footers and trailers (`Co-Authored-By:` naming Claude, Copilot, Codex or OpenAI, and "Generated with"). Human co-authors are kept.
+- **Gate:** before Kete pushes or creates a PR, it scans the commits being published for any `Co-Authored-By:` trailer (human or AI) and any "Generated with" footer. All of them are removed.
   - If any are found in commits not yet on the remote, Kete rewrites only those messages (no content change), then continues.
   - If they're already on the remote, it shows a one-line note and does not rewrite.
