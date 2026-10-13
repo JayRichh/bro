@@ -1,7 +1,9 @@
 // Demo bridge for screenshots: stands in for the Tauri backend so the
 // window renders in a plain browser with labelled synthetic data. Nothing
-// here talks to a daemon, git or Azure DevOps. Loaded only by demo.html
-// (`npx vite`, then open /demo.html?view=tasks&theme=dark&start=1).
+// here talks to a daemon, git or Azure DevOps. Loaded only by
+// demo/index.html (`npx vite`, then open /demo/?view=tasks&theme=dark&start=1).
+// Not part of the app: vite builds only the root index.html, and
+// tsconfig and the encoding check cover src/ only.
 //
 // Query: view=tasks|branches, theme=light|dark, start=1 (open the Start
 // dialog), offline=1 (tasks come back as a saved list), sel=<branch>,

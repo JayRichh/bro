@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { app, openDiff } from '../store.svelte';
+  import { ownsKey } from './tasks-api';
   import { nav } from '../shell/history.svelte';
   import Chip from './Chip.svelte';
   import { branchesApi, filterBranches, shortAge, syncWords, type BranchRow, type BranchTree, type RangeDiff } from './branches-api';
@@ -104,13 +105,12 @@
   function onKey(e: KeyboardEvent) {
     if (e.ctrlKey || e.altKey || e.metaKey) return;
     const t = e.target as HTMLElement;
-    if (t.closest('input, textarea, select, .xterm, .monaco-editor')) {
-      if (e.key === 'Escape' && t === filterBox) {
-        ui.q = '';
-        filterBox?.blur();
-      }
+    if (e.key === 'Escape' && t === filterBox) {
+      ui.q = '';
+      filterBox?.blur();
       return;
     }
+    if (ownsKey(t, e.key)) return;
     if (e.key === '/') {
       e.preventDefault();
       filterBox?.focus();
@@ -140,8 +140,12 @@
 
   const checkout = (r: BranchRow) =>
     run(r.name, 'checkout', async () => {
-      await branchesApi.checkout(worktree!, r.name);
+      const id = await branchesApi.checkout(worktree!, r.name);
       await load();
+      // Land in the new checkout: its session when one runs there, else its diff.
+      const session = allRows.find((x) => x.name === r.name)?.session;
+      if (session) nav.go({ view: 'session', repo, item: `a:${session}` });
+      else openDiff(id);
     });
 
   const deleteLocal = (r: BranchRow) =>
@@ -168,7 +172,7 @@
     return 'bg-done';
   }
 
-  const STATUS_WORD: Record<string, string> = { M: 'modified', A: 'added', D: 'deleted', R: 'renamed', C: 'copied', U: 'untracked' };
+  const STATUS_WORD: Record<string, string> = { M: 'modified', A: 'added', D: 'deleted', R: 'renamed', C: 'conflicted', U: 'untracked' };
   const action =
     'h-8 border border-rule bg-transparent px-3 text-left text-[13px] text-ink enabled:hover:border-rule-strong disabled:text-faint';
 </script>
@@ -237,6 +241,15 @@
       {:else if !shown}
         <p class="m-0 px-6 py-6 font-mono text-[12px] text-muted">{worktree ? 'Reading branches' : 'This repo has no checkout the daemon knows.'}</p>
       {:else}
+        {#if error}
+          <p class="m-0 flex items-center gap-2 border-b border-rule px-6 py-2 text-[13px] text-ink" role="alert">
+            <span class="size-1.5 flex-none bg-fail" aria-hidden="true"></span><span class="font-medium text-fail">Failed</span>
+            <span class="min-w-0 flex-1 truncate" title={error}>Could not reread the branches; this is the last list. {error}</span>
+            <button class="flex-none border-0 bg-transparent p-0 text-[13px] text-ink underline underline-offset-4 hover:no-underline disabled:text-faint" onclick={load} disabled={loading}
+              >{loading ? 'Reading' : 'Try again'}</button
+            >
+          </p>
+        {/if}
         {#each shown.people as [person, rows] (person)}
           {@const open = isOpen(person)}
           {@const mine = person === shown.me}

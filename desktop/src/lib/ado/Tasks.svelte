@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { app } from '../store.svelte';
+  import { app, toast } from '../store.svelte';
   import { api } from '../api';
   import { nav } from '../shell/history.svelte';
   import Chip from './Chip.svelte';
@@ -8,6 +8,7 @@
   import {
     ageWords,
     filterTasks,
+    ownsKey,
     remainingLabel,
     scopeFromKey,
     scopeKey,
@@ -39,6 +40,7 @@
   let teams = $state<string[]>([]);
   let teamBusy = $state(false);
   let branches = $state<BranchTree | null>(null);
+  let branchesFailed = $state(false);
   let starting = $state<WorkItem | null>(null);
   let filterBox: HTMLInputElement | undefined = $state();
   let listBox: HTMLDivElement | undefined = $state();
@@ -81,8 +83,12 @@
       .catch(() => {});
     branchesApi
       .list(wt)
-      .then((b) => (branches = b))
-      .catch(() => {});
+      .then((b) => {
+        branches = b;
+        branchesFailed = false;
+      })
+      // Start then has no initials to prefix with, and says so.
+      .catch(() => (branchesFailed = true));
   }
   onMount(() => {
     if (worktree) loadSide(worktree);
@@ -101,8 +107,9 @@
     ui.scope = scopeKey(s);
   }
 
-  async function pickTeam(team: string) {
+  async function pickTeam(team: string, picker: HTMLSelectElement) {
     if (!worktree) return;
+    const before = typeof ui.team === 'string' ? ui.team : '';
     teamBusy = true;
     try {
       await tasksApi.setTeam(worktree, team);
@@ -110,7 +117,9 @@
       iterations = await tasksApi.iterations(worktree).catch(() => []);
       await load(worktree, scope);
     } catch (e) {
-      error = String(e);
+      // The team was not saved: the picker goes back to what is in use.
+      picker.value = before;
+      error = `Could not change the team: ${String(e)}`;
     } finally {
       teamBusy = false;
     }
@@ -131,13 +140,13 @@
   function onKey(e: KeyboardEvent) {
     if (starting || e.ctrlKey || e.altKey || e.metaKey) return;
     const t = e.target as HTMLElement;
-    if (t.closest('input, textarea, select, .xterm, .monaco-editor')) {
-      if (e.key === 'Escape' && t === filterBox) {
-        ui.q = '';
-        filterBox?.blur();
-      }
+    if (e.key === 'Escape' && t === filterBox) {
+      ui.q = '';
+      filterBox?.blur();
       return;
     }
+    // Typing, or Enter/Space on a focused button, link or radio: not ours.
+    if (ownsKey(t, e.key)) return;
     if (e.key === '/') {
       e.preventDefault();
       filterBox?.focus();
@@ -246,7 +255,7 @@
           aria-label="Team"
           value={typeof ui.team === 'string' ? ui.team : ''}
           disabled={teamBusy || !teams.length}
-          onchange={(e) => pickTeam((e.currentTarget as HTMLSelectElement).value)}
+          onchange={(e) => pickTeam(e.currentTarget.value, e.currentTarget)}
         >
           <option value="">Default team</option>
           {#each teams as t (t)}<option value={t}>{t}</option>{/each}
@@ -364,6 +373,7 @@
           {repo}
           item={starting}
           initials={branches?.me ?? ''}
+          initialsUnknown={branchesFailed}
           taken={rows.map((r) => r.name)}
           onclose={() => (starting = null)}
           onstarted={() => {
@@ -397,7 +407,7 @@
             >
             <button
               class="h-8 border border-rule bg-transparent px-3 text-[13px] text-ink hover:border-rule-strong"
-              onclick={() => api.openUrl(selected.url).catch(() => {})}>Open in ADO</button
+              onclick={() => api.openUrl(selected.url).catch((e) => toast(`Could not open the task in the browser: ${String(e)}`))}>Open in ADO</button
             >
           </div>
         </div>

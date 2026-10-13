@@ -92,6 +92,22 @@ export const tasksApi = {
 
 // ---- pure helpers ----
 
+/** Where keys are text: a view shortcut never fires there. */
+export const TYPING_SEL = 'input, textarea, select, [contenteditable], .xterm, .monaco-editor';
+/** Controls that act on Enter and Space themselves. */
+export const CONTROL_SEL = 'button, a, summary, [role="button"], [role="radio"], [role="checkbox"], [role="tab"]';
+
+/**
+ * Whether `key` belongs to the focused element rather than to a view's
+ * window-level shortcuts: any key while typing, and Enter or Space on a
+ * focused control (so Enter presses the button, never starts a task).
+ */
+export function ownsKey(target: { closest(sel: string): unknown } | null | undefined, key: string): boolean {
+  if (!target || typeof target.closest !== 'function') return false;
+  if (target.closest(TYPING_SEL)) return true;
+  return (key === 'Enter' || key === ' ') && !!target.closest(CONTROL_SEL);
+}
+
 /** The scope as the scope bar names it. */
 export function scopeLabel(scope: TaskScope, iterations: Iteration[] = []): string {
   if (typeof scope === 'object') {

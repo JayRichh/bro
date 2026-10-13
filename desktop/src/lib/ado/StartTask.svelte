@@ -8,6 +8,7 @@
     repo,
     item,
     initials,
+    initialsUnknown = false,
     taken,
     onclose,
     onstarted,
@@ -16,6 +17,8 @@
     repo: string;
     item: WorkItem;
     initials: string;
+    /** The branch list failed, so `initials` is empty for want of it. */
+    initialsUnknown?: boolean;
     taken: string[];
     onclose: () => void;
     onstarted: () => void;
@@ -63,9 +66,22 @@
 
   onMount(() => {
     loadPrompt();
-    box?.focus();
-    box?.select();
+    if (!box) return;
+    box.focus();
+    // Select the slug, caret at its start, so the initials stay in view.
+    const cut = branch.indexOf('/') + 1;
+    box.setSelectionRange(cut, branch.length, 'backward');
+    box.scrollLeft = 0;
   });
+
+  /** The user changed something here, so leaving asks first. */
+  let touched = $state(false);
+  let confirmDiscard = $state(false);
+
+  /** The harness's default profile, else none. */
+  function pickHarness(h: string) {
+    profile = app.launch.profiles.find((p) => p.harness === h && p.default)?.name ?? '';
+  }
 
   async function submit(e: SubmitEvent) {
     e.preventDefault();
@@ -97,7 +113,20 @@
   }
 
   function close() {
-    if (!busy) onclose();
+    if (busy) return;
+    if (touched && !outcome && !confirmDiscard) {
+      confirmDiscard = true;
+      return;
+    }
+    onclose();
+  }
+
+  function onEscape(e: KeyboardEvent) {
+    if (e.key !== 'Escape') return;
+    e.stopPropagation();
+    // A second Escape on the question keeps editing.
+    if (confirmDiscard) confirmDiscard = false;
+    else close();
   }
 
   const STEP: Record<string, string> = {
@@ -136,7 +165,7 @@
   </label>
 {/snippet}
 
-<svelte:window onkeydown={(e) => e.key === 'Escape' && (e.stopPropagation(), close())} />
+<svelte:window onkeydown={onEscape} />
 
 <!-- Takes the detail pane's place, so the list stays in view while you fill it in. -->
 <div class="flex min-h-0 flex-1 flex-col">
@@ -177,7 +206,7 @@
         <button class="h-8 border-0 bg-ink px-3 text-[13px] font-medium text-bg hover:bg-muted" onclick={onclose}>Done</button>
       </footer>
     {:else}
-      <form class="flex min-h-0 flex-1 flex-col" onsubmit={submit}>
+      <form class="flex min-h-0 flex-1 flex-col" onsubmit={submit} oninput={() => (touched = true)} onchange={() => (touched = true)}>
         <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           <div class="grid grid-cols-[minmax(0,1fr)_140px] gap-3">
             <label class="flex min-w-0 flex-col gap-1">
@@ -202,6 +231,8 @@
           <p id="branch-hint" class="m-0 mt-1.5 flex min-h-[18px] items-center gap-1.5 text-[12px] {problem ? 'text-fail' : 'text-muted'}" aria-live="polite">
             {#if problem}
               <span class="size-1.5 flex-none bg-fail" aria-hidden="true"></span>{problem}
+            {:else if initialsUnknown && !initials}
+              Your initials are not known (the branch list did not load), so the name has no prefix. Add one if your team uses it.
             {:else}
               A new worktree on this branch, cut from {base.trim() || 'the default branch'}.
             {/if}
@@ -219,7 +250,7 @@
                 <label class="flex min-w-0 flex-col gap-1">
                   <span class={label}>Harness</span>
                   <span class="relative flex">
-                    <select class={pick} bind:value={harness} onchange={() => (profile = '')} disabled={busy || !harnesses.length}>
+                    <select class={pick} bind:value={harness} onchange={() => pickHarness(harness)} disabled={busy || !harnesses.length}>
                       {#each harnesses as h (h.id)}<option value={h.id}>{h.label}</option>{/each}
                       {#if !harnesses.length}<option value={harness}>{harness}</option>{/if}
                     </select>
@@ -267,6 +298,15 @@
             <span class="mt-1.5 size-1.5 flex-none bg-fail" aria-hidden="true"></span>
             <span><span class="font-medium text-fail">Not started.</span> {error}</span>
           </p>
+        {/if}
+        {#if confirmDiscard}
+          <div class="flex flex-none items-center gap-3 border-t border-rule px-5 py-2.5 text-[13px] text-ink" role="alertdialog" aria-label="Discard changes">
+            <span class="min-w-0 flex-1">Discard what you changed in this form?</span>
+            <button type="button" class="h-7 border-0 bg-ink px-2.5 text-[13px] font-medium text-bg hover:bg-muted" onclick={onclose}>Discard</button>
+            <button type="button" class="h-7 border border-rule bg-transparent px-2.5 text-[13px] text-ink hover:border-rule-strong" onclick={() => (confirmDiscard = false)}
+              >Keep editing</button
+            >
+          </div>
         {/if}
         <footer class="flex flex-none items-center gap-2 border-t border-rule px-5 py-3">
           <span class="min-w-0 flex-1 truncate font-mono text-[12px] text-muted">{repo ? (app.model.projects.find((p) => p.id === repo)?.name ?? '') : ''}</span>
