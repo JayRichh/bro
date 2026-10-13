@@ -2990,6 +2990,7 @@ mod tests {
             starting_prompt: task.map(String::from),
             pr_url: None,
             issue_url: None,
+            profile: None,
             role: nebula_core::AgentRole::Worker,
         };
 
@@ -3286,6 +3287,7 @@ mod tests {
                 starting_prompt: None,
                 pr_url: None,
                 issue_url: None,
+                profile: None,
                 role: nebula_core::AgentRole::Worker,
             })
             .await
@@ -3429,6 +3431,7 @@ mod tests {
                 starting_prompt: None,
                 pr_url: None,
                 issue_url: None,
+                profile: None,
                 role: nebula_core::AgentRole::Worker,
             })
             .await
