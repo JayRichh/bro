@@ -559,6 +559,8 @@ pub(crate) fn run_menu_action(app: &mut App, action: MenuAction, out: &mut Vec<C
                 id,
             });
         }
+        MenuAction::MakeOrchestrator(id) => orchestrator::make_orchestrator(app, id, out),
+        MenuAction::ClearOrchestrator => orchestrator::clear_orchestrator(app, out),
         MenuAction::SendCloudMessage(id) => open_prompt(app, PromptKind::CloudMessage { id }),
         MenuAction::DuplicateAgent(id) => launcher::duplicate_agent(app, id),
         MenuAction::MoveAgentPicker(id) => launcher::open_move_picker(app, id),

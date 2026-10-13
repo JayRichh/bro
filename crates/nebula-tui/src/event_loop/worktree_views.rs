@@ -582,6 +582,9 @@ pub(crate) fn land_view_answer(app: &mut App, answer: crate::view_jobs::Answer) 
         }
         Answer::Files { ticket, result } => land_worktree_files(app, ticket, result),
         Answer::DiffListing { ticket, result } => land_diff_listing(app, ticket, result),
+        Answer::ReviewDiff { session, result } => {
+            super::orchestrator::land_review_diff(app, session, result)
+        }
         Answer::DiffText {
             view: id,
             ticket,

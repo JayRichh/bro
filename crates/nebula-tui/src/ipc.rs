@@ -5,9 +5,9 @@ use crate::platform::Stream;
 use anyhow::{bail, Context, Result};
 use nebula_core::codec::{read_frame, write_frame};
 use nebula_core::{
-    env, paths, Agent, AgentId, AgentKind, ClientRequest, EnterOutcome, Link, Project, ProjectId,
-    ReviewTabKind, ServerEvent, SessionRef, SessionSummary, TerminalId, TerminalTab, Worktree,
-    WorktreeId, PROTOCOL_VERSION,
+    env, paths, Agent, AgentId, AgentKind, ClientRequest, EnterOutcome, EntityId, Link,
+    OrchestratorSession, Project, ProjectId, ReviewTabKind, ServerEvent, SessionRef,
+    SessionSummary, TerminalId, TerminalTab, Worktree, WorktreeId, PROTOCOL_VERSION,
 };
 use std::time::Duration;
 #[cfg(unix)]
@@ -270,9 +270,12 @@ fn daemon_exe_path(pid: i32) -> Option<String> {
 pub struct IpcChannels {
     pub tx: tokio::sync::mpsc::Sender<ClientRequest>,
     pub rx: tokio::sync::mpsc::Receiver<ServerEvent>,
+    /// The protocol the daemon answered the handshake with.
+    pub daemon_protocol: u32,
 }
 
 pub fn split_connection(conn: Connection) -> IpcChannels {
+    let daemon_protocol = conn.protocol_version;
     let (read_half, mut write_half) = crate::platform::split(conn.stream);
     let (event_tx, event_rx) = tokio::sync::mpsc::channel::<ServerEvent>(1024);
     let (req_tx, mut req_rx) = tokio::sync::mpsc::channel::<ClientRequest>(256);
@@ -298,6 +301,7 @@ pub fn split_connection(conn: Connection) -> IpcChannels {
     IpcChannels {
         tx: req_tx,
         rx: event_rx,
+        daemon_protocol,
     }
 }
 
@@ -737,138 +741,6 @@ async fn fetch_orchestrator_tree(
     }
 }
 
-pub async fn orchestrator_list(json: bool) -> Result<()> {
-    let (caller, mut conn) = orchestrator_connection().await?;
-    let tree = fetch_orchestrator_tree(&caller, &mut conn).await?;
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "projects": tree.projects,
-                "worktrees": tree.worktrees,
-                "agents": tree.agents,
-                "terminals": tree.terminals,
-                "links": tree.links,
-            }))?
-        );
-    } else {
-        print_orchestrator_tree(&tree);
-    }
-    Ok(())
-}
-
-pub async fn orchestrator_read(session: &str, bytes: u32) -> Result<()> {
-    let (caller, mut conn) = orchestrator_connection().await?;
-    let session = parse_session_ref(session);
-    let req_id = ONE_SHOT_REQ_ID;
-    write_frame(
-        &mut conn.stream,
-        &ClientRequest::OrchestratorRead {
-            req_id,
-            caller,
-            session: session.clone(),
-            max_bytes: bytes,
-        },
-    )
-    .await?;
-    loop {
-        match read_frame::<ServerEvent, _>(&mut conn.stream).await? {
-            Some(ServerEvent::OutputTail {
-                req_id: r,
-                session: _,
-                tail,
-            }) if r == req_id => {
-                match tail {
-                    Some(tail) => print!("{}", String::from_utf8_lossy(&tail.data)),
-                    None => println!("(session is not live)"),
-                }
-                return Ok(());
-            }
-            Some(ServerEvent::Error {
-                req_id: Some(r),
-                message,
-            }) if r == req_id => bail!("{message}"),
-            Some(_) => continue,
-            None => bail!("{CLOSED_BEFORE_REPLY}"),
-        }
-    }
-}
-
-pub async fn orchestrator_send(session: &str, prompt: &str) -> Result<()> {
-    let target = AgentId(session.to_string());
-    let (caller, mut conn) = orchestrator_connection().await?;
-    let req_id = ONE_SHOT_REQ_ID;
-    write_frame(
-        &mut conn.stream,
-        &ClientRequest::OrchestratorSend {
-            req_id,
-            caller,
-            target: target.clone(),
-            message: prompt.to_string(),
-        },
-    )
-    .await?;
-    await_ack(&mut conn, req_id).await?;
-    println!("sent to {}", target);
-    Ok(())
-}
-
-pub async fn orchestrator_spawn(
-    project: &str,
-    worktree: Option<&str>,
-    base: Option<String>,
-    kind: AgentKind,
-    task: &str,
-) -> Result<()> {
-    let (caller, mut conn) = orchestrator_connection().await?;
-    let tree = fetch_orchestrator_tree(&caller, &mut conn).await?;
-    let project_id = resolve_project(&tree, project)?;
-    let (worktree_id, branch) = match worktree {
-        Some(target) => resolve_worktree_or_branch(&tree, &project_id, target),
-        None => (None, None),
-    };
-    let req_id = ONE_SHOT_REQ_ID + 1;
-    write_frame(
-        &mut conn.stream,
-        &ClientRequest::OrchestratorSpawn {
-            req_id,
-            caller,
-            project: project_id,
-            worktree: worktree_id,
-            branch,
-            base,
-            name: String::new(),
-            kind,
-            custom_harness: None,
-            model: None,
-            effort: None,
-            starting_prompt: task.to_string(),
-        },
-    )
-    .await?;
-    await_ack(&mut conn, req_id).await?;
-    println!("started a new {} session for that task", kind.as_str());
-    Ok(())
-}
-
-pub async fn orchestrator_review(session: &str, tabs: Vec<ReviewTabKind>) -> Result<()> {
-    let (caller, mut conn) = orchestrator_connection().await?;
-    let req_id = ONE_SHOT_REQ_ID;
-    write_frame(
-        &mut conn.stream,
-        &ClientRequest::OrchestratorOpenReview {
-            req_id,
-            caller,
-            sessions: vec![parse_session_ref(session)],
-            tabs,
-        },
-    )
-    .await?;
-    await_ack(&mut conn, req_id).await?;
-    println!("opened review in kete");
-    Ok(())
-}
-
 fn parse_session_ref(raw: &str) -> SessionRef {
     if let Some(id) = raw
         .strip_prefix("terminal:")
@@ -906,6 +778,399 @@ fn resolve_worktree_or_branch(
         Some(worktree) => (Some(worktree.id.clone()), None),
         None => (None, Some(raw.to_string())),
     }
+}
+
+/// The protocol that grew orchestrator provisioning and the richer verbs.
+const ORCHESTRATOR_PROTOCOL: u32 = 54;
+
+/// What `kete orchestrator read` asks a protocol-53 daemon for: its raw
+/// bounded tail, the only read it has.
+const LEGACY_READ_BYTES: u32 = 8192;
+
+async fn fetch_orchestrator_sessions(
+    caller: &AgentId,
+    conn: &mut Connection,
+    req_id: u64,
+) -> Result<Vec<OrchestratorSession>> {
+    write_frame(
+        &mut conn.stream,
+        &ClientRequest::OrchestratorSessions {
+            req_id,
+            caller: caller.clone(),
+        },
+    )
+    .await?;
+    loop {
+        match read_frame::<ServerEvent, _>(&mut conn.stream).await? {
+            Some(ServerEvent::OrchestratorSessions {
+                req_id: r,
+                sessions,
+            }) if r == req_id => return Ok(sessions),
+            Some(ServerEvent::Error {
+                req_id: Some(r),
+                message,
+            }) if r == req_id => bail!("{message}"),
+            Some(_) => continue,
+            None => bail!("{CLOSED_BEFORE_REPLY}"),
+        }
+    }
+}
+
+/// `kete orchestrator list`: every live session in attention order. The
+/// `--json` shape keeps its tree fields (`projects`, `worktrees`, `agents`,
+/// `terminals`, `links`) and adds `sessions`, the attention-ordered rows.
+pub async fn orchestrator_list(json: bool) -> Result<()> {
+    let (caller, mut conn) = orchestrator_connection().await?;
+    let tree = fetch_orchestrator_tree(&caller, &mut conn).await?;
+    // A 53 daemon has no attention rows; the tree alone still answers.
+    let sessions = if conn.protocol_version >= ORCHESTRATOR_PROTOCOL {
+        Some(fetch_orchestrator_sessions(&caller, &mut conn, ONE_SHOT_REQ_ID + 1).await?)
+    } else {
+        None
+    };
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "projects": tree.projects,
+                "worktrees": tree.worktrees,
+                "agents": tree.agents,
+                "terminals": tree.terminals,
+                "links": tree.links,
+                "sessions": sessions.unwrap_or_default(),
+            }))?
+        );
+    } else if let Some(sessions) = sessions {
+        print_attention_rows(&sessions, &caller);
+    } else {
+        print_orchestrator_tree(&tree);
+    }
+    Ok(())
+}
+
+/// `kete orchestrator read`: transcript-aware recent context by id or
+/// name, falling back to the cleaned terminal tail. `--bytes` asks for
+/// the raw bounded tail instead.
+pub async fn orchestrator_read(session: &str, lines: u32, bytes: Option<u32>) -> Result<()> {
+    if let Some(bytes) = bytes {
+        return orchestrator_read_tail(session, bytes).await;
+    }
+    let (caller, mut conn) = orchestrator_connection().await?;
+    // A 53 daemon has no transcript-aware read: its raw tail, by id.
+    if conn.protocol_version < ORCHESTRATOR_PROTOCOL {
+        drop(conn);
+        return orchestrator_read_tail(session, LEGACY_READ_BYTES).await;
+    }
+    let req_id = ONE_SHOT_REQ_ID;
+    write_frame(
+        &mut conn.stream,
+        &ClientRequest::OrchestratorReadSession {
+            req_id,
+            caller,
+            target: session.to_string(),
+            max_lines: lines,
+        },
+    )
+    .await?;
+    loop {
+        match read_frame::<ServerEvent, _>(&mut conn.stream).await? {
+            Some(ServerEvent::SessionText {
+                req_id: r, text, ..
+            }) if r == req_id => {
+                print!("{text}");
+                return Ok(());
+            }
+            Some(ServerEvent::Error {
+                req_id: Some(r),
+                message,
+            }) if r == req_id => bail!("{message}"),
+            Some(_) => continue,
+            None => bail!("{CLOSED_BEFORE_REPLY}"),
+        }
+    }
+}
+
+async fn orchestrator_read_tail(session: &str, bytes: u32) -> Result<()> {
+    let (caller, mut conn) = orchestrator_connection().await?;
+    let session = parse_session_ref(session);
+    let req_id = ONE_SHOT_REQ_ID;
+    write_frame(
+        &mut conn.stream,
+        &ClientRequest::OrchestratorRead {
+            req_id,
+            caller,
+            session: session.clone(),
+            max_bytes: bytes,
+        },
+    )
+    .await?;
+    loop {
+        match read_frame::<ServerEvent, _>(&mut conn.stream).await? {
+            Some(ServerEvent::OutputTail {
+                req_id: r,
+                session: _,
+                tail,
+            }) if r == req_id => {
+                match tail {
+                    Some(tail) => print!("{}", String::from_utf8_lossy(&tail.data)),
+                    None => println!("(session is not live)"),
+                }
+                return Ok(());
+            }
+            Some(ServerEvent::Error {
+                req_id: Some(r),
+                message,
+            }) if r == req_id => bail!("{message}"),
+            Some(_) => continue,
+            None => bail!("{CLOSED_BEFORE_REPLY}"),
+        }
+    }
+}
+
+/// The reply to a request answered by `Ack { created }`: what it created.
+async fn await_created(conn: &mut Connection, req_id: u64) -> Result<Option<EntityId>> {
+    loop {
+        match read_frame::<ServerEvent, _>(&mut conn.stream).await? {
+            Some(ServerEvent::Ack { req_id: r, created }) if r == req_id => return Ok(created),
+            Some(ServerEvent::Error {
+                req_id: Some(r),
+                message,
+            }) if r == req_id => bail!("{message}"),
+            Some(_) => continue,
+            None => bail!("{CLOSED_BEFORE_REPLY}"),
+        }
+    }
+}
+
+/// `kete orchestrator send`: a labelled follow-up, by id or name. The
+/// daemon waits for a busy target (bounded by `timeout_secs`) unless
+/// `wait` is off, and refuses the orchestrator itself.
+pub async fn orchestrator_send(
+    session: &str,
+    prompt: &str,
+    timeout_secs: u64,
+    wait: bool,
+) -> Result<()> {
+    let (caller, mut conn) = orchestrator_connection().await?;
+    let req_id = ONE_SHOT_REQ_ID;
+    // A 53 daemon only knows the id-addressed send, without waiting.
+    if conn.protocol_version < ORCHESTRATOR_PROTOCOL {
+        write_frame(
+            &mut conn.stream,
+            &ClientRequest::OrchestratorSend {
+                req_id,
+                caller,
+                target: AgentId(session.to_string()),
+                message: prompt.to_string(),
+            },
+        )
+        .await?;
+        await_ack(&mut conn, req_id).await?;
+        println!("sent to {session} (older daemon: by id, without waiting for idle)");
+        return Ok(());
+    }
+    write_frame(
+        &mut conn.stream,
+        &ClientRequest::OrchestratorTell {
+            req_id,
+            caller,
+            target: session.to_string(),
+            message: prompt.to_string(),
+            timeout_ms: timeout_secs.saturating_mul(1000),
+            wait,
+        },
+    )
+    .await?;
+    match await_created(&mut conn, req_id).await? {
+        Some(EntityId::Agent(id)) => println!("sent to {id}"),
+        _ => println!("sent to {session}"),
+    }
+    Ok(())
+}
+
+/// Everything `kete orchestrator spawn` can say about the worker.
+pub struct SpawnArgs<'a> {
+    pub project: &'a str,
+    pub worktree: Option<&'a str>,
+    pub base: Option<String>,
+    pub kind: AgentKind,
+    pub name: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub profile: Option<String>,
+    pub task: &'a str,
+}
+
+pub async fn orchestrator_spawn(args: SpawnArgs<'_>) -> Result<()> {
+    let (caller, mut conn) = orchestrator_connection().await?;
+    let tree = fetch_orchestrator_tree(&caller, &mut conn).await?;
+    let project_id = resolve_project(&tree, args.project)?;
+    let (worktree_id, branch) = match args.worktree {
+        Some(target) => resolve_worktree_or_branch(&tree, &project_id, target),
+        None => (None, None),
+    };
+    let req_id = ONE_SHOT_REQ_ID + 1;
+    let name = args.name.unwrap_or_default();
+    let request = if conn.protocol_version >= ORCHESTRATOR_PROTOCOL {
+        ClientRequest::OrchestratorSpawnWith {
+            req_id,
+            caller,
+            project: project_id,
+            worktree: worktree_id,
+            branch,
+            base: args.base,
+            name,
+            kind: args.kind,
+            custom_harness: None,
+            model: args.model,
+            effort: args.effort,
+            profile: args.profile,
+            starting_prompt: args.task.to_string(),
+        }
+    } else {
+        if args.profile.is_some() {
+            require_protocol(&conn, ORCHESTRATOR_PROTOCOL, "orchestrator spawn --profile")?;
+        }
+        ClientRequest::OrchestratorSpawn {
+            req_id,
+            caller,
+            project: project_id,
+            worktree: worktree_id,
+            branch,
+            base: args.base,
+            name,
+            kind: args.kind,
+            custom_harness: None,
+            model: args.model,
+            effort: args.effort,
+            starting_prompt: args.task.to_string(),
+        }
+    };
+    write_frame(&mut conn.stream, &request).await?;
+    match await_created(&mut conn, req_id).await? {
+        Some(EntityId::Agent(id)) => {
+            println!(
+                "started {id}, a new {} session for that task",
+                args.kind.as_str()
+            )
+        }
+        _ => println!("started a new {} session for that task", args.kind.as_str()),
+    }
+    Ok(())
+}
+
+/// `kete orchestrator review`: one modal over every named session, each
+/// by id, `terminal:<id>`, or unambiguous name.
+pub async fn orchestrator_review(sessions: &[String], tabs: Vec<ReviewTabKind>) -> Result<()> {
+    let (caller, mut conn) = orchestrator_connection().await?;
+    let rows = if conn.protocol_version >= ORCHESTRATOR_PROTOCOL {
+        fetch_orchestrator_sessions(&caller, &mut conn, ONE_SHOT_REQ_ID + 1).await?
+    } else {
+        Vec::new()
+    };
+    let refs = sessions
+        .iter()
+        .map(|raw| resolve_review_target(&rows, raw))
+        .collect::<Result<Vec<_>>>()?;
+    let req_id = ONE_SHOT_REQ_ID;
+    write_frame(
+        &mut conn.stream,
+        &ClientRequest::OrchestratorOpenReview {
+            req_id,
+            caller,
+            sessions: refs,
+            tabs,
+        },
+    )
+    .await?;
+    await_ack(&mut conn, req_id).await?;
+    println!(
+        "opened review in kete for {} session{}",
+        sessions.len(),
+        if sessions.len() == 1 { "" } else { "s" }
+    );
+    Ok(())
+}
+
+/// A review target as the daemon names it: an exact id (or
+/// `terminal:<id>`) as given, else the one row whose name matches
+/// exactly, else the one whose id, name, project or branch contains it.
+fn resolve_review_target(rows: &[OrchestratorSession], raw: &str) -> Result<SessionRef> {
+    if rows.is_empty() || rows.iter().any(|r| r.summary.id == raw) {
+        return Ok(parse_session_ref(raw));
+    }
+    let exact: Vec<_> = rows
+        .iter()
+        .filter(|r| r.summary.name.eq_ignore_ascii_case(raw))
+        .collect();
+    match exact.as_slice() {
+        [row] => return Ok(row.summary.session.clone()),
+        [] => {}
+        _ => bail!("session name is ambiguous: {raw}; use an id"),
+    }
+    let needle = raw.to_ascii_lowercase();
+    let fuzzy: Vec<_> = rows
+        .iter()
+        .filter(|r| {
+            [
+                &r.summary.id,
+                &r.summary.name,
+                &r.summary.project,
+                &r.summary.branch,
+            ]
+            .iter()
+            .any(|f| f.to_ascii_lowercase().contains(&needle))
+        })
+        .collect();
+    match fuzzy.as_slice() {
+        [row] => Ok(row.summary.session.clone()),
+        [] => bail!("session not found: {raw}"),
+        _ => bail!("session match is ambiguous: {raw}; use an id"),
+    }
+}
+
+/// One line per session, attention first.
+fn print_attention_rows(rows: &[OrchestratorSession], caller: &AgentId) {
+    for row in rows {
+        println!("{}", attention_line(row, caller));
+    }
+}
+
+fn attention_line(row: &OrchestratorSession, caller: &AgentId) -> String {
+    let s = &row.summary;
+    let mut line = format!(
+        "{:>2} {:<14} {} name={} project={} branch={} harness={}",
+        row.attention,
+        row.state,
+        s.id,
+        shell_word(&s.name),
+        shell_word(&s.project),
+        shell_word(&s.branch),
+        s.harness,
+    );
+    if row.role.is_orchestrator() {
+        line.push_str(if s.id == caller.as_str() {
+            " role=orchestrator(you)"
+        } else {
+            " role=orchestrator"
+        });
+    }
+    if let Some(parent) = &row.parent {
+        line.push_str(&format!(" parent={parent}"));
+    }
+    if !row.subagents.is_empty() {
+        let running = row
+            .subagents
+            .iter()
+            .filter(|sub| sub.status == nebula_core::SubagentStatus::Running)
+            .count();
+        line.push_str(&format!(
+            " subagents={running}/{} running",
+            row.subagents.len()
+        ));
+    }
+    line.push_str(&format!(" summary={}", shell_word(&s.summary)));
+    line
 }
 
 fn print_orchestrator_tree(tree: &OrchestratorTree) {
@@ -955,6 +1220,164 @@ fn print_orchestrator_tree(tree: &OrchestratorTree) {
             }
         }
     }
+}
+
+// ---- provisioning, from the user's own shell ----
+
+/// The first Snapshot a Subscribe answers with: the whole tree.
+async fn fetch_snapshot(
+    conn: &mut Connection,
+) -> Result<(Vec<Project>, Vec<Worktree>, Vec<Agent>)> {
+    write_frame(&mut conn.stream, &ClientRequest::Subscribe).await?;
+    loop {
+        match read_frame::<ServerEvent, _>(&mut conn.stream).await? {
+            Some(ServerEvent::Snapshot {
+                projects,
+                worktrees,
+                agents,
+                ..
+            }) => return Ok((projects, worktrees, agents)),
+            Some(_) => continue,
+            None => bail!("daemon closed the connection before sending a snapshot"),
+        }
+    }
+}
+
+/// Provisioning is the user's call: refuse it from inside an agent
+/// session before asking (the daemon refuses it too).
+fn refuse_inside_agent_session(verb: &str) -> Result<()> {
+    if env::non_empty(env::AGENT_ID).is_some() {
+        bail!(
+            "`kete orchestrator {verb}` is the user's call and is refused inside an agent \
+             session; run it from your own shell, or press F10 in kete"
+        );
+    }
+    Ok(())
+}
+
+/// What `kete orchestrator start` asks for.
+pub struct StartArgs {
+    pub kind: AgentKind,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub profile: Option<String>,
+    pub project: Option<String>,
+    pub name: Option<String>,
+    pub replace: bool,
+}
+
+/// `kete orchestrator start`: start the machine's one orchestrator, in
+/// the named project's root worktree or its own workspace under the data
+/// dir. Spawns the daemon when none runs.
+pub async fn orchestrator_start(args: StartArgs) -> Result<()> {
+    refuse_inside_agent_session("start")?;
+    let mut conn = connect_or_spawn().await?;
+    require_protocol(&conn, ORCHESTRATOR_PROTOCOL, "orchestrator start")?;
+    let project = match args.project.as_deref() {
+        Some(raw) => {
+            let (projects, _, _) = fetch_snapshot(&mut conn).await?;
+            let matches: Vec<&Project> = projects
+                .iter()
+                .filter(|p| p.id.as_str() == raw || p.name == raw)
+                .collect();
+            match matches.as_slice() {
+                [p] => Some(p.id.clone()),
+                [] => bail!("project not found: {raw}"),
+                _ => bail!("project name is ambiguous: {raw}; use its id"),
+            }
+        }
+        None => None,
+    };
+    let req_id = ONE_SHOT_REQ_ID + 1;
+    write_frame(
+        &mut conn.stream,
+        &ClientRequest::StartOrchestrator {
+            req_id,
+            kind: args.kind,
+            custom_harness: None,
+            model: args.model,
+            effort: args.effort,
+            profile: args.profile,
+            project,
+            name: args.name,
+            replace: args.replace,
+        },
+    )
+    .await?;
+    match await_created(&mut conn, req_id).await? {
+        Some(EntityId::Agent(id)) => println!(
+            "started the orchestrator {id} ({}); press F10 in kete to open it",
+            args.kind.as_str()
+        ),
+        _ => println!("started the orchestrator; press F10 in kete to open it"),
+    }
+    Ok(())
+}
+
+/// `kete orchestrator clear`: unpin the orchestrator. Its session keeps
+/// running, as an ordinary worker.
+pub async fn orchestrator_clear() -> Result<()> {
+    refuse_inside_agent_session("clear")?;
+    let sock = paths::socket_path();
+    let Ok(stream) = try_connect(&sock).await else {
+        bail!("no kete daemon is running");
+    };
+    let mut conn = handshake(stream).await?;
+    require_protocol(&conn, ORCHESTRATOR_PROTOCOL, "orchestrator clear")?;
+    let req_id = ONE_SHOT_REQ_ID;
+    write_frame(
+        &mut conn.stream,
+        &ClientRequest::ClearOrchestrator { req_id },
+    )
+    .await?;
+    await_ack(&mut conn, req_id).await?;
+    println!("no session is the orchestrator now");
+    Ok(())
+}
+
+/// `kete orchestrator status`: which session is the orchestrator, where it
+/// runs and what it is doing. Works from any shell and on any protocol.
+pub async fn orchestrator_status(json: bool) -> Result<()> {
+    let sock = paths::socket_path();
+    let Ok(stream) = try_connect(&sock).await else {
+        bail!("no kete daemon is running");
+    };
+    let mut conn = handshake(stream).await?;
+    let (projects, worktrees, agents) = fetch_snapshot(&mut conn).await?;
+    let pinned = agents.iter().find(|a| a.role.is_orchestrator());
+    let worktree = pinned.and_then(|a| worktrees.iter().find(|w| w.id == a.worktree_id));
+    let project = worktree.and_then(|w| projects.iter().find(|p| p.id == w.project_id));
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "orchestrator": pinned,
+                "worktree": worktree,
+                "project": project,
+            }))?
+        );
+        return Ok(());
+    }
+    match pinned {
+        None => println!(
+            "no orchestrator: start one with `kete orchestrator start`, or press F10 in kete"
+        ),
+        Some(a) => println!(
+            "orchestrator {} name={} harness={} status={}{}{} project={} branch={} path={}",
+            a.id,
+            shell_word(&a.name),
+            a.kind.as_str(),
+            a.status.as_str(),
+            if a.alive { " alive" } else { "" },
+            if a.archived { " archived" } else { "" },
+            project.map(|p| shell_word(&p.name)).unwrap_or_default(),
+            worktree.map(|w| shell_word(&w.branch)).unwrap_or_default(),
+            worktree
+                .map(|w| w.path.display().to_string())
+                .unwrap_or_default(),
+        ),
+    }
+    Ok(())
 }
 
 /// CLI: `nebula worktree [name] [--base <ref>]` from inside an agent
@@ -1304,6 +1727,80 @@ fn send_signal(pid: i32, sig: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn attention_row(id: &str, name: &str, branch: &str, attention: u32) -> OrchestratorSession {
+        OrchestratorSession {
+            summary: SessionSummary {
+                session: SessionRef::Agent(AgentId(id.into())),
+                id: id.into(),
+                name: name.into(),
+                project_id: ProjectId("p".into()),
+                project: "demo".into(),
+                worktree_id: WorktreeId("w".into()),
+                worktree: "/w".into(),
+                branch: branch.into(),
+                harness: "claude".into(),
+                status: "idle".into(),
+                alive: true,
+                summary: "fix the login".into(),
+                profile: None,
+                port: None,
+                live_ports: Vec::new(),
+            },
+            attention,
+            state: "unread".into(),
+            role: nebula_core::AgentRole::Worker,
+            parent: Some(AgentId("orch".into())),
+            status_changed_at: 0,
+            subagents: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn review_targets_resolve_by_id_name_or_unambiguous_fragment() {
+        let rows = vec![
+            attention_row("a1", "agent-1", "fix-login", 0),
+            attention_row("a2", "agent-2", "main", 1),
+        ];
+        let agent = |id: &str| SessionRef::Agent(AgentId(id.into()));
+        assert_eq!(resolve_review_target(&rows, "a2").unwrap(), agent("a2"));
+        assert_eq!(
+            resolve_review_target(&rows, "AGENT-1").unwrap(),
+            agent("a1")
+        );
+        assert_eq!(resolve_review_target(&rows, "login").unwrap(), agent("a1"));
+        assert!(resolve_review_target(&rows, "agent")
+            .unwrap_err()
+            .to_string()
+            .contains("ambiguous"));
+        assert!(resolve_review_target(&rows, "nope")
+            .unwrap_err()
+            .to_string()
+            .contains("not found"));
+        assert_eq!(
+            resolve_review_target(&rows, "terminal:t1")
+                .unwrap_err()
+                .to_string(),
+            "session not found: terminal:t1"
+        );
+        // A 53 daemon gave no rows: the raw id goes through as before.
+        assert_eq!(
+            resolve_review_target(&[], "terminal:t1").unwrap(),
+            SessionRef::Terminal(TerminalId("t1".into()))
+        );
+    }
+
+    #[test]
+    fn attention_lines_lead_with_rank_and_state_and_name_the_parent() {
+        let mut row = attention_row("a1", "agent-1", "fix-login", 3);
+        let line = attention_line(&row, &AgentId("orch".into()));
+        assert!(line.starts_with(" 3 unread"), "{line}");
+        assert!(line.contains("a1 name=agent-1 project=demo branch=fix-login harness=claude"));
+        assert!(line.contains("parent=orch"));
+        row.role = nebula_core::AgentRole::Orchestrator;
+        let line = attention_line(&row, &AgentId("a1".into()));
+        assert!(line.contains("role=orchestrator(you)"), "{line}");
+    }
 
     // Unset and empty are the same miss, and the error has to name the
     // command the model just ran so it knows why it can't work here.

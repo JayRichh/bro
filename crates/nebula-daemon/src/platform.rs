@@ -34,6 +34,17 @@ mod windows {
     };
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
+    /// The pid of the process on the client end of a connected pipe
+    /// instance, when Windows will say.
+    pub fn client_pid(pipe: &NamedPipeServer) -> Option<u32> {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::System::Pipes::GetNamedPipeClientProcessId;
+        let mut pid = 0u32;
+        // SAFETY: the handle is a live, connected pipe instance.
+        let ok = unsafe { GetNamedPipeClientProcessId(pipe.as_raw_handle(), &mut pid) } != 0;
+        (ok && pid != 0).then_some(pid)
+    }
+
     /// The daemon's client endpoint: a named pipe (`paths::pipe_name`) that
     /// only this user can open and no remote machine can reach.
     ///

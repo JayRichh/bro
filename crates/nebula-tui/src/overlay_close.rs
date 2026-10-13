@@ -42,6 +42,7 @@ pub(crate) fn overlay_area(overlay: &Overlay) -> Rect {
         Overlay::PullRequests(v) => v.area,
         Overlay::BranchSwitch(v) => v.area,
         Overlay::Review(v) => v.area,
+        Overlay::OrchestratorStart(v) => v.area,
         Overlay::ProjectPicker(v) => v.area,
     }
 }
@@ -91,7 +92,8 @@ pub(crate) fn click_outside(app: &mut App, out: &mut Vec<ClientRequest>) {
             | Overlay::Metrics(_)
             | Overlay::Hosts(_)
             | Overlay::BranchSwitch(_)
-            | Overlay::Review(_),
+            | Overlay::Review(_)
+            | Overlay::OrchestratorStart(_),
         ) => app.modals.overlay = None,
         // Confirm, Prompt, the AGENT PRESETS list and the PRESET EDITOR each
         // have a side effect on the way out that their own Esc already

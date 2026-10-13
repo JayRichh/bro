@@ -273,11 +273,12 @@ pub(crate) enum Command {
         #[arg(long)]
         no_wait: bool,
     },
-    /// Coordinate projects from the orchestrator session.
+    /// Start the orchestrator, or coordinate projects from it.
     ///
-    /// These commands are for the pinned orchestrator agent only. They are
-    /// refused by the daemon unless the current NEBULA_AGENT_ID belongs to
-    /// the persisted orchestrator row.
+    /// `start`, `status` and `clear` are yours, from your own shell (F10 in
+    /// kete does the same). Every other command is for the pinned
+    /// orchestrator session only: the daemon refuses it unless the current
+    /// NEBULA_AGENT_ID belongs to the persisted orchestrator row.
     #[command(after_help = ORCHESTRATOR_EXAMPLES)]
     Orchestrator {
         #[command(subcommand)]
@@ -474,27 +475,84 @@ pub(crate) enum Command {
 
 #[derive(Subcommand)]
 pub(crate) enum OrchestratorCommand {
-    /// List every project, worktree and session.
+    /// Start the machine's one orchestrator session.
+    ///
+    /// Without --project it runs in a workspace of its own under kete's data
+    /// dir, so it never writes into one of your repos. Refused while another
+    /// orchestrator is running unless --replace, which demotes that one to an
+    /// ordinary session.
+    Start {
+        /// Harness to run it on.
+        #[arg(long, value_name = "KIND", value_parser = parse_agent_kind, default_value = "claude")]
+        kind: nebula_core::AgentKind,
+        /// Model the harness launches with.
+        #[arg(long)]
+        model: Option<String>,
+        /// Reasoning effort the harness launches with.
+        #[arg(long)]
+        effort: Option<String>,
+        /// PROFILE (account) to run under; default is the harness's own.
+        #[arg(long)]
+        profile: Option<String>,
+        /// Run in this project's root worktree instead (id or name).
+        #[arg(long)]
+        project: Option<String>,
+        /// Session name (default: orchestrator).
+        #[arg(long)]
+        name: Option<String>,
+        /// Replace a running orchestrator; it keeps running as a worker.
+        #[arg(long)]
+        replace: bool,
+    },
+    /// Show which session is the orchestrator and what it is doing.
+    Status {
+        /// Print JSON instead of compact text.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Unpin the orchestrator; its session keeps running as a worker.
+    Clear,
+    /// List every live session in attention order.
+    ///
+    /// needs_feedback first, then running, then unread (a finished turn
+    /// nobody has looked at), then the rest, with role, parent and open
+    /// subagents. --json keeps the tree (projects, worktrees, agents,
+    /// terminals, links) and adds the ordered `sessions`.
     List {
         /// Print JSON instead of compact text.
         #[arg(long)]
         json: bool,
     },
-    /// Read recent bounded output from a session.
+    /// Read a session's recent context.
+    ///
+    /// The harness transcript when kete knows it, else the cleaned terminal
+    /// tail. --bytes reads the raw bounded terminal tail instead.
     Read {
-        /// Agent id, or terminal:<id> for a terminal.
+        /// Session id, terminal:<id>, or unambiguous name.
         session: String,
-        /// Max bytes to read from the PTY ring (capped by the daemon).
-        #[arg(long, default_value_t = 8192)]
-        bytes: u32,
+        /// Number of recent text lines to print.
+        #[arg(long, default_value_t = 200)]
+        lines: u32,
+        /// Read this many bytes of the raw terminal tail instead.
+        #[arg(long)]
+        bytes: Option<u32>,
     },
-    /// Send a follow-up prompt to another local agent.
+    /// Send a follow-up prompt to another agent, labelled [from orchestrator].
+    ///
+    /// A busy target is waited on until it is idle; --no-wait fails instead.
+    /// The orchestrator cannot send to itself.
     Send {
-        /// Target agent id.
+        /// Target agent id or unambiguous name.
         session: String,
         /// Prompt text; multiple words need no quotes.
         #[arg(required = true, num_args = 1..)]
         prompt: Vec<String>,
+        /// Seconds to wait for a busy target.
+        #[arg(long, default_value_t = 120)]
+        timeout: u64,
+        /// Fail instead of waiting when the target is busy.
+        #[arg(long)]
+        no_wait: bool,
     },
     /// Spawn an agent in any project or worktree.
     Spawn {
@@ -511,14 +569,27 @@ pub(crate) enum OrchestratorCommand {
         /// Harness for the new session.
         #[arg(long, value_name = "KIND", value_parser = parse_agent_kind, default_value = "claude")]
         kind: nebula_core::AgentKind,
+        /// Session name (default: the next free agent-N, auto-titled).
+        #[arg(long)]
+        name: Option<String>,
+        /// Model the harness launches with.
+        #[arg(long)]
+        model: Option<String>,
+        /// Reasoning effort the harness launches with.
+        #[arg(long)]
+        effort: Option<String>,
+        /// PROFILE (account) to run under.
+        #[arg(long)]
+        profile: Option<String>,
         /// Prompt text; multiple words need no quotes.
         #[arg(required = true, num_args = 1..)]
         task: Vec<String>,
     },
     /// Open the tabbed review modal in every attached TUI.
     Review {
-        /// Agent id, or terminal:<id> for a terminal.
-        session: String,
+        /// Sessions to review: ids, terminal:<id>, or unambiguous names.
+        #[arg(required = true, num_args = 1..)]
+        sessions: Vec<String>,
         /// Tabs to open. Repeats allowed; default is terminal, diff, history, pr.
         #[arg(long = "tab", value_parser = parse_review_tab)]
         tabs: Vec<nebula_core::ReviewTabKind>,
@@ -590,12 +661,16 @@ Examples:
   kete ask research \"are you idle?\" --no-wait";
 
 const ORCHESTRATOR_EXAMPLES: &str = "\
-Examples:
+Examples (yours, from your own shell):
+  kete orchestrator start                        claude, in its own workspace
+  kete orchestrator start --kind codex --profile work
+  kete orchestrator status
+Examples (the orchestrator session's):
   kete orchestrator list --json
-  kete orchestrator read agent-2 --bytes 12000
-  kete orchestrator send agent-2 \"continue after the test failure\"
-  kete orchestrator spawn --project kete --worktree fix-auth \"fix the login redirect\"
-  kete orchestrator review agent-2 --tab diff --tab terminal";
+  kete orchestrator read fix-login --lines 80
+  kete orchestrator send fix-login \"continue after the test failure\"
+  kete orchestrator spawn --project kete --worktree fix-auth --name auth \"fix the login redirect\"
+  kete orchestrator review fix-login agent-2 --tab diff --tab terminal";
 
 const BROWSER_EXAMPLES: &str = "\
 Examples:

@@ -16,9 +16,10 @@ use ratatui::Frame;
 mod footer;
 mod launcher_view;
 mod overlay;
+mod review_view;
 mod rows;
 
-pub(crate) use rows::{fit_to_width, render_row, status_dot};
+pub(crate) use rows::{fit_to_width, render_row, status_color, status_dot};
 
 /// Outer size of the editor modal, as (width, height) percent of the frame.
 /// Shared with the event loop's pre-draw PTY size guess.
@@ -264,6 +265,12 @@ fn draw_screen(f: &mut Frame, app: &mut App) {
         Layout::vertical([Constraint::Min(3), Constraint::Length(2)]).areas(f.area());
 
     if app.pane.collapsed {
+        // The ORCHESTRATOR VIEW: the strip of session chips over the
+        // orchestrator's own full-screen pane.
+        let (strip, body) = crate::orchestrator_view::split(app, body);
+        if let Some(strip) = strip {
+            crate::orchestrator_view::draw_strip(f, app, strip);
+        }
         draw_terminal(f, app, body);
         if app.nav.focus == Focus::Terminal {
             draw_focus_tint(f.buffer_mut(), body, app.chrome.theme);

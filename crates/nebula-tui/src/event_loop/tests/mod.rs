@@ -21059,6 +21059,7 @@ fn overlay_label(overlay: &Overlay) -> &'static str {
         Overlay::PullRequests(_) => "PullRequests",
         Overlay::BranchSwitch(_) => "BranchSwitch",
         Overlay::Review(_) => "Review",
+        Overlay::OrchestratorStart(_) => "OrchestratorStart",
         Overlay::ProjectPicker(_) => "ProjectPicker",
     }
 }
@@ -22345,3 +22346,5 @@ fn a_desktop_write_waits_for_the_reset_confirm_too() {
         assert!(app.launcher.launcher_kanban);
     });
 }
+mod dispatch;
+mod orch_view;

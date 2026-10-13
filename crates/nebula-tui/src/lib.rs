@@ -37,6 +37,7 @@ pub mod links;
 pub(crate) mod list_hit;
 pub mod localhost;
 pub mod markdown;
+pub mod orchestrator_view;
 pub mod overlay_close;
 pub mod palette;
 pub mod perf;
@@ -145,28 +146,40 @@ pub fn run_orchestrator_list(json: bool) -> Result<()> {
     runtime()?.block_on(ipc::orchestrator_list(json))
 }
 
-pub fn run_orchestrator_read(session: &str, bytes: u32) -> Result<()> {
-    runtime()?.block_on(ipc::orchestrator_read(session, bytes))
+pub fn run_orchestrator_read(session: &str, lines: u32, bytes: Option<u32>) -> Result<()> {
+    runtime()?.block_on(ipc::orchestrator_read(session, lines, bytes))
 }
 
-pub fn run_orchestrator_send(session: &str, prompt: String) -> Result<()> {
-    runtime()?.block_on(ipc::orchestrator_send(session, &prompt))
-}
-
-pub fn run_orchestrator_spawn(
-    project: &str,
-    worktree: Option<&str>,
-    base: Option<String>,
-    kind: nebula_core::AgentKind,
-    task: String,
+pub fn run_orchestrator_send(
+    session: &str,
+    prompt: String,
+    timeout: u64,
+    wait: bool,
 ) -> Result<()> {
-    runtime()?.block_on(ipc::orchestrator_spawn(
-        project, worktree, base, kind, &task,
-    ))
+    runtime()?.block_on(ipc::orchestrator_send(session, &prompt, timeout, wait))
 }
 
-pub fn run_orchestrator_review(session: &str, tabs: Vec<nebula_core::ReviewTabKind>) -> Result<()> {
-    runtime()?.block_on(ipc::orchestrator_review(session, tabs))
+pub fn run_orchestrator_spawn(args: ipc::SpawnArgs<'_>) -> Result<()> {
+    runtime()?.block_on(ipc::orchestrator_spawn(args))
+}
+
+pub fn run_orchestrator_review(
+    sessions: &[String],
+    tabs: Vec<nebula_core::ReviewTabKind>,
+) -> Result<()> {
+    runtime()?.block_on(ipc::orchestrator_review(sessions, tabs))
+}
+
+pub fn run_orchestrator_start(args: ipc::StartArgs) -> Result<()> {
+    runtime()?.block_on(ipc::orchestrator_start(args))
+}
+
+pub fn run_orchestrator_status(json: bool) -> Result<()> {
+    runtime()?.block_on(ipc::orchestrator_status(json))
+}
+
+pub fn run_orchestrator_clear() -> Result<()> {
+    runtime()?.block_on(ipc::orchestrator_clear())
 }
 
 /// `nebula add <dir>` / bare `nebula <dir>` — register a directory as a

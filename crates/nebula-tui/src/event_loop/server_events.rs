@@ -25,6 +25,10 @@ pub(crate) fn handle_server_event(app: &mut App, event: ServerEvent, out: &mut V
                 .map(|info| (info.worktree.clone(), info))
                 .collect();
         }
+        // The only SessionText this client asks for: a review's History.
+        ServerEvent::SessionText { req_id, text, .. } => {
+            orchestrator::land_review_history(app, req_id, text);
+        }
         _ => {}
     }
 }
@@ -351,6 +355,13 @@ fn handle_ack_event(app: &mut App, event: ServerEvent, out: &mut Vec<ClientReque
                 ) => {
                     app.chrome.flash = Some(format!("■ stopped the run in {branch}"));
                 }
+                (Some(PendingIntent::FlashOnAck(note)), _) => {
+                    app.chrome.flash = Some(note);
+                }
+                // F10's start prompt: straight into the view.
+                (Some(PendingIntent::OpenOrchestrator), Some(EntityId::Agent(id))) => {
+                    orchestrator::open_view(app, id, out);
+                }
                 (Some(PendingIntent::SelectCreatedProject), Some(EntityId::Project(id))) => {
                     // Its upsert usually lands just before this Ack; if not,
                     // stash the id and select once it does.
@@ -494,9 +505,11 @@ fn handle_tree_event(app: &mut App, event: ServerEvent, out: &mut Vec<ClientRequ
         ServerEvent::FilesOpened { root, paths, .. } => {
             crate::file_tabs::open(app, root, paths);
         }
-        ServerEvent::ReviewOpened { sessions, tabs, .. } => {
-            crate::review_modal::open(app, sessions, tabs);
-        }
+        ServerEvent::ReviewOpened {
+            opener,
+            sessions,
+            tabs,
+        } => orchestrator::review_opened(app, opener, sessions, tabs, out),
         ServerEvent::Metrics { req_id, snapshot } => {
             // Answered with Metrics, not Ack — clear the pending slot by hand.
             app.requests.pending.remove(&req_id);
@@ -542,6 +555,11 @@ fn handle_error_event(app: &mut App, event: ServerEvent, out: &mut Vec<ClientReq
     let _ = &mut *out;
     match event {
         ServerEvent::Error { req_id, message } => {
+            // A review's History tab asked and was refused: the tab says
+            // why, rather than the footer.
+            if req_id.is_some_and(|id| orchestrator::fail_review_history(app, id, &message)) {
+                return;
+            }
             // A failed request's intent never gets an Ack; clear it — and if
             // it was an optimistic worktree delete, put the rows back. A
             // failed Cloud launch reopens its populated task editor.

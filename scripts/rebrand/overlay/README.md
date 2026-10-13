@@ -186,7 +186,7 @@ project tabs, and each tab counts its sessions' dots. A red `●1` on a tab tell
 | **Find, grep, browse** | `f` finds a file, `F` runs `git grep`, `b` opens the tree browser, all scoped to the worktree. |
 | **Themes** | Kete Workshop dark (the default) and light, One Dark and One Light, `auto` to follow the OS, or `vscode` to take VS Code's palette. |
 | **Agents that drive Kete back** | Ask a session to "do this in a worktree" and it runs `kete worktree`. "Show me the file" runs `kete open`. "Start a new session that..." runs `kete spawn`. |
-| **One orchestrator chat** | `F10` toggles a pinned agent that can list, read, message and start sessions across projects. |
+| **One orchestrator chat** | `F10` starts the one pinned orchestrator agent (pick a harness and profile) or brings it back full-screen, with every other session as a chip across the top in attention order. It lists, reads, messages and starts sessions across projects, and opens a review of any of them: terminal, diff, history and PR. |
 
 ### Keys
 
@@ -201,7 +201,7 @@ project tabs, and each tab counts its sessions' dots. A red `●1` on a tab tell
 | `f` / `F` / `b` | find file, `git grep`, tree browser |
 | `v` / `i` | pull requests, issues |
 | `w` / `Shift+W` | open the worktree's dev server in a browser, or screenshot it |
-| `F10` | orchestrator chat |
+| `F10` | orchestrator chat: start it, open it, and `F10` again for the grid |
 | `s` | settings, where every key can be rebound |
 | `q` | leave; the sessions keep running |
 

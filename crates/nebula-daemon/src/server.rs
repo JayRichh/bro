@@ -30,8 +30,9 @@ pub async fn accept_loop(daemon: Arc<Daemon>, mut listener: crate::platform::Pip
                 Ok(pipe) => {
                     let daemon = daemon.clone();
                     tokio::spawn(async move {
+                        let peer = crate::platform::client_pid(&pipe);
                         let (read_half, write_half) = tokio::io::split(pipe);
-                        if let Err(e) = serve_client(daemon, read_half, write_half).await {
+                        if let Err(e) = serve_client(daemon, read_half, write_half, peer).await {
                             tracing::debug!(error = %e, "client connection ended with error");
                         }
                     });
@@ -70,13 +71,24 @@ pub async fn accept_loop(daemon: Arc<Daemon>, listener: UnixListener) {
 
 #[cfg(unix)]
 async fn handle_client(daemon: Arc<Daemon>, stream: UnixStream) -> Result<()> {
+    let peer = stream
+        .peer_cred()
+        .ok()
+        .and_then(|c| c.pid())
+        .and_then(|pid| u32::try_from(pid).ok());
     let (read_half, write_half) = stream.into_split();
-    serve_client(daemon, read_half, write_half).await
+    serve_client(daemon, read_half, write_half, peer).await
 }
 
 /// One client connection, over whichever halves the platform's stream
-/// splits into.
-async fn serve_client<R, W>(daemon: Arc<Daemon>, read_half: R, write_half: W) -> Result<()>
+/// splits into. `peer` is the client process's pid when the OS reports it:
+/// what the orchestrator provisioning requests are checked against.
+async fn serve_client<R, W>(
+    daemon: Arc<Daemon>,
+    read_half: R,
+    write_half: W,
+    peer: Option<u32>,
+) -> Result<()>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin + Send + 'static,
@@ -97,6 +109,7 @@ where
     });
 
     let mut client = ClientConnection::new(daemon, out_tx);
+    client.peer_pid = peer;
     let result: Result<()> = async {
         while let Some(req) = read_frame::<ClientRequest, _>(&mut reader).await? {
             if !client.handle_request(req).await? {
@@ -119,6 +132,8 @@ struct ClientConnection {
     attached: HashMap<SessionRef, tokio::task::JoinHandle<()>>,
     subscription: Option<tokio::task::JoinHandle<()>>,
     handshaken: bool,
+    /// The client process's pid, when the OS said.
+    peer_pid: Option<u32>,
 }
 
 impl ClientConnection {
@@ -129,10 +144,25 @@ impl ClientConnection {
             attached: HashMap::new(),
             subscription: None,
             handshaken: false,
+            peer_pid: None,
         }
     }
 
     async fn handle_request(&mut self, req: ClientRequest) -> Result<bool> {
+        // A privileged verb from a process inside some other agent's
+        // session, naming the orchestrator as its caller: refused before
+        // the verb runs.
+        if let (true, Some((req_id, caller)), Some(peer)) =
+            (self.handshaken, privileged_caller(&req), self.peer_pid)
+        {
+            let checked = self
+                .blocking_daemon(move |daemon| daemon.check_caller_peer(&caller, Some(peer)))
+                .await;
+            if let Err(e) = checked {
+                reply_done(&self.out_tx, req_id, Err(e)).await;
+                return Ok(true);
+            }
+        }
         match req {
             ClientRequest::Hello { protocol_version } => {
                 Ok(self.handle_hello(protocol_version).await)
@@ -435,8 +465,13 @@ impl ClientConnection {
                 target,
                 message,
             } => {
-                let result = self.daemon.orchestrator_send(&caller, &target, &message);
-                reply_done(&self.out_tx, req_id, result).await;
+                // Waits for a busy target: off the request loop, like ask.
+                let daemon = self.daemon.clone();
+                let out_tx = self.out_tx.clone();
+                tokio::spawn(async move {
+                    let result = daemon.orchestrator_send(&caller, &target, &message).await;
+                    reply_done(&out_tx, req_id, result.map(|_| ())).await;
+                });
                 Ok(true)
             }
             ClientRequest::OrchestratorSpawn {
@@ -459,16 +494,19 @@ impl ClientConnection {
                     let result = daemon
                         .orchestrator_spawn(
                             &caller,
-                            &project,
-                            worktree,
-                            branch,
-                            base,
-                            name,
-                            kind,
-                            custom_harness,
-                            model,
-                            effort,
-                            starting_prompt,
+                            crate::orchestrator::OrchestratorSpawnSpec {
+                                project,
+                                worktree,
+                                branch,
+                                base,
+                                name,
+                                kind,
+                                custom_harness,
+                                model,
+                                effort,
+                                profile: None,
+                                starting_prompt,
+                            },
                         )
                         .await;
                     reply(&out_tx, req_id, result.map(Some)).await;
@@ -664,7 +702,186 @@ impl ClientConnection {
                 reply_done(&self.out_tx, req_id, result).await;
                 Ok(true)
             }
+            ClientRequest::StartOrchestrator {
+                req_id,
+                kind,
+                custom_harness,
+                model,
+                effort,
+                profile,
+                project,
+                name,
+                replace,
+            } => {
+                if let Err(e) = self.check_provisioning_peer().await {
+                    reply_done(&self.out_tx, req_id, Err(e)).await;
+                    return Ok(true);
+                }
+                let daemon = self.daemon.clone();
+                let out_tx = self.out_tx.clone();
+                tokio::spawn(async move {
+                    let result = daemon
+                        .start_orchestrator(crate::orchestrator::StartOrchestratorSpec {
+                            kind: Some(kind),
+                            custom_harness,
+                            model,
+                            effort,
+                            profile,
+                            project,
+                            name,
+                            replace,
+                        })
+                        .await;
+                    reply(&out_tx, req_id, result.map(Some)).await;
+                });
+                Ok(true)
+            }
+            ClientRequest::SetOrchestrator { req_id, agent } => {
+                let result = match self.check_provisioning_peer().await {
+                    Ok(()) => {
+                        self.blocking_daemon(move |daemon| daemon.set_orchestrator(&agent))
+                            .await
+                    }
+                    Err(e) => Err(e),
+                };
+                reply_done(&self.out_tx, req_id, result).await;
+                Ok(true)
+            }
+            ClientRequest::ClearOrchestrator { req_id } => {
+                let result = match self.check_provisioning_peer().await {
+                    Ok(()) => {
+                        self.blocking_daemon(|daemon| daemon.clear_orchestrator())
+                            .await
+                    }
+                    Err(e) => Err(e),
+                };
+                reply_done(&self.out_tx, req_id, result).await;
+                Ok(true)
+            }
+            ClientRequest::OrchestratorSessions { req_id, caller } => {
+                let result = self
+                    .blocking_daemon(move |daemon| daemon.orchestrator_sessions(&caller))
+                    .await;
+                match result {
+                    Ok(sessions) => {
+                        self.send(ServerEvent::OrchestratorSessions { req_id, sessions })
+                            .await;
+                    }
+                    Err(err) => reply_done(&self.out_tx, req_id, Err(err)).await,
+                }
+                Ok(true)
+            }
+            ClientRequest::OrchestratorTell {
+                req_id,
+                caller,
+                target,
+                message,
+                timeout_ms,
+                wait,
+            } => {
+                let daemon = self.daemon.clone();
+                let out_tx = self.out_tx.clone();
+                tokio::spawn(async move {
+                    let result = daemon
+                        .orchestrator_tell(
+                            &caller,
+                            &target,
+                            &message,
+                            std::time::Duration::from_millis(timeout_ms),
+                            wait,
+                        )
+                        .await;
+                    let created = result.map(|id| Some(nebula_core::EntityId::Agent(id)));
+                    reply(&out_tx, req_id, created).await;
+                });
+                Ok(true)
+            }
+            ClientRequest::OrchestratorReadSession {
+                req_id,
+                caller,
+                target,
+                max_lines,
+            } => {
+                let result = self
+                    .blocking_daemon(move |daemon| {
+                        daemon.orchestrator_read_session(&caller, &target, max_lines)
+                    })
+                    .await;
+                match result {
+                    Ok(read) => {
+                        self.send(ServerEvent::SessionText {
+                            req_id,
+                            session: read.session,
+                            text: read.text,
+                        })
+                        .await;
+                    }
+                    Err(err) => reply_done(&self.out_tx, req_id, Err(err)).await,
+                }
+                Ok(true)
+            }
+            ClientRequest::OrchestratorSpawnWith {
+                req_id,
+                caller,
+                project,
+                worktree,
+                branch,
+                base,
+                name,
+                kind,
+                custom_harness,
+                model,
+                effort,
+                profile,
+                starting_prompt,
+            } => {
+                let daemon = self.daemon.clone();
+                let out_tx = self.out_tx.clone();
+                tokio::spawn(async move {
+                    let result = daemon
+                        .orchestrator_spawn(
+                            &caller,
+                            crate::orchestrator::OrchestratorSpawnSpec {
+                                project,
+                                worktree,
+                                branch,
+                                base,
+                                name,
+                                kind,
+                                custom_harness,
+                                model,
+                                effort,
+                                profile,
+                                starting_prompt,
+                            },
+                        )
+                        .await;
+                    reply(&out_tx, req_id, result.map(Some)).await;
+                });
+                Ok(true)
+            }
         }
+    }
+
+    /// Orchestrator provisioning (start, set, clear) is the user's call,
+    /// never a worker's: refused when the client process runs inside a live
+    /// agent session. A client whose pid the OS would not report passes;
+    /// the peer check is defence in depth over the same-user socket, not
+    /// the trust boundary itself.
+    async fn check_provisioning_peer(&self) -> Result<()> {
+        let Some(pid) = self.peer_pid else {
+            return Ok(());
+        };
+        let inside = self
+            .blocking_daemon(move |daemon| Ok(daemon.pid_inside_agent_session(pid)))
+            .await?;
+        if inside {
+            anyhow::bail!(
+                "orchestrator provisioning is refused from inside an agent session; start or \
+                 pin the orchestrator from kete itself (F10) or your own shell"
+            );
+        }
+        Ok(())
     }
 
     async fn handle_hello(&mut self, protocol_version: u32) -> bool {
@@ -856,6 +1073,17 @@ impl ClientConnection {
         role: nebula_core::AgentRole,
         profile: Option<String>,
     ) {
+        // The ORCHESTRATOR role is granted only by StartOrchestrator and
+        // SetOrchestrator, which keep it to one per machine and refuse a
+        // worker's own shell. A create naming it is refused outright.
+        if role != nebula_core::AgentRole::Worker {
+            let refusal = anyhow::anyhow!(
+                "CreateAgent cannot grant the orchestrator role; use StartOrchestrator \
+                 (`kete orchestrator start`, or F10 in kete)"
+            );
+            reply_done(&self.out_tx, req_id, Err(refusal)).await;
+            return;
+        }
         // Logged by mode only — never the task, prompt text or issue URL.
         let launch_mode = match (&cloud_prompt, &starting_prompt, &issue_url) {
             (Some(_), _, _) => Some("cloud"),
@@ -1230,6 +1458,23 @@ async fn forward_subscription_events(
 }
 
 /// [`reply`] for the requests that create nothing: success is a bare Ack.
+/// The request id and claimed caller of a privileged orchestrator verb.
+fn privileged_caller(req: &ClientRequest) -> Option<(u64, nebula_core::AgentId)> {
+    use ClientRequest as R;
+    match req {
+        R::OrchestratorList { req_id, caller }
+        | R::OrchestratorRead { req_id, caller, .. }
+        | R::OrchestratorSend { req_id, caller, .. }
+        | R::OrchestratorSpawn { req_id, caller, .. }
+        | R::OrchestratorOpenReview { req_id, caller, .. }
+        | R::OrchestratorSessions { req_id, caller }
+        | R::OrchestratorTell { req_id, caller, .. }
+        | R::OrchestratorReadSession { req_id, caller, .. }
+        | R::OrchestratorSpawnWith { req_id, caller, .. } => Some((*req_id, caller.clone())),
+        _ => None,
+    }
+}
+
 async fn reply_done(out_tx: &mpsc::Sender<ServerEvent>, req_id: u64, result: anyhow::Result<()>) {
     reply(out_tx, req_id, result.map(|_| None)).await
 }
@@ -1295,5 +1540,270 @@ mod tests {
             matches!(ev, ServerEvent::Snapshot { .. }),
             "lag should resync with a snapshot, got {ev:?}"
         );
+    }
+
+    /// A handshaken connection over `daemon`, and the receiving end of
+    /// its replies.
+    fn connection(daemon: Arc<Daemon>) -> (ClientConnection, mpsc::Receiver<ServerEvent>) {
+        let (tx, rx) = mpsc::channel(16);
+        let mut client = ClientConnection::new(daemon, tx);
+        client.handshaken = true;
+        (client, rx)
+    }
+
+    async fn error_for(rx: &mut mpsc::Receiver<ServerEvent>, req: u64) -> Option<String> {
+        loop {
+            let ev = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+                .await
+                .expect("no reply")
+                .expect("connection closed");
+            match ev {
+                ServerEvent::Error {
+                    req_id: Some(r),
+                    message,
+                } if r == req => return Some(message),
+                ServerEvent::Ack { req_id, .. } if req_id == req => return None,
+                _ => continue,
+            }
+        }
+    }
+
+    fn seed(daemon: &Daemon, dir: &std::path::Path) {
+        use nebula_core::{Project, ProjectId, Worktree, WorktreeId};
+        daemon
+            .store
+            .insert_project(&Project {
+                id: ProjectId("p".into()),
+                name: "demo".into(),
+                repo_path: dir.into(),
+                sort_order: 0,
+            })
+            .unwrap();
+        daemon
+            .store
+            .insert_worktree(&Worktree {
+                id: WorktreeId("w".into()),
+                project_id: ProjectId("p".into()),
+                path: dir.into(),
+                branch: "main".into(),
+                is_main: true,
+                sort_order: 0,
+            })
+            .unwrap();
+    }
+
+    /// CreateAgent was the escalation door: any client could mint an
+    /// orchestrator by naming the role. It is refused before anything is
+    /// created.
+    #[tokio::test]
+    async fn create_agent_cannot_grant_the_orchestrator_role() {
+        let daemon = test_daemon();
+        let dir = tempfile::tempdir().unwrap();
+        seed(&daemon, dir.path());
+        let (mut client, mut rx) = connection(daemon.clone());
+        client
+            .handle_request(ClientRequest::CreateAgent {
+                req_id: 7,
+                worktree: nebula_core::WorktreeId("w".into()),
+                name: "sneaky".into(),
+                kind: nebula_core::AgentKind::Claude,
+                custom_harness: None,
+                model: None,
+                effort: None,
+                auto_title: false,
+                cloud_prompt: None,
+                starting_prompt: None,
+                issue_url: None,
+                role: nebula_core::AgentRole::Orchestrator,
+                profile: None,
+            })
+            .await
+            .unwrap();
+        let err = error_for(&mut rx, 7).await.expect("refused");
+        assert!(err.contains("cannot grant the orchestrator role"), "{err}");
+        assert!(daemon.store.load_tree().unwrap().2.is_empty());
+        assert!(daemon.store.orchestrator().unwrap().is_none());
+    }
+
+    /// A worker claiming the orchestrator's id (`NEBULA_AGENT_ID=<orch>`)
+    /// from inside its own session is refused every privileged verb; the
+    /// orchestrator's own session, and a process inside no session, pass.
+    #[tokio::test]
+    async fn a_worker_cannot_borrow_the_orchestrators_id() {
+        #[cfg(unix)]
+        let stand_in = "/bin/cat";
+        #[cfg(windows)]
+        let stand_in = "cmd.exe";
+        let _cli = crate::registry::tests::EnvGuard::set(nebula_core::env::AGENT_CMD, stand_in);
+        let daemon = test_daemon();
+        let dir = tempfile::tempdir().unwrap();
+        seed(&daemon, dir.path());
+        let row = |id: &str, role| nebula_core::Agent {
+            parent: None,
+            profile: None,
+            id: nebula_core::AgentId(id.into()),
+            worktree_id: nebula_core::WorktreeId("w".into()),
+            name: id.into(),
+            status: nebula_core::AgentStatus::Fresh,
+            archived: false,
+            archived_at: 0,
+            unseen: false,
+            kind: nebula_core::AgentKind::Claude,
+            custom_harness: None,
+            model: None,
+            effort: None,
+            session_id: None,
+            cloud_session_id: None,
+            sort_order: 0,
+            status_changed_at: 0,
+            alive: false,
+            issue_url: None,
+            role,
+            recent_prompts: Vec::new(),
+        };
+        let mut roots = std::collections::HashMap::new();
+        for (id, role) in [
+            ("worker", nebula_core::AgentRole::Worker),
+            ("orch", nebula_core::AgentRole::Orchestrator),
+        ] {
+            daemon.store.insert_agent(&row(id, role)).unwrap();
+            let sref = SessionRef::Agent(nebula_core::AgentId(id.into()));
+            daemon.ensure_session(&sref, 80, 24).unwrap();
+            let pid = daemon
+                .session_pids()
+                .into_iter()
+                .find(|(s, _, _)| *s == sref)
+                .map(|(_, pid, _)| pid)
+                .unwrap();
+            roots.insert(id, pid);
+        }
+        let orch = nebula_core::AgentId("orch".into());
+        let (mut client, mut rx) = connection(daemon.clone());
+        for (req_id, peer, refused) in [
+            (1, roots["worker"], true),
+            (2, roots["orch"], false),
+            (3, std::process::id(), false),
+        ] {
+            client.peer_pid = Some(peer);
+            client
+                .handle_request(ClientRequest::OrchestratorList {
+                    req_id,
+                    caller: orch.clone(),
+                })
+                .await
+                .unwrap();
+            let answer = loop {
+                match rx.recv().await.expect("closed") {
+                    ServerEvent::Error {
+                        req_id: Some(r),
+                        message,
+                    } if r == req_id => break Err(message),
+                    ServerEvent::OrchestratorList { req_id: r, .. } if r == req_id => break Ok(()),
+                    _ => continue,
+                }
+            };
+            if refused {
+                let err = answer.unwrap_err();
+                assert!(err.contains("another session"), "{err}");
+            } else {
+                assert_eq!(answer, Ok(()), "peer {peer}");
+            }
+        }
+
+        for id in ["worker", "orch"] {
+            daemon.kill_session(&SessionRef::Agent(nebula_core::AgentId(id.into())));
+        }
+    }
+
+    /// A process running inside an agent session (here: the session's own
+    /// PTY child) cannot pin, clear or start the orchestrator; the same
+    /// request from outside every session goes through.
+    #[tokio::test]
+    async fn provisioning_is_refused_from_inside_an_agent_session() {
+        #[cfg(unix)]
+        let stand_in = "/bin/cat";
+        #[cfg(windows)]
+        let stand_in = "cmd.exe";
+        let _cli = crate::registry::tests::EnvGuard::set(nebula_core::env::AGENT_CMD, stand_in);
+        let daemon = test_daemon();
+        let dir = tempfile::tempdir().unwrap();
+        seed(&daemon, dir.path());
+        let worker = nebula_core::Agent {
+            parent: None,
+            profile: None,
+            id: nebula_core::AgentId("worker".into()),
+            worktree_id: nebula_core::WorktreeId("w".into()),
+            name: "worker".into(),
+            status: nebula_core::AgentStatus::Fresh,
+            archived: false,
+            archived_at: 0,
+            unseen: false,
+            kind: nebula_core::AgentKind::Claude,
+            custom_harness: None,
+            model: None,
+            effort: None,
+            session_id: None,
+            cloud_session_id: None,
+            sort_order: 0,
+            status_changed_at: 0,
+            alive: false,
+            issue_url: None,
+            role: nebula_core::AgentRole::Worker,
+            recent_prompts: Vec::new(),
+        };
+        daemon.store.insert_agent(&worker).unwrap();
+        let sref = SessionRef::Agent(worker.id.clone());
+        daemon.ensure_session(&sref, 80, 24).unwrap();
+        let root = daemon
+            .session_pids()
+            .into_iter()
+            .find(|(s, _, _)| *s == sref)
+            .map(|(_, pid, _)| pid)
+            .expect("the session has a pid");
+
+        let (mut client, mut rx) = connection(daemon.clone());
+        client.peer_pid = Some(root);
+        for (req_id, req) in [
+            (
+                1,
+                ClientRequest::SetOrchestrator {
+                    req_id: 1,
+                    agent: worker.id.clone(),
+                },
+            ),
+            (2, ClientRequest::ClearOrchestrator { req_id: 2 }),
+            (
+                3,
+                ClientRequest::StartOrchestrator {
+                    req_id: 3,
+                    kind: nebula_core::AgentKind::Claude,
+                    custom_harness: None,
+                    model: None,
+                    effort: None,
+                    profile: None,
+                    project: None,
+                    name: None,
+                    replace: true,
+                },
+            ),
+        ] {
+            client.handle_request(req).await.unwrap();
+            let err = error_for(&mut rx, req_id).await.expect("refused");
+            assert!(err.contains("inside an agent session"), "{err}");
+        }
+        assert!(daemon.store.orchestrator().unwrap().is_none());
+
+        // From outside every session: allowed.
+        client.peer_pid = Some(std::process::id());
+        client
+            .handle_request(ClientRequest::SetOrchestrator {
+                req_id: 4,
+                agent: worker.id.clone(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(error_for(&mut rx, 4).await, None);
+        assert_eq!(daemon.store.orchestrator().unwrap().unwrap().id, worker.id);
+        daemon.kill_session(&sref);
     }
 }

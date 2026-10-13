@@ -768,8 +768,9 @@ fn handle_left_click_target(app: &mut App, mouse: MouseEvent, out: &mut Vec<Clie
         // the card, and the issue in the browser, through the very
         // `open_issue` `⇧I` runs.
         Some(HitTarget::LauncherCardIssue(id)) => launcher::click_issue(app, &id, out),
+        // A chip on the ORCHESTRATOR VIEW's strip: review that session.
         Some(HitTarget::OrchestratorChip(sref)) => {
-            open_session(app, sref, out);
+            orchestrator::click_chip(app, sref, out);
         }
         // `‹ sessions` in a full-screen session's header: back
         // down to the pane beside the grid, the same way `^q`
