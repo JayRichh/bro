@@ -59,31 +59,35 @@ pub fn find_unpushed_ai_commits(repo: &Path, range: &str) -> Result<Vec<String>>
 /// uncommitted changes, or when a commit it would rewrite is signed (a new
 /// message means a new commit, and the signature cannot come along).
 pub fn rewrite_unpushed(repo: &Path, base: &str, branch: &str) -> Result<usize> {
+    let branch = branch.strip_prefix("refs/heads/").unwrap_or(branch);
+    if branch.is_empty() || branch == "HEAD" {
+        bail!("name the branch to rewrite, not {branch:?}");
+    }
     let branch_ref = format!("refs/heads/{branch}");
     let old_tip = git(
         repo,
         &["rev-parse", "--verify", &format!("{branch_ref}^{{commit}}")],
-    )?
+    )
+    .with_context(|| format!("branch {branch} not found"))?
     .trim()
     .to_string();
+    let base_sha =
+        resolve_commit(repo, base)?.ok_or_else(|| anyhow!("base {base} not found; fetch first"))?;
 
     let mut args = vec![
         "rev-list".to_string(),
         "--topo-order".into(),
         "--reverse".into(),
         old_tip.clone(),
-        format!("^{base}"),
+        format!("^{base_sha}"),
     ];
-    if let Ok(upstream) = git(
-        repo,
-        &[
-            "rev-parse",
-            "--verify",
-            "--quiet",
-            &format!("{branch_ref}@{{upstream}}"),
-        ],
-    ) {
-        args.push(format!("^{}", upstream.trim()));
+    // The branch's upstream, local or remote, when it still exists.
+    let upstream = git(repo, &["for-each-ref", "--format=%(upstream)", &branch_ref])?;
+    let upstream = upstream.trim();
+    if !upstream.is_empty() {
+        if let Some(sha) = resolve_commit(repo, upstream)? {
+            args.push(format!("^{sha}"));
+        }
     }
     args.extend(["--not".into(), "--remotes".into()]);
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -106,6 +110,14 @@ pub fn rewrite_unpushed(repo: &Path, base: &str, branch: &str) -> Result<usize> 
                 "commit {} is signed; rewriting its message would drop the signature, so it was left alone",
                 short(sha)
             );
+        }
+        if let Some(enc) = commit.encoding.as_deref() {
+            if !enc.eq_ignore_ascii_case("utf-8") && !enc.eq_ignore_ascii_case("utf8") {
+                bail!(
+                    "commit {} is encoded as {enc}, not UTF-8, so it was left alone",
+                    short(sha)
+                );
+            }
         }
         if stripped {
             changed += 1;
@@ -172,6 +184,19 @@ fn ensure_clean_checkouts(repo: &Path, branch_ref: &str) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// The commit `rev` names, or `None` when it names nothing.
+fn resolve_commit(repo: &Path, rev: &str) -> Result<Option<String>> {
+    let out = git_command(repo)
+        .args(["rev-parse", "--verify", "--quiet", "--end-of-options"])
+        .arg(format!("{rev}^{{commit}}"))
+        .output()
+        .context("could not run git")?;
+    Ok(out
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string()))
 }
 
 fn short(sha: &str) -> &str {
@@ -520,6 +545,74 @@ mod tests {
         let tip = run(&work, &["rev-parse", "main"]);
         assert_eq!(rewrite_unpushed(&work, "origin/main", "main").unwrap(), 0);
         assert_eq!(run(&work, &["rev-parse", "main"]), tip);
+    }
+
+    #[test]
+    fn leaves_the_upstream_branch_alone() {
+        // `feature` tracks the LOCAL branch `main`, which holds an
+        // unpushed trailer commit of its own; only feature's commit moves.
+        let scratch = Scratch::new("upstream");
+        let (_remote, work) = fixture(&scratch);
+        run(&work, &["checkout", "-q", "-b", "feature", "main"]);
+        run(
+            &work,
+            &["branch", "-q", "--set-upstream-to=main", "feature"],
+        );
+        commit(
+            &work,
+            "c.txt",
+            "feature\n",
+            "Feature work\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n",
+            1_700_000_300,
+        );
+        let main_tip = run(&work, &["rev-parse", "main"]);
+
+        assert_eq!(
+            rewrite_unpushed(&work, "origin/main", "refs/heads/feature").unwrap(),
+            1
+        );
+        assert_eq!(run(&work, &["rev-parse", "main"]), main_tip);
+        assert_eq!(run(&work, &["rev-parse", "feature~1"]), main_tip);
+        assert_eq!(
+            run(&work, &["log", "-1", "--format=%B", "feature"]).trim_end(),
+            "Feature work"
+        );
+    }
+
+    #[test]
+    fn refuses_bad_names_and_other_encodings() {
+        let scratch = Scratch::new("names");
+        let (_remote, work) = fixture(&scratch);
+        let tip = run(&work, &["rev-parse", "main"]);
+
+        let err = rewrite_unpushed(&work, "origin/gone", "main").unwrap_err();
+        assert_eq!(err.to_string(), "base origin/gone not found; fetch first");
+        assert!(rewrite_unpushed(&work, "origin/main", "HEAD").is_err());
+        assert!(rewrite_unpushed(&work, "origin/main", "refs/heads/HEAD").is_err());
+
+        // A Latin-1 commit on top: its message cannot round-trip, so the
+        // whole rewrite is refused.
+        let raw = run(&work, &["cat-file", "commit", "main"]);
+        let (headers, _) = raw.split_once("\n\n").unwrap();
+        let headers = headers.replacen(
+            &format!("parent {}", run(&work, &["rev-parse", "main~1"]).trim()),
+            &format!("parent {}", tip.trim()),
+            1,
+        );
+        let latin = format!("{headers}\nencoding ISO-8859-1\n\nLatin\n");
+        let path = scratch.0.join("latin.txt");
+        std::fs::write(&path, latin).unwrap();
+        let sha = run(
+            &work,
+            &["hash-object", "-t", "commit", "-w", &path.to_string_lossy()],
+        );
+        run(
+            &work,
+            &["update-ref", "refs/heads/main", sha.trim(), tip.trim()],
+        );
+        let err = rewrite_unpushed(&work, "origin/main", "main").unwrap_err();
+        assert!(err.to_string().contains("ISO-8859-1"), "{err}");
+        assert_eq!(run(&work, &["rev-parse", "main"]), sha);
     }
 
     #[test]
