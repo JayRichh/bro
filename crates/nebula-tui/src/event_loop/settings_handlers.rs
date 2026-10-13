@@ -435,6 +435,8 @@ pub(crate) fn apply_config(app: &mut App, cfg: &crate::config::Config) {
     app.launcher.launcher_list = cfg.list_layout();
     app.launcher.launcher_nested = cfg.nested_layout();
     app.launcher.launcher_columns = cfg.columns_layout();
+    app.launcher.launcher_kanban = cfg.kanban;
+    app.launcher.kanban_all = cfg.kanban_all();
     app.launcher.columns_hide_projects = cfg.hide_projects;
     app.launcher.columns_hide_worktrees = cfg.hide_worktrees;
     app.launcher.columns_hide_sessions = cfg.hide_sessions;

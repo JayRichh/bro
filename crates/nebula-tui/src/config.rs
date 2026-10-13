@@ -46,6 +46,9 @@ pub const PANE_SIDES: &[&str] = &[
 /// COLUMNS: projects, worktrees and sessions beside the pane.
 pub const WORKTREE_LAYOUTS: &[&str] = &["cards", "list", "nested", "columns"];
 
+/// What **Kanban scope** cycles through.
+pub const KANBAN_SCOPES: &[&str] = &["project", "all"];
+
 /// What **Diff context** cycles through: the three lines git gives each
 /// side of a change, or the whole file.
 pub const DIFF_CONTEXTS: &[&str] = &["collapsed", "full"];
@@ -415,6 +418,8 @@ pub enum SettingKind {
     DiffContext,
     SessionPane,
     WorktreeLayout,
+    Kanban,
+    KanbanScope,
     InlineGraphics,
     ExpandAllWorktrees,
     CardIssueNumber,
@@ -524,7 +529,10 @@ impl SettingKind {
             SettingKind::AskBeforeArchive => (2026, 10, 3),
             SettingKind::ConfirmDragMove => (2026, 10, 2),
             SettingKind::SourceControlGraph | SettingKind::InlineGraphics => (2026, 10, 9),
-            SettingKind::DiffMode | SettingKind::DiffContext => (2026, 10, 13),
+            SettingKind::DiffMode
+            | SettingKind::DiffContext
+            | SettingKind::Kanban
+            | SettingKind::KanbanScope => (2026, 10, 13),
         }
     }
 
@@ -714,6 +722,18 @@ pub const SETTINGS_TABS: &[SettingsTab] = &[
                 kind: SettingKind::ExpandAllWorktrees,
                 label: "Expand all worktrees",
                 hint: "Show every worktree's sessions and terminals at once, with no Tab to open one (off = one worktree opens at a time, with Tab)",
+                group: "",
+            },
+            SettingSpec {
+                kind: SettingKind::Kanban,
+                label: "Kanban",
+                hint: "Lay the grid out as lanes by status — Needs input, Running, Unseen, Done, PR open — instead of a band per worktree (⇧K)",
+                group: "",
+            },
+            SettingSpec {
+                kind: SettingKind::KanbanScope,
+                label: "Kanban scope",
+                hint: "Whose sessions the kanban lanes hold: the project on screen, or every project (Tab on the board)",
                 group: "",
             },
             SettingSpec {
@@ -1147,6 +1167,14 @@ pub struct Config {
     /// [`Config::worktree_layout_word`], so a word off the list is the
     /// cards.
     pub worktree_layout: String,
+    /// KANBAN: the grid laid out as five lanes by status — Needs input,
+    /// Running, Unseen, Done, PR open — instead of a band per worktree.
+    /// `⇧K` flips it and writes it back. Off by default.
+    pub kanban: bool,
+    /// KANBAN SCOPE: `project` (the project on screen's sessions, the
+    /// default) or `all` (every project's). `Tab` on the board flips it
+    /// and writes it back. Anything else reads as `project`.
+    pub kanban_scope: String,
     /// INLINE GRAPHICS: images and Mermaid diagrams in file previews.
     /// `off` shows source/hints only; enabled values currently use the
     /// Unicode half-block renderer, which works in native terminals,
@@ -1537,6 +1565,8 @@ impl Default for Config {
             highlight_current_card: true,
             session_pane: crate::launcher::PaneSide::default().as_str().into(),
             worktree_layout: WORKTREE_LAYOUTS[0].into(),
+            kanban: false,
+            kanban_scope: KANBAN_SCOPES[0].into(),
             inline_graphics: crate::graphics::DEFAULT_INLINE_GRAPHICS.into(),
             expand_all_worktrees: false,
             hide_card_prompt: false,
@@ -1717,6 +1747,11 @@ impl Config {
     /// out on.
     pub fn pane_side(&self) -> crate::launcher::PaneSide {
         crate::launcher::PaneSide::parse(&self.session_pane)
+    }
+
+    /// `kanban_scope` says every project rather than the one on screen.
+    pub fn kanban_all(&self) -> bool {
+        self.kanban_scope.trim().eq_ignore_ascii_case("all")
     }
 
     /// The DIFF LAYOUT `diff_mode` names; None while the file has not set
@@ -2413,6 +2448,15 @@ impl Config {
             SettingKind::HighlightCurrentCard => on_off(self.highlight_current_card).into(),
             SettingKind::SessionPane => self.pane_side().as_str().into(),
             SettingKind::WorktreeLayout => self.worktree_layout_word().into(),
+            SettingKind::Kanban => on_off(self.kanban).into(),
+            SettingKind::KanbanScope => {
+                if self.kanban_all() {
+                    "all"
+                } else {
+                    "project"
+                }
+            }
+            .into(),
             SettingKind::InlineGraphics => self.inline_graphics_label().into(),
             SettingKind::ExpandAllWorktrees => on_off(self.expand_all_worktrees).into(),
             SettingKind::CardIssueNumber => on_off(self.card_issue_number).into(),
@@ -2529,6 +2573,12 @@ impl Config {
                 // list steps on from the right it reads as.
                 self.session_pane =
                     cycle_choice(self.pane_side().as_str(), PANE_SIDES, step).into();
+            }
+            SettingKind::Kanban => {
+                self.kanban = !self.kanban;
+            }
+            SettingKind::KanbanScope => {
+                self.kanban_scope = if self.kanban_all() { "project" } else { "all" }.into();
             }
             SettingKind::WorktreeLayout => {
                 let now = self.worktree_layout_word();

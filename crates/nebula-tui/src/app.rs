@@ -80,6 +80,9 @@ pub enum HitTarget {
     /// its place in `launcher::bands`: a click lands the cursor on it,
     /// inside its worktree.
     LauncherCard(crate::launcher::CardRef),
+    /// A session card on the KANBAN, by its session: a click lands the
+    /// cursor on it, a second one goes down into the pane.
+    KanbanCard(nebula_core::AgentId),
     /// A BAND's rule on the grid — the checkout's own row over its cards,
     /// by the band's place in `launcher::bands`: a click puts the cursor
     /// on the band, as `j`/`k` walking onto it do.
@@ -3791,6 +3794,14 @@ pub struct LauncherState {
     /// sessions side by side, backed by the same panel row models and
     /// terminal pane as the card grid.
     pub launcher_columns: bool,
+    /// The KANBAN (`⇧K`; Settings → Appearance → **Kanban**): the grid
+    /// laid out as five lanes by what each session wants from you —
+    /// Needs input, Running, Unseen, Done, PR open (`launcher::Lane`) —
+    /// in place of the bands, whatever the worktree layout says.
+    pub launcher_kanban: bool,
+    /// The KANBAN shows every project's sessions rather than the one on
+    /// screen's (`Tab` on the board; **Kanban scope**).
+    pub kanban_all: bool,
     pub columns_hide_projects: bool,
     pub columns_hide_worktrees: bool,
     pub columns_hide_sessions: bool,

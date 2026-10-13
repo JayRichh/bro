@@ -644,6 +644,7 @@ fn handle_tool_action(app: &mut App, action: crate::keymap::Action, out: &mut Ve
         Action::DuplicateSession => launcher::duplicate_session(app),
         Action::MoveSession => launcher::move_session(app),
         Action::OpenGhosttyTab => open_ghostty_tab(app),
+        Action::ToggleKanban => launcher::toggle_kanban(app, out),
         // Shift+Enter / Shift+O: the selected worktree's OPEN COMMAND, from
         // any panel — the cursor's worktree is the context wherever the
         // cursor stands, as it is for `g`, `f` and `b`, so the key is never

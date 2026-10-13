@@ -24,6 +24,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Widget};
 use ratatui::Frame;
 
 mod columns;
+mod kanban;
 mod nested;
 
 /// Width of the view's QUICK PROMPT, and its height: wider and taller than
@@ -66,6 +67,10 @@ pub(super) fn draw(f: &mut Frame, app: &mut App, body: Rect) {
     // The project the grid is on gets its tab, whichever way it was
     // opened, before the header lays the tabs out.
     app.settle_project_tabs();
+    if app.launcher.launcher_kanban {
+        kanban::draw(f, app, body);
+        return;
+    }
     if app.launcher.launcher_columns {
         columns::draw(f, app, body);
         return;

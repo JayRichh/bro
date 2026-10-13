@@ -10114,30 +10114,33 @@ fn renaming_a_project_to_nothing_undoes_the_rename() {
 /// now, so they neither send a request nor move anything.
 #[test]
 fn shifted_keys_no_longer_reorder_projects() {
-    let mut app = App::new();
-    seed_tree(&mut app);
-    hse(
-        &mut app,
-        ServerEvent::EntityUpserted {
-            entity: project("p2", "two", 1),
-        },
-    );
-    let mut out = Vec::new();
-    app.nav.focus = Focus::Projects;
-    for key in [
-        KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT),
-        KeyEvent::new(KeyCode::Char('J'), KeyModifiers::SHIFT),
-        KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT),
-    ] {
-        handle_key(&mut app, key, &mut out);
-    }
-    assert!(out.is_empty(), "no reorder request goes out: {out:?}");
-    let order: Vec<&str> = app
-        .project_rows()
-        .into_iter()
-        .map(|i| app.tree.projects[i].name.as_str())
-        .collect();
-    assert_eq!(order, ["demo", "two"], "nothing moved");
+    // `Shift+K` is the KANBAN now, a toggle saved to the config.
+    with_default_config(|| {
+        let mut app = App::new();
+        seed_tree(&mut app);
+        hse(
+            &mut app,
+            ServerEvent::EntityUpserted {
+                entity: project("p2", "two", 1),
+            },
+        );
+        let mut out = Vec::new();
+        app.nav.focus = Focus::Projects;
+        for key in [
+            KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT),
+            KeyEvent::new(KeyCode::Char('J'), KeyModifiers::SHIFT),
+            KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT),
+        ] {
+            handle_key(&mut app, key, &mut out);
+        }
+        assert!(out.is_empty(), "no reorder request goes out: {out:?}");
+        let order: Vec<&str> = app
+            .project_rows()
+            .into_iter()
+            .map(|i| app.tree.projects[i].name.as_str())
+            .collect();
+        assert_eq!(order, ["demo", "two"], "nothing moved");
+    });
 }
 
 /// A finished-or-fresh agent under `wt`, stamped `at`.

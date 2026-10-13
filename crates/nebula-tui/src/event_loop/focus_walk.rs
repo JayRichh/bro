@@ -97,6 +97,7 @@ pub(super) fn land_click_focus(app: &mut App, column: u16, row: u16, out: &mut V
     match app.hit_at(column, row) {
         Some(
             HitTarget::LauncherCard(_)
+            | HitTarget::KanbanCard(_)
             | HitTarget::LauncherBand(_)
             | HitTarget::LauncherBandPr(_)
             | HitTarget::LauncherCardIssue(_)

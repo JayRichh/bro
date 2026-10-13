@@ -740,6 +740,7 @@ fn handle_left_click_target(app: &mut App, mouse: MouseEvent, out: &mut Vec<Clie
         // The press also arms a drag of the card onto another
         // band, which moves its session there. Armed first: the
         // card is found by the grid as drawn, before the click.
+        Some(HitTarget::KanbanCard(id)) => launcher::click_kanban(app, &id, out),
         Some(HitTarget::LauncherCard(at)) => {
             launcher::press_card(app, at, (mouse.column, mouse.row));
             launcher::click_card(app, at, out);
