@@ -2245,6 +2245,9 @@ mod tests {
         git(&repo, &["config", "user.email", "t@t"]);
         git(&repo, &["config", "user.name", "t"]);
         git(&repo, &["config", "commit.gpgsign", "false"]);
+        // Git for Windows ships core.autocrlf=true system-wide; the asserts
+        // read back the exact bytes written.
+        git(&repo, &["config", "core.autocrlf", "false"]);
         std::fs::write(repo.join("a.txt"), "main\n").unwrap();
         std::fs::write(repo.join("b.txt"), "shared\n").unwrap();
         git(&repo, &["add", "."]);

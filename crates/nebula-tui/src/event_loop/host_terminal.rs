@@ -305,6 +305,7 @@ mod tests {
         app.chrome.is_remote = false;
         seed_tree(&mut app);
         seed_feat_worktree(&mut app, "w2", "links");
+        native(&mut app);
         app.pane.term = Some(AttachedTerm::new(
             SessionRef::Agent(AgentId("a1".into())),
             80,
@@ -313,27 +314,25 @@ mod tests {
         let mut sent = None;
         let mut out = Vec::new();
         report_working_directory(&app, &mut sent, &mut out).unwrap();
-        assert_eq!(text(&out), "\x1b]7;file://localhost/tmp/demo\x1b\\");
+        assert_eq!(text(&out), osc7("/tmp/demo"));
         out.clear();
         report_working_directory(&app, &mut sent, &mut out).unwrap();
         assert!(out.is_empty(), "unchanged cwd is not repeated");
 
         // An agent moved checkout while the sidebar still selects main.
         app.tree.agents[0].worktree_id = WorktreeId("w2".into());
-        assert_eq!(
-            app.selected_worktree().unwrap().path,
-            Path::new("/tmp/demo")
-        );
+        assert!(app
+            .selected_worktree()
+            .unwrap()
+            .path
+            .ends_with(Path::new("tmp").join("demo")));
         report_working_directory(&app, &mut sent, &mut out).unwrap();
-        assert_eq!(
-            text(&out),
-            "\x1b]7;file://localhost/tmp/demo-worktrees/links\x1b\\"
-        );
+        assert_eq!(text(&out), osc7("/tmp/demo-worktrees/links"));
 
         out.clear();
         app.pane.term = None;
         report_working_directory(&app, &mut sent, &mut out).unwrap();
-        assert_eq!(text(&out), "\x1b]7;file://localhost/tmp/demo\x1b\\");
+        assert_eq!(text(&out), osc7("/tmp/demo"));
     }
 
     #[test]
@@ -342,6 +341,7 @@ mod tests {
         app.chrome.is_remote = false;
         seed_tree(&mut app);
         seed_feat_worktree(&mut app, "w2", "shell");
+        native(&mut app);
         let id = TerminalId("t1".into());
         app.tree.terminals.push(TerminalTab {
             id: id.clone(),
@@ -355,10 +355,7 @@ mod tests {
         let mut sent = None;
         let mut out = Vec::new();
         report_working_directory(&app, &mut sent, &mut out).unwrap();
-        assert_eq!(
-            text(&out),
-            "\x1b]7;file://localhost/tmp/demo-worktrees/shell\x1b\\"
-        );
+        assert_eq!(text(&out), osc7("/tmp/demo-worktrees/shell"));
 
         app.chrome.is_remote = true;
         sent = None;
@@ -393,13 +390,14 @@ mod tests {
         let mut app = App::new();
         app.chrome.is_remote = false;
         seed_tree(&mut app);
+        native(&mut app);
         let mut sent = None;
         let mut full = &mut [][..];
         assert!(report_working_directory(&app, &mut sent, &mut full).is_err());
         assert!(sent.is_none(), "only a successful write counts as reported");
         let mut out = Vec::new();
         report_working_directory(&app, &mut sent, &mut out).unwrap();
-        assert_eq!(text(&out), "\x1b]7;file://localhost/tmp/demo\x1b\\");
+        assert_eq!(text(&out), osc7("/tmp/demo"));
     }
 
     #[test]
@@ -428,6 +426,29 @@ mod tests {
         assert!(!take_worker_panic(), "and it is not a worker panic");
     }
 
+    /// The seeded worktrees sit at unix paths (`/tmp/demo`), which are not
+    /// absolute on Windows; there they move onto a drive.
+    fn native(app: &mut App) {
+        if cfg!(windows) {
+            for w in &mut app.tree.worktrees {
+                w.path = Path::new("C:").join(&w.path);
+            }
+        }
+    }
+
+    /// The OSC 7 report for a seeded `/tmp/…` path, as [`native`] puts it.
+    fn osc7(path: &str) -> String {
+        let drive = if cfg!(windows) { "/C:" } else { "" };
+        format!("\x1b]7;file://localhost{drive}{path}\x1b\\")
+    }
+
+    /// The runtime modes [`write_modes`] spells as escapes. Windows
+    /// crossterm turns mouse capture on through the console API instead.
+    #[cfg(unix)]
+    const MODES: &[&str] = &["?1000h", "?1002h", "?1003h", "?1006h", "?2004h", "?1004h"];
+    #[cfg(windows)]
+    const MODES: &[&str] = &["?2004h", "?1004h"];
+
     fn text(bytes: &[u8]) -> String {
         String::from_utf8_lossy(bytes).into_owned()
     }
@@ -437,7 +458,7 @@ mod tests {
         let mut out = Vec::new();
         write_modes(&mut out, false).unwrap();
         let out = text(&out);
-        for mode in ["?1000h", "?1002h", "?1003h", "?1006h", "?2004h", "?1004h"] {
+        for mode in MODES {
             assert!(out.contains(mode), "{mode} missing from {out:?}");
         }
         assert!(
@@ -487,7 +508,7 @@ mod tests {
             !out.contains("?1049"),
             "1049 would clobber the saved cursor: {out:?}"
         );
-        assert!(out.contains("?1000h"), "and the modes ride along: {out:?}");
+        assert!(out.contains(MODES[0]), "and the modes ride along: {out:?}");
     }
 
     /// ratatui's whole-terminal clear method opens with a cursor-position query (`CSI 6n`) and

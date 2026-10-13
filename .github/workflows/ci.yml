@@ -87,9 +87,6 @@ jobs:
         run: cargo build --workspace --locked
 
       - name: Test workspace
-        # The Windows port still has known failing tests (unix-shaped fixtures);
-        # report them without failing the job until they are ported.
-        continue-on-error: ${{ matrix.os == 'windows-latest' }}
         run: cargo test --workspace --locked
 
   windows-arm64:

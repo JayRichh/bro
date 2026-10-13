@@ -738,6 +738,7 @@ fn a_pane_scrolled_past_its_cursor_leaves_the_host_cursor_alone() {
 
 /// With the editor modal up every key goes to it, so the host cursor
 /// follows the editor's PTY cursor, not the attached pane's underneath.
+#[cfg(unix)]
 #[test]
 fn the_editor_modal_takes_the_host_cursor_over_the_pane() {
     use crate::app::{AttachedTerm, Focus};
@@ -1429,7 +1430,7 @@ fn locating_a_missing_project_sends_set_project_path_and_reopens_on_error() {
     let gone = tmp.path().join("old");
     let moved = tmp.path().join("new");
     std::fs::create_dir_all(&moved).unwrap();
-    let moved_canon = std::fs::canonicalize(&moved).unwrap();
+    let moved_canon = nebula_core::paths::canonical(&moved).unwrap();
     let mut app = App::new();
     app.launcher.prompt_missing_project_paths = true;
     seed_worktree_at(&mut app, &gone);
@@ -1479,13 +1480,13 @@ fn successful_project_repath_rekeys_project_settings() {
     let gone = tmp.path().join("old");
     let moved = tmp.path().join("new");
     std::fs::create_dir_all(&moved).unwrap();
-    let moved_canon = std::fs::canonicalize(&moved).unwrap();
+    let moved_canon = nebula_core::paths::canonical(&moved).unwrap();
     let config_path = tmp.path().join("config.json");
     std::fs::write(
         &config_path,
         format!(
-            r#"{{"projects":{{"{}":{{"run_command":"npm run dev"}}}}}}"#,
-            gone.display()
+            r#"{{"projects":{{{}:{{"run_command":"npm run dev"}}}}}}"#,
+            serde_json::to_string(&gone.display().to_string()).unwrap()
         ),
     )
     .unwrap();
@@ -1650,10 +1651,19 @@ fn the_open_project_prompt_starts_on_the_launch_folder() {
     };
     assert_eq!(p.title, "Open project");
     assert_eq!(dir_names(p), vec!["alpha", "beta"]);
-    assert_eq!(
-        p.hovered_path(),
-        Some(format!("{}/ws/alpha", tmp.path().display()))
-    );
+    // The temp dir sits under the home directory on Windows, where the
+    // prompt spells it `~/…`.
+    let parent = tmp.path().join("ws");
+    let shown = match nebula_core::env::home_dir().and_then(|home| {
+        parent
+            .strip_prefix(home)
+            .ok()
+            .map(std::path::Path::to_path_buf)
+    }) {
+        Some(rest) => format!("~/{}", rest.display()),
+        None => parent.display().to_string(),
+    };
+    assert_eq!(p.hovered_path(), Some(format!("{shown}/alpha")));
     press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
     assert!(
         matches!(
@@ -1670,7 +1680,7 @@ fn the_open_project_prompt_starts_on_the_launch_folder() {
 #[test]
 fn opening_a_known_folder_opens_its_project() {
     let tmp = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(tmp.path()).unwrap();
+    let root = nebula_core::paths::canonical(tmp.path()).unwrap();
     std::fs::create_dir_all(root.join("demo/src")).unwrap();
     let mut app = App::new();
     seed_tree(&mut app);
@@ -14007,6 +14017,7 @@ fn finder(app: &App) -> &crate::app::FileFinder {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn f_opens_file_finder_listing_tracked_and_untracked() {
     // Pinned to the legacy behavior: with `close_finder_on_open`
@@ -14082,6 +14093,7 @@ fn f_opens_file_finder_listing_tracked_and_untracked() {
 /// Enter on a markdown file reads it first: the FILE TABS take the
 /// finder's place with the rendered page, and Enter there is the
 /// editor. The same rule serves a `.md` ⌥clicked in the pane.
+#[cfg(unix)]
 #[test]
 fn a_markdown_file_from_the_finder_or_a_clicked_path_is_read_first() {
     let dir = tempfile::tempdir().unwrap();
@@ -14144,6 +14156,7 @@ fn a_markdown_file_from_the_finder_or_a_clicked_path_is_read_first() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn close_finder_on_open_leaves_only_the_editor_modal() {
     let dir = tempfile::tempdir().unwrap();
@@ -14378,6 +14391,7 @@ fn ctrl_r_flips_a_markdown_preview_between_the_page_and_its_source() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn t_opens_tree_browser_folds_dirs_and_filters_hierarchies() {
     let dir = tempfile::tempdir().unwrap();
@@ -14575,6 +14589,7 @@ fn file_preview_gets_a_line_number_gutter_but_listings_dont() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn embedded_editor_takes_over_the_preview_pane() {
     let dir = tempfile::tempdir().unwrap();
@@ -14625,6 +14640,7 @@ fn grep_view(app: &App) -> &crate::app::GrepView {
     }
 }
 
+#[cfg(unix)]
 fn fake_grep_view(hits: Vec<crate::grep_search::GrepHit>) -> GrepView {
     let mut view = GrepView::new(
         "/nonexistent-nebula-grep-test".into(),
@@ -14684,6 +14700,7 @@ fn shift_f_without_worktree_flashes() {
     assert_eq!(app.chrome.flash.as_deref(), Some("no worktree selected"));
 }
 
+#[cfg(unix)]
 #[test]
 fn grep_enter_spawns_editor_and_ctrl_q_closes_it() {
     // Pinned to the legacy behavior — the "lands back on the
@@ -14741,6 +14758,7 @@ fn grep_enter_spawns_editor_and_ctrl_q_closes_it() {
     });
 }
 
+#[cfg(unix)]
 #[test]
 fn close_finder_on_open_also_closes_the_grep_overlay() {
     let dir = tempfile::tempdir().unwrap();
@@ -14769,6 +14787,7 @@ fn close_finder_on_open_also_closes_the_grep_overlay() {
     });
 }
 
+#[cfg(unix)]
 #[test]
 fn stale_generation_editor_events_are_dropped() {
     let mut app = App::new();
@@ -14818,6 +14837,7 @@ fn stale_generation_editor_events_are_dropped() {
     assert!(app.pane.vim.is_none());
 }
 
+#[cfg(unix)]
 #[test]
 fn grep_overlay_renders_hits_and_editor_modal_renders_on_top() {
     let mut app = App::new();
@@ -19930,6 +19950,7 @@ fn a_paste_lands_in_the_open_box() {
 /// as a copy in the ATTACHMENTS DIR under a plain name, and that copy
 /// is what the turn names: macOS deletes the thumbnail's file soon
 /// after the drop, and the agent types its U+202F back as a space.
+#[cfg(unix)]
 #[test]
 fn a_dropped_screenshot_reaches_the_agent_as_a_copy_it_can_find() {
     let root = tempfile::tempdir().unwrap();
@@ -20864,6 +20885,7 @@ fn files_opened_event_raises_the_file_tabs_previewing_the_first() {
 /// The one modal where Ctrl+Q backs out a level: from the editor it
 /// lands on the strip (editor killed, file re-read), from the preview
 /// it lands on the strip, and only from the strip does it close.
+#[cfg(unix)]
 #[test]
 fn file_tabs_ctrl_q_steps_back_to_the_strip_before_closing() {
     with_default_config(|| {

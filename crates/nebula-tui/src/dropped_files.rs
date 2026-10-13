@@ -340,6 +340,7 @@ mod tests {
         shot
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_dropped_screenshot_is_copied_under_a_plain_name_before_macos_deletes_it() {
         let root = tempfile::tempdir().unwrap();
@@ -356,6 +357,7 @@ mod tests {
         assert_eq!(fs::read(&copy).unwrap(), b"\x89PNG pixels");
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_whitespace_around_a_drop_survives_staging() {
         let root = tempfile::tempdir().unwrap();
@@ -367,6 +369,7 @@ mod tests {
         assert!(staged.text.ends_with(".png "), "{:?}", staged.text);
     }
 
+    #[cfg(unix)]
     #[test]
     fn an_image_with_an_awkward_name_outside_temp_is_copied_too() {
         let root = tempfile::tempdir().unwrap();
@@ -407,6 +410,7 @@ mod tests {
         assert!(!attachments.exists(), "nothing copied");
     }
 
+    #[cfg(unix)]
     #[test]
     fn several_dropped_files_stage_one_by_one() {
         let root = tempfile::tempdir().unwrap();
@@ -443,6 +447,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn quoted_and_file_url_drops_are_read_too() {
         let root = tempfile::tempdir().unwrap();
@@ -466,6 +471,7 @@ mod tests {
         assert_eq!(fs::read_dir(&attachments).unwrap().count(), 1);
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_different_file_under_a_taken_name_gets_a_numbered_copy() {
         let root = tempfile::tempdir().unwrap();
@@ -481,6 +487,7 @@ mod tests {
             .contains("Screenshot-2026-09-21-at-11.13.58-PM-2.png"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn copies_older_than_a_week_are_pruned_by_the_next_drop() {
         let root = tempfile::tempdir().unwrap();

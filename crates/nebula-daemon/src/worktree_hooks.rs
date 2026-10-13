@@ -331,7 +331,7 @@ mod tests {
     #[tokio::test]
     async fn hook_gets_literal_paths_env_and_the_repo_as_cwd() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let root = nebula_core::paths::canonical(tmp.path()).unwrap();
         let repo = repo_with_space(&root);
         let out = root.join("out.txt");
         let hook = script(
@@ -378,7 +378,7 @@ mod tests {
     #[tokio::test]
     async fn create_and_delete_keys_are_independent() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let root = nebula_core::paths::canonical(tmp.path()).unwrap();
         let repo = repo_with_space(&root);
         let out = root.join("out.txt");
         let hook = script(
@@ -413,7 +413,7 @@ mod tests {
     #[tokio::test]
     async fn delete_hook_is_skipped_while_the_directory_exists() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let root = nebula_core::paths::canonical(tmp.path()).unwrap();
         let repo = repo_with_space(&root);
         let out = root.join("out.txt");
         let hook = script(&root, &format!("touch '{}'", out.display()));

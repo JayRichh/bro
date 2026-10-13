@@ -17,6 +17,7 @@ fn tunnel(args: &[&str]) -> std::process::Output {
         .expect("failed to run bro tunnel")
 }
 
+#[cfg(unix)]
 #[test]
 fn missing_ssh_explains_the_dependency_and_fails() {
     let out = tunnel(&["user@example.invalid", "--port", "0"]);
@@ -28,6 +29,7 @@ fn missing_ssh_explains_the_dependency_and_fails() {
 /// The port is settled locally, before ssh is spawned, so the forward and the
 /// URL are the same number — a taken one has to fail here rather than inside
 /// a connection that already installed nebula on the far end.
+#[cfg(unix)]
 #[test]
 fn a_taken_local_port_fails_before_ssh_is_reached() {
     let held = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
@@ -47,6 +49,7 @@ fn a_taken_local_port_fails_before_ssh_is_reached() {
 
 /// The forward is announced before the connection, so a tunnel that hangs on
 /// a slow remote still says which ports it is waiting on.
+#[cfg(unix)]
 #[test]
 fn the_forward_is_printed_before_connecting() {
     let out = tunnel(&["user@example.invalid", "--port", "0"]);
@@ -56,4 +59,14 @@ fn the_forward_is_printed_before_connecting() {
         "{stdout}"
     );
     assert!(stdout.contains("127.0.0.1:"), "{stdout}");
+}
+
+/// Windows: `tunnel` is refused up front with a clear error (docs/PORT.md).
+#[cfg(windows)]
+#[test]
+fn tunnel_is_refused_on_windows() {
+    let out = tunnel(&["user@example.invalid", "--port", "0"]);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("not supported on Windows"), "{stderr}");
 }

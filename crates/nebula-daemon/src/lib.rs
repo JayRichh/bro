@@ -558,7 +558,7 @@ mod probe_tests {
     #[test]
     fn probe_follows_a_linked_worktrees_gitdir_file() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let root = nebula_core::paths::canonical(tmp.path()).unwrap();
         let repo = root.join("repo");
         std::fs::create_dir(&repo).unwrap();
         git_in(&repo, &["init", "-b", "main"]);

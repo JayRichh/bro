@@ -2322,8 +2322,8 @@ mod tests {
             |json: String| -> crate::config::Config { serde_json::from_str(&json).unwrap() };
         let entry = |path: &Path, run: &str| {
             config(format!(
-                r#"{{"projects": {{"{}": {{"run_command": "{run}"}}}}}}"#,
-                path.display()
+                r#"{{"projects": {{{}: {{"run_command": "{run}"}}}}}}"#,
+                serde_json::to_string(&path.display().to_string()).unwrap()
             ))
         };
         let run_with = |cfg: &crate::config::Config| -> String {
@@ -2542,7 +2542,7 @@ mod tests {
     #[tokio::test]
     async fn pr_worktree_is_created_once_and_shared_by_later_launches() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let root = nebula_core::paths::canonical(tmp.path()).unwrap();
         let repo = root.join("repo");
         std::fs::create_dir(&repo).unwrap();
         git_in(&repo, &["init", "-b", "main"]);
@@ -3309,7 +3309,7 @@ mod tests {
     #[tokio::test]
     async fn enter_worktree_creates_the_checkout_in_nebulas_layout() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let root = nebula_core::paths::canonical(tmp.path()).unwrap();
         let repo = root.join("repo");
         std::fs::create_dir(&repo).unwrap();
         git_in(&repo, &["init", "-b", "main"]);
@@ -3481,7 +3481,7 @@ mod tests {
     #[tokio::test]
     async fn worktree_sync_replays_a_cwd_reported_before_adoption() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let root = nebula_core::paths::canonical(tmp.path()).unwrap();
         let repo = root.join("repo");
         std::fs::create_dir(&repo).unwrap();
         git_in(&repo, &["init", "-b", "main"]);
@@ -3574,7 +3574,7 @@ mod tests {
     #[tokio::test]
     async fn rename_project_relabels_the_row_and_leaves_the_folder_alone() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let root = nebula_core::paths::canonical(tmp.path()).unwrap();
         let repo = root.join("acme-api");
         std::fs::create_dir(&repo).unwrap();
         git_in(&repo, &["init", "-b", "main"]);
@@ -3613,7 +3613,7 @@ mod tests {
         daemon: &Arc<Daemon>,
     ) -> (tempfile::TempDir, PathBuf, PathBuf, ProjectId) {
         let tmp = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let root = nebula_core::paths::canonical(tmp.path()).unwrap();
         let repo = root.join("acme");
         std::fs::create_dir(&repo).unwrap();
         git_in(&repo, &["init", "-b", "main"]);
@@ -3746,7 +3746,7 @@ mod tests {
     #[tokio::test]
     async fn add_project_from_inside_a_worktree_roots_at_the_repo() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let root = nebula_core::paths::canonical(tmp.path()).unwrap();
         let repo = root.join("repo");
         std::fs::create_dir(&repo).unwrap();
         git_in(&repo, &["init", "-b", "main"]);
@@ -3791,7 +3791,7 @@ mod tests {
     #[tokio::test]
     async fn adding_a_worktree_of_a_known_repo_is_a_duplicate() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let root = nebula_core::paths::canonical(tmp.path()).unwrap();
         let repo = root.join("repo");
         std::fs::create_dir(&repo).unwrap();
         git_in(&repo, &["init", "-b", "main"]);
@@ -3818,7 +3818,7 @@ mod tests {
     #[tokio::test]
     async fn reconcile_moves_root_ness_onto_the_checkout_git_lists_first() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let root = nebula_core::paths::canonical(tmp.path()).unwrap();
         let repo = root.join("repo");
         std::fs::create_dir(&repo).unwrap();
         git_in(&repo, &["init", "-b", "main"]);
@@ -3858,7 +3858,7 @@ mod tests {
     #[tokio::test]
     async fn reconcile_drops_a_vanished_row_that_still_claims_to_be_root() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let root = nebula_core::paths::canonical(tmp.path()).unwrap();
         let repo = root.join("repo");
         std::fs::create_dir(&repo).unwrap();
         git_in(&repo, &["init", "-b", "main"]);
@@ -3946,7 +3946,7 @@ mod tests {
     #[tokio::test]
     async fn create_worktree_runs_the_create_hook() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let root = nebula_core::paths::canonical(tmp.path()).unwrap();
         let repo = init_repo(&root);
         let log = root.join("hook.log");
         let hook = hook_script(
@@ -3996,7 +3996,7 @@ mod tests {
     #[tokio::test]
     async fn worktree_on_branch_race_shares_the_checkout() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let root = nebula_core::paths::canonical(tmp.path()).unwrap();
         let repo = init_repo(&root);
         let daemon = test_daemon();
         let project = project_at(&daemon, &repo);
@@ -4036,7 +4036,7 @@ mod tests {
     #[tokio::test]
     async fn delete_worktree_runs_the_delete_hook_and_survives_its_failure() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let root = nebula_core::paths::canonical(tmp.path()).unwrap();
         let repo = init_repo(&root);
         let wt = root.join("repo-worktrees").join("feat");
         git_in(
@@ -4099,7 +4099,7 @@ mod tests {
     #[tokio::test]
     async fn recreating_a_path_waits_for_its_delete_hook() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let root = nebula_core::paths::canonical(tmp.path()).unwrap();
         let repo = init_repo(&root);
         let wt = root.join("repo-worktrees").join("feat");
         git_in(
@@ -4159,7 +4159,7 @@ mod tests {
     #[tokio::test]
     async fn delete_worktree_without_a_hook_warns_nobody() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let root = nebula_core::paths::canonical(tmp.path()).unwrap();
         let repo = init_repo(&root);
         let wt = root.join("repo-worktrees").join("feat");
         git_in(

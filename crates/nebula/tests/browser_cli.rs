@@ -4,6 +4,7 @@
 
 use std::process::Command;
 
+#[cfg(unix)]
 #[test]
 fn missing_ttyd_explains_the_dependency_and_fails() {
     let out = Command::new(env!("CARGO_BIN_EXE_bro"))
@@ -21,6 +22,7 @@ fn missing_ttyd_explains_the_dependency_and_fails() {
 /// `--port 0` used to be refused before anything spawned. It now resolves to
 /// a free port, so the run gets all the way to looking for ttyd — which is
 /// the *only* thing left to fail once PATH is scrubbed.
+#[cfg(unix)]
 #[test]
 fn port_zero_now_resolves_and_reaches_the_ttyd_lookup() {
     let out = Command::new(env!("CARGO_BIN_EXE_bro"))
@@ -44,6 +46,7 @@ fn port_zero_now_resolves_and_reaches_the_ttyd_lookup() {
 /// `--public` is the flag for a nebula running on a remote box. It has to get
 /// all the way past port resolution — which now probes 0.0.0.0 rather than
 /// loopback — before ttyd is looked for.
+#[cfg(unix)]
 #[test]
 fn public_resolves_a_port_on_every_interface_and_reaches_the_ttyd_lookup() {
     let out = Command::new(env!("CARGO_BIN_EXE_bro"))
@@ -60,6 +63,7 @@ fn public_resolves_a_port_on_every_interface_and_reaches_the_ttyd_lookup() {
 /// Serving a writable terminal to the network with no password is a thing to
 /// say out loud, and it is said before ttyd is spawned so it survives a run
 /// that fails for any other reason.
+#[cfg(unix)]
 #[test]
 fn a_public_bind_without_a_credential_warns() {
     let out = Command::new(env!("CARGO_BIN_EXE_bro"))
@@ -110,4 +114,19 @@ fn a_bind_address_that_is_not_an_ip_is_rejected_by_the_parser() {
     assert!(!out.status.success(), "hostnames are not bind addresses");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("invalid value"), "{stderr}");
+}
+
+/// Windows: `browser` is refused up front with a clear error until ttyd has
+/// a Windows story (docs/PORT.md).
+#[cfg(windows)]
+#[test]
+fn browser_is_refused_on_windows() {
+    let out = Command::new(env!("CARGO_BIN_EXE_bro"))
+        .arg("browser")
+        .env("PATH", "")
+        .output()
+        .expect("failed to run bro browser");
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("not supported on Windows"), "{stderr}");
 }

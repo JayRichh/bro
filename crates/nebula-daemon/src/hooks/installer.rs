@@ -593,6 +593,20 @@ mod tests {
         );
     }
 
+    /// Whether `cmd` posts `event` to the daemon's `endpoint`: the curl
+    /// URL on unix, the `_hook` subcommand's arguments on Windows.
+    fn routes(cmd: &str, endpoint: &str, event: &str) -> bool {
+        #[cfg(unix)]
+        {
+            cmd.contains(&format!("/api/hooks/{endpoint}?"))
+                && cmd.contains(&format!("hookEvent={event}"))
+        }
+        #[cfg(windows)]
+        {
+            cmd.ends_with(&format!(" {HOOK_SUBCOMMAND} {endpoint} {event}"))
+        }
+    }
+
     fn read_json(dir: &Path, rel: &str) -> Value {
         let text = std::fs::read_to_string(dir.join(rel)).unwrap();
         serde_json::from_str(&text).unwrap()
@@ -610,10 +624,11 @@ mod tests {
         let stop = &settings["hooks"]["Stop"];
         assert_eq!(stop.as_array().unwrap().len(), 1);
         assert_eq!(stop[0]["_nebulaManaged"], json!(true));
-        assert!(stop[0]["hooks"][0]["command"]
-            .as_str()
-            .unwrap()
-            .contains("hookEvent=Stop"));
+        assert!(routes(
+            stop[0]["hooks"][0]["command"].as_str().unwrap(),
+            "claude",
+            "Stop"
+        ));
         // Notification carries no matcher: idle_prompt has to reach us too.
         let notification = &settings["hooks"]["Notification"];
         assert!(notification[0].get("matcher").is_none());
@@ -653,10 +668,11 @@ mod tests {
         assert_eq!(groups.len(), 1, "{groups:?}");
         assert!(groups[0].get("matcher").is_none());
         assert_eq!(groups[0]["_nebulaManaged"], json!(true));
-        assert!(groups[0]["hooks"][0]["command"]
-            .as_str()
-            .unwrap()
-            .contains("hookEvent=PostToolUse"));
+        assert!(routes(
+            groups[0]["hooks"][0]["command"].as_str().unwrap(),
+            "claude",
+            "PostToolUse"
+        ));
     }
 
     /// Windows: the hook is this binary's `_hook` subcommand, the endpoint
@@ -755,8 +771,7 @@ mod tests {
         assert_eq!(stop.as_array().unwrap().len(), 1);
         assert_eq!(stop[0]["_nebulaManaged"], json!(true));
         let cmd = stop[0]["hooks"][0]["command"].as_str().unwrap();
-        assert!(cmd.contains("/api/hooks/codex?"), "codex endpoint: {cmd}");
-        assert!(cmd.contains("hookEvent=Stop"));
+        assert!(routes(cmd, "codex", "Stop"), "codex endpoint: {cmd}");
         // Claude-only events must not leak into the codex file.
         assert!(hooks["hooks"].get("Notification").is_none());
         assert!(hooks["hooks"].get("PreToolUse").is_none());
@@ -1011,26 +1026,34 @@ mod tests {
         assert_eq!(stop.as_array().unwrap().len(), 1);
         assert_eq!(stop[0]["_nebulaManaged"], json!(true));
         let cmd = stop[0]["command"].as_str().unwrap();
-        assert!(cmd.contains("/api/hooks/cursor?"), "cursor endpoint: {cmd}");
-        assert!(cmd.contains("hookEvent=Stop"));
-        // Gating hooks must answer cursor with a JSON response.
+        assert!(routes(cmd, "cursor", "Stop"), "cursor endpoint: {cmd}");
+        // Gating hooks must answer cursor with a JSON response (on Windows
+        // the `_hook` subcommand prints it).
+        #[cfg(unix)]
         assert!(
             cmd.contains("{\"continue\": true}"),
             "stdout response: {cmd}"
         );
         let submit = &hooks["hooks"]["beforeSubmitPrompt"][0];
-        assert!(submit["command"]
-            .as_str()
-            .unwrap()
-            .contains("hookEvent=UserPromptSubmit"));
-        assert!(hooks["hooks"]["sessionStart"][0]["command"]
-            .as_str()
-            .unwrap()
-            .contains("hookEvent=SessionStart"));
-        assert!(hooks["hooks"]["subagentStop"][0]["command"]
-            .as_str()
-            .unwrap()
-            .contains("hookEvent=SubagentStop"));
+        assert!(routes(
+            submit["command"].as_str().unwrap(),
+            "cursor",
+            "UserPromptSubmit"
+        ));
+        assert!(routes(
+            hooks["hooks"]["sessionStart"][0]["command"]
+                .as_str()
+                .unwrap(),
+            "cursor",
+            "SessionStart"
+        ));
+        assert!(routes(
+            hooks["hooks"]["subagentStop"][0]["command"]
+                .as_str()
+                .unwrap(),
+            "cursor",
+            "SubagentStop"
+        ));
         // Claude-dialect events must not appear — cursor never fires them.
         for key in [
             "Stop",
@@ -1124,17 +1147,24 @@ mod tests {
         let claude = read_settings(tmp.path());
         let codex = read_json(codex_dir.path(), "hooks.json");
         let cursor = read_json(tmp.path(), ".cursor/hooks.json");
-        assert!(claude["hooks"]["Stop"][0]["hooks"][0]["command"]
-            .as_str()
-            .unwrap()
-            .contains("/api/hooks/claude?"));
-        assert!(codex["hooks"]["Stop"][0]["hooks"][0]["command"]
-            .as_str()
-            .unwrap()
-            .contains("/api/hooks/codex?"));
-        assert!(cursor["hooks"]["stop"][0]["command"]
-            .as_str()
-            .unwrap()
-            .contains("/api/hooks/cursor?"));
+        assert!(routes(
+            claude["hooks"]["Stop"][0]["hooks"][0]["command"]
+                .as_str()
+                .unwrap(),
+            "claude",
+            "Stop"
+        ));
+        assert!(routes(
+            codex["hooks"]["Stop"][0]["hooks"][0]["command"]
+                .as_str()
+                .unwrap(),
+            "codex",
+            "Stop"
+        ));
+        assert!(routes(
+            cursor["hooks"]["stop"][0]["command"].as_str().unwrap(),
+            "cursor",
+            "Stop"
+        ));
     }
 }

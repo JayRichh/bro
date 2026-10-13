@@ -185,8 +185,10 @@ impl VimTerm {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::time::Duration;
 
+    #[cfg(unix)]
     async fn recv_until(
         rx: &mut tokio::sync::mpsc::UnboundedReceiver<VimEvent>,
         term: &mut VimTerm,
@@ -211,6 +213,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn output_reaches_parser_and_kill_exits() {
         let dir = tempfile::tempdir().unwrap();
@@ -239,6 +242,7 @@ mod tests {
         .await;
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn input_reaches_the_child() {
         let dir = tempfile::tempdir().unwrap();
