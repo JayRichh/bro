@@ -17,7 +17,13 @@
     const out: Crumb[] = [{ label: app.home === 'board' ? 'Board' : 'Overview', go: () => goHome() }];
     const project = p.repo ? m.projects.find((x) => x.id === p.repo) : undefined;
     if (project) out.push({ label: project.name, go: () => goHome(project.id) });
-    if (VIEW_LABEL[p.view]) out.push({ label: VIEW_LABEL[p.view] });
+    if (VIEW_LABEL[p.view]) out.push({ label: VIEW_LABEL[p.view], go: () => nav.go({ view: p.view, repo: p.repo }) });
+    if (p.view === 'branches' && p.item) {
+      // `repo / Branches / jari / gst-rounding`: the person, then the rest.
+      const cut = p.item.indexOf('/');
+      if (cut > 0) out.push({ label: p.item.slice(0, cut), mono: true }, { label: p.item.slice(cut + 1), mono: true });
+      else out.push({ label: p.item, mono: true });
+    }
     if (p.view === 'session') {
       const s = sessionFromKey(p.item);
       const name =
