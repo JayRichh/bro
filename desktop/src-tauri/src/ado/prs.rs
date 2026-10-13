@@ -1,7 +1,7 @@
 //! Azure DevOps pull requests: lists, votes, policies and threads.
 
 use crate::ado::auth::AuthError;
-use crate::ado::client::{AdoClient, AdoError};
+use crate::ado::client::{AdoClient, AdoError, CmdError};
 use crate::ado::remote::AdoRemote;
 use crate::ado::store::Reviewer;
 use crate::ado::{AdoContext, AdoState};
@@ -46,9 +46,9 @@ impl PrCtx {
         state: &AdoState,
         client: &crate::daemon::Client,
         worktree: &str,
-    ) -> Result<PrCtx, String> {
+    ) -> Result<PrCtx, CmdError> {
         let ado = state.context_for(client, worktree).await?;
-        PrCtx::new(ado).await.map_err(|e| e.user_message())
+        Ok(PrCtx::new(ado).await?)
     }
 }
 

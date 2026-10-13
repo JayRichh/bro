@@ -3,10 +3,13 @@
 // the last create's note for the detail to show.
 
 import type { CreateResult, PrLists, Reviewer } from './prs-api';
+import type { ErrKind } from './errors';
 
 export interface ListState {
   data: PrLists | null;
   error: string | null;
+  /** `auth` when the failure was the sign-in, so the list offers Sign in again. */
+  errorKind?: ErrKind | null;
   loading: boolean;
   /** Unix ms of the last good load. */
   at: number;
@@ -30,6 +33,7 @@ export interface ComposeDraft {
   /** The task the create asked to link, kept for Retry. */
   linkTask: number | null;
   error: string | null;
+  errorKind: ErrKind | null;
 }
 
 export const prsState = $state({
@@ -65,6 +69,7 @@ export function freshDraft(): ComposeDraft {
     outcome: null,
     linkTask: null,
     error: null,
+    errorKind: null,
   };
 }
 

@@ -7,7 +7,7 @@
   import { composeItem } from './prs-api';
   import StartTask from './StartTask.svelte';
   import {
-    ageWords,
+    cachedNotice,
     filterTasks,
     ownsKey,
     remainingLabel,
@@ -21,6 +21,9 @@
     type WorkItem,
   } from './tasks-api';
   import { branchesApi, type BranchRow, type BranchTree } from './branches-api';
+  import { errKind, errText, type ErrKind } from './errors';
+  import { signin } from './signin.svelte';
+  import SignInAgain from './SignInAgain.svelte';
 
   let { repo }: { repo: string } = $props();
 
@@ -37,6 +40,7 @@
   let list = $state<TaskList | null>(null);
   let loading = $state(false);
   let error = $state<string | null>(null);
+  let errorKind = $state<ErrKind>('other');
   let iterations = $state<Iteration[]>([]);
   let teams = $state<string[]>([]);
   let teamBusy = $state(false);
@@ -63,7 +67,8 @@
       list = l;
     } catch (e) {
       if (mine !== seq) return;
-      error = String(e);
+      error = errText(e);
+      errorKind = errKind(e);
     } finally {
       if (mine === seq) loading = false;
     }
@@ -120,7 +125,8 @@
     } catch (e) {
       // The team was not saved: the picker goes back to what is in use.
       picker.value = before;
-      error = `Could not change the team: ${String(e)}`;
+      error = `Could not change the team: ${errText(e)}`;
+      errorKind = errKind(e);
     } finally {
       teamBusy = false;
     }
@@ -218,7 +224,7 @@
       <button
         class="h-7 border border-rule bg-transparent px-2.5 text-[13px] text-ink hover:border-rule-strong disabled:text-faint"
         onclick={() => worktree && load(worktree, scope)}
-        disabled={loading || !worktree}>{loading ? 'Loading' : 'Refresh'}</button
+        disabled={loading || !worktree}>{loading ? (signin.slow ? 'Signing in\u2026' : 'Loading') : 'Refresh'}</button
       >
     </div>
 
@@ -279,10 +285,14 @@
     </div>
 
     {#if list?.cachedAt}
-      <p class="m-0 mt-3 flex items-center gap-2 text-[13px] text-muted" role="status">
-        <span class="size-1.5 flex-none border border-muted" aria-hidden="true"></span>
-        Offline, as of {ageWords(list.cachedAt, app.now)}. This is the last list saved for this scope.
-      </p>
+      {@const cachedAuth = list.cachedBecause === 'auth'}
+      <div class="mt-3 flex flex-wrap items-center gap-3 text-[13px] {cachedAuth ? 'text-ink' : 'text-muted'}" role="status">
+        <span class="inline-flex items-center gap-2" title={list.cachedReason ?? undefined}>
+          <span class="size-1.5 flex-none {cachedAuth ? 'bg-fail' : 'border border-muted'}" aria-hidden="true"></span>
+          {cachedNotice(list, app.now)}
+        </span>
+        {#if cachedAuth}<SignInAgain {worktree} onsignedin={() => worktree && load(worktree, scope)} />{/if}
+      </div>
     {/if}
     {#if stale}
       <p class="m-0 mt-3 flex items-center gap-3 text-[13px] text-ink" role="status">
@@ -303,18 +313,22 @@
             <span class="size-1.5 flex-none bg-fail" aria-hidden="true"></span><span class="font-medium text-fail">Failed</span>
             {error}
           </p>
-          <button class="mt-3 h-7 border border-rule-strong bg-transparent px-2.5 text-[13px] text-ink hover:bg-surface" onclick={() => worktree && load(worktree, scope)}
-            >Try again</button
-          >
+          <div class="mt-3 flex flex-wrap items-center gap-3">
+            <button class="h-7 border border-rule-strong bg-transparent px-2.5 text-[13px] text-ink hover:bg-surface" onclick={() => worktree && load(worktree, scope)}
+              >Try again</button
+            >
+            {#if errorKind === 'auth'}<SignInAgain {worktree} onsignedin={() => worktree && load(worktree, scope)} />{/if}
+          </div>
         </div>
       {:else if !list}
-        <p class="m-0 px-6 py-6 font-mono text-[12px] text-muted">{worktree ? 'Loading tasks' : 'This repo has no checkout the daemon knows.'}</p>
+        <p class="m-0 px-6 py-6 font-mono text-[12px] text-muted">{worktree ? (signin.slow ? 'Signing in\u2026' : 'Loading tasks') : 'This repo has no checkout the daemon knows.'}</p>
       {:else}
         {#if error}
           <p class="m-0 flex items-center gap-2 border-b border-rule px-6 py-2 text-[13px] text-ink" role="alert">
             <span class="size-1.5 flex-none bg-fail" aria-hidden="true"></span><span class="font-medium text-fail">Failed</span>
             {error}
           </p>
+          {#if errorKind === 'auth'}<div class="border-b border-rule px-6 py-2"><SignInAgain {worktree} onsignedin={() => worktree && load(worktree, scope)} /></div>{/if}
         {/if}
         {#each groups as g, gi (g.parent?.id ?? `none-${gi}`)}
           <section class="pt-5" aria-label={g.parent ? `${g.parent.kind} ${g.parent.id}` : 'No parent'}>

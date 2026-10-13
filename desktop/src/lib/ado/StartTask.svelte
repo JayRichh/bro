@@ -2,6 +2,9 @@
   import { onMount } from 'svelte';
   import { app, openSession, toast } from '../store.svelte';
   import { branchProblem, suggestBranch, tasksApi, type StartedTask, type WorkItem } from './tasks-api';
+  import { errKind, errText, type ErrKind } from './errors';
+  import { signin } from './signin.svelte';
+  import SignInAgain from './SignInAgain.svelte';
 
   let {
     worktree,
@@ -41,6 +44,8 @@
   let promptError = $state('');
   let busy = $state(false);
   let error = $state<string | null>(null);
+  let errorKind = $state<ErrKind>('other');
+  let promptKind = $state<ErrKind>('other');
   let outcome = $state<StartedTask | null>(null);
   let box: HTMLInputElement | undefined = $state();
 
@@ -59,7 +64,8 @@
       prompt = await tasksApi.prompt(worktree, item.id);
       promptState = 'ready';
     } catch (e) {
-      promptError = String(e);
+      promptError = errText(e);
+      promptKind = errKind(e);
       promptState = 'failed';
     }
   }
@@ -106,7 +112,8 @@
       if (done.agentId) openSession({ Agent: done.agentId });
       else toast(`Started ${branch.trim()} in a new worktree.`);
     } catch (err) {
-      error = String(err);
+      error = errText(err);
+      errorKind = errKind(err);
     } finally {
       busy = false;
     }
@@ -287,6 +294,7 @@
                       >Try again</button
                     >
                   </span>
+                  {#if promptKind === 'auth'}<SignInAgain {worktree} onsignedin={loadPrompt} />{/if}
                 {/if}
               </label>
             {/if}
@@ -298,6 +306,7 @@
             <span class="mt-1.5 size-1.5 flex-none bg-fail" aria-hidden="true"></span>
             <span><span class="font-medium text-fail">Not started.</span> {error}</span>
           </p>
+          {#if errorKind === 'auth'}<div class="flex-none px-5 pb-2.5"><SignInAgain {worktree} /></div>{/if}
         {/if}
         {#if confirmDiscard}
           <div class="flex flex-none items-center gap-3 border-t border-rule px-5 py-2.5 text-[13px] text-ink" role="alertdialog" aria-label="Discard changes">
@@ -316,7 +325,7 @@
           <button
             type="submit"
             class="h-8 min-w-24 border-0 bg-ink px-3 text-[13px] font-medium text-bg enabled:hover:bg-muted disabled:bg-raised disabled:text-faint"
-            disabled={busy || !!problem}>{busy ? 'Starting' : 'Start task'}</button
+            disabled={busy || !!problem}>{busy ? (signin.slow ? 'Signing in\u2026' : 'Starting') : 'Start task'}</button
           >
         </footer>
       </form>

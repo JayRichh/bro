@@ -8,6 +8,9 @@
   import Review from './Review.svelte';
   import { composeItem, parseItem, prItem, prMark, prs, voteSquare, type PrSummary } from './prs-api';
   import { prsState, type CreatedPr } from './prs-state.svelte';
+  import { errKind, errText } from './errors';
+  import { signin } from './signin.svelte';
+  import SignInAgain from './SignInAgain.svelte';
 
   const repo = $derived(nav.current.repo ?? '');
   const item = $derived(parseItem(nav.current.item));
@@ -35,9 +38,11 @@
     try {
       cur.data = await prs.list(wt);
       cur.error = null;
+      cur.errorKind = null;
       cur.at = Date.now();
     } catch (e) {
-      cur.error = String(e);
+      cur.error = errText(e);
+      cur.errorKind = errKind(e);
     } finally {
       cur.loading = false;
     }
@@ -162,7 +167,7 @@
             {/each}
           </div>
           <span class="flex-1"></span>
-          {#if list?.loading}<span class="mb-1.5 font-mono text-[12px] text-muted" role="status">Loading</span>{/if}
+          {#if list?.loading}<span class="mb-1.5 font-mono text-[12px] text-muted" role="status">{signin.slow ? 'Signing in\u2026' : 'Loading'}</span>{/if}
           <button
             class="mb-1.5 inline-flex h-7 items-center border border-rule-strong bg-transparent px-2.5 text-[13px] text-ink hover:bg-surface"
             onclick={() => (composing = !composing)}
@@ -227,6 +232,7 @@
         {#if list?.error}
           <li class="px-6 py-4 text-[13px]">
             <p class="m-0 text-fail select-text">{list.error}</p>
+            {#if list.errorKind === 'auth'}<div class="mt-2"><SignInAgain {worktree} onsignedin={load} /></div>{/if}
             {#if list.data}<p class="m-0 mt-1 text-[12px] text-muted">Showing what was read before.</p>{/if}
           </li>
         {/if}

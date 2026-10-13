@@ -4,6 +4,7 @@
 // types are diff-api's; the PR views draw their diff with DiffPane.
 
 import { invoke } from '@tauri-apps/api/core';
+import { promptingInvoke } from './signin.svelte';
 import type { Blob, DiffSide, RangeDiff } from '../diff-api';
 
 export interface ReviewerVote {
@@ -109,6 +110,8 @@ export interface WorkItem {
 export interface TaskList {
   groups: { parent: WorkItem | null; items: WorkItem[] }[];
   cachedAt?: number | null;
+  cachedBecause?: 'auth' | 'offline' | null;
+  cachedReason?: string | null;
 }
 export type TaskScope = 'currentSprint' | 'myOpen' | 'sprintAll' | { iteration: string };
 
@@ -123,20 +126,20 @@ export const VOTES: { vote: number; label: string }[] = [
 ];
 
 export const prs = {
-  list: (worktree: string) => invoke<PrLists>('ado_prs', { worktree }),
-  detail: (worktree: string, id: number) => invoke<PrDetail>('ado_pr_detail', { worktree, id }),
-  create: (worktree: string, pr: NewPr) => invoke<CreateResult>('ado_create_pr', { worktree, pr }),
+  list: (worktree: string) => promptingInvoke<PrLists>('ado_prs', { worktree }),
+  detail: (worktree: string, id: number) => promptingInvoke<PrDetail>('ado_pr_detail', { worktree, id }),
+  create: (worktree: string, pr: NewPr) => promptingInvoke<CreateResult>('ado_create_pr', { worktree, pr }),
   /** Retry for "Created, task not linked". */
-  linkTask: (worktree: string, id: number, task: number) => invoke<void>('ado_link_pr_task', { worktree, id, task }),
-  publish: (worktree: string, id: number) => invoke<void>('ado_publish_pr', { worktree, id }),
+  linkTask: (worktree: string, id: number, task: number) => promptingInvoke<void>('ado_link_pr_task', { worktree, id, task }),
+  publish: (worktree: string, id: number) => promptingInvoke<void>('ado_publish_pr', { worktree, id }),
   /** Refused for drafts. */
-  vote: (worktree: string, id: number, vote: number) => invoke<void>('ado_vote', { worktree, id, vote }),
+  vote: (worktree: string, id: number, vote: number) => promptingInvoke<void>('ado_vote', { worktree, id, vote }),
   reply: (worktree: string, id: number, thread: number, text: string) =>
-    invoke<Comment>('ado_reply', { worktree, id, thread, text }),
-  searchIdentities: (worktree: string, q: string) => invoke<Reviewer[]>('ado_search_identities', { worktree, q }),
+    promptingInvoke<Comment>('ado_reply', { worktree, id, thread, text }),
+  searchIdentities: (worktree: string, q: string) => promptingInvoke<Reviewer[]>('ado_search_identities', { worktree, q }),
   recentReviewers: (worktree: string) => invoke<Reviewer[]>('ado_recent_reviewers', { worktree }),
-  composeSeed: (worktree: string, branch: string) => invoke<ComposeSeed>('ado_compose_seed', { worktree, branch }),
-  tasks: (worktree: string, scope: TaskScope) => invoke<TaskList>('ado_tasks', { worktree, scope }),
+  composeSeed: (worktree: string, branch: string) => promptingInvoke<ComposeSeed>('ado_compose_seed', { worktree, branch }),
+  tasks: (worktree: string, scope: TaskScope) => promptingInvoke<TaskList>('ado_tasks', { worktree, scope }),
   diffRange: (worktree: string, base: string, tip: string) => invoke<RangeDiff>('diff_range', { worktree, base, tip }),
   diffBlob: (worktree: string, side: DiffSide, path: string) => invoke<Blob>('diff_blob', { worktree, side, path }),
   /** Ask a session (`kete ask`) and wait for its answer. */

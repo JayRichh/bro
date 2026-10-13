@@ -3,6 +3,7 @@
 //! then), saving a view's UI state into `ado.json` so it survives a
 //! restart, and the store's last load or write failure for a toast.
 
+use super::client::CmdError;
 use super::store::{AdoStore, RepoKey};
 use super::{ado_remote, checkout_path, AdoState};
 use crate::daemon::Client;
@@ -83,6 +84,23 @@ pub async fn ado_save_ui(
 #[tauri::command]
 pub fn ado_store_error(ado: State<'_, AdoState>) -> Option<String> {
     ado.store.take_last_error()
+}
+
+/// "Sign in again": `az login` for the repo's org (with the tenant Kete
+/// learned for it, else a plain `az login`), then the org's cached
+/// credential and ids are dropped and its PR poll runs again. Opens a
+/// browser and waits for the person to finish there.
+#[tauri::command]
+pub async fn ado_sign_in(
+    client: State<'_, Arc<Client>>,
+    ado: State<'_, AdoState>,
+    worktree: String,
+) -> Result<(), CmdError> {
+    let path = checkout_path(&client, &worktree)?;
+    let (_, r) = ado_remote(&path)
+        .await?
+        .ok_or("This repo has no Azure DevOps remote.")?;
+    Ok(ado.sign_in(&r.org_url).await?)
 }
 
 fn saved_ui(store: &AdoStore, key: &RepoKey) -> serde_json::Value {

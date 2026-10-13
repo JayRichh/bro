@@ -734,8 +734,14 @@ mod tests {
         // tid is learned for b alone, and saved.
         src.token("https://dev.azure.com/b").await.unwrap();
         assert!(!r.last_args("az").contains(&"--tenant".to_string()));
-        assert_eq!(src.tenant("https://dev.azure.com/b").as_deref(), Some("t-b"));
-        assert_eq!(src.tenant("https://dev.azure.com/a").as_deref(), Some("t-a"));
+        assert_eq!(
+            src.tenant("https://dev.azure.com/b").as_deref(),
+            Some("t-b")
+        );
+        assert_eq!(
+            src.tenant("https://dev.azure.com/a").as_deref(),
+            Some("t-a")
+        );
         assert_eq!(
             *saved.lock().unwrap(),
             vec![("https://dev.azure.com/b".to_string(), "t-b".to_string())]

@@ -11,6 +11,9 @@
   import { BLOCKING, preflight } from './policy';
   import { prItem, prs, type Reviewer, type WorkItem } from './prs-api';
   import { describe, freshDraft, prsState, type ComposeDraft } from './prs-state.svelte';
+  import { errKind, errText } from './errors';
+  import { signin } from './signin.svelte';
+  import SignInAgain from './SignInAgain.svelte';
 
   let {
     worktree,
@@ -50,7 +53,7 @@
       }
       if (!draft.title) draft.title = draft.task?.title || (s.subjects.length === 1 ? s.subjects[0] : '');
     } catch (e) {
-      draft.seedError = String(e);
+      draft.seedError = errText(e);
       draft.target ||= 'main';
     } finally {
       draft.seeded = true;
@@ -81,7 +84,7 @@
         const t = prsState.drafts[key]?.task;
         if (t && !t.title) t.title = tasks.find((x) => x.id === t.id)?.title ?? '';
       })
-      .catch((e) => (tasksError = String(e)));
+      .catch((e) => (tasksError = errText(e)));
   });
   const taskMatches = $derived.by(() => {
     const q = taskQuery.trim().toLowerCase().replace(/^#/, '');
@@ -127,7 +130,7 @@
           if (revQuery.trim() === q) found = r;
           revError = null;
         })
-        .catch((e) => (revError = String(e)))
+        .catch((e) => (revError = errText(e)))
         .finally(() => revQuery.trim() === q && (searching = false));
     }, 250);
   });
@@ -172,7 +175,7 @@
       );
       d.summary = answer.trim();
     } catch (e) {
-      askError = String(e);
+      askError = errText(e);
     } finally {
       asking = false;
     }
@@ -184,6 +187,7 @@
     if (!check.ok || d.busy || !d.title.trim() || d.outcome) return;
     d.busy = true;
     d.error = null;
+    d.errorKind = null;
     d.outcome = null;
     const linkTask = d.noTask ? null : (d.task?.id ?? null);
     d.linkTask = linkTask;
@@ -200,7 +204,8 @@
       d.outcome = out;
       if (out.kind === 'created') opened(out.id, out.note);
     } catch (e) {
-      d.error = String(e);
+      d.error = errText(e);
+      d.errorKind = errKind(e);
     } finally {
       d.busy = false;
     }
@@ -216,7 +221,7 @@
       await prs.linkTask(worktree, o.id, task);
       opened(o.id, o.note);
     } catch (e) {
-      o.reason = String(e);
+      o.reason = errText(e);
     } finally {
       retrying = false;
     }
@@ -429,13 +434,14 @@
           type="submit"
           class="inline-flex h-8 items-center border-0 bg-ink px-3.5 text-[13px] font-medium text-bg enabled:hover:bg-muted disabled:bg-raised disabled:text-faint"
           disabled={!check.ok || d.busy || !d.title.trim() || !!d.outcome}
-          >{d.busy ? 'Pushing and creating' : d.draft ? 'Create draft pull request' : 'Create pull request'}</button
+          >{d.busy ? (signin.slow ? 'Signing in\u2026' : 'Pushing and creating') : d.draft ? 'Create draft pull request' : 'Create pull request'}</button
         >
         {#if !d.title.trim()}<span class="text-[12px] text-muted">Add a title</span>{/if}
       </div>
 
       {#if d.error}
         <p class="m-0 mt-3 text-[13px] text-fail select-text">{d.error}</p>
+        {#if d.errorKind === 'auth'}<div class="mt-2"><SignInAgain {worktree} /></div>{/if}
         <p class="m-0 mt-1 text-[12px] text-muted">Nothing you typed was lost. Fix it and create again.</p>
       {/if}
 

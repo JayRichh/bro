@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest';
 import {
   branchProblem,
+  cachedNotice,
   ownsKey,
   filterTasks,
   scopeFromKey,
@@ -13,6 +14,16 @@ import {
   type TaskGroup,
   type WorkItem,
 } from './tasks-api';
+
+test('a list saved because of a sign-in failure says so, not offline', () => {
+  const now = Date.parse('2026-10-14T12:00:00Z');
+  const at = now - 3 * 60_000;
+  expect(cachedNotice({ cachedAt: null, cachedBecause: null }, now)).toBeNull();
+  expect(cachedNotice({ cachedAt: at, cachedBecause: 'auth' }, now)).toBe('Signed out. Showing the list from 3 min ago.');
+  expect(cachedNotice({ cachedAt: at, cachedBecause: 'offline' }, now)).toContain('Offline, as of 3 min ago');
+  // An older saved list without a reason reads as offline.
+  expect(cachedNotice({ cachedAt: at }, now)).toContain('Offline');
+});
 
 const sprint = (name: string, finish: string | null): Iteration => ({
   id: name.toLowerCase().replace(' ', '-'),

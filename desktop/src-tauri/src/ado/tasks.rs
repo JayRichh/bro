@@ -1,7 +1,7 @@
 //! Sprint tasks: the team's iterations, the work items in a scope grouped
 //! by parent, and starting a task as a branch, a worktree and an agent.
 
-use crate::ado::client::AdoError;
+use crate::ado::client::{AdoError, CmdError, ErrorKind};
 use crate::ado::naming::validate_branch_name;
 use crate::ado::{enc, git_out, AdoContext, AdoState, Me, WitState};
 use crate::daemon::Client;
@@ -83,10 +83,18 @@ pub struct TaskList {
     pub stale: bool,
     pub next: Option<Iteration>,
     pub groups: Vec<TaskGroup>,
-    /// Set when ADO could not be reached and this is the last list saved
-    /// for the scope: when it was saved, in Unix milliseconds.
+    /// Set when ADO could not be reached or signed in to and this is the
+    /// last list saved for the scope: when it was saved, in Unix
+    /// milliseconds.
     #[serde(default)]
     pub cached_at: Option<i64>,
+    /// Why the saved list is shown: `offline`, or `auth` (signed out, so
+    /// the window offers "Sign in again").
+    #[serde(default)]
+    pub cached_because: Option<ErrorKind>,
+    /// The failure behind a saved list, in words.
+    #[serde(default)]
+    pub cached_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -347,6 +355,8 @@ pub async fn tasks(ctx: &AdoContext, scope: &TaskScope, today: &str) -> Result<T
             next: None,
             groups,
             cached_at: None,
+            cached_because: None,
+            cached_reason: None,
         });
     }
 
@@ -375,6 +385,8 @@ pub async fn tasks(ctx: &AdoContext, scope: &TaskScope, today: &str) -> Result<T
             next: None,
             groups: Vec::new(),
             cached_at: None,
+            cached_because: None,
+            cached_reason: None,
         });
     };
     let (stale, next) = stale_and_next(&iteration, &all, today);
@@ -406,6 +418,8 @@ pub async fn tasks(ctx: &AdoContext, scope: &TaskScope, today: &str) -> Result<T
             next,
             groups: Vec::new(),
             cached_at: None,
+            cached_because: None,
+            cached_reason: None,
         });
     }
 
@@ -429,21 +443,21 @@ pub async fn tasks(ctx: &AdoContext, scope: &TaskScope, today: &str) -> Result<T
         next,
         groups,
         cached_at: None,
+        cached_because: None,
+        cached_reason: None,
     })
 }
 
 /// Whether `e` means ADO could not be reached or signed in to, when the
-/// last saved list beats an error.
-fn is_offline(e: &AdoError) -> bool {
-    matches!(
-        e,
-        AdoError::Network(_) | AdoError::Auth(_) | AdoError::Unauthorized
-    )
+/// last saved list beats an error. The list then says which it was.
+fn falls_back(e: &AdoError) -> bool {
+    matches!(e.kind(), ErrorKind::Offline | ErrorKind::Auth)
 }
 
 /// [`tasks`], saving each list in `ado.json`. When ADO cannot be reached
 /// or signed in to, the last list saved for the scope comes back instead,
-/// with `cached_at` set.
+/// with `cached_at` set and `cached_because` saying which (a signed-out
+/// list is never passed off as offline).
 pub async fn tasks_or_cached(
     ctx: &AdoContext,
     scope: &TaskScope,
@@ -458,7 +472,7 @@ pub async fn tasks_or_cached(
             ctx.store.cache_put(&ctx.key, &name, value);
             Ok(list)
         }
-        Err(e) if is_offline(&e) => {
+        Err(e) if falls_back(&e) => {
             let saved = ctx
                 .store
                 .read_repo(&ctx.key, |r| r.cache.get(&name).cloned());
@@ -470,6 +484,8 @@ pub async fn tasks_or_cached(
             match cached {
                 Some((mut list, at)) => {
                     list.cached_at = Some(at);
+                    list.cached_because = Some(e.kind());
+                    list.cached_reason = Some(e.user_message());
                     Ok(list)
                 }
                 None => Err(e),
@@ -853,18 +869,19 @@ pub async fn start_task(
     ctx: &AdoContext,
     ws: &dyn Workspace,
     req: StartTask,
-) -> Result<StartedTask, String> {
+) -> Result<StartedTask, CmdError> {
     validate_branch_name(&req.branch, &[])?;
     let taken = ws.taken_branches().await?;
     validate_branch_name(&req.branch, &taken)?;
     let base = match req.base.as_deref().map(str::trim).filter(|b| !b.is_empty()) {
         Some(b) => Some(b.to_string()),
         // The repo's ADO default branch, never whatever origin/HEAD says.
-        None => ctx.default_branch_ref().await.map_err(|e| {
-            format!(
+        None => ctx.default_branch_ref().await.map_err(|e| CmdError {
+            kind: e.kind(),
+            message: format!(
                 "Could not read the repo's default branch, so no base to cut from: {}",
                 e.user_message()
-            )
+            ),
         })?,
     };
     let worktree_id = ws.create_worktree(&req.branch, base.as_deref()).await?;
@@ -1100,9 +1117,9 @@ pub async fn ado_teams(
     client: State<'_, Arc<Client>>,
     ado: State<'_, AdoState>,
     worktree: String,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<String>, CmdError> {
     let ctx = ado.context_for(&client, &worktree).await?;
-    teams(&ctx).await.map_err(|e| e.user_message())
+    teams(&ctx).await.map_err(CmdError::from)
 }
 
 /// The team's iterations, by start date.
@@ -1111,9 +1128,9 @@ pub async fn ado_iterations(
     client: State<'_, Arc<Client>>,
     ado: State<'_, AdoState>,
     worktree: String,
-) -> Result<Vec<Iteration>, String> {
+) -> Result<Vec<Iteration>, CmdError> {
     let ctx = ado.context_for(&client, &worktree).await?;
-    iterations(&ctx).await.map_err(|e| e.user_message())
+    iterations(&ctx).await.map_err(CmdError::from)
 }
 
 /// The tasks in `scope`, grouped by parent.
@@ -1123,11 +1140,11 @@ pub async fn ado_tasks(
     ado: State<'_, AdoState>,
     worktree: String,
     scope: TaskScope,
-) -> Result<TaskList, String> {
+) -> Result<TaskList, CmdError> {
     let ctx = ado.context_for(&client, &worktree).await?;
     tasks_or_cached(&ctx, &scope, &today_utc())
         .await
-        .map_err(|e| e.user_message())
+        .map_err(CmdError::from)
 }
 
 /// Remember the team this repo's views use (empty: the default team).
@@ -1137,9 +1154,9 @@ pub async fn ado_set_team(
     ado: State<'_, AdoState>,
     worktree: String,
     team: String,
-) -> Result<(), String> {
+) -> Result<(), CmdError> {
     let ctx = ado.context_for(&client, &worktree).await?;
-    set_team(&ctx, &team).map_err(|e| e.user_message())
+    set_team(&ctx, &team).map_err(CmdError::from)
 }
 
 /// The prompt Start would give an agent for task `id`, for the dialog.
@@ -1149,9 +1166,9 @@ pub async fn ado_task_prompt(
     ado: State<'_, AdoState>,
     worktree: String,
     id: u32,
-) -> Result<String, String> {
+) -> Result<String, CmdError> {
     let ctx = ado.context_for(&client, &worktree).await?;
-    prompt_for(&ctx, id).await.map_err(|e| e.user_message())
+    prompt_for(&ctx, id).await.map_err(CmdError::from)
 }
 
 /// Start a task: branch, worktree, task link, and optionally assign,
@@ -1162,7 +1179,7 @@ pub async fn ado_start_task(
     ado: State<'_, AdoState>,
     worktree: String,
     req: StartTask,
-) -> Result<StartedTask, String> {
+) -> Result<StartedTask, CmdError> {
     // Refuse a bad name before any git or HTTP.
     validate_branch_name(&req.branch, &[])?;
     let row = client
@@ -1178,7 +1195,7 @@ pub async fn ado_start_task(
         repo: row.path,
         remote_name: ctx.remote_name.clone(),
     };
-    start_task(&ctx, &ws, req).await
+    Ok(start_task(&ctx, &ws, req).await?)
 }
 
 // ---- HTML to markdown ----
@@ -1981,7 +1998,7 @@ mod tests {
         let ws = FakeWs::default();
         for bad in ["jari/fix gst", "jari/..x", "-x", "jari/"] {
             let e = start_task(&ctx, &ws, start(101, bad)).await.unwrap_err();
-            assert!(e.contains("not a valid branch name"), "{e}");
+            assert!(e.message.contains("not a valid branch name"), "{e}");
         }
         assert!(ws.calls.lock().unwrap().is_empty());
         assert_eq!(any.hits(), 0);
@@ -2002,7 +2019,7 @@ mod tests {
         let e = start_task(&ctx, &ws, start(101, "jari/fix-gst"))
             .await
             .unwrap_err();
-        assert!(e.contains("already exists"), "{e}");
+        assert!(e.message.contains("already exists"), "{e}");
         assert_eq!(*ws.calls.lock().unwrap(), vec!["branches"]);
         assert_eq!(any.hits(), 0);
     }
@@ -2173,7 +2190,7 @@ mod tests {
         let e = start_task(&ctx, &ws, start(101, "jari/fix"))
             .await
             .unwrap_err();
-        assert!(e.contains("default branch"), "{e}");
+        assert!(e.message.contains("default branch"), "{e}");
         assert_eq!(*ws.calls.lock().unwrap(), vec!["branches"]);
     }
 
@@ -2280,6 +2297,7 @@ mod tests {
             .await
             .unwrap();
         assert!(cached.cached_at.is_some());
+        assert_eq!(cached.cached_because, Some(ErrorKind::Offline));
         assert_eq!(cached.groups, fresh.groups);
         // Another scope has nothing saved: the error stands.
         let e = tasks_or_cached(&offline, &TaskScope::MyOpen, "2026-10-10")
@@ -2298,6 +2316,9 @@ mod tests {
             .await
             .unwrap();
         assert!(cached.cached_at.is_some());
+        // ...saying it is shown because of the sign-in, not as offline.
+        assert_eq!(cached.cached_because, Some(ErrorKind::Auth));
+        assert!(cached.cached_reason.is_some_and(|r| r.contains("sign")));
         // A 403 is not offline: it stays an error.
         let forbidden = MockServer::start();
         forbidden.mock(|w, t| {

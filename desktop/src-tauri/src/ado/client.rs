@@ -4,6 +4,7 @@
 use crate::ado::auth::{AuthError, TokenSource};
 use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};
@@ -68,6 +69,70 @@ impl std::error::Error for AdoError {}
 impl From<AuthError> for AdoError {
     fn from(e: AuthError) -> Self {
         AdoError::Auth(e)
+    }
+}
+
+/// What kind of failure a command hit, so the window can offer the right
+/// way out ("Sign in again" for `Auth`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ErrorKind {
+    /// Not signed in, or the sign-in was refused (401, interaction
+    /// required, no credential).
+    Auth,
+    /// Signed in, but not allowed into that area (403).
+    Forbidden,
+    /// Azure DevOps could not be reached.
+    Offline,
+    Other,
+}
+
+impl AdoError {
+    pub fn kind(&self) -> ErrorKind {
+        match self {
+            AdoError::Auth(_) | AdoError::Unauthorized => ErrorKind::Auth,
+            AdoError::Forbidden { .. } => ErrorKind::Forbidden,
+            AdoError::Network(_) => ErrorKind::Offline,
+            _ => ErrorKind::Other,
+        }
+    }
+}
+
+/// An ADO command's error as the window gets it: `{ kind, message }`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CmdError {
+    pub kind: ErrorKind,
+    pub message: String,
+}
+
+impl fmt::Display for CmdError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl From<AdoError> for CmdError {
+    fn from(e: AdoError) -> Self {
+        CmdError {
+            kind: e.kind(),
+            message: e.user_message(),
+        }
+    }
+}
+
+/// A local failure (git, input, a gone worktree), already in words.
+impl From<String> for CmdError {
+    fn from(message: String) -> Self {
+        CmdError {
+            kind: ErrorKind::Other,
+            message,
+        }
+    }
+}
+
+impl From<&str> for CmdError {
+    fn from(message: &str) -> Self {
+        message.to_string().into()
     }
 }
 
@@ -536,6 +601,30 @@ mod tests {
         let c = AdoClient::new(&s.base_url(), Arc::new(TokenSource::new(r.clone()))).silent();
         let _: serde_json::Value = c.get("/p/_apis/x").await.unwrap();
         assert_eq!(r.count("git", "credential.interactive=never"), 1);
+    }
+
+    #[test]
+    fn command_errors_carry_their_kind() {
+        let kind = |e: AdoError| CmdError::from(e).kind;
+        assert_eq!(kind(AdoError::Unauthorized), ErrorKind::Auth);
+        assert_eq!(
+            kind(AdoError::Auth(AuthError::InteractionRequired("x".into()))),
+            ErrorKind::Auth
+        );
+        assert_eq!(
+            kind(AdoError::Forbidden {
+                area: "code".into()
+            }),
+            ErrorKind::Forbidden
+        );
+        assert_eq!(kind(AdoError::Network("down".into())), ErrorKind::Offline);
+        assert_eq!(kind(AdoError::NotFound), ErrorKind::Other);
+        let e = CmdError::from(AdoError::Unauthorized);
+        assert_eq!(
+            serde_json::to_value(&e).unwrap(),
+            json!({"kind": "auth", "message": AdoError::Unauthorized.user_message()})
+        );
+        assert_eq!(CmdError::from("gone").kind, ErrorKind::Other);
     }
 
     #[test]

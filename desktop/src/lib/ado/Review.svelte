@@ -11,6 +11,9 @@
   import type { DiffMode } from '../diff-api';
   import { policyMark, prMark, prs, VOTES, voteSquare, type PrDetail, type Thread } from './prs-api';
   import { prsState } from './prs-state.svelte';
+  import { errKind, errText, type ErrKind } from './errors';
+  import { signin } from './signin.svelte';
+  import SignInAgain from './SignInAgain.svelte';
 
   let {
     worktree,
@@ -21,6 +24,7 @@
 
   let detail = $state<PrDetail | null>(null);
   let error = $state<string | null>(null);
+  let errorKind = $state<ErrKind>('other');
   let loading = $state(false);
   let tab = $state<'overview' | 'changes'>('overview');
   /** The Changes tab opens inline, as the PR detail's column is narrow. */
@@ -28,6 +32,7 @@
   let publishing = $state(false);
   let voting = $state<number | null>(null);
   let actionError = $state<string | null>(null);
+  let actionKind = $state<ErrKind>('other');
   /** Reply drafts per thread id. */
   let replies = $state<Record<number, string>>({});
   let replying = $state<number | null>(null);
@@ -43,7 +48,10 @@
       const d = await prs.detail(worktree, id);
       if (mine === asked) detail = d;
     } catch (e) {
-      if (mine === asked) error = String(e);
+      if (mine === asked) {
+        error = errText(e);
+        errorKind = errKind(e);
+      }
     } finally {
       if (mine === asked) loading = false;
     }
@@ -69,7 +77,8 @@
       await load(true);
       onchanged?.();
     } catch (e) {
-      actionError = String(e);
+      actionError = errText(e);
+      actionKind = errKind(e);
     } finally {
       publishing = false;
     }
@@ -83,7 +92,8 @@
       await load(true);
       onchanged?.();
     } catch (e) {
-      actionError = String(e);
+      actionError = errText(e);
+      actionKind = errKind(e);
     } finally {
       voting = null;
     }
@@ -98,7 +108,7 @@
       t.comments.push(c);
       replies[t.id] = '';
     } catch (e) {
-      toast(String(e));
+      toast(errText(e));
     } finally {
       replying = null;
     }
@@ -118,9 +128,12 @@
   <div class="px-6 py-6 text-[13px]">
     {#if error}
       <p class="m-0 text-fail select-text">{error}</p>
-      <button class="{btn} mt-3" onclick={() => load()}>Try again</button>
+      <div class="mt-3 flex flex-wrap items-center gap-3">
+        <button class={btn} onclick={() => load()}>Try again</button>
+        {#if errorKind === 'auth'}<SignInAgain {worktree} onsignedin={() => load()} />{/if}
+      </div>
     {:else if loading}
-      <p class="m-0 font-mono text-[12px] text-muted" role="status">Loading PR {id}</p>
+      <p class="m-0 font-mono text-[12px] text-muted" role="status">{signin.slow ? 'Signing in\u2026' : `Loading PR ${id}`}</p>
     {/if}
   </div>
 {:else}
@@ -138,7 +151,7 @@
         <span class="text-muted">by {pr.createdBy}</span>
         <button
           class="border-0 bg-transparent p-0 text-[13px] text-muted hover:text-ink hover:underline hover:underline-offset-4"
-          onclick={() => api.openUrl(pr.url).catch((e) => toast(String(e)))}>Open in Azure DevOps</button
+          onclick={() => api.openUrl(pr.url).catch((e) => toast(errText(e)))}>Open in Azure DevOps</button
         >
         {#if loading}<span class="font-mono text-[12px] text-muted" role="status">Refreshing</span>{/if}
       </div>
@@ -179,7 +192,10 @@
             >
           </div>
         {/if}
-        {#if actionError}<p class="m-0 mb-4 text-[13px] text-fail select-text">{actionError}</p>{/if}
+        {#if actionError}
+          <p class="m-0 mb-4 text-[13px] text-fail select-text">{actionError}</p>
+          {#if actionKind === 'auth'}<div class="mb-4"><SignInAgain {worktree} onsignedin={() => load(true)} /></div>{/if}
+        {/if}
 
         <section class="mb-7">
           <h3 class={label}>Task</h3>

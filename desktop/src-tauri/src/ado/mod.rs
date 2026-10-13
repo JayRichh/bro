@@ -704,11 +704,17 @@ mod tests {
             .ids()
             .set_me("https://dev.azure.com/other", "me-2");
         // The silent client of the org sees the same ids.
-        assert_eq!(ado.silent_client(org).ids().me(org).as_deref(), Some("me-1"));
+        assert_eq!(
+            ado.silent_client(org).ids().me(org).as_deref(),
+            Some("me-1")
+        );
         ado.invalidate(org);
         assert_eq!(ado.client(org).ids().me(org), None);
         assert_eq!(
-            ado.client(org).ids().me("https://dev.azure.com/other").as_deref(),
+            ado.client(org)
+                .ids()
+                .me("https://dev.azure.com/other")
+                .as_deref(),
             Some("me-2")
         );
     }

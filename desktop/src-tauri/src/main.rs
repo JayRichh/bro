@@ -10,6 +10,7 @@ mod attribution;
 mod daemon;
 mod git;
 
+use ado::client::CmdError;
 use ado::prs::{self, PrCtx};
 use ado::{AdoContext, AdoState};
 use daemon::{Client, Model, PtyEvent};
@@ -24,6 +25,8 @@ use tauri::{Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 type Res<T> = Result<T, String>;
+/// An ADO command's result: errors carry a kind for the window.
+type AdoRes<T> = Result<T, CmdError>;
 
 fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
@@ -431,12 +434,10 @@ async fn ado_prs(
     client: State<'_, Arc<Client>>,
     ado: State<'_, AdoState>,
     worktree: String,
-) -> Res<PrLists> {
+) -> AdoRes<PrLists> {
     let ctx = PrCtx::for_command(&ado, &client, &worktree).await?;
-    let me = prs::my_id(&ctx.ado.client).await.map_err(err)?;
-    let (mine, review) = prs::list(&ctx.ado.client, &ctx.repo_id, &me)
-        .await
-        .map_err(err)?;
+    let me = prs::my_id(&ctx.ado.client).await?;
+    let (mine, review) = prs::list(&ctx.ado.client, &ctx.repo_id, &me).await?;
     Ok(PrLists { mine, review })
 }
 
@@ -446,14 +447,10 @@ async fn ado_pr_detail(
     ado: State<'_, AdoState>,
     worktree: String,
     id: u32,
-) -> Res<PrDetail> {
+) -> AdoRes<PrDetail> {
     let ctx = PrCtx::for_command(&ado, &client, &worktree).await?;
-    let (pr, threads) = prs::get(&ctx.ado.client, &ctx.repo_id, id)
-        .await
-        .map_err(err)?;
-    let policies = prs::policies(&ctx.ado.client, &ctx.project_id, id, pr.is_draft)
-        .await
-        .map_err(err)?;
+    let (pr, threads) = prs::get(&ctx.ado.client, &ctx.repo_id, id).await?;
+    let policies = prs::policies(&ctx.ado.client, &ctx.project_id, id, pr.is_draft).await?;
     Ok(PrDetail {
         pr,
         policies,
@@ -467,10 +464,10 @@ async fn ado_create_pr(
     ado: State<'_, AdoState>,
     worktree: String,
     pr: prs::NewPr,
-) -> Res<prs::CreateResult> {
+) -> AdoRes<prs::CreateResult> {
     let ctx = PrCtx::for_command(&ado, &client, &worktree).await?;
     let reviewers = pr.reviewers.clone();
-    let out = prs::create(&ctx, pr).await.map_err(err)?;
+    let out = prs::create(&ctx, pr).await?;
     for r in reviewers.into_iter().rev() {
         ctx.ado.store.remember_reviewer(&ctx.ado.key, r);
     }
@@ -485,9 +482,9 @@ async fn ado_link_pr_task(
     worktree: String,
     id: u32,
     task: u32,
-) -> Res<()> {
+) -> AdoRes<()> {
     let ctx = PrCtx::for_command(&ado, &client, &worktree).await?;
-    prs::link_task(&ctx, id, task).await.map_err(err)
+    prs::link_task(&ctx, id, task).await.map_err(CmdError::from)
 }
 
 #[tauri::command]
@@ -496,9 +493,9 @@ async fn ado_publish_pr(
     ado: State<'_, AdoState>,
     worktree: String,
     id: u32,
-) -> Res<()> {
+) -> AdoRes<()> {
     let ctx = PrCtx::for_command(&ado, &client, &worktree).await?;
-    prs::publish(&ctx, id).await.map_err(err)
+    prs::publish(&ctx, id).await.map_err(CmdError::from)
 }
 
 #[tauri::command]
@@ -508,9 +505,9 @@ async fn ado_vote(
     worktree: String,
     id: u32,
     vote: i8,
-) -> Res<()> {
+) -> AdoRes<()> {
     let ctx = PrCtx::for_command(&ado, &client, &worktree).await?;
-    prs::vote(&ctx, id, vote).await.map_err(err)
+    prs::vote(&ctx, id, vote).await.map_err(CmdError::from)
 }
 
 #[tauri::command]
@@ -521,9 +518,11 @@ async fn ado_reply(
     id: u32,
     thread: u32,
     text: String,
-) -> Res<prs::Comment> {
+) -> AdoRes<prs::Comment> {
     let ctx = PrCtx::for_command(&ado, &client, &worktree).await?;
-    prs::reply(&ctx, id, thread, &text).await.map_err(err)
+    prs::reply(&ctx, id, thread, &text)
+        .await
+        .map_err(CmdError::from)
 }
 
 #[tauri::command]
@@ -532,9 +531,11 @@ async fn ado_search_identities(
     ado: State<'_, AdoState>,
     worktree: String,
     q: String,
-) -> Res<Vec<ado::store::Reviewer>> {
+) -> AdoRes<Vec<ado::store::Reviewer>> {
     let ctx = PrCtx::for_command(&ado, &client, &worktree).await?;
-    prs::search_identities(&ctx, &q).await.map_err(err)
+    prs::search_identities(&ctx, &q)
+        .await
+        .map_err(CmdError::from)
 }
 
 /// Reviewers picked before in this repo, newest first. Local only: a
@@ -544,7 +545,7 @@ async fn ado_recent_reviewers(
     client: State<'_, Arc<Client>>,
     ado: State<'_, AdoState>,
     worktree: String,
-) -> Res<Vec<ado::store::Reviewer>> {
+) -> AdoRes<Vec<ado::store::Reviewer>> {
     let path = ado::checkout_path(&client, &worktree)?;
     let Some(ctx) = ado.silent_context(&path).await? else {
         return Ok(Vec::new());
@@ -562,7 +563,7 @@ async fn ado_compose_seed(
     ado: State<'_, AdoState>,
     worktree: String,
     branch: String,
-) -> Res<prs::ComposeSeed> {
+) -> AdoRes<prs::ComposeSeed> {
     let ctx = ado.context_for(&client, &worktree).await?;
     Ok(prs::compose_seed(&ctx, &branch).await)
 }
@@ -729,6 +730,7 @@ fn main() {
             ado::ui::ado_context,
             ado::ui::ado_save_ui,
             ado::ui::ado_store_error,
+            ado::ui::ado_sign_in,
         ])
         .run(tauri::generate_context!())
         .expect("kete-desktop failed to start");

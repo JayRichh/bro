@@ -4,6 +4,7 @@
 // are what serde writes for the Rust structs in `src-tauri/src/ado/tasks.rs`.
 
 import { invoke } from '@tauri-apps/api/core';
+import { promptingInvoke } from './signin.svelte';
 
 /**
  * Which tasks to list. Serde's external tagging: the unit variants are bare
@@ -46,8 +47,12 @@ export interface TaskList {
   stale: boolean;
   next: Iteration | null;
   groups: TaskGroup[];
-  /** Set when ADO could not be reached: when this saved list was saved, Unix ms. */
+  /** Set when ADO could not be reached or signed in to: when this saved list was saved, Unix ms. */
   cachedAt: number | null;
+  /** Why the saved list is shown: signed out (`auth`) or unreachable (`offline`). */
+  cachedBecause?: 'auth' | 'offline' | null;
+  /** The failure behind the saved list, in words. */
+  cachedReason?: string | null;
 }
 
 /** The agent Start spawns; `worktree` stays empty, the backend fills it. */
@@ -81,13 +86,13 @@ export interface StartedTask {
 }
 
 export const tasksApi = {
-  teams: (worktree: string) => invoke<string[]>('ado_teams', { worktree }),
-  iterations: (worktree: string) => invoke<Iteration[]>('ado_iterations', { worktree }),
-  tasks: (worktree: string, scope: TaskScope) => invoke<TaskList>('ado_tasks', { worktree, scope }),
+  teams: (worktree: string) => promptingInvoke<string[]>('ado_teams', { worktree }),
+  iterations: (worktree: string) => promptingInvoke<Iteration[]>('ado_iterations', { worktree }),
+  tasks: (worktree: string, scope: TaskScope) => promptingInvoke<TaskList>('ado_tasks', { worktree, scope }),
   /** Empty goes back to the project's default team. */
   setTeam: (worktree: string, team: string) => invoke<void>('ado_set_team', { worktree, team }),
-  prompt: (worktree: string, id: number) => invoke<string>('ado_task_prompt', { worktree, id }),
-  start: (worktree: string, req: StartTask) => invoke<StartedTask>('ado_start_task', { worktree, req }),
+  prompt: (worktree: string, id: number) => promptingInvoke<string>('ado_task_prompt', { worktree, id }),
+  start: (worktree: string, req: StartTask) => promptingInvoke<StartedTask>('ado_start_task', { worktree, req }),
 };
 
 // ---- pure helpers ----
@@ -166,6 +171,20 @@ export function ageWords(at: number, now: number = Date.now()): string {
   if (h < 24) return `${h} h ago`;
   const d = Math.round(h / 24);
   return d === 1 ? 'yesterday' : `${d} days ago`;
+}
+
+/**
+ * The line over a saved list: signed out and offline read differently, so
+ * a sign-in problem is never passed off as the network. Null for a live list.
+ */
+export function cachedNotice(
+  list: Pick<TaskList, 'cachedAt' | 'cachedBecause'>,
+  now: number = Date.now(),
+): string | null {
+  if (!list.cachedAt) return null;
+  const age = ageWords(list.cachedAt, now);
+  if (list.cachedBecause === 'auth') return `Signed out. Showing the list from ${age}.`;
+  return `Offline, as of ${age}. This is the last list saved for this scope.`;
 }
 
 /** Remaining work as the row shows it: `4 h`, `0.5 h`, or nothing. */
