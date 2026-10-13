@@ -1,0 +1,66 @@
+/* Base styles only. Colours and fonts live in theme.css. */
+@import 'tailwindcss';
+@import './theme.css';
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #app {
+    @apply h-full m-0;
+  }
+
+  body {
+    @apply bg-bg text-fg font-ui overflow-hidden select-none antialiased;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  button,
+  select {
+    cursor: default;
+  }
+
+  input,
+  textarea {
+    @apply select-text caret-focus;
+  }
+
+  ::selection {
+    @apply bg-focus/35 text-fg-strong;
+  }
+
+  :focus-visible {
+    @apply outline-2 outline-offset-1 outline-focus;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-md bg-muted/35 hover:bg-muted/55;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-corner,
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  kbd {
+    @apply font-mono text-[10.5px] px-[5px] py-px rounded border border-b-2 border-line text-muted bg-sunk;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

@@ -1,7 +1,8 @@
 [workspace]
 resolver = "2"
 members = ["crates/nebula-core", "crates/nebula-daemon", "crates/nebula-fuzzy", "crates/nebula-tui", "crates/nebula"]
-exclude = ["vendor/vt100"]
+# desktop/ is its own workspace (the Tauri GUI), built by its own CI job.
+exclude = ["vendor/vt100", "desktop"]
 
 # Vendored vt100 with two patches. Rows scrolled out of a top-anchored DECSTBM
 # region on the primary screen go into scrollback (upstream discards them).

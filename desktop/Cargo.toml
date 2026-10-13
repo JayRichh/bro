@@ -1,0 +1,11 @@
+# The desktop GUI is its own workspace, kept out of the root one so the core
+# CI (fmt, clippy, test on three OSes) never compiles Tauri. Its backend
+# reaches the daemon through nebula-core by path.
+[workspace]
+resolver = "2"
+members = ["src-tauri"]
+
+[profile.release]
+opt-level = "s"
+strip = "debuginfo"
+codegen-units = 16
