@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -62,6 +63,11 @@ pub struct StoreData {
 pub struct AdoStore {
     path: PathBuf,
     data: Mutex<StoreData>,
+    /// The last failed load or write, for a command to surface.
+    last_error: Mutex<Option<String>>,
+    /// Set when a corrupt file could not be backed up: the store then
+    /// never writes, so the only copy of that file is not overwritten.
+    hold: Option<String>,
 }
 
 impl AdoStore {
@@ -70,13 +76,22 @@ impl AdoStore {
         nebula_core::paths::data_dir().join("ado.json")
     }
 
-    /// Load `path`. A missing file is empty; an unreadable one is moved to
-    /// `ado.json.bad` and the store starts empty.
+    /// Load `path`. A missing file is empty. An unreadable one is moved to
+    /// `ado.json.bad` and the store starts empty; if that move fails, the
+    /// store keeps its data in memory only and records the error.
     pub fn open(path: impl AsRef<Path>) -> Self {
         let path = path.as_ref().to_path_buf();
+        let mut hold = None;
         let data = match std::fs::read(&path) {
             Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|_| {
-                let _ = std::fs::rename(&path, sibling(&path, ".bad"));
+                let bad = sibling(&path, ".bad");
+                if let Err(e) = std::fs::rename(&path, &bad) {
+                    hold = Some(format!(
+                        "{} is unreadable and could not be backed up to {}: {e}. Changes are kept in memory only.",
+                        path.display(),
+                        bad.display()
+                    ));
+                }
                 StoreData::default()
             }),
             Err(_) => StoreData::default(),
@@ -84,6 +99,8 @@ impl AdoStore {
         Self {
             path,
             data: Mutex::new(data),
+            last_error: Mutex::new(hold.clone()),
+            hold,
         }
     }
 
@@ -91,14 +108,60 @@ impl AdoStore {
         &self.path
     }
 
-    /// Run `f` on the repo's state, then write the file atomically.
+    /// The last load or write error, cleared by reading it.
+    pub fn take_last_error(&self) -> Option<String> {
+        self.last_error
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+    }
+
+    /// Run `f` on the repo's state, then write the file atomically. A
+    /// failed write keeps the change in memory and is recorded for
+    /// [`take_last_error`](Self::take_last_error).
     pub fn with_repo<R>(&self, key: &RepoKey, f: impl FnOnce(&mut RepoState) -> R) -> R {
+        self.mutate(key, f).0
+    }
+
+    /// As [`with_repo`](Self::with_repo), but a failed write is returned.
+    /// The change stays in memory either way.
+    pub fn try_with_repo<R>(
+        &self,
+        key: &RepoKey,
+        f: impl FnOnce(&mut RepoState) -> R,
+    ) -> std::io::Result<R> {
+        let (out, res) = self.mutate(key, f);
+        res.map(|()| out)
+    }
+
+    /// Read the repo's state without writing, and without adding an entry
+    /// for a repo the store has never seen.
+    pub fn read_repo<R>(&self, key: &RepoKey, f: impl FnOnce(&RepoState) -> R) -> R {
+        let data = self.data.lock().unwrap_or_else(|p| p.into_inner());
+        match data.repos.get(&key.to_string()) {
+            Some(state) => f(state),
+            None => f(&RepoState::default()),
+        }
+    }
+
+    fn mutate<R>(
+        &self,
+        key: &RepoKey,
+        f: impl FnOnce(&mut RepoState) -> R,
+    ) -> (R, std::io::Result<()>) {
         let mut data = self.data.lock().unwrap_or_else(|p| p.into_inner());
         let out = f(data.repos.entry(key.to_string()).or_default());
-        // Best effort: a failed write keeps the in-memory state, and the
-        // next successful write carries it.
-        let _ = write_atomic(&self.path, &data);
-        out
+        let res = match &self.hold {
+            Some(why) => Err(std::io::Error::other(why.clone())),
+            None => write_atomic(&self.path, &data),
+        };
+        if let Err(e) = &res {
+            *self.last_error.lock().unwrap_or_else(|p| p.into_inner()) = Some(match &self.hold {
+                Some(why) => why.clone(),
+                None => format!("Could not save {}: {e}", self.path.display()),
+            });
+        }
+        (out, res)
     }
 
     /// Put `r` first, dropping any older entry with the same id, keeping
@@ -156,10 +219,16 @@ fn write_atomic(path: &Path, data: &StoreData) -> std::io::Result<()> {
     }
     let tmp = sibling(path, ".tmp");
     let bytes = serde_json::to_vec_pretty(data).map_err(std::io::Error::other)?;
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })
+    let written = (|| {
+        let mut file = std::fs::File::create(&tmp)?;
+        file.write_all(&bytes)?;
+        file.sync_all()
+    })();
+    written
+        .and_then(|()| std::fs::rename(&tmp, path))
+        .inspect_err(|_| {
+            let _ = std::fs::remove_file(&tmp);
+        })
 }
 
 #[cfg(test)]
@@ -193,6 +262,77 @@ mod tests {
             name: format!("Person {i}"),
             email: format!("p{i}@example.com"),
         }
+    }
+
+    fn other_key() -> RepoKey {
+        RepoKey {
+            org: "tnt".into(),
+            project: "Platform".into(),
+            repo: "web".into(),
+        }
+    }
+
+    /// Windows ignores the read-only flag on directories, so the write is
+    /// made to fail portably by putting a plain file where the parent
+    /// directory should be.
+    #[test]
+    fn write_failure_is_recorded_and_returned() {
+        let dir = temp_dir();
+        std::fs::write(dir.join("blocker"), "x").unwrap();
+        let s = AdoStore::open(dir.join("blocker").join("ado.json"));
+        s.with_repo(&key(), |r| r.team = Some("a".into()));
+        assert!(s.take_last_error().is_some());
+        assert!(s.take_last_error().is_none());
+        assert!(s
+            .try_with_repo(&key(), |r| r.team = Some("b".into()))
+            .is_err());
+        assert!(s.take_last_error().is_some());
+        // The change is kept in memory.
+        assert_eq!(
+            s.read_repo(&key(), |r| r.team.clone()).as_deref(),
+            Some("b")
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn failed_backup_never_overwrites_the_corrupt_file() {
+        let dir = temp_dir();
+        let path = dir.join("ado.json");
+        std::fs::write(&path, "{ not json").unwrap();
+        // A directory in the way makes the backup rename fail.
+        std::fs::create_dir(dir.join("ado.json.bad")).unwrap();
+        let s = AdoStore::open(&path);
+        assert!(s.take_last_error().is_some());
+        assert!(s
+            .try_with_repo(&key(), |r| r.team = Some("a".into()))
+            .is_err());
+        s.with_repo(&key(), |r| r.team = Some("b".into()));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ not json");
+        assert_eq!(
+            s.read_repo(&key(), |r| r.team.clone()).as_deref(),
+            Some("b")
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn read_repo_neither_persists_nor_inserts() {
+        let dir = temp_dir();
+        let path = dir.join("ado.json");
+        let s = AdoStore::open(&path);
+        assert!(s.read_repo(&key(), |r| r.team.is_none()));
+        assert!(!path.exists());
+        s.with_repo(&key(), |r| r.team = Some("a".into()));
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(
+            s.read_repo(&key(), |r| r.team.clone()).as_deref(),
+            Some("a")
+        );
+        assert!(s.read_repo(&other_key(), |r| r.team.is_none()));
+        assert!(!path.exists());
+        assert_eq!(s.data.lock().unwrap().repos.len(), 1);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
