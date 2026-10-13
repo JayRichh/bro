@@ -1,3 +1,4 @@
+pub mod branch_name;
 pub mod clock;
 pub mod codec;
 pub mod crashlog;
@@ -13,6 +14,7 @@ pub mod ports;
 pub mod profiles;
 pub mod project_file;
 pub mod protocol;
+pub mod remote;
 pub mod settings;
 pub mod shell;
 

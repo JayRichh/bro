@@ -2,7 +2,7 @@ pub mod agent_picker;
 pub mod agent_presets;
 pub mod app;
 pub mod appearance;
-pub mod branch_name;
+pub use nebula_core::branch_name;
 pub mod branch_switch;
 pub mod bundle;
 pub use nebula_config::claude_catalogue;
