@@ -22,6 +22,7 @@ use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// A JSON object, as the settings files hold one.
 pub type Object = Map<String, Value>;
@@ -179,7 +180,11 @@ pub fn write_json(path: &Path, value: &Value) -> io::Result<()> {
 /// the TUI and the desktop window save the same settings files, and two
 /// saves sharing one temp name could rename the other's half-written bytes
 /// into place. On Windows a rename onto a file another process has open
-/// for reading fails for a moment; it is retried briefly before giving up.
+/// (an editor, a virus scanner, the other app reading it) fails for a
+/// moment with access denied (5) or a sharing violation (32); it is retried
+/// for about a second before giving up. A successful write also sweeps
+/// temp files of this name more than a minute old — what a writer killed
+/// between its write and its rename leaves behind.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEQ: AtomicU64 = AtomicU64::new(0);
@@ -198,10 +203,13 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let mut tries = 0;
     loop {
         match std::fs::rename(&tmp, &target) {
-            Ok(()) => return Ok(()),
-            Err(err) if err.kind() == io::ErrorKind::PermissionDenied && tries < 20 => {
+            Ok(()) => {
+                sweep_stale_temps(&target, STALE_TEMP);
+                return Ok(());
+            }
+            Err(err) if rename_blocked(&err) && tries < 50 => {
                 tries += 1;
-                std::thread::sleep(std::time::Duration::from_millis(10));
+                std::thread::sleep(Duration::from_millis(20));
             }
             Err(err) => {
                 let _ = std::fs::remove_file(&tmp);
@@ -209,6 +217,155 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
             }
         }
     }
+}
+
+/// How old a leftover `<name>.*.tmp` must be before a write sweeps it: far
+/// longer than any live writer holds its temp file.
+const STALE_TEMP: Duration = Duration::from_secs(60);
+
+/// A rename Windows refuses only while another handle is open on the file.
+fn rename_blocked(err: &io::Error) -> bool {
+    err.kind() == io::ErrorKind::PermissionDenied || matches!(err.raw_os_error(), Some(5 | 32))
+}
+
+/// Remove `<name>.<anything>.tmp` beside `target` last modified more than
+/// `age` ago. Best effort: a file another writer holds is skipped.
+fn sweep_stale_temps(target: &Path, age: Duration) {
+    let (Some(parent), Some(name)) = (target.parent(), target.file_name()) else {
+        return;
+    };
+    let prefix = format!("{}.", name.to_string_lossy());
+    let parent = if parent.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        parent
+    };
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let file = entry.file_name();
+        let file = file.to_string_lossy();
+        if !(file.starts_with(&prefix) && file.ends_with(".tmp")) {
+            continue;
+        }
+        let old = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|m| m.elapsed().ok())
+            .is_some_and(|elapsed| elapsed > age);
+        if old {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// How long [`lock`] waits for another writer before giving up.
+pub const LOCK_WAIT: Duration = Duration::from_secs(6);
+/// How old a lock file must be before [`lock`] takes it for one its holder
+/// left behind (a crash) and breaks it. A real hold is one read and one
+/// write of a small file — milliseconds, a second at worst on Windows.
+pub const LOCK_STALE: Duration = Duration::from_secs(4);
+
+/// A held lock on a settings file: `<name>.lock` beside it, holding this
+/// holder's own token. Dropping it removes the lock file — only while it
+/// still holds that token, so a holder whose lock was broken as stale never
+/// removes the next holder's.
+#[derive(Debug)]
+pub struct FileLock {
+    path: PathBuf,
+    token: String,
+}
+
+impl Drop for FileLock {
+    fn drop(&mut self) {
+        if std::fs::read_to_string(&self.path).is_ok_and(|held| held == self.token) {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+/// Lock the settings file at `path` against the other kete writers — the
+/// TUI's saves, the desktop window's, `kete profile` — for one
+/// read-modify-write. Waits up to [`LOCK_WAIT`] for a holder, breaking a
+/// lock older than [`LOCK_STALE`]; then fails rather than write unlocked.
+/// Not reentrant: take it once, at the outermost write.
+pub fn lock(path: &Path) -> io::Result<FileLock> {
+    lock_with(path, LOCK_WAIT, LOCK_STALE)
+}
+
+/// [`lock`] with its waits spelled out.
+pub fn lock_with(path: &Path, wait: Duration, stale: Duration) -> io::Result<FileLock> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let target = resolve_links(path);
+    if let Some(parent) = target.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut name = target.file_name().map(OsString::from).unwrap_or_default();
+    name.push(".lock");
+    let lock_path = target.with_file_name(name);
+    let token = format!(
+        "{} {} {}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos()),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    );
+    let started = std::time::Instant::now();
+    loop {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+        {
+            Ok(mut file) => {
+                let lock = FileLock {
+                    path: lock_path,
+                    token,
+                };
+                file.write_all(lock.token.as_bytes())?;
+                return Ok(lock);
+            }
+            // On Windows a lock file another writer is removing reads as
+            // access denied for a moment: as held as an existing one.
+            Err(err)
+                if err.kind() == io::ErrorKind::AlreadyExists
+                    || err.kind() == io::ErrorKind::PermissionDenied => {}
+            Err(err) => return Err(err),
+        }
+        if lock_is_stale(&lock_path, stale) {
+            let seen = std::fs::read_to_string(&lock_path).ok();
+            // Break it only if it is still the lock judged stale.
+            if lock_is_stale(&lock_path, stale) && std::fs::read_to_string(&lock_path).ok() == seen
+            {
+                let _ = std::fs::remove_file(&lock_path);
+            }
+            continue;
+        }
+        if started.elapsed() >= wait {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!(
+                    "another kete is writing {} (its lock {} is held); nothing was written — try again",
+                    target.display(),
+                    lock_path.display()
+                ),
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn lock_is_stale(lock_path: &Path, stale: Duration) -> bool {
+    std::fs::metadata(lock_path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|m| m.elapsed().ok())
+        .is_some_and(|elapsed| elapsed > stale)
 }
 
 /// `path` followed through any symlinks to the file they name, which need
@@ -446,6 +603,97 @@ mod tests {
         let last: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(last["i"], 24, "a whole document, never a torn one");
         assert!(no_temp_files(dir.path()));
+    }
+
+    fn age(path: &Path, secs: u64) {
+        let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+        file.set_modified(std::time::SystemTime::now() - Duration::from_secs(secs))
+            .unwrap();
+    }
+
+    #[test]
+    fn a_lock_is_exclusive_and_released_on_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let lock_file = dir.path().join("config.json.lock");
+        let held = lock(&path).unwrap();
+        assert!(lock_file.exists());
+        let err = lock_with(&path, Duration::from_millis(50), Duration::from_secs(60)).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+        assert!(err.to_string().contains("nothing was written"), "{err}");
+        drop(held);
+        assert!(!lock_file.exists(), "dropping the lock removes its file");
+        drop(lock(&path).unwrap());
+    }
+
+    #[test]
+    fn a_waiting_writer_gets_the_lock_once_it_is_let_go() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let held = lock(&path).unwrap();
+        let waiter = {
+            let path = path.clone();
+            std::thread::spawn(move || lock_with(&path, Duration::from_secs(5), LOCK_STALE).is_ok())
+        };
+        std::thread::sleep(Duration::from_millis(100));
+        drop(held);
+        assert!(waiter.join().unwrap());
+    }
+
+    #[test]
+    fn a_stale_lock_is_broken_and_its_late_holder_leaves_the_new_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let lock_file = dir.path().join("config.json.lock");
+        let crashed = lock(&path).unwrap();
+        age(&lock_file, 30);
+        let next = lock_with(&path, Duration::from_millis(500), Duration::from_secs(5)).unwrap();
+        // The old holder wakes up and lets go: the new holder's lock stays.
+        drop(crashed);
+        assert!(lock_file.exists());
+        drop(next);
+        assert!(!lock_file.exists());
+    }
+
+    #[test]
+    fn a_write_sweeps_temp_files_a_killed_writer_left() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let old = dir.path().join("config.json.999-1.tmp");
+        let fresh = dir.path().join("config.json.999-2.tmp");
+        let other = dir.path().join("hosts.json.999-1.tmp");
+        for f in [&old, &fresh, &other] {
+            std::fs::write(f, "{").unwrap();
+        }
+        age(&old, 120);
+        age(&other, 120);
+        write_json(&path, &json!({})).unwrap();
+        assert!(!old.exists(), "a minute-old temp of this file goes");
+        assert!(fresh.exists(), "a live writer's temp stays");
+        assert!(other.exists(), "another file's temp is not ours");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_rename_blocked_by_an_open_handle_is_retried() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, "{}").unwrap();
+        // Share read only: a rename onto it fails until the handle closes.
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&path)
+            .unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            drop(held);
+        });
+        write_json(&path, &json!({"after": true})).unwrap();
+        release.join().unwrap();
+        let back: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(back["after"], true);
     }
 
     #[test]
