@@ -285,12 +285,10 @@ async fn diff_range(
     pr: Option<u32>,
 ) -> Res<RangeDiff> {
     let root = worktree_path(&client, &worktree)?;
+    // The repo's ADO remote, which has the PR refs, even when origin is
+    // another host.
+    let remote = ado::range_remote(&root).await;
     tauri::async_runtime::spawn_blocking(move || {
-        // The repo's remote (origin, else its only ADO remote), as the
-        // branch views read it.
-        let remote = Some(ado::branches::pick_remote(&root))
-            .filter(|r| !r.is_empty())
-            .unwrap_or_else(|| "origin".into());
         let merge = pr.map(|id| format!("refs/pull/{id}/merge"));
         let prefetch: Vec<&str> = merge.iter().map(String::as_str).collect();
         let refs = git::prepare_range_at(&root, &remote, &base, &tip, &prefetch)?;

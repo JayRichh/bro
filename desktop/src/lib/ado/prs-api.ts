@@ -132,7 +132,8 @@ export const VOTES: { vote: number; label: string }[] = [
 export const prs = {
   list: (worktree: string) => promptingInvoke<PrLists>('ado_prs', { worktree }),
   detail: (worktree: string, id: number) => promptingInvoke<PrDetail>('ado_pr_detail', { worktree, id }),
-  create: (worktree: string, pr: NewPr) => promptingInvoke<CreateResult>('ado_create_pr', { worktree, pr }),
+  /** Not counted as signing in: its fetch and push take time of their own. */
+  create: (worktree: string, pr: NewPr) => invoke<CreateResult>('ado_create_pr', { worktree, pr }),
   /** Retry for "Created, task not linked". */
   linkTask: (worktree: string, id: number, task: number) => promptingInvoke<void>('ado_link_pr_task', { worktree, id, task }),
   publish: (worktree: string, id: number) => promptingInvoke<void>('ado_publish_pr', { worktree, id }),

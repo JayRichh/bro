@@ -12,7 +12,6 @@
   import { prItem, prs, type Reviewer, type WorkItem } from './prs-api';
   import { describe, freshDraft, prsState, type ComposeDraft } from './prs-state.svelte';
   import { errKind, errText } from './errors';
-  import { signin } from './signin.svelte';
   import SignInAgain from './SignInAgain.svelte';
 
   let {
@@ -434,7 +433,7 @@
           type="submit"
           class="inline-flex h-8 items-center border-0 bg-ink px-3.5 text-[13px] font-medium text-bg enabled:hover:bg-muted disabled:bg-raised disabled:text-faint"
           disabled={!check.ok || d.busy || !d.title.trim() || !!d.outcome}
-          >{d.busy ? (signin.slow ? 'Signing in\u2026' : 'Pushing and creating') : d.draft ? 'Create draft pull request' : 'Create pull request'}</button
+          >{d.busy ? 'Pushing and creating' : d.draft ? 'Create draft pull request' : 'Create pull request'}</button
         >
         {#if !d.title.trim()}<span class="text-[12px] text-muted">Add a title</span>{/if}
       </div>

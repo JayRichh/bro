@@ -92,7 +92,8 @@ export const tasksApi = {
   /** Empty goes back to the project's default team. */
   setTeam: (worktree: string, team: string) => invoke<void>('ado_set_team', { worktree, team }),
   prompt: (worktree: string, id: number) => promptingInvoke<string>('ado_task_prompt', { worktree, id }),
-  start: (worktree: string, req: StartTask) => promptingInvoke<StartedTask>('ado_start_task', { worktree, req }),
+  /** Not counted as signing in: making the worktree takes time of its own. */
+  start: (worktree: string, req: StartTask) => invoke<StartedTask>('ado_start_task', { worktree, req }),
 };
 
 // ---- pure helpers ----

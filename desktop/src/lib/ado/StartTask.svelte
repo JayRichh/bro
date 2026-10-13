@@ -3,7 +3,6 @@
   import { app, openSession, toast } from '../store.svelte';
   import { branchProblem, suggestBranch, tasksApi, type StartedTask, type WorkItem } from './tasks-api';
   import { errKind, errText, type ErrKind } from './errors';
-  import { signin } from './signin.svelte';
   import SignInAgain from './SignInAgain.svelte';
 
   let {
@@ -325,7 +324,7 @@
           <button
             type="submit"
             class="h-8 min-w-24 border-0 bg-ink px-3 text-[13px] font-medium text-bg enabled:hover:bg-muted disabled:bg-raised disabled:text-faint"
-            disabled={busy || !!problem}>{busy ? (signin.slow ? 'Signing in\u2026' : 'Starting') : 'Start task'}</button
+            disabled={busy || !!problem}>{busy ? 'Starting' : 'Start task'}</button
           >
         </footer>
       </form>

@@ -508,6 +508,21 @@ pub async fn ado_remote(path: &Path) -> Result<Option<(String, AdoRemote)>, Stri
     }
 }
 
+/// The remote a range diff fetches from: the repo's ADO remote (so a PR's
+/// `refs/pull/{id}/merge` comes from Azure DevOps even when `origin` is
+/// another host), else [`branches::pick_remote`]'s, else `origin`.
+pub async fn range_remote(path: &Path) -> String {
+    if let Ok(Some((name, _))) = ado_remote(path).await {
+        return name;
+    }
+    let p = path.to_path_buf();
+    tokio::task::spawn_blocking(move || branches::pick_remote(&p))
+        .await
+        .ok()
+        .filter(|r| !r.is_empty())
+        .unwrap_or_else(|| "origin".into())
+}
+
 #[cfg(test)]
 pub(crate) mod testing {
     //! A context over a mock server, for the command modules' tests.
@@ -738,6 +753,35 @@ mod tests {
         ado.sign_in(org).await.unwrap();
         assert!(!ado.is_paused(org));
         assert_eq!(ado.client(org).ids().me(org), None);
+    }
+
+    #[tokio::test]
+    async fn a_range_diff_reads_the_ado_remote_even_when_origin_is_elsewhere() {
+        let both = temp_repo(Some("https://github.com/JayRichh/kete.git"));
+        let ok = std::process::Command::new("git")
+            .current_dir(&both)
+            .args([
+                "remote",
+                "add",
+                "azure",
+                "https://dev.azure.com/tnt/Platform/_git/api",
+            ])
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok);
+        assert_eq!(range_remote(&both).await, "azure");
+        // Origin on ADO: origin.
+        let ado = temp_repo(Some("https://dev.azure.com/tnt/Platform/_git/api"));
+        assert_eq!(range_remote(&ado).await, "origin");
+        // No ADO remote at all: the plain pick.
+        let gh = temp_repo(Some("https://github.com/JayRichh/kete.git"));
+        assert_eq!(range_remote(&gh).await, "origin");
+        let none = temp_repo(None);
+        assert_eq!(range_remote(&none).await, "origin");
+        for d in [both, ado, gh, none] {
+            let _ = std::fs::remove_dir_all(d);
+        }
     }
 
     #[test]

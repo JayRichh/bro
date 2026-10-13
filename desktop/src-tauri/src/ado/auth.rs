@@ -212,9 +212,12 @@ impl TokenSource {
         if let Some(t) = tenant.as_deref() {
             args.extend(["--tenant", t]);
         }
+        // Newer az asks which subscription to use after a login; with no
+        // console to answer on, that would hang until the timeout.
+        let env = [("AZURE_CORE_LOGIN_EXPERIENCE_V2", "off")];
         let res = self
             .runner
-            .run("az", &args, &[], None, SIGN_IN_TIMEOUT)
+            .run("az", &args, &env, None, SIGN_IN_TIMEOUT)
             .await
             .map(|_| ())
             .map_err(|e| match e {
@@ -774,6 +777,11 @@ mod tests {
         let args = r.last_args("az");
         assert_eq!(args[0], "login");
         assert!(args.windows(2).any(|w| w == ["--tenant", "t-7"]));
+        // No subscription picker to hang on.
+        assert!(r.last_env("az").contains(&(
+            "AZURE_CORE_LOGIN_EXPERIENCE_V2".to_string(),
+            "off".to_string()
+        )));
         assert_eq!(src.source_of("https://dev.azure.com/tnt"), None);
         // No tenant known: a plain az login.
         src.sign_in("https://dev.azure.com/other").await.unwrap();
