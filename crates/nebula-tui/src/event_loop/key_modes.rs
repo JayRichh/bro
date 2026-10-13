@@ -315,7 +315,28 @@ fn handle_global_action(
         | Action::Delete
         | Action::DeleteAll
         | Action::FollowUp => handle_session_state_action(app, action, chord, out),
-        _ => handle_tool_action(app, action, out),
+        // F10: the ORCHESTRATOR VIEW, or the prompt that starts one.
+        Action::ToggleOrchestratorView => crate::orchestrator_view::toggle(app, out),
+        // Listed rather than `_`: a new action is a compile error here
+        // until it is routed, never an `unreachable!` at the user's press.
+        Action::GitDiff
+        | Action::CommentPullRequest
+        | Action::OpenRepo
+        | Action::OpenPullRequest
+        | Action::OpenIssue
+        | Action::DuplicateSession
+        | Action::MoveSession
+        | Action::OpenGhosttyTab
+        | Action::ToggleKanban
+        | Action::OpenWorktree
+        | Action::OpenInBrowser
+        | Action::Screenshot
+        | Action::AddProject
+        | Action::FindFile
+        | Action::Grep
+        | Action::TreeBrowser
+        | Action::NewTerminal
+        | Action::UnlockTerminal => handle_tool_action(app, action, out),
     }
 }
 

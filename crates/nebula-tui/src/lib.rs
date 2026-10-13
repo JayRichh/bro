@@ -36,6 +36,7 @@ pub mod links;
 pub(crate) mod list_hit;
 pub mod localhost;
 pub mod markdown;
+pub mod orchestrator_view;
 pub mod overlay_close;
 pub mod palette;
 pub mod perf;
