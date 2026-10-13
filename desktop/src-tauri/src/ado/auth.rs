@@ -17,6 +17,22 @@ pub const ADO_RESOURCE: &str = "499b84ac-1321-427f-aa17-267ca6975798";
 /// How long GCM (or az) may take, including any sign-in window it opens.
 pub const AUTH_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// How long `az login` may take: a person signs in, maybe with MFA, in
+/// the browser it opens.
+pub const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Where a credential came from, so a refused one is only reported back
+/// to the helper that handed it out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Source {
+    Gcm,
+    Az,
+}
+
+/// Called with `(org_url, tenant)` when a token names a new tenant, so it
+/// can be saved.
+pub type TenantSink = Box<dyn Fn(&str, &str) + Send + Sync>;
+
 /// A credential for the `Authorization` header.
 #[derive(Clone, PartialEq, Eq)]
 pub enum Credential {
@@ -77,24 +93,32 @@ impl std::error::Error for AuthError {}
 /// Runs a credential helper. The real one spawns a process; tests fake it.
 #[async_trait]
 pub trait Runner: Send + Sync {
-    /// Run `program args`, feed it `stdin`, and return its stdout. A
-    /// non-zero exit is an error carrying stderr, never stdout.
+    /// Run `program args` with `env` set, feed it `stdin`, and return its
+    /// stdout. A non-zero exit is an error carrying stderr, never stdout.
     async fn run(
         &self,
         program: &str,
         args: &[&str],
+        env: &[(&str, &str)],
         stdin: Option<&str>,
         timeout: Duration,
     ) -> Result<String, AuthError>;
 }
 
+/// A cached credential: the secret, when it stops being used, and which
+/// helper handed it out.
+type Cached = (Credential, Instant, Source);
+
 /// Finds a token for an org: GCM first, then az.
 pub struct TokenSource {
     runner: Arc<dyn Runner>,
-    /// The Entra tenant from the last OAuth token, passed to az.
-    tenant: Mutex<Option<String>>,
-    /// In-memory credentials per org URL, with when they stop being used.
-    cache: Mutex<HashMap<String, (Credential, Instant)>>,
+    /// The Entra tenant per org URL, from that org's last OAuth token,
+    /// passed to az.
+    tenants: Mutex<HashMap<String, String>>,
+    /// Told about each newly learned tenant, to save it.
+    tenant_sink: Option<TenantSink>,
+    /// In-memory credentials per org URL.
+    cache: Mutex<HashMap<String, Cached>>,
     /// One fetch at a time per org, so only one sign-in prompt can appear.
     fetching: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     #[cfg(test)]
@@ -110,7 +134,8 @@ impl TokenSource {
     pub fn new(runner: impl Runner + 'static) -> Self {
         Self {
             runner: Arc::new(runner),
-            tenant: Mutex::new(None),
+            tenants: Mutex::new(HashMap::new()),
+            tenant_sink: None,
             cache: Mutex::new(HashMap::new()),
             fetching: Mutex::new(HashMap::new()),
             #[cfg(test)]
@@ -118,15 +143,33 @@ impl TokenSource {
         }
     }
 
+    /// Start from the tenants saved earlier (org URL to tenant id), and
+    /// hand each newly learned one to `sink`.
+    pub fn with_tenants(mut self, saved: HashMap<String, String>, sink: TenantSink) -> Self {
+        self.tenants = Mutex::new(saved);
+        self.tenant_sink = Some(sink);
+        self
+    }
+
     /// Forget the cached credential for `org_url`.
     pub fn invalidate(&self, org_url: &str) {
         self.cache.lock().unwrap().remove(org_url);
     }
 
-    /// Drop the cached credential and tell GCM the stored one was refused
-    /// (`git credential reject`), so the next fetch gets a fresh one.
+    /// Drop the cached credential and, when GCM handed it out, tell GCM it
+    /// was refused (`git credential reject`), so the next fetch gets a
+    /// fresh one. An az token is only dropped: GCM's stored credential had
+    /// nothing to do with it, and rejecting would sign the user out of GCM.
     pub async fn reject(&self, org_url: &str) {
-        self.invalidate(org_url);
+        let source = self
+            .cache
+            .lock()
+            .unwrap()
+            .remove(org_url)
+            .map(|(_, _, s)| s);
+        if source != Some(Source::Gcm) {
+            return;
+        }
         #[cfg(test)]
         if self.fixed.is_some() {
             return;
@@ -144,19 +187,60 @@ impl TokenSource {
                     "credential",
                     "reject",
                 ],
+                &[],
                 Some(&credential_input(org_url)),
                 AUTH_TIMEOUT,
             )
             .await;
     }
 
+    /// `az login`, for the org's tenant when one is known, then drop the
+    /// org's cached credential so the next request uses the new sign-in.
+    /// Opens a browser; waits up to [`SIGN_IN_TIMEOUT`].
+    pub async fn sign_in(&self, org_url: &str) -> Result<(), AuthError> {
+        #[cfg(test)]
+        if self.fixed.is_some() {
+            self.invalidate(org_url);
+            return Ok(());
+        }
+        if crate::ado::base_override().is_some() {
+            self.invalidate(org_url);
+            return Ok(());
+        }
+        let tenant = self.tenant(org_url);
+        let mut args = vec!["login", "--output", "none"];
+        if let Some(t) = tenant.as_deref() {
+            args.extend(["--tenant", t]);
+        }
+        let res = self
+            .runner
+            .run("az", &args, &[], None, SIGN_IN_TIMEOUT)
+            .await
+            .map(|_| ())
+            .map_err(|e| match e {
+                AuthError::NoCredential => AuthError::Other(
+                    "The Azure CLI (az) is not installed, so Kete cannot sign you in.".into(),
+                ),
+                AuthError::Other(msg) => AuthError::Other(first_line(&msg)),
+                e => e,
+            });
+        self.invalidate(org_url);
+        res
+    }
+
     fn cached(&self, org_url: &str) -> Option<Credential> {
         let cache = self.cache.lock().unwrap();
-        let (cred, until) = cache.get(org_url)?;
+        let (cred, until, _) = cache.get(org_url)?;
         (Instant::now() < *until).then(|| cred.clone())
     }
 
-    fn remember(&self, org_url: &str, cred: &Credential) {
+    /// Where the org's cached credential came from, if one is cached.
+    #[cfg(test)]
+    pub fn source_of(&self, org_url: &str) -> Option<Source> {
+        self.cache.lock().unwrap().get(org_url).map(|(_, _, s)| *s)
+    }
+
+    fn remember(&self, org_url: &str, cred: &Credential, source: Source) {
         let ttl = match cred {
             Credential::Bearer(t) => match exp_from_jwt(t) {
                 Some(exp) => {
@@ -167,10 +251,10 @@ impl TokenSource {
             },
             Credential::Basic(_) => OPAQUE_TTL,
         };
-        self.cache
-            .lock()
-            .unwrap()
-            .insert(org_url.to_string(), (cred.clone(), Instant::now() + ttl));
+        self.cache.lock().unwrap().insert(
+            org_url.to_string(),
+            (cred.clone(), Instant::now() + ttl, source),
+        );
     }
 
     /// A source over real processes.
@@ -187,13 +271,25 @@ impl TokenSource {
         }
     }
 
-    /// The tenant remembered from the last OAuth token, if any.
-    pub fn tenant(&self) -> Option<String> {
-        self.tenant.lock().unwrap().clone()
+    /// The tenant remembered from the org's last OAuth token, if any.
+    pub fn tenant(&self, org_url: &str) -> Option<String> {
+        self.tenants.lock().unwrap().get(org_url).cloned()
     }
 
-    pub fn set_tenant(&self, tenant: Option<String>) {
-        *self.tenant.lock().unwrap() = tenant;
+    /// Remember the org's tenant, telling the sink when it is new.
+    pub fn set_tenant(&self, org_url: &str, tenant: &str) {
+        let changed = self
+            .tenants
+            .lock()
+            .unwrap()
+            .insert(org_url.to_string(), tenant.to_string())
+            .as_deref()
+            != Some(tenant);
+        if changed {
+            if let Some(sink) = &self.tenant_sink {
+                sink(org_url, tenant);
+            }
+        }
     }
 
     pub async fn token(&self, org_url: &str) -> Result<Credential, AuthError> {
@@ -232,18 +328,18 @@ impl TokenSource {
         if let Some(c) = self.cached(org_url) {
             return Ok(c);
         }
-        let cred = self.fetch(org_url, silent).await?;
-        self.remember(org_url, &cred);
+        let (cred, source) = self.fetch(org_url, silent).await?;
+        self.remember(org_url, &cred, source);
         Ok(cred)
     }
 
-    async fn fetch(&self, org_url: &str, silent: bool) -> Result<Credential, AuthError> {
+    async fn fetch(&self, org_url: &str, silent: bool) -> Result<(Credential, Source), AuthError> {
         let gcm = match self.gcm(org_url, silent).await {
-            Ok(c) => return Ok(c),
+            Ok(c) => return Ok((c, Source::Gcm)),
             Err(e) => e,
         };
-        match self.az().await {
-            Ok(c) => Ok(c),
+        match self.az(org_url).await {
+            Ok(c) => Ok((c, Source::Az)),
             Err(az) if gcm == AuthError::NoCredential => Err(az),
             Err(_) => Err(gcm),
         }
@@ -252,15 +348,17 @@ impl TokenSource {
     async fn gcm(&self, org_url: &str, silent: bool) -> Result<Credential, AuthError> {
         let input = credential_input(org_url);
         let mut args = vec!["-c", "credential.azreposCredentialType=oauth"];
+        let mut env: Vec<(&str, &str)> = Vec::new();
         if silent {
-            // GCM's own switch (GCM_INTERACTIVE=never as config): fail
-            // rather than open a sign-in window.
+            // GCM's own switch, as config and as its environment variable:
+            // fail rather than open a sign-in window.
             args.extend(["-c", "credential.interactive=never"]);
+            env.push(("GCM_INTERACTIVE", "never"));
         }
         args.extend(["credential", "fill"]);
         let out = self
             .runner
-            .run("git", &args, Some(&input), AUTH_TIMEOUT)
+            .run("git", &args, &env, Some(&input), AUTH_TIMEOUT)
             .await
             .map_err(|e| match e {
                 AuthError::Other(msg) => AuthError::Other(first_line(&msg)),
@@ -272,11 +370,11 @@ impl TokenSource {
             .map(str::trim)
             .filter(|p| !p.is_empty())
             .ok_or(AuthError::NoCredential)?;
-        Ok(self.classify(password))
+        Ok(self.classify(org_url, password))
     }
 
-    async fn az(&self) -> Result<Credential, AuthError> {
-        let tenant = self.tenant();
+    async fn az(&self, org_url: &str) -> Result<Credential, AuthError> {
+        let tenant = self.tenant(org_url);
         let mut args = vec![
             "account",
             "get-access-token",
@@ -289,7 +387,7 @@ impl TokenSource {
             args.push("--tenant");
             args.push(t);
         }
-        let out = match self.runner.run("az", &args, None, AUTH_TIMEOUT).await {
+        let out = match self.runner.run("az", &args, &[], None, AUTH_TIMEOUT).await {
             Ok(out) => out,
             Err(AuthError::Other(msg)) => return Err(classify_az_error(&msg)),
             Err(e) => return Err(e),
@@ -299,14 +397,15 @@ impl TokenSource {
             .and_then(|v| v.get("accessToken")?.as_str().map(str::to_string))
             .filter(|t| !t.is_empty())
             .ok_or_else(|| AuthError::Other("az returned no access token".into()))?;
-        Ok(self.classify(&token))
+        Ok(self.classify(org_url, &token))
     }
 
     /// A JWT is an OAuth token (Bearer); anything else is a PAT (Basic).
-    fn classify(&self, secret: &str) -> Credential {
+    /// A JWT's tenant is remembered for the org.
+    fn classify(&self, org_url: &str, secret: &str) -> Credential {
         if looks_like_jwt(secret) {
             if let Some(tid) = tenant_from_jwt(secret) {
-                self.set_tenant(Some(tid));
+                self.set_tenant(org_url, &tid);
             }
             Credential::Bearer(secret.to_string())
         } else {
@@ -404,6 +503,7 @@ impl Runner for ProcessRunner {
         &self,
         program: &str,
         args: &[&str],
+        env: &[(&str, &str)],
         stdin: Option<&str>,
         timeout: Duration,
     ) -> Result<String, AuthError> {
@@ -424,6 +524,7 @@ impl Runner for ProcessRunner {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .env("GIT_TERMINAL_PROMPT", "0")
+            .envs(env.iter().copied())
             .kill_on_drop(true);
         #[cfg(windows)]
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
@@ -470,7 +571,8 @@ pub(crate) mod fake {
     use std::collections::HashMap;
 
     type Canned = HashMap<String, Result<String, AuthError>>;
-    type Calls = Vec<(String, Vec<String>, Option<String>)>;
+    /// Program, args, stdin, env.
+    type Calls = Vec<(String, Vec<String>, Option<String>, Vec<(String, String)>)>;
 
     #[derive(Clone, Default)]
     pub(crate) struct Fake {
@@ -499,8 +601,19 @@ pub(crate) mod fake {
                 .unwrap()
                 .iter()
                 .rev()
-                .find(|(p, _, _)| p == program)
-                .map(|(_, a, _)| a.clone())
+                .find(|(p, _, _, _)| p == program)
+                .map(|(_, a, _, _)| a.clone())
+                .unwrap_or_default()
+        }
+        /// The env of the last call of `program`.
+        pub(crate) fn last_env(&self, program: &str) -> Vec<(String, String)> {
+            self.calls
+                .lock()
+                .unwrap()
+                .iter()
+                .rev()
+                .find(|(p, _, _, _)| p == program)
+                .map(|(_, _, _, e)| e.clone())
                 .unwrap_or_default()
         }
         /// Calls of `program` whose args include `arg`.
@@ -509,7 +622,7 @@ pub(crate) mod fake {
                 .lock()
                 .unwrap()
                 .iter()
-                .filter(|(p, a, _)| p == program && a.iter().any(|x| x == arg))
+                .filter(|(p, a, _, _)| p == program && a.iter().any(|x| x == arg))
                 .count()
         }
         /// The stdin of the last call of `program` with `arg`.
@@ -519,8 +632,8 @@ pub(crate) mod fake {
                 .unwrap()
                 .iter()
                 .rev()
-                .find(|(p, a, _)| p == program && a.iter().any(|x| x == arg))
-                .and_then(|(_, _, s)| s.clone())
+                .find(|(p, a, _, _)| p == program && a.iter().any(|x| x == arg))
+                .and_then(|(_, _, s, _)| s.clone())
         }
     }
 
@@ -530,6 +643,7 @@ pub(crate) mod fake {
             &self,
             program: &str,
             args: &[&str],
+            env: &[(&str, &str)],
             stdin: Option<&str>,
             _timeout: Duration,
         ) -> Result<String, AuthError> {
@@ -537,6 +651,9 @@ pub(crate) mod fake {
                 program.into(),
                 args.iter().map(|a| a.to_string()).collect(),
                 stdin.map(str::to_string),
+                env.iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
             ));
             // Let concurrent callers interleave, as a real process would.
             tokio::task::yield_now().await;
@@ -595,9 +712,66 @@ mod tests {
             .fail("git", AuthError::NoCredential)
             .on("az", "{\"accessToken\":\"eyJ.eyJ0aWQiOiJ0LTkifQ.s\"}");
         let src = TokenSource::new(r.clone());
-        *src.tenant.lock().unwrap() = Some("t-9".into());
+        src.set_tenant("https://dev.azure.com/tnt", "t-9");
         src.token("https://dev.azure.com/tnt").await.unwrap();
         assert!(r.last_args("az").contains(&"--tenant".to_string()));
+        assert!(r.last_args("az").contains(&"t-9".to_string()));
+    }
+
+    #[tokio::test]
+    async fn tenants_are_per_org_and_new_ones_are_saved() {
+        let saved = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
+        let sink = saved.clone();
+        let tok = jwt(json!({"tid": "t-b"}));
+        let r = Fake::new()
+            .fail("git", AuthError::NoCredential)
+            .on("az", &format!("{{\"accessToken\":\"{tok}\"}}"));
+        let src = TokenSource::new(r.clone()).with_tenants(
+            HashMap::from([("https://dev.azure.com/a".to_string(), "t-a".to_string())]),
+            Box::new(move |org, t| sink.lock().unwrap().push((org.into(), t.into()))),
+        );
+        // Org b has no tenant yet: az runs without one, and the token's
+        // tid is learned for b alone, and saved.
+        src.token("https://dev.azure.com/b").await.unwrap();
+        assert!(!r.last_args("az").contains(&"--tenant".to_string()));
+        assert_eq!(src.tenant("https://dev.azure.com/b").as_deref(), Some("t-b"));
+        assert_eq!(src.tenant("https://dev.azure.com/a").as_deref(), Some("t-a"));
+        assert_eq!(
+            *saved.lock().unwrap(),
+            vec![("https://dev.azure.com/b".to_string(), "t-b".to_string())]
+        );
+        // Org a keeps its own tenant.
+        src.token("https://dev.azure.com/a").await.unwrap();
+        assert!(r.last_args("az").contains(&"t-a".to_string()));
+    }
+
+    #[tokio::test]
+    async fn an_az_token_refused_never_rejects_in_gcm() {
+        let r = Fake::new()
+            .fail("git", AuthError::NoCredential)
+            .on("az", "{\"accessToken\":\"eyJ.eyJ0aWQiOiJ0LTkifQ.s\"}");
+        let src = TokenSource::new(r.clone());
+        src.token("https://dev.azure.com/tnt").await.unwrap();
+        assert_eq!(src.source_of("https://dev.azure.com/tnt"), Some(Source::Az));
+        src.reject("https://dev.azure.com/tnt").await;
+        assert_eq!(r.count("git", "reject"), 0);
+        assert_eq!(src.source_of("https://dev.azure.com/tnt"), None);
+    }
+
+    #[tokio::test]
+    async fn sign_in_runs_az_login_for_the_org_tenant_and_drops_the_cache() {
+        let r = Fake::new().on("git", "password=pat\n").on("az", "");
+        let src = TokenSource::new(r.clone());
+        src.token("https://dev.azure.com/tnt").await.unwrap();
+        src.set_tenant("https://dev.azure.com/tnt", "t-7");
+        src.sign_in("https://dev.azure.com/tnt").await.unwrap();
+        let args = r.last_args("az");
+        assert_eq!(args[0], "login");
+        assert!(args.windows(2).any(|w| w == ["--tenant", "t-7"]));
+        assert_eq!(src.source_of("https://dev.azure.com/tnt"), None);
+        // No tenant known: a plain az login.
+        src.sign_in("https://dev.azure.com/other").await.unwrap();
+        assert!(!r.last_args("az").contains(&"--tenant".to_string()));
     }
 
     #[tokio::test]
@@ -630,7 +804,7 @@ mod tests {
     #[test]
     fn basic_header_encodes_colon_pat() {
         let src = TokenSource::new(Fake::new());
-        let c = src.classify("abc");
+        let c = src.classify("https://dev.azure.com/tnt", "abc");
         assert_eq!(c.header(), "Basic OmFiYw==");
         assert_eq!(format!("{c:?}"), "Basic(<redacted>)");
     }
@@ -726,6 +900,9 @@ mod tests {
             .last_args("git")
             .windows(2)
             .any(|w| w == ["-c", "credential.interactive=never"]));
+        assert!(r
+            .last_env("git")
+            .contains(&("GCM_INTERACTIVE".to_string(), "never".to_string())));
         // A cached credential is reused without running anything.
         src.token_silent("https://dev.azure.com/tnt").await.unwrap();
         assert_eq!(r.count("git", "fill"), 1);
@@ -736,6 +913,7 @@ mod tests {
             .last_args("git")
             .iter()
             .any(|a| a == "credential.interactive=never"));
+        assert!(r.last_env("git").is_empty());
     }
 
     #[test]

@@ -1,5 +1,6 @@
 //! `ado.json`: per-repo ADO state (branch to task links, recent reviewers,
-//! team, tenant, a small cache, UI bits). Never holds a token.
+//! team, a small cache, UI bits) and each org's tenant. Never holds a
+//! token.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -48,7 +49,6 @@ pub struct RepoState {
     /// Newest first, deduped by id.
     pub recent_reviewers: Vec<Reviewer>,
     pub team: Option<String>,
-    pub tenant: Option<String>,
     pub cache: BTreeMap<String, CacheEntry>,
     pub ui: serde_json::Value,
 }
@@ -58,6 +58,9 @@ pub struct RepoState {
 pub struct StoreData {
     /// Keyed by `org/project/repo`.
     pub repos: BTreeMap<String, RepoState>,
+    /// The Entra tenant per org URL, learned from the org's OAuth tokens
+    /// and passed to `az`.
+    pub tenants: BTreeMap<String, String>,
 }
 
 pub struct AdoStore {
@@ -146,13 +149,34 @@ impl AdoStore {
         }
     }
 
+    /// Every org's remembered tenant, by org URL.
+    pub fn tenants(&self) -> std::collections::HashMap<String, String> {
+        let data = self.data.lock().unwrap_or_else(|p| p.into_inner());
+        data.tenants
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
+
+    /// Remember the org's tenant and write the file. A failed write is
+    /// recorded for [`take_last_error`](Self::take_last_error).
+    pub fn set_tenant(&self, org_url: &str, tenant: &str) {
+        let _ = self.mutate_data(|d| {
+            d.tenants.insert(org_url.to_string(), tenant.to_string());
+        });
+    }
+
     fn mutate<R>(
         &self,
         key: &RepoKey,
         f: impl FnOnce(&mut RepoState) -> R,
     ) -> (R, std::io::Result<()>) {
+        self.mutate_data(|d| f(d.repos.entry(key.to_string()).or_default()))
+    }
+
+    fn mutate_data<R>(&self, f: impl FnOnce(&mut StoreData) -> R) -> (R, std::io::Result<()>) {
         let mut data = self.data.lock().unwrap_or_else(|p| p.into_inner());
-        let out = f(data.repos.entry(key.to_string()).or_default());
+        let out = f(&mut data);
         let res = match &self.hold {
             Some(why) => Err(std::io::Error::other(why.clone())),
             None => write_atomic(&self.path, &data),
@@ -353,9 +377,16 @@ mod tests {
         s.with_repo(&key(), |r| {
             r.branch_tasks.insert("jari/gst".into(), 4211);
             r.team = Some("Platform Team".into());
-            r.tenant = Some("t-1".into());
         });
+        s.set_tenant("https://dev.azure.com/tnt", "t-1");
         let again = AdoStore::open(&path);
+        assert_eq!(
+            again
+                .tenants()
+                .get("https://dev.azure.com/tnt")
+                .map(String::as_str),
+            Some("t-1")
+        );
         let (task, team) = again.with_repo(&key(), |r| {
             (r.branch_tasks.get("jari/gst").copied(), r.team.clone())
         });

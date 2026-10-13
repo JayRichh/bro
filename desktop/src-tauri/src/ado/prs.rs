@@ -8,10 +8,8 @@ use crate::ado::{AdoContext, AdoState};
 use crate::attribution::{strip_ai_trailers, LocalUpstream};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::{Mutex, OnceLock};
 
 /// Policy evaluations are only offered as a preview API.
 const POLICY_API_VERSION: &str = "7.1-preview.1";
@@ -90,19 +88,11 @@ fn git_command(cwd: &Path) -> Command {
     cmd
 }
 
-fn cache<V: Clone>(
-    cell: &'static OnceLock<Mutex<HashMap<String, V>>>,
-) -> &'static Mutex<HashMap<String, V>> {
-    cell.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-static REPO_IDS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
-static MY_IDS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
-
-/// The repo GUID and project GUID, cached per repo.
+/// The repo GUID and project GUID, cached per repo in the org's
+/// [`IdCache`](crate::ado::client::IdCache).
 async fn repo_ids(client: &AdoClient, r: &AdoRemote) -> Result<(String, String), AdoError> {
-    let key = format!("{}/{}/{}", r.org_url, r.project, r.repo);
-    if let Some(hit) = cache(&REPO_IDS).lock().unwrap().get(&key).cloned() {
+    let key = format!("{}/{}", r.project, r.repo);
+    if let Some(hit) = client.ids().repo(client.org_url(), &key) {
         return Ok(hit);
     }
     let v: Value = client
@@ -118,15 +108,14 @@ async fn repo_ids(client: &AdoClient, r: &AdoRemote) -> Result<(String, String),
         return Err(AdoError::NotFound);
     }
     let ids = (repo_id, project_id);
-    cache(&REPO_IDS).lock().unwrap().insert(key, ids.clone());
+    client.ids().set_repo(client.org_url(), &key, ids.clone());
     Ok(ids)
 }
 
 /// My identity id in this org (`connectionData`'s `authenticatedUser.id`),
-/// cached per org.
+/// cached per org until its sign-in is refused or dropped.
 pub async fn my_id(client: &AdoClient) -> Result<String, AdoError> {
-    let org = client.org_url().to_string();
-    if let Some(hit) = cache(&MY_IDS).lock().unwrap().get(&org).cloned() {
+    if let Some(hit) = client.ids().me(client.org_url()) {
         return Ok(hit);
     }
     let v: Value = client
@@ -138,7 +127,7 @@ pub async fn my_id(client: &AdoClient) -> Result<String, AdoError> {
     if id.is_empty() {
         return Err(AdoError::Auth(AuthError::NoCredential));
     }
-    cache(&MY_IDS).lock().unwrap().insert(org, id.clone());
+    client.ids().set_me(client.org_url(), &id);
     Ok(id)
 }
 

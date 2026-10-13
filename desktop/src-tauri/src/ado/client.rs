@@ -4,8 +4,9 @@
 use crate::ado::auth::{AuthError, TokenSource};
 use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
+use std::collections::HashMap;
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub const API_VERSION: &str = "7.1";
@@ -87,6 +88,57 @@ pub fn area_of(path: &str) -> &'static str {
     }
 }
 
+/// Ids learned per org (who I am, each repo's GUIDs). They belong to
+/// whoever is signed in, so a refused or dropped sign-in clears the org's.
+#[derive(Default)]
+pub struct IdCache {
+    orgs: Mutex<HashMap<String, OrgIds>>,
+}
+
+#[derive(Default, Clone)]
+struct OrgIds {
+    /// My identity id (`connectionData`'s `authenticatedUser.id`).
+    me: Option<String>,
+    /// `project/repo` to (repo GUID, project GUID).
+    repos: HashMap<String, (String, String)>,
+}
+
+impl IdCache {
+    fn with<R>(&self, org_url: &str, f: impl FnOnce(&mut OrgIds) -> R) -> R {
+        let mut orgs = self.orgs.lock().unwrap_or_else(|p| p.into_inner());
+        f(orgs.entry(org_key(org_url)).or_default())
+    }
+
+    pub fn me(&self, org_url: &str) -> Option<String> {
+        self.with(org_url, |o| o.me.clone())
+    }
+
+    pub fn set_me(&self, org_url: &str, id: &str) {
+        self.with(org_url, |o| o.me = Some(id.to_string()));
+    }
+
+    pub fn repo(&self, org_url: &str, repo: &str) -> Option<(String, String)> {
+        self.with(org_url, |o| o.repos.get(repo).cloned())
+    }
+
+    pub fn set_repo(&self, org_url: &str, repo: &str, ids: (String, String)) {
+        self.with(org_url, |o| o.repos.insert(repo.to_string(), ids));
+    }
+
+    /// Forget everything learned for `org_url`, and only that org.
+    pub fn clear(&self, org_url: &str) {
+        self.orgs
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&org_key(org_url));
+    }
+}
+
+/// An org URL as a map key: no trailing slash.
+fn org_key(org_url: &str) -> String {
+    org_url.trim_end_matches('/').to_string()
+}
+
 /// One org's REST API.
 pub struct AdoClient {
     http: reqwest::Client,
@@ -94,6 +146,7 @@ pub struct AdoClient {
     org_url: String,
     /// Never prompt for a sign-in (background work).
     silent: bool,
+    ids: Arc<IdCache>,
 }
 
 impl AdoClient {
@@ -107,6 +160,7 @@ impl AdoClient {
             tokens,
             org_url: org_url.trim_end_matches('/').to_string(),
             silent: false,
+            ids: Arc::default(),
         }
     }
 
@@ -115,6 +169,16 @@ impl AdoClient {
     pub fn silent(mut self) -> Self {
         self.silent = true;
         self
+    }
+
+    /// Share `ids` (the app's, so every client of an org sees one set).
+    pub fn with_ids(mut self, ids: Arc<IdCache>) -> Self {
+        self.ids = ids;
+        self
+    }
+
+    pub fn ids(&self) -> &IdCache {
+        &self.ids
     }
 
     async fn credential(&self) -> Result<crate::ado::auth::Credential, AdoError> {
@@ -230,10 +294,17 @@ impl AdoClient {
                 .map_err(|e| AdoError::Network(e.without_url().to_string()))?;
             let status = resp.status();
             if status == StatusCode::UNAUTHORIZED && !reauthed {
-                // The credential was refused: drop it, tell GCM, and try
-                // once more with a fresh one.
+                // The credential was refused: drop it and try once more
+                // with a fresh one. Only a prompting client tells GCM
+                // (which signs the user out of it, for a GCM credential);
+                // background work only forgets its copy.
                 reauthed = true;
-                self.tokens.reject(&self.org_url).await;
+                if self.silent {
+                    self.tokens.invalidate(&self.org_url);
+                } else {
+                    self.tokens.reject(&self.org_url).await;
+                }
+                self.ids.clear(&self.org_url);
                 auth = self.credential().await?.header();
                 continue;
             }
@@ -401,6 +472,57 @@ mod tests {
         assert_eq!(m.hits(), 2);
         assert_eq!(r.count("git", "reject"), 1);
         assert_eq!(r.count("git", "fill"), 2);
+    }
+
+    #[tokio::test]
+    async fn a_silent_401_never_rejects_and_clears_the_ids() {
+        let s = MockServer::start();
+        let m = s.mock(|w, t| {
+            w.path("/p/_apis/x");
+            t.status(401);
+        });
+        let r = Fake::new().on("git", "password=pat\n");
+        let c = AdoClient::new(&s.base_url(), Arc::new(TokenSource::new(r.clone()))).silent();
+        c.ids().set_me(&s.base_url(), "me-1");
+        let e = c.get::<serde_json::Value>("/p/_apis/x").await.unwrap_err();
+        assert!(matches!(e, AdoError::Unauthorized));
+        assert_eq!(m.hits(), 2);
+        assert_eq!(r.count("git", "reject"), 0);
+        // The cached copy was dropped, so the retry fetched again.
+        assert_eq!(r.count("git", "fill"), 2);
+        assert_eq!(c.ids().me(&s.base_url()), None);
+    }
+
+    #[tokio::test]
+    async fn an_az_credential_refused_never_reaches_gcm() {
+        let s = MockServer::start();
+        s.mock(|w, t| {
+            w.path("/p/_apis/x");
+            t.status(401);
+        });
+        let r = Fake::new()
+            .fail("git", AuthError::NoCredential)
+            .on("az", "{\"accessToken\":\"eyJ.eyJ0aWQiOiJ0LTkifQ.s\"}");
+        let c = AdoClient::new(&s.base_url(), Arc::new(TokenSource::new(r.clone())));
+        let e = c.get::<serde_json::Value>("/p/_apis/x").await.unwrap_err();
+        assert!(matches!(e, AdoError::Unauthorized));
+        assert_eq!(r.count("git", "reject"), 0);
+    }
+
+    #[test]
+    fn clearing_one_org_keeps_another_whose_url_it_prefixes() {
+        let ids = IdCache::default();
+        ids.set_me("https://dev.azure.com/tnt", "a");
+        ids.set_me("https://dev.azure.com/tnt2", "b");
+        ids.set_repo(
+            "https://dev.azure.com/tnt/",
+            "p/r",
+            ("r".into(), "p".into()),
+        );
+        ids.clear("https://dev.azure.com/tnt");
+        assert_eq!(ids.me("https://dev.azure.com/tnt"), None);
+        assert_eq!(ids.repo("https://dev.azure.com/tnt", "p/r"), None);
+        assert_eq!(ids.me("https://dev.azure.com/tnt2").as_deref(), Some("b"));
     }
 
     #[tokio::test]

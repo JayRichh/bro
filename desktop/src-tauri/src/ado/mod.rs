@@ -15,7 +15,7 @@ pub mod tasks;
 pub mod ui;
 
 use auth::TokenSource;
-use client::{AdoClient, AdoError};
+use client::{AdoClient, AdoError, IdCache};
 use remote::{parse_remote, AdoRemote};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
@@ -44,6 +44,8 @@ pub struct AdoState {
     clients: Mutex<HashMap<String, Arc<AdoClient>>>,
     silent_clients: Mutex<HashMap<String, Arc<AdoClient>>>,
     states: StateCache,
+    /// Who I am and each repo's GUIDs, per org, shared by every client.
+    ids: Arc<IdCache>,
     /// Orgs whose background PR poll stopped after a sign-in failure, so
     /// the poll never keeps failing on its own. A command that works for
     /// the org starts it again.
@@ -52,10 +54,13 @@ pub struct AdoState {
 
 impl AdoState {
     pub fn system() -> Self {
-        Self::new(
-            Arc::new(AdoStore::open(AdoStore::default_path())),
-            Arc::new(TokenSource::system()),
-        )
+        let store = Arc::new(AdoStore::open(AdoStore::default_path()));
+        let saver = store.clone();
+        let tokens = TokenSource::system().with_tenants(
+            store.tenants(),
+            Box::new(move |org, tenant| saver.set_tenant(org, tenant)),
+        );
+        Self::new(store, Arc::new(tokens))
     }
 
     pub fn new(store: Arc<AdoStore>, tokens: Arc<TokenSource>) -> Self {
@@ -65,8 +70,25 @@ impl AdoState {
             clients: Mutex::new(HashMap::new()),
             silent_clients: Mutex::new(HashMap::new()),
             states: StateCache::default(),
+            ids: Arc::default(),
             paused: Mutex::new(HashSet::new()),
         }
+    }
+
+    /// Forget the org's cached credential and the ids learned under it.
+    pub fn invalidate(&self, org_url: &str) {
+        self.tokens.invalidate(org_url);
+        self.ids.clear(org_url);
+    }
+
+    /// Sign in to the org again with `az login` (its tenant when known),
+    /// then start over: no cached credential or ids, and the PR poll
+    /// running again.
+    pub async fn sign_in(&self, org_url: &str) -> Result<(), AdoError> {
+        let res = self.tokens.sign_in(org_url).await;
+        self.invalidate(org_url);
+        self.resume(org_url);
+        res.map_err(AdoError::Auth)
     }
 
     pub fn client(&self, org_url: &str) -> Arc<AdoClient> {
@@ -89,7 +111,7 @@ impl AdoState {
         clients
             .entry(org_url.to_string())
             .or_insert_with(|| {
-                let c = AdoClient::new(org_url, self.tokens.clone());
+                let c = AdoClient::new(org_url, self.tokens.clone()).with_ids(self.ids.clone());
                 Arc::new(if silent { c.silent() } else { c })
             })
             .clone()
@@ -668,6 +690,41 @@ mod tests {
         ado.context(&repo).await.unwrap();
         assert!(!ado.is_paused(org));
         let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn one_org_shares_its_ids_and_an_invalidate_clears_them() {
+        let ado = AdoState::new(
+            testing::temp_store(),
+            Arc::new(TokenSource::fixed(auth::Credential::Bearer("tok".into()))),
+        );
+        let org = "https://dev.azure.com/tnt";
+        ado.client(org).ids().set_me(org, "me-1");
+        ado.client("https://dev.azure.com/other")
+            .ids()
+            .set_me("https://dev.azure.com/other", "me-2");
+        // The silent client of the org sees the same ids.
+        assert_eq!(ado.silent_client(org).ids().me(org).as_deref(), Some("me-1"));
+        ado.invalidate(org);
+        assert_eq!(ado.client(org).ids().me(org), None);
+        assert_eq!(
+            ado.client(org).ids().me("https://dev.azure.com/other").as_deref(),
+            Some("me-2")
+        );
+    }
+
+    #[tokio::test]
+    async fn sign_in_clears_the_ids_and_resumes_the_poll() {
+        let ado = AdoState::new(
+            testing::temp_store(),
+            Arc::new(TokenSource::fixed(auth::Credential::Bearer("tok".into()))),
+        );
+        let org = "https://dev.azure.com/tnt";
+        ado.client(org).ids().set_me(org, "me-1");
+        ado.pause(org);
+        ado.sign_in(org).await.unwrap();
+        assert!(!ado.is_paused(org));
+        assert_eq!(ado.client(org).ids().me(org), None);
     }
 
     #[test]
