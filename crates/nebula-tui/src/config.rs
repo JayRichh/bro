@@ -2889,3 +2889,131 @@ mod shared_words {
         }
     }
 }
+
+/// What the desktop window writes, the TUI reads back as it was meant.
+#[cfg(test)]
+mod desktop_round_trip {
+    use super::*;
+    use nebula_config::desktop::DesktopPrefs;
+    use nebula_config::schema::{self, Target};
+    use serde_json::{json, Value};
+    use std::path::Path;
+
+    const STORED: &str = r#"{
+  "future_key": {"from": "a newer build"},
+  "theme": "ocean",
+  "kanban": true,
+  "codex_model": "gpt-5.6-terra",
+  "worktree_base_branch": "develop",
+  "projects": {"/repo/demo": {"run_command": "make dev", "mystery": 1}},
+  "keybindings": {"quit": "ctrl+q"},
+  "desktop": {"theme": "dark"}
+}"#;
+
+    fn as_json(cfg: &Config) -> Value {
+        serde_json::to_value(cfg).unwrap()
+    }
+
+    #[test]
+    fn writing_every_row_back_as_it_is_changes_nothing_the_tui_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let local = dir.path().join("config.local.json");
+        std::fs::write(&path, STORED).unwrap();
+        std::fs::write(&local, r#"{"editor": "hx", "machine_only": 1}"#).unwrap();
+        let before_bytes = std::fs::read_to_string(&path).unwrap();
+        let original = with_config_path(path.clone(), Config::load);
+        let projects = [schema::ProjectRef {
+            name: "demo".into(),
+            path: "/repo/demo".into(),
+        }];
+        let exported = schema::export(&original, &DesktopPrefs::load_at(&path, &local), &projects);
+        for row in exported
+            .tabs
+            .iter()
+            .flat_map(|t| &t.groups)
+            .flat_map(|g| &g.rows)
+        {
+            if matches!(row.target, Target::Desktop { .. }) {
+                continue;
+            }
+            // An effort with nothing to offer shows n/a and is not written.
+            if row.value == json!("n/a") {
+                continue;
+            }
+            schema::set_in(&path, &local, &row.target, &row.value)
+                .unwrap_or_else(|e| panic!("{:?}: {e}", row.target));
+        }
+        let reread = with_config_path(path.clone(), Config::load);
+        assert_eq!(as_json(&reread), as_json(&original));
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            before_bytes,
+            "no-op writes leave the file as it was"
+        );
+    }
+
+    #[test]
+    fn a_desktop_change_reads_back_in_the_tui_as_that_change_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let local = dir.path().join("config.local.json");
+        std::fs::write(&path, STORED).unwrap();
+        let mut expected = with_config_path(path.clone(), Config::load);
+
+        let global = |key: &str| Target::Global { key: key.into() };
+        schema::set_in(&path, &local, &global("kanban"), &json!(false)).unwrap();
+        schema::set_in(
+            &path,
+            &local,
+            &global("session_idle_timeout"),
+            &json!("30m"),
+        )
+        .unwrap();
+        schema::set_in(
+            &path,
+            &local,
+            &Target::Agent {
+                harness: "claude".into(),
+                field: "model".into(),
+            },
+            &json!("opus"),
+        )
+        .unwrap();
+        schema::set_in(
+            &path,
+            &local,
+            &Target::Project {
+                path: "/repo/demo".into(),
+                field: "open_command".into(),
+            },
+            &json!("open http://localhost:3000"),
+        )
+        .unwrap();
+        schema::set_in(
+            &path,
+            &local,
+            &Target::Desktop {
+                key: "theme".into(),
+            },
+            &json!("light"),
+        )
+        .unwrap();
+
+        expected.kanban = false;
+        expected.session_idle_timeout = "30m".into();
+        expected.claude_model = "opus".into();
+        expected.set_project_text(
+            Path::new("/repo/demo"),
+            SettingKind::OpenCommand,
+            "open http://localhost:3000",
+        );
+        let reread = with_config_path(path.clone(), Config::load);
+        assert_eq!(as_json(&reread), as_json(&expected));
+        let raw: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(raw["future_key"], json!({"from": "a newer build"}));
+        assert_eq!(raw["projects"]["/repo/demo"]["mystery"], 1);
+        assert_eq!(raw["desktop"]["theme"], "light");
+        assert_eq!(raw["theme"], "ocean", "the window's theme is not the TUI's");
+    }
+}

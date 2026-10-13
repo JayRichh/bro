@@ -633,21 +633,7 @@ pub(crate) fn run_menu_action(app: &mut App, action: MenuAction, out: &mut Vec<C
             // What the submenus chose, before the defaults fill in the
             // rest: REMEMBER HARNESS below records a pick, never a fallback.
             let picked = (model.clone(), effort.clone());
-            let resolve = |choice: Option<String>, configured: Option<String>| match choice {
-                None => configured,
-                Some(c) if c == crate::config::DEFAULT_CHOICE => configured,
-                some => some,
-            };
-            let harness = cfg.effective_harness(kind, custom.as_deref());
-            let model = resolve(model, harness.default_model().map(str::to_string));
-            // A Cursor effort only counts for the family it belongs to: a
-            // stale setting behind a freshly picked model drops to none.
-            let effort = crate::config::fit_effort(
-                kind,
-                model.as_deref(),
-                resolve(effort, harness.default_effort().map(str::to_string)),
-                custom.as_deref(),
-            );
+            let (model, effort) = cfg.launch_model_effort(kind, custom.as_deref(), model, effort);
             // A Claude Cloud launch has its own task box, and nothing to
             // name first.
             if cloud {

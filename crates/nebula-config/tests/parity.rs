@@ -1,0 +1,308 @@
+//! The desktop window renders every setting the TUI's overlay declares,
+//! and writes them back without touching what it did not change.
+
+use nebula_config::desktop::DesktopPrefs;
+use nebula_config::schema::{
+    self, export, rendered_kinds, set_in, Control, ProjectRef, Target, DESKTOP_EXCLUDED,
+    TERMINAL_ONLY, TERMINAL_RESTART,
+};
+use nebula_config::{all_settings, Config, SettingKind};
+use serde_json::{json, Value};
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+
+fn layers() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    let local = dir.path().join("config.local.json");
+    (dir, path, local)
+}
+
+fn read(path: &Path) -> Value {
+    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+fn one_project() -> Vec<ProjectRef> {
+    vec![ProjectRef {
+        name: "demo".into(),
+        path: PathBuf::from("/repo/demo"),
+    }]
+}
+
+fn declared() -> Vec<SettingKind> {
+    all_settings().map(|(_, _, spec)| spec.kind).collect()
+}
+
+#[test]
+fn every_overlay_row_is_rendered_or_explicitly_excluded() {
+    let schema = export(&Config::default(), &DesktopPrefs::default(), &one_project());
+    let rendered = rendered_kinds(&schema);
+    for kind in declared() {
+        let shown = rendered.contains(&kind);
+        let excluded = DESKTOP_EXCLUDED.contains(&kind);
+        assert!(
+            shown ^ excluded,
+            "{kind:?}: rendered {shown}, excluded {excluded} (exactly one, please)"
+        );
+    }
+    for kind in TERMINAL_ONLY.iter().chain(TERMINAL_RESTART) {
+        assert!(
+            declared().contains(kind),
+            "{kind:?} is listed but no tab declares it"
+        );
+    }
+}
+
+#[test]
+fn terminal_only_rows_sit_in_the_terminal_group() {
+    let schema = export(&Config::default(), &DesktopPrefs::default(), &one_project());
+    for tab in &schema.tabs {
+        for group in &tab.groups {
+            for row in &group.rows {
+                if let Target::Global { key } = &row.target {
+                    let kind = schema::kind_for_key(key).unwrap();
+                    assert_eq!(
+                        group.terminal,
+                        TERMINAL_ONLY.contains(&kind),
+                        "{key} in group {:?}",
+                        group.title
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// A new `Config` field must be a settings row, or be named here as one
+/// the overlay does not edit (retired keys, maps edited elsewhere).
+#[test]
+fn every_config_key_is_a_row_or_named_as_not_one() {
+    const NOT_ROWS: &[&str] = &[
+        // retired, kept for older builds sharing the file
+        "git_init_on_create",
+        "hide_card_prompt",
+        "card_line_changes",
+        "skip_session_naming",
+        "confirm_on_archive",
+        "focus_tint",
+        "show_workspaces",
+        "hide_projects",
+        "hide_worktrees",
+        "hide_sessions",
+        "hide_root_worktree",
+        "recent_prompts",
+        "recent_prompts_count",
+        "show_key_combos",
+        "pr_issue_counts",
+        // per-project, per-harness and hand-edited maps
+        "projects",
+        "keybindings",
+        "claude_models",
+        "custom_harnesses",
+        "harnesses",
+        "profiles",
+        "browsers",
+        // the Agents tab's per-harness rows write these legacy keys
+        "claude_model",
+        "claude_effort",
+        "codex_model",
+        "codex_effort",
+        "cursor_model",
+        "cursor_effort",
+        "pi_model",
+        "pi_effort",
+        "muse_model",
+        "muse_effort",
+        "opencode_model",
+        "claude_enabled",
+        "codex_enabled",
+        "cursor_enabled",
+        "pi_enabled",
+        "muse_enabled",
+        "opencode_enabled",
+    ];
+    let rows: BTreeSet<&str> = declared().into_iter().map(SettingKind::key).collect();
+    let Value::Object(keys) = serde_json::to_value(Config::default()).unwrap() else {
+        unreachable!()
+    };
+    for key in keys.keys() {
+        assert!(
+            rows.contains(key.as_str()) || NOT_ROWS.contains(&key.as_str()),
+            "config key {key} is neither a settings row nor named in NOT_ROWS"
+        );
+    }
+}
+
+#[test]
+fn every_global_row_takes_each_of_its_values() {
+    let schema = export(&Config::default(), &DesktopPrefs::default(), &[]);
+    for row in schema
+        .tabs
+        .iter()
+        .flat_map(|t| &t.groups)
+        .flat_map(|g| &g.rows)
+    {
+        let Target::Global { key } = &row.target else {
+            continue;
+        };
+        let kind = schema::kind_for_key(key).unwrap();
+        let values: Vec<Value> = match &row.control {
+            Control::Toggle => vec![json!(true), json!(false)],
+            Control::Choice { options, .. } => options.iter().map(|o| json!(o)).collect(),
+            Control::Text { .. } => vec![json!("develop"), json!("")],
+        };
+        for value in values {
+            let mut cfg = Config::default();
+            schema::set_value(&mut cfg, kind, &value).unwrap_or_else(|e| panic!("{key}: {e}"));
+            assert_eq!(schema::get_value(&cfg, kind), value, "{key}");
+        }
+    }
+}
+
+#[test]
+fn a_write_from_the_window_changes_one_key_and_keeps_the_rest() {
+    let (_dir, path, local) = layers();
+    std::fs::write(
+        &path,
+        r#"{"future_key": {"a": 1}, "editor": "hx", "desktop": {"theme": "dark"}}"#,
+    )
+    .unwrap();
+    std::fs::write(&local, r#"{"session_idle_timeout": "1h"}"#).unwrap();
+    let global = |key: &str| Target::Global { key: key.into() };
+    set_in(&path, &local, &global("kanban"), &json!(true)).unwrap();
+    set_in(
+        &path,
+        &local,
+        &global("session_idle_timeout"),
+        &json!("15m"),
+    )
+    .unwrap();
+    set_in(
+        &path,
+        &local,
+        &Target::Desktop { key: "home".into() },
+        &json!("board"),
+    )
+    .unwrap();
+    assert_eq!(
+        read(&path),
+        json!({"future_key": {"a": 1}, "editor": "hx", "kanban": true,
+               "desktop": {"theme": "dark", "home": "board", "diff_mode": "side"}})
+    );
+    assert_eq!(read(&local), json!({"session_idle_timeout": "15m"}));
+    assert!(set_in(&path, &local, &global("kanban"), &json!("sideways")).is_err());
+    assert!(set_in(&path, &local, &global("no_such_key"), &json!(true)).is_err());
+}
+
+#[test]
+fn agent_and_project_rows_write_where_the_tui_reads_them() {
+    let (_dir, path, local) = layers();
+    let agent = |id: &str, field: &str| Target::Agent {
+        harness: id.into(),
+        field: field.into(),
+    };
+    set_in(
+        &path,
+        &local,
+        &agent("codex", "model"),
+        &json!("gpt-5.6-terra"),
+    )
+    .unwrap();
+    set_in(&path, &local, &agent("codex", "effort"), &json!("high")).unwrap();
+    set_in(&path, &local, &agent("pi", "enabled"), &json!(false)).unwrap();
+    let project = |field: &str| Target::Project {
+        path: "/repo/demo".into(),
+        field: field.into(),
+    };
+    set_in(
+        &path,
+        &local,
+        &project("run_command"),
+        &json!(" npm run dev "),
+    )
+    .unwrap();
+    set_in(&path, &local, &project("browser"), &json!("edge")).unwrap();
+
+    let cfg = Config::load_at(&path, &local);
+    assert_eq!(cfg.codex_model, "gpt-5.6-terra");
+    assert_eq!(cfg.codex_effort, "high");
+    assert!(!cfg.pi_enabled);
+    let p = cfg.project(Path::new("/repo/demo"));
+    assert_eq!(p.run_command, "npm run dev");
+    assert_eq!(p.browser, "edge");
+    let (model, effort) = cfg.launch_model_effort(nebula_core::AgentKind::Codex, None, None, None);
+    assert_eq!(model.as_deref(), Some("gpt-5.6-terra"));
+    assert_eq!(effort.as_deref(), Some("high"));
+    assert_eq!(
+        cfg.launch_model_effort(nebula_core::AgentKind::Claude, None, None, None),
+        (None, None),
+        "default reaches the daemon as no flag"
+    );
+}
+
+#[test]
+fn the_last_harness_stays_on_and_a_refused_write_writes_nothing() {
+    let (_dir, path, local) = layers();
+    let ids = nebula_config::agent_kind_names();
+    for (i, id) in ids.iter().enumerate() {
+        let target = Target::Agent {
+            harness: id.clone(),
+            field: "enabled".into(),
+        };
+        let result = set_in(&path, &local, &target, &json!(false));
+        assert_eq!(result.is_err(), i == ids.len() - 1, "{id}: {result:?}");
+    }
+    let cfg = Config::load_at(&path, &local);
+    let usable = nebula_core::harness::usable(&cfg.harness_registry()).len();
+    assert_eq!(usable, 1, "the refused write left the last one on");
+}
+
+#[test]
+fn the_agents_tab_lists_custom_harnesses_and_the_quick_prompt_defaults() {
+    let mut cfg = Config::default();
+    cfg.custom_harnesses
+        .push(nebula_core::harness::CustomHarness {
+            id: "aider".into(),
+            label: "Aider".into(),
+            program: "aider".into(),
+            enabled: true,
+            model: "default".into(),
+            model_flag: "--model".into(),
+            hooks: None,
+        });
+    let schema = export(&cfg, &DesktopPrefs::default(), &[]);
+    let agents = schema.tabs.iter().find(|t| t.id == "agents").unwrap();
+    let titles: Vec<&str> = agents.groups.iter().map(|g| g.title.as_str()).collect();
+    assert_eq!(titles.first(), Some(&"Quick prompt"));
+    assert!(titles.contains(&"Aider"), "{titles:?}");
+    assert_eq!(titles.last(), Some(&"Terminal app"));
+}
+
+#[test]
+fn reset_puts_rows_back_and_keeps_what_it_does_not_show() {
+    let (_dir, path, local) = layers();
+    std::fs::write(
+        &path,
+        r#"{"kanban": true, "claude_model": "opus", "theme": "rose",
+            "projects": {"/repo/demo": {"run_command": "make"}},
+            "profiles": [{"name": "work", "harness": "claude"}],
+            "keybindings": {"quit": "ctrl+q"}, "future_key": 5,
+            "desktop": {"theme": "dark", "later": true}}"#,
+    )
+    .unwrap();
+    schema::reset_in(&path, &local).unwrap();
+    let cfg = Config::load_at(&path, &local);
+    assert!(!cfg.kanban);
+    assert_eq!(cfg.claude_model, "default");
+    assert_eq!(cfg.theme, Config::default().theme);
+    assert_eq!(cfg.project(Path::new("/repo/demo")).run_command, "make");
+    assert_eq!(
+        cfg.keybindings.get("quit").map(String::as_str),
+        Some("ctrl+q")
+    );
+    let raw = read(&path);
+    assert_eq!(raw["future_key"], 5);
+    assert_eq!(raw["profiles"][0]["name"], "work");
+    assert_eq!(raw["desktop"]["theme"], "system");
+    assert_eq!(raw["desktop"]["later"], true);
+}

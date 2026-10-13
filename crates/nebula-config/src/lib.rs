@@ -13,5 +13,7 @@ pub mod choices;
 pub mod claude_catalogue;
 mod config;
 pub mod cursor_catalogue;
+pub mod desktop;
+pub mod schema;
 
 pub use config::*;

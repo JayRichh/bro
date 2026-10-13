@@ -2250,6 +2250,113 @@ impl Config {
         }
     }
 
+    /// The model and effort a launch of `(kind, custom)` hands the daemon,
+    /// given what a picker chose: an unpicked field (None) and the explicit
+    /// "default" row both take the Agents tab's setting, whose own
+    /// "default" means "no flag" and comes back None. The effort is fitted
+    /// to the model (a Cursor effort only counts for its family). The TUI's
+    /// `n` picker and the desktop window's launches resolve through here.
+    pub fn launch_model_effort(
+        &self,
+        kind: AgentKind,
+        custom: Option<&str>,
+        model: Option<String>,
+        effort: Option<String>,
+    ) -> (Option<String>, Option<String>) {
+        let resolve = |choice: Option<String>, configured: Option<String>| match choice {
+            None => configured,
+            Some(c) if c == DEFAULT_CHOICE => configured,
+            some => some,
+        };
+        let harness = self.effective_harness(kind, custom);
+        let model = resolve(model, harness.default_model().map(str::to_string));
+        let effort = fit_effort_in(
+            &harness,
+            model.as_deref(),
+            resolve(effort, harness.default_effort().map(str::to_string)),
+        );
+        (model, effort)
+    }
+
+    /// Set an Agents tab harness row to `value` — the desktop window's
+    /// write, where [`Config::cycle_agent_row`] is the overlay's step:
+    /// Enabled takes `"on"`/`"off"`, Model and Effort a choice the row
+    /// offers (a composing harness refits its effort to a new model, as the
+    /// cycle does). Refuses a row the registry does not name, an effort on
+    /// a harness without one, and switching off the last usable harness.
+    pub fn set_agent_value(
+        &mut self,
+        id: &str,
+        field: HarnessField,
+        value: &str,
+    ) -> Result<(), String> {
+        let Some(descriptor) = self
+            .harness_registry()
+            .into_iter()
+            .find(|entry| entry.id == id)
+        else {
+            return Err(format!("no harness {id}"));
+        };
+        let value = value.trim();
+        match field {
+            HarnessField::Enabled => {
+                let on = match value {
+                    "on" | "true" => true,
+                    "off" | "false" => false,
+                    other => return Err(format!("Enabled is on or off, not {other:?}")),
+                };
+                // Writing what it already says changes nothing: no
+                // override is created for an entry that had none.
+                if on == descriptor.enabled {
+                    return Ok(());
+                }
+                let mut next = self.clone();
+                next.set_harness_enabled(id, on);
+                if nebula_core::harness::usable(&next.harness_registry()).is_empty() {
+                    return Err("keep at least one harness enabled".into());
+                }
+                *self = next;
+            }
+            HarnessField::Model => {
+                if value.is_empty() {
+                    return Err("a model is a name, or default".into());
+                }
+                if value == descriptor.model.default {
+                    return Ok(());
+                }
+                self.set_harness_model(id, value.to_string());
+                let descriptor = self.effective_harness_by_id(id);
+                if descriptor.compose_model_effort {
+                    let choices = effort_choices_in(&descriptor, Some(value));
+                    if !fits(&descriptor.effort.default, &choices) {
+                        let fitted = fit_effort_in(&descriptor, Some(value), None)
+                            .unwrap_or_else(|| DEFAULT_CHOICE.into());
+                        self.set_harness_effort(id, fitted);
+                    }
+                }
+            }
+            HarnessField::Effort => {
+                let choices = effort_choices_in(
+                    &descriptor,
+                    descriptor.default_model().map(str::to_string).as_deref(),
+                );
+                if !fits(value, &choices) {
+                    return Err(format!("{value:?} is not an effort {id} offers"));
+                }
+                let picked = choices
+                    .iter()
+                    .find(|c| c.eq_ignore_ascii_case(value))
+                    .cloned()
+                    .unwrap_or_else(|| value.to_string());
+                if picked == descriptor.effort.default {
+                    return Ok(());
+                }
+                self.set_harness_effort(id, picked);
+            }
+        }
+        Ok(())
+    }
+
     /// Cycle an Agents harness row: toggle Enabled, step Model / Effort
     /// through the rows the pickers offer. A composing harness refits its
     /// effort against the new model, so the row never holds an id the CLI
