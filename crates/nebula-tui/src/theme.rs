@@ -9,7 +9,8 @@
 //! chromatic steps start around 40%), so it's truecolor RGB — supported by
 //! modern terminals including Terminal.app since macOS Tahoe.
 //!
-//! The TRUECOLOR PRESETS (`one-dark`, `one-light`) go further: every role
+//! The TRUECOLOR PRESETS (`one-dark`, `one-light`, `kete-dark`,
+//! `kete-light`; the last pair is the Kete Workshop palette) go further: every role
 //! is an exact RGB, and they bring their own canvas ([`Theme::bg`]) so the
 //! window reads as the editor beside it rather than as whatever the
 //! terminal's palette makes of the ANSI names. Two more names are not
@@ -41,6 +42,8 @@ pub const PRESETS: &[&str] = &[
     "mono",
     "one-dark",
     "one-light",
+    "kete-dark",
+    "kete-light",
 ];
 
 /// The theme that follows the OS app theme: `one-light` while the OS says
@@ -67,6 +70,8 @@ pub const THEMES: &[&str] = &[
     "mono",
     "one-dark",
     "one-light",
+    "kete-dark",
+    "kete-light",
     AUTO,
     VSCODE,
 ];
@@ -441,6 +446,94 @@ pub const ONE_LIGHT: Theme = Theme {
     diff_del_word: hex("#F3C6C1"),
 };
 
+/// Kete Workshop, dark: the desktop brief's tokens on soot `#161412`. Ember
+/// is the accent and ink the bone `#EDE6DA`; `ok` is the done olive, `done`
+/// (unread) the teal, `err` the oxide, `merged` the plum. `warn` takes the
+/// ember's text tone, since `warn` may never be the accent; `root` is a
+/// gold apart from both embers, `worktree` a green-teal apart from the
+/// olive and the teal.
+pub const KETE_DARK: Theme = Theme {
+    accent: hex("#E08A35"),
+    on_accent: hex("#161412"),
+    text: hex("#EDE6DA"),
+    muted: hex("#A89F92"),
+    dim: hex("#6E665C"),
+    ok: hex("#9BAA5E"),
+    done: hex("#5FA8A0"),
+    warn: hex("#F0A35A"),
+    err: hex("#D2694E"),
+    special: hex("#B8826A"),
+    merged: hex("#B48EC2"),
+    root: hex("#E3B84F"),
+    worktree: hex("#6FB58A"),
+    sel_bg: hex("#26221E"),
+    sel_bg_dim: hex("#1E1B18"),
+    edge: hex("#3A342D"),
+    warn_sweep: [hex("#F0A35A"), hex("#F5BC85"), hex("#FAD9B8")],
+    err_sweep: [hex("#D2694E"), hex("#E08A72"), hex("#EDB4A3")],
+    merged_sweep: [hex("#B48EC2"), hex("#C7A9D1"), hex("#DCC8E3")],
+    done_sweep: [hex("#5FA8A0"), hex("#8CC2BB"), hex("#BDDDD8")],
+    focus_tint: hex("#231A12"),
+    bg: Some(hex("#161412")),
+    light: false,
+    syn_keyword: hex("#B48EC2"),
+    syn_string: hex("#9BAA5E"),
+    syn_comment: hex("#7F776C"),
+    syn_number: hex("#F0A35A"),
+    nested_bright: hex("#EDE6DA"),
+    nested_dim: hex("#8A8178"),
+    link: hex("#5FA8A0"),
+    // The olive and the oxide over soot: a sixth for the line, a third for
+    // the words.
+    diff_add_bg: hex("#2C2D1F"),
+    diff_del_bg: hex("#35221C"),
+    diff_add_word: hex("#42462B"),
+    diff_del_word: hex("#553026"),
+};
+
+/// Kete Workshop, light: charcoal ink on paper `#F4EFE6`. The sweeps run
+/// darker toward their heads, as on One Light. `on_accent` is the ink, not
+/// the paper: it reads on the ember fill where the paper would not.
+pub const KETE_LIGHT: Theme = Theme {
+    accent: hex("#D9822B"),
+    on_accent: hex("#1C1917"),
+    text: hex("#1C1917"),
+    muted: hex("#57534E"),
+    dim: hex("#8A8178"),
+    ok: hex("#5B6B2E"),
+    done: hex("#2F6F6A"),
+    warn: hex("#A9550F"),
+    err: hex("#A23B22"),
+    special: hex("#8F5B45"),
+    merged: hex("#6B4A7A"),
+    root: hex("#A67C00"),
+    worktree: hex("#3B7A4A"),
+    sel_bg: hex("#E4DBCC"),
+    sel_bg_dim: hex("#EDE6DA"),
+    edge: hex("#CFC5B4"),
+    warn_sweep: [hex("#A9550F"), hex("#8C440A"), hex("#6E3507")],
+    err_sweep: [hex("#A23B22"), hex("#85301B"), hex("#692514")],
+    merged_sweep: [hex("#6B4A7A"), hex("#563B63"), hex("#432E4E")],
+    done_sweep: [hex("#2F6F6A"), hex("#245957"), hex("#1B4543")],
+    focus_tint: hex("#F3E6D3"),
+    bg: Some(hex("#F4EFE6")),
+    light: true,
+    syn_keyword: hex("#6B4A7A"),
+    syn_string: hex("#5B6B2E"),
+    syn_comment: hex("#8A8178"),
+    syn_number: hex("#A9550F"),
+    nested_bright: hex("#1C1917"),
+    nested_dim: hex("#8A8178"),
+    link: hex("#2F6F6A"),
+    // Greener and redder washes than the plain blend: the olive and the
+    // oxide taken toward paper land too near gray-beige for the wash to
+    // read as add or remove.
+    diff_add_bg: hex("#DDE6CB"),
+    diff_del_bg: hex("#F0D8CE"),
+    diff_add_word: hex("#C5D5A6"),
+    diff_del_word: hex("#E8B8A6"),
+};
+
 impl Theme {
     /// `c` taken `level` of the way from this theme's canvas toward
     /// itself ([`blend`]): the washes HIGHLIGHT CURRENT CARD and the
@@ -460,6 +553,8 @@ impl Theme {
         let mut th = match name.trim().to_ascii_lowercase().as_str() {
             "one-dark" | "onedark" | "one dark" => ONE_DARK,
             "one-light" | "onelight" | "one light" => ONE_LIGHT,
+            "kete-dark" | "ketedark" | "kete dark" => KETE_DARK,
+            "kete-light" | "ketelight" | "kete light" => KETE_LIGHT,
             "ocean" => Self {
                 accent: Color::Indexed(39),  // deep sky blue
                 special: Color::Indexed(75), // steel blue
@@ -1056,6 +1151,25 @@ mod tests {
                 assert_ne!(line, canvas, "{name}");
                 assert_ne!(line, th.sel_bg, "{name}");
             }
+        }
+    }
+
+    /// The Kete presets carry the Workshop tokens from the desktop brief:
+    /// ember as the accent, bone or charcoal as the ink, on soot or paper.
+    #[test]
+    fn the_kete_presets_wear_the_workshop_tokens() {
+        let dark = Theme::by_name("kete-dark");
+        assert_eq!(dark.accent, Color::Rgb(0xE0, 0x8A, 0x35));
+        assert_eq!(dark.text, Color::Rgb(0xED, 0xE6, 0xDA));
+        assert_eq!(dark.bg, Some(Color::Rgb(0x16, 0x14, 0x12)));
+        assert!(!dark.light);
+        let light = Theme::by_name(" Kete-Light ");
+        assert_eq!(light.accent, Color::Rgb(0xD9, 0x82, 0x2B));
+        assert_eq!(light.text, Color::Rgb(0x1C, 0x19, 0x17));
+        assert_eq!(light.bg, Some(Color::Rgb(0xF4, 0xEF, 0xE6)));
+        assert!(light.light);
+        for name in ["kete-dark", "kete-light"] {
+            assert!(PRESETS.contains(&name) && THEMES.contains(&name), "{name}");
         }
     }
 

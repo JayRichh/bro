@@ -1,6 +1,6 @@
 //! `kete setup terminal`: make Windows Terminal ready for Kete — the font
 //! the FILE ICONS' Nerd Font glyphs need, and a **Kete** profile that runs
-//! `kete` in it, under Kete's icon and a One Dark color scheme. A **Bro**
+//! `kete` in it, under Kete's icon and the Kete Workshop color scheme. A **Bro**
 //! profile an earlier `bro setup terminal` made becomes the Kete one.
 //!
 //! 1. **The font.** JetBrainsMono Nerd Font (SIL OFL 1.1), from the
@@ -50,8 +50,8 @@ pub(crate) fn run_terminal(opts: Options) -> Result<()> {
             "kete setup terminal sets up Windows Terminal, which this OS doesn't have. \
              Instead:\n  1. install a Nerd Font (https://www.nerdfonts.com: JetBrainsMono \
              Nerd Font matches Kete's own), from your package manager or by hand;\n  \
-             2. set your terminal's font to it (and a One Dark color scheme, if it has \
-             one, to match the one-dark theme);\n  3. in Kete, Settings → Appearance → \
+             2. set your terminal's font to it (and a dark warm color scheme, if it has \
+             one, to match the kete-dark theme);\n  3. in Kete, Settings → Appearance → \
              File icons → nerd."
         );
         return Ok(());

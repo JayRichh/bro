@@ -2,8 +2,9 @@
 //! font the profile Kete runs in draws with — which decides whether the
 //! FILE ICONS can be Nerd Font glyphs (`crate::icons::detect`) — and
 //! written by `kete setup terminal`, which adds a **Kete** profile: `kete` as
-//! its command line, Kete's icon, JetBrainsMono Nerd Font, and a One Dark
-//! color scheme to match the `one-dark` theme.
+//! its command line, Kete's icon, JetBrainsMono Nerd Font, and the Kete
+//! Workshop color scheme to match the `kete-dark` theme (One Dark stays
+//! available as [`one_dark_scheme`]).
 //!
 //! The write is the one place Kete edits a file it does not own, so it is
 //! careful:
@@ -33,9 +34,12 @@ use std::path::PathBuf;
 pub const PROFILE_GUID: &str = "{8b0f3d6e-6a2b-4d8c-9b5e-62726f000001}";
 /// The profile's name in Windows Terminal's dropdown.
 pub const PROFILE_NAME: &str = "Kete";
-/// The color scheme the profile wears. A "One Dark" the user already has
-/// is theirs and stays as it is — the profile wears that one.
-pub const SCHEME_NAME: &str = "One Dark";
+/// The color scheme the profile wears. A "Kete Workshop" the user already
+/// has is theirs and stays as it is — the profile wears that one.
+pub const SCHEME_NAME: &str = "Kete Workshop";
+/// The scheme the profile wore before the Workshop one; still built by
+/// [`one_dark_scheme`] for anyone who wants it.
+pub const ONE_DARK_SCHEME_NAME: &str = "One Dark";
 /// The font the profile draws with, the one `kete setup terminal` installs.
 pub const FONT_FACE: &str = "JetBrainsMono Nerd Font";
 
@@ -122,7 +126,7 @@ pub fn font_face(settings: &Value, guid: Option<&str>) -> Option<String> {
 /// on its own `#282C34`, the canvas the `one-dark` theme paints.
 pub fn one_dark_scheme() -> Value {
     json!({
-        "name": SCHEME_NAME,
+        "name": ONE_DARK_SCHEME_NAME,
         "background": "#282C34",
         "foreground": "#ABB2BF",
         "cursorColor": "#528BFF",
@@ -146,10 +150,40 @@ pub fn one_dark_scheme() -> Value {
     })
 }
 
+/// Kete Workshop as a Windows Terminal color scheme: the dark Workshop
+/// tokens of the desktop brief (bone ink on soot, ember cursor), with the
+/// sixteen ANSI colors derived warm from the same palette, so the terminal
+/// around the `kete-dark` theme reads as one surface with it.
+pub fn kete_workshop_scheme() -> Value {
+    json!({
+        "name": SCHEME_NAME,
+        "background": "#161412",
+        "foreground": "#EDE6DA",
+        "cursorColor": "#E08A35",
+        "selectionBackground": "#3A342D",
+        "black": "#161412",
+        "red": "#D2694E",
+        "green": "#9BAA5E",
+        "yellow": "#E3B84F",
+        "blue": "#5FA8A0",
+        "purple": "#B48EC2",
+        "cyan": "#6FB58A",
+        "white": "#C9C0B2",
+        "brightBlack": "#6E665C",
+        "brightRed": "#E08A72",
+        "brightGreen": "#B5C477",
+        "brightYellow": "#F0A35A",
+        "brightBlue": "#8CC2BB",
+        "brightPurple": "#C7A9D1",
+        "brightCyan": "#A6D4C4",
+        "brightWhite": "#F4EFE6"
+    })
+}
+
 /// The Kete profile: `commandline` (the `kete` to run, a full path when it
 /// is known — quoted when it has a space, as Windows Terminal splits the
 /// line), its `icon` (an absolute path) when there is one, the Nerd Font,
-/// the One Dark scheme.
+/// the Kete Workshop scheme.
 pub fn kete_profile(commandline: &str, icon: Option<&str>) -> Value {
     let commandline = if commandline.contains(' ') && !commandline.starts_with('"') {
         format!("\"{commandline}\"")
@@ -207,7 +241,7 @@ pub fn add_kete_profile(
     }
     let schemes = schemes.as_array_mut().expect("an array now");
     if !schemes.iter().any(is_our_scheme) {
-        schemes.push(one_dark_scheme());
+        schemes.push(kete_workshop_scheme());
         changes.push(format!("add color scheme \"{SCHEME_NAME}\""));
     }
 
@@ -454,7 +488,7 @@ pub fn plan(text: &str, commandline: &str, icon: Option<&str>) -> Result<Plan, S
         .and_then(Value::as_array)
         .is_some_and(|s| s.iter().any(is_our_scheme))
     {
-        let scheme = one_dark_scheme();
+        let scheme = kete_workshop_scheme();
         match root.get("schemes") {
             Some(node) if matches!(node.shape, Shape::Array(_)) => {
                 edits.extend(append(text, node, |ind| write(&scheme, ind)));
@@ -691,15 +725,52 @@ mod tests {
         assert_eq!(list[1]["startingDirectory"], r"C:\Code", "the user's kept");
     }
 
-    /// A "One Dark" the user already has is theirs: it stays as it is, and
-    /// the profile wears it.
+    /// A "Kete Workshop" the user already has is theirs: it stays as it is,
+    /// and the profile wears it.
     #[test]
-    fn a_one_dark_already_there_is_kept() {
-        let mut s = json!({ "schemes": [ { "name": "One Dark", "background": "#000000" } ] });
+    fn a_workshop_scheme_already_there_is_kept() {
+        let mut s = json!({ "schemes": [ { "name": "Kete Workshop", "background": "#000000" } ] });
         let changes = add_kete_profile(&mut s, "kete", None);
         assert_eq!(changes.len(), 1, "only the profile: {changes:?}");
         assert_eq!(s["schemes"].as_array().unwrap().len(), 1);
         assert_eq!(s["schemes"][0]["background"], "#000000");
+    }
+
+    /// The dry run's diff shows the Kete Workshop scheme on soot, and the
+    /// profile wears it; One Dark stays available as a scheme builder.
+    #[test]
+    fn the_dry_run_diff_adds_the_kete_workshop_scheme() {
+        assert_eq!(SCHEME_NAME, "Kete Workshop");
+        let plan = plan("{}", "kete", None).unwrap();
+        let diff = unified_diff("{}", &plan.text, "settings.json");
+        assert!(diff.contains("\"name\": \"Kete Workshop\","), "{diff}");
+        assert!(diff.contains("\"background\": \"#161412\","), "{diff}");
+        assert!(
+            diff.contains("\"colorScheme\": \"Kete Workshop\""),
+            "{diff}"
+        );
+        let scheme = kete_workshop_scheme();
+        for key in [
+            "black",
+            "red",
+            "green",
+            "yellow",
+            "blue",
+            "purple",
+            "cyan",
+            "white",
+            "brightBlack",
+            "brightRed",
+            "brightGreen",
+            "brightYellow",
+            "brightBlue",
+            "brightPurple",
+            "brightCyan",
+            "brightWhite",
+        ] {
+            assert!(scheme[key].is_string(), "{key}");
+        }
+        assert_eq!(one_dark_scheme()["name"], "One Dark");
     }
 
     /// An old file keeps its profiles in a bare array; an empty one has
@@ -749,7 +820,7 @@ mod tests {
         );
         assert!(plan
             .text
-            .contains("\"schemes\": [\n        { \"name\": \"Campbell\", \"background\": \"#0C0C0C\" },\n        {\n            \"name\": \"One Dark\",\n            \"background\": \"#282C34\","));
+            .contains("\"schemes\": [\n        { \"name\": \"Campbell\", \"background\": \"#0C0C0C\" },\n        {\n            \"name\": \"Kete Workshop\",\n            \"background\": \"#161412\","));
         // The new profile sits at the list's indent, its keys in Windows
         // Terminal's order.
         assert!(plan.text.contains(
