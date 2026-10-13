@@ -4,6 +4,7 @@
   import { ownsKey } from './tasks-api';
   import { nav } from '../shell/history.svelte';
   import Chip from './Chip.svelte';
+  import { composeItem } from './prs-api';
   import { branchesApi, filterBranches, shortAge, syncWords, type BranchRow, type BranchTree, type RangeDiff } from './branches-api';
 
   let { repo }: { repo: string } = $props();
@@ -348,7 +349,7 @@
               <button class={action} onclick={() => checkout(r)} disabled={!!busy}>{doing === 'checkout' ? 'Checking out' : 'Check out to worktree'}</button>
             {/if}
             <button class={action} onclick={() => diffVsMain(r)} disabled={!!busy}>{doing === 'diff' ? 'Comparing' : `Diff vs ${TARGET}`}</button>
-            <button class={action} onclick={() => nav.go({ view: 'prs', repo, item: 'compose:' + r.name })} disabled={!!r.pr}
+            <button class={action} onclick={() => nav.go({ view: 'prs', repo, item: composeItem(r.name, r.task) })} disabled={!!r.pr}
               >{r.pr ? 'PR already open' : 'Draft PR'}</button
             >
             {#if r.local}

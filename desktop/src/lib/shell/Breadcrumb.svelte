@@ -2,6 +2,7 @@
   import { app, goHome, sessionFromKey } from '../store.svelte';
   import { nav } from './history.svelte';
   import { placeOf } from '../status';
+  import { parseItem } from '../ado/prs-api';
 
   type Crumb = { label: string; mono?: boolean; go?: () => void };
 
@@ -23,6 +24,12 @@
       const cut = p.item.indexOf('/');
       if (cut > 0) out.push({ label: p.item.slice(0, cut), mono: true }, { label: p.item.slice(cut + 1), mono: true });
       else out.push({ label: p.item, mono: true });
+    }
+    if (p.view === 'prs' && p.item) {
+      // `repo / Pull requests / PR 3417`, or `/ New / <branch>` in the composer.
+      const it = parseItem(p.item);
+      if (it.kind === 'pr') out.push({ label: `PR ${it.id}`, mono: true });
+      else if (it.kind === 'compose') out.push({ label: 'New' }, { label: it.branch, mono: true });
     }
     if (p.view === 'session') {
       const s = sessionFromKey(p.item);

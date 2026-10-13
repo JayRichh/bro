@@ -4,6 +4,7 @@
   import { api } from '../api';
   import { nav } from '../shell/history.svelte';
   import Chip from './Chip.svelte';
+  import { composeItem } from './prs-api';
   import StartTask from './StartTask.svelte';
   import {
     ageWords,
@@ -419,6 +420,13 @@
                 <li class="flex min-w-0 flex-wrap items-center gap-1.5">
                   <Chip kind="branch" label={b.name} place={{ view: 'branches', repo, item: b.name }} />
                   {#if b.pr}<Chip kind="pr" label={`${b.pr.id}${b.pr.is_draft ? ' draft' : ''}`} place={{ view: 'prs', repo, item: String(b.pr.id) }} />{/if}
+                  {#if !b.pr}
+                    <button
+                      class="border border-rule bg-transparent px-1.5 py-px text-[12px] leading-[18px] text-ink hover:border-rule-strong hover:bg-surface"
+                      onclick={() => nav.go({ view: 'prs', repo, item: composeItem(b.name, selected.id) })}
+                      title="Draft a pull request from {b.name} linked to this task">Draft PR</button
+                    >
+                  {/if}
                   {#if b.session}<Chip kind="session" label={app.model.agents.find((a) => a.id === b.session)?.name ?? b.session} place={{ view: 'session', repo, item: `a:${b.session}` }} />{/if}
                 </li>
               {/each}

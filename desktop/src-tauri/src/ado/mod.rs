@@ -401,12 +401,43 @@ pub async fn git_out(cwd: &Path, args: &[&str]) -> Result<String, String> {
 /// `KETE_ADO_BASE`: a local mock server (`http://127.0.0.1:<port>`) that
 /// every ADO request goes to instead of Azure DevOps, signed with a dummy
 /// token. For screenshots and manual tests; loopback only, so neither a
-/// real token nor a real request is ever involved.
+/// real token nor a real request is ever involved. Debug builds only:
+/// a release build never reads the variable.
+#[cfg(debug_assertions)]
 pub fn base_override() -> Option<String> {
-    let base = std::env::var("KETE_ADO_BASE").ok()?;
-    let base = base.trim().trim_end_matches('/');
-    (base.starts_with("http://127.0.0.1:") || base.starts_with("http://localhost:"))
-        .then(|| base.to_string())
+    static BASE: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    BASE.get_or_init(|| {
+        std::env::var("KETE_ADO_BASE")
+            .ok()
+            .and_then(|v| parse_base(&v))
+    })
+    .clone()
+}
+
+#[cfg(not(debug_assertions))]
+pub fn base_override() -> Option<String> {
+    None
+}
+
+/// A mock base as `http://host:port`, or None unless it is plain http to
+/// a loopback host (`127.0.0.1`, `localhost`, `[::1]`) on an explicit
+/// port, with no user info, path, query or fragment.
+#[cfg(debug_assertions)]
+pub fn parse_base(raw: &str) -> Option<String> {
+    let u = reqwest::Url::parse(raw.trim()).ok()?;
+    if u.scheme() != "http" || !u.username().is_empty() || u.password().is_some() {
+        return None;
+    }
+    if !matches!(u.path(), "" | "/") || u.query().is_some() || u.fragment().is_some() {
+        return None;
+    }
+    // The parser has already lowercased and normalised the host.
+    let host = u.host_str()?;
+    if !matches!(host, "127.0.0.1" | "localhost" | "[::1]") {
+        return None;
+    }
+    let port = u.port()?;
+    Some(format!("http://{host}:{port}"))
 }
 
 /// `url` with its scheme and host swapped for `base`'s, path kept.
@@ -507,6 +538,38 @@ mod tests {
             "http://127.0.0.1:7070/synth/_apis/identities"
         );
         assert_eq!(rebase_url("https://synth.visualstudio.com", base), base);
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn parse_base_takes_only_a_plain_loopback_port() {
+        assert_eq!(
+            parse_base("http://127.0.0.1:7417/").as_deref(),
+            Some("http://127.0.0.1:7417")
+        );
+        assert_eq!(
+            parse_base(" http://LOCALHOST:9 ").as_deref(),
+            Some("http://localhost:9")
+        );
+        assert_eq!(
+            parse_base("http://[::1]:8080").as_deref(),
+            Some("http://[::1]:8080")
+        );
+        for bad in [
+            "http://127.0.0.1:1@dev.azure.com",
+            "http://user:pw@127.0.0.1:7417",
+            "http://localhost.evil.example:7417",
+            "http://127.0.0.1.evil.example:7417",
+            "https://127.0.0.1:7417",
+            "http://127.0.0.1",
+            "http://127.0.0.1:7417/synth",
+            "http://127.0.0.1:7417/?x=1",
+            "http://127.0.0.1:7417/#f",
+            "http://10.0.0.1:7417",
+            "not a url",
+        ] {
+            assert_eq!(parse_base(bad), None, "{bad}");
+        }
     }
 
     fn temp_repo(remote: Option<&str>) -> PathBuf {

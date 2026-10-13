@@ -182,6 +182,8 @@
     d.busy = true;
     d.error = null;
     d.outcome = null;
+    const linkTask = d.noTask ? null : (d.task?.id ?? null);
+    d.linkTask = linkTask;
     try {
       const out = await prs.create(worktree, {
         source: branch,
@@ -190,7 +192,7 @@
         description: describe(d),
         draft: d.draft,
         reviewers: d.noReviewer ? [] : d.reviewers,
-        workItem: d.noTask ? null : (d.task?.id ?? null),
+        workItem: linkTask,
       });
       d.outcome = out;
       if (out.kind === 'created') opened(out.id, out.note);
@@ -204,10 +206,11 @@
   let retrying = $state(false);
   async function retryLink() {
     const o = d.outcome;
-    if (!o || !d.task) return;
+    const task = d.linkTask;
+    if (!o || task == null) return;
     retrying = true;
     try {
-      await prs.linkTask(worktree, o.id, d.task.id);
+      await prs.linkTask(worktree, o.id, task);
       opened(o.id, o.note);
     } catch (e) {
       o.reason = String(e);
@@ -439,7 +442,10 @@
           <Mark square="border border-fail" word="Created, task not linked" strong />
           {#if o.reason}<p class="m-0 mt-1.5 text-muted select-text">{o.reason}</p>{/if}
           <div class="mt-2.5 flex items-center gap-3">
-            <button type="button" class={btn} onclick={retryLink} disabled={retrying}>{retrying ? 'Linking' : 'Retry'}</button>
+            <button type="button" class={btn} onclick={retryLink} disabled={retrying || d.linkTask == null}
+              >{retrying ? 'Linking' : d.linkTask != null ? `Retry linking #${d.linkTask}` : 'Retry'}</button
+            >
+            {#if d.linkTask == null}<span class="text-[12px] text-muted">No task id was sent with the create, so there is nothing to link.</span>{/if}
             <button
               type="button"
               class="border-0 bg-transparent p-0 text-[13px] text-ink underline decoration-rule underline-offset-4 hover:decoration-rule-strong"

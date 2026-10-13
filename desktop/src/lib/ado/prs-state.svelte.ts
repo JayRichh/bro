@@ -27,6 +27,8 @@ export interface ComposeDraft {
   draft: boolean;
   busy: boolean;
   outcome: CreateResult | null;
+  /** The task the create asked to link, kept for Retry. */
+  linkTask: number | null;
   error: string | null;
 }
 
@@ -53,6 +55,7 @@ export function freshDraft(): ComposeDraft {
     draft: true,
     busy: false,
     outcome: null,
+    linkTask: null,
     error: null,
   };
 }

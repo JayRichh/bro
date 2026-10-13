@@ -131,6 +131,7 @@ export const VOTES: { vote: number; label: string }[] = [
   { vote: 5, label: 'Approve with suggestions' },
   { vote: -5, label: 'Wait for author' },
   { vote: -10, label: 'Reject' },
+  { vote: 0, label: 'Reset vote' },
 ];
 
 export const prs = {
@@ -218,5 +219,3 @@ export function prMark(pr: PrSummary): { square: string; word: string } {
   return { square: 'bg-merged', word: 'active' };
 }
 
-/** `refs/heads/x` reads as `x`. */
-export const short = (ref: string) => ref.replace(/^refs\/heads\//, '');

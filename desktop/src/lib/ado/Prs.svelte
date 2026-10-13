@@ -52,6 +52,17 @@
     }
   });
 
+  // A PR just created: reload Mine so its row is there, on the Mine tab.
+  let reloadedFor = 0;
+  $effect(() => {
+    const id = prsState.created?.id ?? 0;
+    if (id && id !== reloadedFor && ctx && worktree && item.kind !== 'compose') {
+      reloadedFor = id;
+      ui.tab = 'mine';
+      load();
+    }
+  });
+
   // "New pull request": a branch name, then the composer for it.
   let composing = $state(false);
   let newBranch = $state('');
@@ -179,6 +190,7 @@
             >
               <span class="flex min-w-0 items-baseline gap-3">
                 <span class="min-w-0 flex-1 truncate text-[15px] font-semibold text-ink">{pr.title}</span>
+                {#if pr.id === prsState.created?.id}<span class="flex-none text-[12px] font-medium text-ink">just created</span>{/if}
                 <span class="flex-none font-mono text-[12px] text-muted">{pr.id}</span>
               </span>
               <span class="mt-1 flex min-w-0 items-center gap-3">
