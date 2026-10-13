@@ -396,6 +396,20 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: SetupCommand,
     },
+    /// Open the desktop window: the kanban, live terminals and diffs.
+    ///
+    /// Launches `bro-desktop`, the native window over the same daemon this
+    /// TUI talks to (it starts the daemon when none is running). It is
+    /// looked for beside this `bro` first, then on PATH; when neither has
+    /// it, this prints where to get it. Arguments after `--` go to the
+    /// window: `--view board|session|diff`, `--session <name>`,
+    /// `--theme light|dark|system`.
+    #[command(after_help = DESKTOP_EXAMPLES)]
+    Desktop {
+        /// Options for the window, after `--`.
+        #[arg(last = true, value_name = "ARGS")]
+        args: Vec<String>,
+    },
     /// Install the latest published bro over this one.
     ///
     /// Runs the install script for the newest release, then moves a running
@@ -591,6 +605,12 @@ Examples:
   bro tunnel user@server /srv/app  start in a directory there
   bro tunnel user@server --port 9000
                                       pick the local end of the tunnel";
+
+const DESKTOP_EXAMPLES: &str = "\
+Examples:
+  bro desktop                   open the window
+  bro desktop -- --view diff    open it on the diff view
+  bro desktop -- --theme light  force the light theme";
 
 const UPGRADE_EXAMPLES: &str = "\
 Examples:

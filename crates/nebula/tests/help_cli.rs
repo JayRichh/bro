@@ -28,6 +28,7 @@ const VISIBLE: &[&[&str]] = &[
     &["browser"],
     &["ssh"],
     &["tunnel"],
+    &["desktop"],
     &["upgrade"],
 ];
 

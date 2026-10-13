@@ -1,5 +1,6 @@
 mod browser;
 mod cli;
+mod desktop;
 mod hook;
 mod profile;
 mod setup;
@@ -158,6 +159,7 @@ fn main() -> Result<()> {
             no_font,
             wt_settings,
         }),
+        Some(Command::Desktop { args }) => desktop::run_desktop(&args),
         Some(Command::Upgrade { force }) => upgrade::run_upgrade(force),
         Some(Command::StaleDaemonNote) => {
             if nebula_daemon::lifecycle::daemon_is_stale() {
