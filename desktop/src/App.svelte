@@ -16,6 +16,8 @@
   import { nav } from './lib/shell/history.svelte';
   import Rail from './lib/shell/Rail.svelte';
   import Breadcrumb from './lib/shell/Breadcrumb.svelte';
+  import AttentionStrip from './lib/overview/AttentionStrip.svelte';
+  import Overview from './lib/overview/Overview.svelte';
   import Board from './lib/Board.svelte';
   import Session from './lib/Session.svelte';
   import Diff from './lib/Diff.svelte';
@@ -164,6 +166,7 @@
     <header class="flex h-10 flex-none items-center gap-6 border-b border-rule pr-4 pl-2">
       <Breadcrumb />
       <span class="flex-1"></span>
+      <AttentionStrip />
       <div class="flex h-6 flex-none border border-rule" role="radiogroup" aria-label="Home view">
         {#each [{ id: 'overview', label: 'Overview' }, { id: 'board', label: 'Board' }] as h, i (h.id)}
           {@const on = app.home === h.id}
@@ -191,7 +194,11 @@
         </section>
       {:else}
         <div class="relative min-w-0 flex-1">
-          <Board active={!split} />
+          {#if app.home === 'board'}
+            <Board active={!split} />
+          {:else}
+            <Overview active={!split} />
+          {/if}
         </div>
         {#if split}
           <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->

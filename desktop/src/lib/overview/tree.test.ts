@@ -1,0 +1,116 @@
+import { expect, test } from 'vitest';
+import type { Agent, AgentStatus, Subagent } from '../api';
+import { attentionRank, buildForest, flatten, sortRepos, type Node } from './tree';
+
+function agent(id: string, parent: string | null = null, status: AgentStatus = 'finished', unseen = false): Agent {
+  return {
+    id,
+    worktree_id: 'w1',
+    name: id,
+    status,
+    archived: false,
+    unseen,
+    status_changed_at: 0,
+    kind: 'claude',
+    custom_harness: null,
+    model: null,
+    profile: null,
+    alive: true,
+    recent_prompts: [],
+    role: 'worker',
+    sort_order: 0,
+    parent,
+  };
+}
+
+function sub(parent: string, id: string, status: Subagent['status'] = 'running'): Subagent {
+  return { id, parent_agent: parent, kind: 'Explore', description: `look at ${id}`, started_at: 0, ended_at: null, status };
+}
+
+function find(forest: Node[], id: string): Node | undefined {
+  for (const n of forest) {
+    if (n.id === id) return n;
+    const hit = find(n.children, id);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+test('the forest nests three deep', () => {
+  const forest = buildForest(
+    [agent('lead'), agent('child', 'lead'), agent('grandchild', 'child')],
+    [],
+  );
+  expect(forest.map((n) => n.id)).toEqual(['lead']);
+  const child = forest[0].children[0];
+  expect(child.id).toBe('child');
+  expect(child.depth).toBe(1);
+  expect(child.children[0].id).toBe('grandchild');
+  expect(child.children[0].depth).toBe(2);
+});
+
+test('a subagent nests under its session', () => {
+  const forest = buildForest([agent('lead'), agent('child', 'lead')], [sub('child', 's1')]);
+  const s = find(forest, 'child')!.children.find((n) => n.kind === 'subagent');
+  expect(s).toBeDefined();
+  expect(s!.depth).toBe(2);
+  expect(s!.status).toBe('running');
+  expect(s!.label).toBe('look at s1');
+});
+
+test('an orphan whose parent is missing becomes a root', () => {
+  const forest = buildForest([agent('lead'), agent('lost', 'gone')], [sub('nobody', 's9')]);
+  expect(forest.map((n) => n.id).sort()).toContain('lost');
+  expect(forest.find((n) => n.id === 'lost')!.depth).toBe(0);
+  expect(forest.some((n) => n.kind === 'subagent' && n.depth === 0)).toBe(true);
+});
+
+test('a row ranks by the most urgent node in its subtree', () => {
+  const forest = buildForest(
+    [agent('lead', null, 'running'), agent('asks', 'lead', 'needs_feedback')],
+    [],
+  );
+  expect(attentionRank(forest[0])).toBe(0);
+  const done = buildForest([agent('a', null, 'finished')], [sub('a', 'x', 'failed')]);
+  expect(attentionRank(done[0])).toBe(1);
+  expect(attentionRank(buildForest([agent('u', null, 'finished', true)], [])[0])).toBe(2);
+  expect(attentionRank(buildForest([agent('r', null, 'running')], [])[0])).toBe(3);
+  expect(attentionRank(buildForest([agent('d')], [])[0])).toBe(4);
+});
+
+test('a repo with a needs-you child floats first', () => {
+  const quiet = { name: 'alpha', forest: buildForest([agent('a1', null, 'running')], []) };
+  const asks = {
+    name: 'zeta',
+    forest: buildForest([agent('z1', null, 'running'), agent('z2', 'z1', 'needs_feedback')], []),
+  };
+  const idle = { name: 'beta', forest: [] as Node[] };
+  expect(sortRepos([quiet, idle, asks]).map((r) => r.name)).toEqual(['zeta', 'alpha', 'beta']);
+});
+
+test('ties sort by name', () => {
+  const a = { name: 'web', forest: buildForest([agent('w')], []) };
+  const b = { name: 'api', forest: buildForest([agent('x')], []) };
+  expect(sortRepos([a, b]).map((r) => r.name)).toEqual(['api', 'web']);
+});
+
+test('nodes deeper than two are collapsed by default', () => {
+  const forest = buildForest(
+    [agent('lead'), agent('child', 'lead'), agent('grandchild', 'child'), agent('deep', 'grandchild')],
+    [sub('grandchild', 's1')],
+  );
+  const rows = flatten(forest, new Set());
+  expect(rows.map((r) => r.node.id)).toEqual(['lead', 'child', 'grandchild']);
+  const gc = rows.find((r) => r.node.id === 'grandchild')!;
+  expect(gc.hidden).toBe(2);
+  expect(gc.expanded).toBe(false);
+
+  const open = flatten(forest, new Set(['grandchild']));
+  expect(open.map((r) => r.node.id)).toEqual(['lead', 'child', 'grandchild', 'deep', 's1']);
+});
+
+test('a collapsed node can be opened and an open one closed', () => {
+  const forest = buildForest([agent('lead'), agent('child', 'lead')], []);
+  expect(flatten(forest, new Set()).length).toBe(2);
+  expect(flatten(forest, new Set(), new Set(['lead'])).map((r) => r.node.id)).toEqual(['lead']);
+});
