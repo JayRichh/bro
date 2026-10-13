@@ -99,3 +99,71 @@ Depth is unlimited, with collapse at depth > 2 by default.
   - an `ado` client test suite against a local mock HTTP server with recorded-shape JSON fixtures
 - **Frontend:** component tests for the composer's policy logic (task / no-task / reviewers).
 - **Live smoke with Jay against TnT:** read-only views first, then one real draft PR on a scratch branch, which is then abandoned.
+
+## Audit resolutions (Codex review, 2026-10-14)
+
+These decisions override anything above that conflicts.
+
+**Auth**
+- Call GCM as `git -c credential.azreposCredentialType=oauth credential fill`, and send `Authorization: Bearer`. If only a PAT comes back, send Basic `:token` and probe capability once per org. Read-only probes are `GET _apis/connectionData` and `GET _apis/wit/workitemtypes?$top=1`. The probe reports exactly which area (work items, identities, code) is not permitted.
+- SSH remotes are normalised to the HTTPS org URL for the credential lookup.
+- The `az` fallback passes `--tenant` from the remembered tenant (learned from the first successful token's `tid` claim).
+- Conditional-access and interaction-required errors show "Sign in again" and run `az login --tenant <tid>` on click.
+- Error copy distinguishes authentication (401, interaction required) from permission (403 on one area) from policy.
+
+**Repository identity**
+- **Remote:** `origin`, or the single ADO remote. A picker appears only when several ADO remotes exist.
+- **Metadata:** `GET {org}/{project}/_apis/git/repositories/{repo}?api-version=7.1` gives the repo GUID and `defaultBranch`. `GET {org}/_apis/projects/{project}?api-version=7.1` gives `defaultTeam`.
+- **Unsupported cases:**
+  - non-ADO repos show no ADO views
+  - forks and detached HEAD are shown as such, read-only
+  - new branch names are validated with `git check-ref-format --branch`
+  - name collisions and branches already checked out in a worktree are refused with the reason
+
+**Tasks**
+- **Current sprint:** `GET {team}/_apis/work/teamsettings/iterations?$timeframe=current`, then `GET {team}/_apis/work/teamsettings/iterations/{id}/workitems?api-version=7.1`, hydrated by `POST _apis/wit/workitemsbatch?api-version=7.1` in batches of 200.
+- **Other iterations:** the previous and next ones come from the full iteration list (no timeframe).
+- **All my open:** WIQL (`POST _apis/wit/wiql`) on `[System.AssignedTo] = @Me` and state category not Completed or Removed, using the team's area paths (`teamfieldvalues`, honouring `includeChildren`).
+- **States:** open/closed is decided by state *category* (`_apis/wit/workitemtypes/{type}/states`), never by state name.
+- **Missing fields:** empty or undated iterations, and missing fields, render as "none" rather than erroring. Acceptance criteria fall back to the parent's when the task has none.
+- **Start:** assigns the task to me if it's unassigned, and moves it to the first InProgress-category state. Both are on by default, as toggles in the Start dialog.
+
+**PR creation**
+1. Push the source branch to the chosen remote, with `--set-upstream` if needed.
+2. `POST _apis/git/repositories/{repoId}/pullrequests?api-version=7.1` with full `refs/heads/...` names, `isDraft`, `reviewers[].id` (ADO identity IDs) and `workItemRefs[].id` for the task link.
+   - If linking fails after creation, keep the PR ID, show "Created, task not linked" with Retry, and never create twice.
+   - An ambiguous create (timeout) is reconciled by listing PRs for that source branch before any retry.
+3. **Publish:** `PATCH .../pullrequests/{id}` with `isDraft: false`. While a PR is a draft, voting is unavailable, and policy rows show "not evaluated (draft)".
+
+**Policy and reviewers**
+- **Policy is the server's:** `GET _apis/policy/evaluations?artifactId=vstfs:///CodeReview/CodeReviewId/{projectId}/{prId}&api-version=7.1-preview.1`, showing pending, approved, rejected and not-applicable separately.
+- **The "No task (n/a)" and "No reviewer" escapes** only silence Kete's own pre-submit nudge. The server's verdict is shown as returned.
+- **Reviewer search:** `GET https://vssps.dev.azure.com/{org}/_apis/identities?searchFilter=General&filterValue={q}&api-version=7.1`. Ambiguous matches show email to disambiguate.
+
+**Review**
+- **Vote:** `PUT .../pullrequests/{id}/reviewers/{myId}` with vote `10 / 5 / 0 / -5 / -10`.
+- **Reply:** `POST .../pullrequests/{id}/threads/{threadId}/comments`.
+- **Threads:** shown with their file and line context from the PR iteration.
+
+**Diff**
+- Comparisons are by commit SHA (merge-base..tip), with PR tips pinned when opened. Missing refs are fetched, including `refs/pull/{id}/merge`; shallow history is deepened.
+- Missing blob content is an error state, never an empty side. Each side is capped at 2 MB, with a "too large" state beyond that.
+- **Modes:** side-by-side, inline and replacement are all rendering. Per-hunk stage/discard applies only to working-tree diffs, uses `git apply --cached` / `git apply -R` on the hunk's patch, and is computed from `git diff` (index vs worktree) and `git diff --cached`.
+- Monaco and its workers are bundled locally for the app's CSP.
+
+**Store (`ado.json`)**
+- Keyed by org/project/repo. Writes are atomic (temp file + rename), and the cache is capped (last 500 items per repo).
+
+**Nested subagents (protocol)**
+- `AgentSummary` gains `parent: Option<AgentId>`, filled for `kete spawn` children.
+- A new `subagents: Vec<SubagentSummary { id, parent_agent, kind, description, started_at, ended_at, status }>` is carried in snapshots and updated by `SubagentChanged` deltas fed from the SubagentStart/SubagentStop hooks.
+- When the parent session ends or the daemon restarts, open subagents are closed as "ended (unknown)".
+- Protocol version bump (additive: the minimum compatible version stays).
+
+**Attribution (hard rule, quiet)**
+- **Claude:** per-worktree settings get `attribution: { commit: "", pr: "" }`, plus `includeCoAuthoredBy: false` for older versions. Managed settings can override this; if they do, Kete can't, and the gate below catches it.
+- **Copilot CLI:** `includeCoAuthoredBy: false` in `.github/copilot/settings.local.json` in each Kete worktree, kept out of git via the worktree's `info/exclude`.
+- **Codex:** no switch exists. Its session instructions ask for plain commit messages without co-author trailers.
+- **Gate:** before Kete pushes or creates a PR, it scans the commits being published for AI footers and trailers (`Co-Authored-By:` naming Claude, Copilot, Codex or OpenAI, and "Generated with"). Human co-authors are kept.
+  - If any are found in commits not yet on the remote, Kete rewrites only those messages (no content change), then continues.
+  - If they're already on the remote, it shows a one-line note and does not rewrite.
