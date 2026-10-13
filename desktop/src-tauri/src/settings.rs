@@ -1,0 +1,277 @@
+//! Settings: the same config.json the TUI reads, through `nebula-config`.
+//! The window renders what [`schema::export`] lays out and sends each
+//! change back as one [`schema::Target`]; a write touches only the keys it
+//! changes, so a running TUI and this window keep each other's edits. The
+//! window's own preferences live under the `desktop` object.
+
+use crate::daemon::{Client, Model};
+use crate::Res;
+use nebula_config::desktop::DesktopPrefs;
+use nebula_config::schema::{self, ProjectRef, Target};
+use nebula_config::Config;
+use nebula_core::project_file::{self, ProjectCommand};
+use serde::Serialize;
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use tauri::State;
+
+fn projects(model: &Model) -> Vec<ProjectRef> {
+    let mut list: Vec<_> = model.projects.iter().collect();
+    list.sort_by_key(|p| p.sort_order);
+    list.into_iter()
+        .map(|p| ProjectRef {
+            name: p.name.clone(),
+            path: p.repo_path.clone(),
+        })
+        .collect()
+}
+
+/// Every tab and row, with the values stored now.
+#[tauri::command]
+pub fn settings_schema(client: State<'_, Arc<Client>>) -> schema::Schema {
+    schema::export(
+        &Config::load(),
+        &DesktopPrefs::load(),
+        &projects(&client.snapshot()),
+    )
+}
+
+/// Write one row.
+#[tauri::command]
+pub fn settings_set(target: Target, value: serde_json::Value) -> Res<()> {
+    let (path, local) = nebula_config::layer_paths();
+    schema::set_in(&path, &local, &target, &value)
+}
+
+/// Put every row the window shows back to its default (see
+/// [`schema::reset_config`] for what stays).
+#[tauri::command]
+pub fn settings_reset() -> Res<()> {
+    let (path, local) = nebula_config::layer_paths();
+    schema::reset_in(&path, &local)
+}
+
+/// The window's own preferences, read at startup.
+#[tauri::command]
+pub fn desktop_prefs() -> DesktopPrefs {
+    DesktopPrefs::load()
+}
+
+/// The run command each worktree's Run button would start, by worktree
+/// id: the project's own `run_command` setting, else the checkout's
+/// `.kete.json` `run` — the order the daemon's StartRun reads them in.
+/// Worktrees with neither are left out.
+#[tauri::command]
+pub fn run_commands(client: State<'_, Arc<Client>>) -> BTreeMap<String, String> {
+    run_commands_for(&client.snapshot(), &Config::load())
+}
+
+pub fn run_commands_for(model: &Model, cfg: &Config) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    for w in &model.worktrees {
+        let main = model
+            .projects
+            .iter()
+            .find(|p| p.id == w.project_id)
+            .map_or(w.path.as_path(), |p| p.repo_path.as_path());
+        let configured = cfg.project(main).run_command.trim().to_string();
+        let command = if configured.is_empty() {
+            project_file::lookup(&w.path, main, ProjectCommand::Run)
+                .ok()
+                .flatten()
+        } else {
+            Some(configured)
+        };
+        if let Some(command) = command.filter(|c| !c.trim().is_empty()) {
+            out.insert(w.id.0.clone(), command);
+        }
+    }
+    out
+}
+
+/// A harness the quick prompt offers.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct HarnessInfo {
+    pub id: String,
+    pub label: String,
+}
+
+/// What the New session picker offers, as the TUI's: enabled, valid
+/// entries of the effective registry (built-ins with the `harnesses` map
+/// and legacy keys applied, then custom harnesses), less any missing from
+/// PATH while `hide_uninstalled_harnesses` is on.
+pub fn offered(cfg: &Config) -> Vec<HarnessInfo> {
+    cfg.offered_harnesses()
+        .into_iter()
+        .map(|(kind, custom)| {
+            let descriptor = cfg.effective_harness(kind, custom.as_deref());
+            HarnessInfo {
+                id: descriptor.id.clone(),
+                label: descriptor.display_label().to_string(),
+            }
+        })
+        .collect()
+}
+
+/// A create's harness id as the daemon wants it: a built-in kind, or
+/// `Custom` with the entry's id.
+pub fn resolve_kind(cfg: &Config, id: &str) -> Res<(nebula_core::AgentKind, Option<String>)> {
+    use nebula_core::AgentKind;
+    if let Some(kind) = AgentKind::parse(id).filter(|k| *k != AgentKind::Custom) {
+        return Ok((kind, None));
+    }
+    if cfg.harness_registry().iter().any(|h| h.id == id) {
+        return Ok((AgentKind::Custom, Some(id.to_string())));
+    }
+    Err(format!("unknown harness {id}"))
+}
+
+/// The model and effort a create passes for `id`, as the TUI resolves
+/// them: what the caller picked, else the Agents tab's defaults ("default"
+/// = no flag).
+pub fn launch_args(
+    cfg: &Config,
+    id: &str,
+    model: Option<String>,
+    effort: Option<String>,
+) -> Res<LaunchArgs> {
+    let (kind, custom) = resolve_kind(cfg, id)?;
+    let (model, effort) = cfg.launch_model_effort(kind, custom.as_deref(), model, effort);
+    Ok(LaunchArgs {
+        kind,
+        custom,
+        model,
+        effort,
+    })
+}
+
+#[derive(Debug, PartialEq)]
+pub struct LaunchArgs {
+    pub kind: nebula_core::AgentKind,
+    pub custom: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nebula_core::{AgentKind, Project, ProjectId, Worktree, WorktreeId};
+    use serde_json::json;
+    use std::path::Path;
+
+    fn cfg_from(json: serde_json::Value) -> (tempfile::TempDir, Config) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, json.to_string()).unwrap();
+        let cfg = Config::load_at(&path, &dir.path().join("config.local.json"));
+        (dir, cfg)
+    }
+
+    #[test]
+    fn a_create_passes_the_configured_model_and_effort() {
+        let (_d, cfg) = cfg_from(json!({"claude_model": "opus", "claude_effort": "high"}));
+        let args = launch_args(&cfg, "claude", None, None).unwrap();
+        assert_eq!(args.kind, AgentKind::Claude);
+        assert_eq!(args.model.as_deref(), Some("opus"));
+        assert_eq!(args.effort.as_deref(), Some("high"));
+        // "default" is no flag at all.
+        let (_d, cfg) = cfg_from(json!({}));
+        let args = launch_args(&cfg, "codex", None, None).unwrap();
+        assert_eq!((args.model, args.effort), (None, None));
+        // A pick beats the default.
+        let (_d, cfg) = cfg_from(json!({"claude_model": "opus"}));
+        let args = launch_args(&cfg, "claude", Some("sonnet".into()), None).unwrap();
+        assert_eq!(args.model.as_deref(), Some("sonnet"));
+    }
+
+    #[test]
+    fn a_custom_harness_launches_as_custom_with_its_id() {
+        let (_d, cfg) = cfg_from(json!({"custom_harnesses": [
+            {"id": "aider", "program": "aider", "model": "gpt-x", "model_flag": "--model"}
+        ]}));
+        let args = launch_args(&cfg, "aider", None, None).unwrap();
+        assert_eq!(args.kind, AgentKind::Custom);
+        assert_eq!(args.custom.as_deref(), Some("aider"));
+        assert_eq!(args.model.as_deref(), Some("gpt-x"));
+        assert!(launch_args(&cfg, "nope", None, None).is_err());
+    }
+
+    #[test]
+    fn the_offered_harnesses_follow_the_agents_tab() {
+        let (_d, cfg) = cfg_from(json!({
+            "codex_enabled": false,
+            "harnesses": {"cursor": {"enabled": false, "label": "Cursor CLI"}},
+            "custom_harnesses": [{"id": "aider", "label": "Aider", "program": "aider", "model": "default", "model_flag": "--model"}]
+        }));
+        let ids: Vec<String> = offered(&cfg).into_iter().map(|h| h.id).collect();
+        assert!(ids.contains(&"claude".to_string()));
+        assert!(!ids.contains(&"codex".to_string()), "{ids:?}");
+        assert!(!ids.contains(&"cursor".to_string()), "{ids:?}");
+        assert!(ids.contains(&"aider".to_string()), "{ids:?}");
+    }
+
+    #[test]
+    fn hide_missing_clis_drops_a_harness_whose_program_is_nowhere() {
+        let (_d, cfg) = cfg_from(json!({
+            "hide_uninstalled_harnesses": true,
+            "custom_harnesses": [{"id": "ghost", "program": "kete-no-such-cli-xyz", "model": "default", "model_flag": "--model"}]
+        }));
+        let ids: Vec<String> = offered(&cfg).into_iter().map(|h| h.id).collect();
+        assert!(!ids.contains(&"ghost".to_string()), "{ids:?}");
+    }
+
+    #[test]
+    fn a_run_command_comes_from_the_setting_then_the_project_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        let wt = dir.path().join("repo-wt");
+        let bare = dir.path().join("bare");
+        for d in [&repo, &wt, &bare] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::write(wt.join(".kete.json"), r#"{"run": "npm run dev"}"#).unwrap();
+        let model = Model {
+            projects: vec![
+                Project {
+                    id: ProjectId("p1".into()),
+                    name: "repo".into(),
+                    repo_path: repo.clone(),
+                    sort_order: 0,
+                },
+                Project {
+                    id: ProjectId("p2".into()),
+                    name: "bare".into(),
+                    repo_path: bare.clone(),
+                    sort_order: 1,
+                },
+            ],
+            worktrees: vec![
+                worktree("w1", "p1", &repo),
+                worktree("w2", "p1", &wt),
+                worktree("w3", "p2", &bare),
+            ],
+            ..Model::default()
+        };
+        let none = run_commands_for(&model, &Config::default());
+        assert_eq!(none.get("w2").map(String::as_str), Some("npm run dev"));
+        assert!(!none.contains_key("w1") && !none.contains_key("w3"));
+
+        let mut cfg = Config::default();
+        cfg.set_project_text(&repo, nebula_config::SettingKind::RunCommand, "cargo run");
+        let set = run_commands_for(&model, &cfg);
+        assert_eq!(set.get("w1").map(String::as_str), Some("cargo run"));
+        assert_eq!(set.get("w2").map(String::as_str), Some("cargo run"));
+    }
+
+    fn worktree(id: &str, project: &str, path: &Path) -> Worktree {
+        Worktree {
+            id: WorktreeId(id.into()),
+            project_id: ProjectId(project.into()),
+            path: path.to_path_buf(),
+            branch: "main".into(),
+            is_main: true,
+            sort_order: 0,
+        }
+    }
+}

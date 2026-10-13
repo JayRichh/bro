@@ -2045,6 +2045,8 @@ mod tests {
             kind: "claude".into(),
             profile: None,
             prompt: None,
+            model: None,
+            effort: None,
         }
     }
 

@@ -479,6 +479,15 @@ pub fn fetch_ids() -> Option<Vec<String>> {
     (!ids.is_empty()).then_some(ids)
 }
 
+/// Install the cached catalogue, if there is one, and nothing more: no
+/// refresh, no `cursor-agent` probe. For the desktop window, which should
+/// not start a console process to fill a settings list.
+pub fn install_cached() {
+    if let Some(cache) = read_cache(&cache_path()) {
+        install(&cache.ids);
+    }
+}
+
 /// TUI startup: install the cached catalogue at once and, when the cache is
 /// missing or older than [`CACHE_TTL`], refresh it on a background thread.
 /// Skipped when Cursor is switched off (HARNESS TOGGLE) and under

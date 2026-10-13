@@ -9,12 +9,13 @@ mod ado;
 mod attribution;
 mod daemon;
 mod git;
+mod settings;
 
 use ado::client::CmdError;
 use ado::prs::{self, PrCtx};
 use ado::{AdoContext, AdoState};
 use daemon::{Client, Model, PtyEvent};
-use nebula_core::{AgentId, AgentKind, ClientRequest, EntityId, SessionRef, WorktreeId};
+use nebula_core::{AgentId, ClientRequest, EntityId, SessionRef, WorktreeId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -24,7 +25,7 @@ use tauri::ipc::Channel;
 use tauri::{Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
-type Res<T> = Result<T, String>;
+pub(crate) type Res<T> = Result<T, String>;
 /// An ADO command's result: errors carry a kind for the window.
 type AdoRes<T> = Result<T, CmdError>;
 
@@ -129,6 +130,12 @@ struct NewAgent {
     kind: String,
     profile: Option<String>,
     prompt: Option<String>,
+    /// A model picked for this one launch; None takes the Agents tab's.
+    #[serde(default)]
+    model: Option<String>,
+    /// An effort picked for this one launch; None takes the Agents tab's.
+    #[serde(default)]
+    effort: Option<String>,
 }
 
 #[tauri::command]
@@ -136,9 +143,12 @@ async fn create_agent(client: State<'_, Arc<Client>>, spec: NewAgent) -> Res<Str
     spawn_agent(&client, spec).await
 }
 
+/// Create a session as the TUI's New session picker would: the harness by
+/// id (a custom one as `Custom` with its id), and the model and effort the
+/// caller picked, else the Agents tab's defaults ("default" = no flag).
 async fn spawn_agent(client: &Client, spec: NewAgent) -> Res<String> {
-    let kind =
-        AgentKind::parse(&spec.kind).ok_or_else(|| format!("unknown harness {}", spec.kind))?;
+    let cfg = nebula_config::Config::load();
+    let launch = settings::launch_args(&cfg, spec.kind.trim(), spec.model, spec.effort)?;
     let name = default_agent_name(&client.snapshot());
     let prompt = spec
         .prompt
@@ -152,10 +162,10 @@ async fn spawn_agent(client: &Client, spec: NewAgent) -> Res<String> {
                 req_id,
                 worktree: WorktreeId(spec.worktree),
                 name,
-                kind,
-                custom_harness: None,
-                model: None,
-                effort: None,
+                kind: launch.kind,
+                custom_harness: launch.custom,
+                model: launch.model,
+                effort: launch.effort,
                 auto_title: true,
                 cloud_prompt: None,
                 starting_prompt: prompt,
@@ -218,6 +228,23 @@ async fn start_run(client: State<'_, Arc<Client>>, worktree: String) -> Res<Stri
         .await
         .map_err(err)?;
     Ok(created_id(created))
+}
+
+/// Stop the worktree's run terminal (the Run button's other half).
+#[tauri::command]
+async fn stop_run(client: State<'_, Arc<Client>>, worktree: String) -> Res<()> {
+    let req_id = client.req_id();
+    client
+        .rpc(
+            req_id,
+            ClientRequest::StopRun {
+                req_id,
+                worktree: WorktreeId(worktree),
+            },
+        )
+        .await
+        .map_err(err)?;
+    Ok(())
 }
 
 fn worktree_path(client: &Client, worktree: &str) -> Res<PathBuf> {
@@ -352,12 +379,6 @@ fn open_url(app: tauri::AppHandle, url: String) -> Res<()> {
 }
 
 #[derive(Serialize)]
-struct HarnessInfo {
-    id: String,
-    label: String,
-}
-
-#[derive(Serialize)]
 struct ProfileInfo {
     name: String,
     harness: String,
@@ -366,21 +387,20 @@ struct ProfileInfo {
 
 #[derive(Serialize)]
 struct Launchables {
-    harnesses: Vec<HarnessInfo>,
+    harnesses: Vec<settings::HarnessInfo>,
     profiles: Vec<ProfileInfo>,
+    /// The harness the quick prompt starts on: the Agents tab's Quick
+    /// prompt Agent, stepped past one switched off since.
+    default_harness: String,
 }
 
-/// What the quick prompt offers: the built-in harnesses and every profile.
+/// What the quick prompt offers: the harnesses the TUI's New session
+/// picker would (enabled, valid, built-in and custom), and every profile.
 #[tauri::command]
 fn launchables() -> Launchables {
-    let harnesses = nebula_core::harness::builtins()
-        .into_iter()
-        .filter(|h| AgentKind::parse(&h.id).is_some())
-        .map(|h| HarnessInfo {
-            label: h.display_label().to_string(),
-            id: h.id,
-        })
-        .collect();
+    let cfg = nebula_config::Config::load();
+    let harnesses = settings::offered(&cfg);
+    let default_harness = cfg.quick_prompt_kind().as_str().to_string();
     let profiles = nebula_core::profiles::load()
         .into_iter()
         .map(|p| ProfileInfo {
@@ -392,6 +412,7 @@ fn launchables() -> Launchables {
     Launchables {
         harnesses,
         profiles,
+        default_harness,
     }
 }
 
@@ -686,6 +707,14 @@ fn main() {
         .manage(AdoState::system())
         .setup(move |app| {
             let handle = app.handle().clone();
+            // The Agents tab's model lists, as the TUI's: Claude Code's own
+            // availableModels when its settings carry one, and the cached
+            // cursor-agent list (never a fresh probe from a GUI window).
+            let cfg = nebula_config::Config::load();
+            nebula_config::claude_catalogue::bootstrap(cfg.claude_enabled);
+            if cfg.cursor_enabled {
+                nebula_config::cursor_catalogue::install_cached();
+            }
             tauri::async_runtime::spawn(daemon::run(client.clone()));
             tauri::async_runtime::spawn(emit_state(handle.clone(), client.clone()));
             tauri::async_runtime::spawn(poll_prs(client.clone(), handle));
@@ -706,6 +735,12 @@ fn main() {
             create_terminal,
             add_project,
             start_run,
+            stop_run,
+            settings::settings_schema,
+            settings::settings_set,
+            settings::settings_reset,
+            settings::desktop_prefs,
+            settings::run_commands,
             diff_files,
             diff_pair,
             diff_range,

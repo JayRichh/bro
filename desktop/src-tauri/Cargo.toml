@@ -14,6 +14,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 nebula-core = { path = "../../crates/nebula-core" }
+nebula-config = { path = "../../crates/nebula-config" }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
@@ -30,3 +31,4 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_
 
 [dev-dependencies]
 httpmock = "0.7"
+tempfile = "3"
