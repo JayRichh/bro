@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, openSession, openDiff } from './store.svelte';
+  import { app, markSeen, openSession, openDiff } from './store.svelte';
   import { LANES, lanes, toneOf, harnessLabel, lastPrompt, age, placeOf, type Lane } from './status';
   import Status from './Status.svelte';
   import { retract } from './motion';
@@ -57,6 +57,7 @@
       const a = selectedAgent();
       if (a) {
         app.session = { Agent: a.id };
+        markSeen(app.session);
         openDiff(a.worktree_id);
       }
     }

@@ -21,6 +21,22 @@
       .sort((a, b) => Number(b.is_main) - Number(a.is_main) || a.sort_order - b.sort_order),
   );
   const profiles = $derived(app.launch.profiles.filter((p) => p.harness === harness));
+
+  // Start on the Agents tab's quick prompt harness, and step off one the
+  // settings have since switched off (as the TUI's quick prompt does).
+  let seeded = false;
+  $effect(() => {
+    const list = harnesses;
+    const def = app.launch.default_harness;
+    if (!seeded && def && list.some((h) => h.id === def)) {
+      seeded = true;
+      if (harness !== TERMINAL) harness = def;
+      return;
+    }
+    if (harness !== TERMINAL && !list.some((h) => h.id === harness)) {
+      harness = def && list.some((h) => h.id === def) ? def : list[0].id;
+    }
+  });
   const ready = $derived(app.model.connected && !!worktree && !busy);
 
   // Follow the window (the repo in view, else the open session's) until

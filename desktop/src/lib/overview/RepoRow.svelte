@@ -3,6 +3,7 @@
   import { api } from '../api';
   import type { RepoRow } from './repos';
   import SessionTree from './SessionTree.svelte';
+  import RunButton from './RunButton.svelte';
 
   let { row }: { row: RepoRow } = $props();
 
@@ -16,6 +17,9 @@
       {row.name}
     </h2>
     <span class="flex-1"></span>
+    {#each row.worktrees as w (w.id)}
+      <RunButton worktree={w} label={w.is_main ? '' : w.branch} />
+    {/each}
     <span class="flex min-w-0 items-baseline justify-end gap-4 overflow-hidden">
       {#if row.main}<span class="{label} truncate text-ink" title="Main worktree branch">{row.main.branch}</span>{/if}
       <span class={label}>{others > 0 ? `${others + 1} worktrees` : '1 worktree'}</span>

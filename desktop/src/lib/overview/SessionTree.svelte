@@ -5,6 +5,7 @@
   import { age, harnessLabel, lastPrompt, placeOf } from '../status';
   import type { TerminalTab } from '../api';
   import Status from '../Status.svelte';
+  import RunButton from './RunButton.svelte';
   import { flatten, type Node } from './tree';
 
   let { repo, forest, terminals }: { repo: string; forest: Node[]; terminals: TerminalTab[] } = $props();
@@ -156,7 +157,12 @@
       </span>
       <span class="truncate pl-3 text-[13px] text-muted @max-[760px]:hidden">terminal</span>
       <span class="truncate pl-3 font-mono text-[12px] text-muted @max-[760px]:hidden">{t.run_command ?? ''}</span>
-      <span></span>
+      <span class="text-right">
+        {#if t.run_command}
+          {@const w = app.model.worktrees.find((x) => x.id === t.worktree_id)}
+          {#if w}<RunButton worktree={w} label="" />{/if}
+        {/if}
+      </span>
     </div>
   {/each}
 </div>
