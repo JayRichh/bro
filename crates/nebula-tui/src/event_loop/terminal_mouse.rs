@@ -391,9 +391,11 @@ pub(crate) fn copy_to_clipboard(text: &str) -> bool {
     }
 }
 
-/// Open a URL in the default browser via open(1) (this tool targets macOS).
-/// The scheme allowlist is defense in depth — the link scanner only ever
-/// produces http(s) URLs, but the text originates from untrusted PTY output.
+/// Open a URL in the default browser: open(1) on macOS, the system URL
+/// handler on Windows and Linux (`localhost::open_default`, the same call
+/// the localhost chooser's "System default" row makes). The scheme
+/// allowlist is defense in depth — the link scanner only ever produces
+/// http(s) URLs, but the text originates from untrusted PTY output.
 pub(crate) fn open_url(url: &str) -> bool {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         return false;
@@ -409,7 +411,7 @@ pub(crate) fn open_url(url: &str) -> bool {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        false
+        crate::localhost::open_default(url)
     }
 }
 
