@@ -153,6 +153,12 @@ const AGO_REFRESH: Duration = Duration::from_secs(30);
 /// theme picked in VS Code. Focus coming back checks at once as well.
 const THEME_RECHECK: Duration = Duration::from_secs(3);
 
+/// The CONFIG BEAT: how often the settings files are looked at for a
+/// change made outside this TUI — the desktop window's Settings view — so
+/// the values the app mirrors follow it (`reload_foreign_config`). Two
+/// `stat`s a beat, on the theme beat's cadence.
+const CONFIG_RECHECK: Duration = THEME_RECHECK;
+
 /// How long the worktree selection must rest before asking the daemon to
 /// pre-spawn that worktree's dead sessions — long enough that walking the
 /// list doesn't boot every CLI passed, short enough that the sessions are

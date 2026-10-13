@@ -4046,6 +4046,10 @@ pub struct ChromeState {
     /// because a keymap lookup happens on every single key press. The
     /// event loop refreshes it at startup and whenever a binding changes.
     pub keymap: crate::keymap::Keymap,
+    /// The CONFIG WATCH: whether the settings files changed under us (the
+    /// desktop window writes them), checked on the loop's config beat.
+    /// Armed at startup; unarmed in an `App` a test builds.
+    pub config_watch: crate::config_watch::ConfigWatch,
     /// Pointer shape the outer terminal should currently show (OSC 22).
     pub pointer_shape: PointerShape,
     /// The last key press, spelled for the bottom-left of the screen with
@@ -4137,6 +4141,7 @@ impl Default for ChromeState {
             live_theme: crate::appearance::LiveTheme::default(),
             icons: crate::icons::IconStyle::default(),
             keymap: crate::keymap::Keymap::default(),
+            config_watch: crate::config_watch::ConfigWatch::default(),
             pointer_shape: PointerShape::default(),
             key_combo: None,
             dirty: true,

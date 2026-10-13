@@ -22157,3 +22157,169 @@ fn a_live_port_shows_on_its_band_rule() {
         assert!(screen.contains(":3010 ●"), "{screen}");
     });
 }
+
+// LIVE RELOAD: a setting the desktop window writes reaches a running TUI on
+// its CONFIG BEAT (`reload_foreign_config`).
+
+/// Pin a settings file's mtime, so a change is seen without waiting on
+/// the clock's resolution.
+fn touch_config(path: &std::path::Path, secs: u64) {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(secs))
+        .unwrap();
+}
+
+/// A TUI started on `path` as `loop_run` starts one: the watch armed,
+/// the config applied, the keymap taken.
+fn started_on(path: &std::path::Path) -> App {
+    std::fs::write(
+        path, "{}
+",
+    )
+    .unwrap();
+    touch_config(path, 1_000_000);
+    let mut app = App::new();
+    app.chrome.config_watch.arm();
+    let cfg = crate::config::Config::load();
+    apply_config(&mut app, &cfg);
+    app.chrome.keymap = cfg.keymap();
+    app
+}
+
+/// The desktop window's write: `Config::update`, then a new mtime.
+fn desktop_write(path: &std::path::Path, secs: u64) {
+    crate::config::Config::update(|c| {
+        c.kanban = true;
+        c.theme = "midnight".into();
+        c.keybindings.insert("git_diff".into(), "f9".into());
+    })
+    .unwrap();
+    touch_config(path, secs);
+}
+
+fn f9() -> crate::keymap::KeyChord {
+    crate::keymap::KeyChord::parse("f9").unwrap()
+}
+
+#[test]
+fn a_desktop_write_reaches_a_running_tui_on_the_config_beat() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    crate::config::with_config_path(path.clone(), || {
+        let mut app = started_on(&path);
+        let theme_before = app.chrome.theme;
+        assert!(!app.launcher.launcher_kanban);
+        assert!(!app
+            .chrome
+            .keymap
+            .chords(crate::keymap::Action::GitDiff)
+            .contains(&f9()));
+
+        desktop_write(&path, 2_000_000);
+        app.chrome.dirty = false;
+        assert!(reload_foreign_config(&mut app), "the write is picked up");
+        assert!(app.launcher.launcher_kanban, "kanban mirrored");
+        assert_ne!(app.chrome.theme, theme_before, "theme mirrored");
+        assert!(
+            app.chrome
+                .keymap
+                .chords(crate::keymap::Action::GitDiff)
+                .contains(&f9()),
+            "the hotkey override is live"
+        );
+        assert!(app.chrome.dirty, "and the frame repaints");
+
+        assert!(!reload_foreign_config(&mut app), "once per change");
+    });
+}
+
+#[test]
+fn unchanged_settings_files_do_not_reload() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    crate::config::with_config_path(path.clone(), || {
+        let mut app = started_on(&path);
+        app.chrome.dirty = false;
+        assert!(!reload_foreign_config(&mut app));
+        assert!(!app.chrome.dirty);
+    });
+}
+
+/// The TUI's own save is not a foreign change: its values are adopted
+/// where it saves, so the beat has nothing to do.
+#[test]
+fn the_tuis_own_save_does_not_reload() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    crate::config::with_config_path(path.clone(), || {
+        let mut app = started_on(&path);
+        let mut cfg = crate::config::Config::load();
+        cfg.animations = false;
+        // The write adds `"animations": false`, so the file moves.
+        assert!(save_config(&mut app, &cfg));
+        assert!(!reload_foreign_config(&mut app));
+    });
+}
+
+/// With the settings overlay up the change waits, untaken — even across
+/// one of the overlay's own saves — and lands, hotkeys and all, on the
+/// first beat after it closes.
+#[test]
+fn a_desktop_write_waits_for_the_settings_overlay_to_close() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    crate::config::with_config_path(path.clone(), || {
+        let mut app = started_on(&path);
+        open_settings(&mut app);
+        desktop_write(&path, 2_000_000);
+
+        assert!(!reload_foreign_config(&mut app), "deferred while open");
+        assert!(!app.launcher.launcher_kanban);
+
+        // An overlay save in between keeps the change pending.
+        let mut cfg = crate::config::Config::load();
+        cfg.animations = false;
+        assert!(save_config(&mut app, &cfg));
+        assert!(!reload_foreign_config(&mut app), "still deferred");
+        assert!(!app
+            .chrome
+            .keymap
+            .chords(crate::keymap::Action::GitDiff)
+            .contains(&f9()));
+
+        close_settings(&mut app);
+        assert!(reload_foreign_config(&mut app), "applied once closed");
+        assert!(app.launcher.launcher_kanban);
+        assert!(!app.chrome.animations, "the overlay's own save kept too");
+        assert!(app
+            .chrome
+            .keymap
+            .chords(crate::keymap::Action::GitDiff)
+            .contains(&f9()));
+    });
+}
+
+/// A typed setting's prompt stands in for the overlay: still deferred.
+#[test]
+fn a_desktop_write_waits_for_a_setting_prompt_too() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    crate::config::with_config_path(path.clone(), || {
+        let mut app = started_on(&path);
+        open_prompt(
+            &mut app,
+            PromptKind::SettingText {
+                kind: crate::config::SettingKind::Editor,
+                project: None,
+            },
+        );
+        desktop_write(&path, 2_000_000);
+        assert!(!reload_foreign_config(&mut app));
+        app.modals.overlay = None;
+        assert!(reload_foreign_config(&mut app));
+        assert!(app.launcher.launcher_kanban);
+    });
+}

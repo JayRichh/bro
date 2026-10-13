@@ -10,6 +10,9 @@ macro_rules! main_loop_body {
     // The repo nebula was started in, for the first run's "open this
     // folder" — looked up once, off the tree the snapshot has not sent yet.
     app.launcher.launch_repo = crate::app::launch_repo();
+    // The CONFIG WATCH's baseline is taken before the read, so a write
+    // landing between the two still reads as a change on the first beat.
+    app.chrome.config_watch.arm();
     let cfg = crate::config::Config::load();
     apply_config(&mut app, &cfg);
     app.chrome.keymap = cfg.keymap();
@@ -98,6 +101,7 @@ macro_rules! main_loop_body {
     let mut sweep_was_ticking = false;
     let mut next_ago_refresh = tokio::time::Instant::now() + AGO_REFRESH;
     let mut next_theme_recheck = tokio::time::Instant::now() + THEME_RECHECK;
+    let mut next_config_recheck = tokio::time::Instant::now() + CONFIG_RECHECK;
     // The host's runtime modes, re-asked on a slow beat (see host_$terminal).
     let mut next_mode_reassert = tokio::time::Instant::now() + MODE_REASSERT;
     // Editor-modal PTY output; the channel outlives individual editor
@@ -234,6 +238,13 @@ macro_rules! main_loop_body {
             _ = tokio::time::sleep_until(next_theme_recheck), if app.chrome.live_theme.is_live() => {
                 recheck_theme(&mut app);
                 next_theme_recheck = tokio::time::Instant::now() + THEME_RECHECK;
+            }
+            // The CONFIG BEAT: a setting changed outside this TUI (the
+            // desktop window) reaches what the app mirrors. Unguarded,
+            // unlike the theme beat: a write can come at any time.
+            _ = tokio::time::sleep_until(next_config_recheck) => {
+                reload_foreign_config(&mut app);
+                next_config_recheck = tokio::time::Instant::now() + CONFIG_RECHECK;
             }
             // The KEY COMBO DISPLAY clears itself a moment after the press
             // (`key_combo::LINGER`) — nothing else repaints an idle app, so

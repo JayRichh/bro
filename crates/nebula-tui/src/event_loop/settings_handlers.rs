@@ -325,7 +325,7 @@ pub(crate) fn remember_launch(
 
 /// Write the config file, flashing the failure. False when it didn't land.
 pub(crate) fn save_config(app: &mut App, cfg: &crate::config::Config) -> bool {
-    match cfg.save() {
+    match app.chrome.config_watch.own_write(|| cfg.save()) {
         Ok(()) => true,
         Err(err) => {
             app.chrome.flash = Some(format!("couldn't save settings: {err}"));
@@ -414,6 +414,34 @@ pub(crate) fn recheck_theme(app: &mut App) {
     }
 }
 
+/// LIVE RELOAD: the settings files changed under us — the desktop
+/// window's Settings view, or a hand edit — so adopt every value the app
+/// mirrors, hotkeys included, as startup does. Run on the loop's CONFIG
+/// BEAT. True when it reloaded.
+///
+/// Deferred while the settings overlay is up, or a typed setting's prompt
+/// stands in for it: the change is left untaken (no poll), so the first
+/// beat after the overlay closes applies it. Swapping state under the
+/// open overlay — a hotkey capture in progress, the row being typed —
+/// would be the surprise; the overlay's own saves load fresh and keep a
+/// pending change pending (`ConfigWatch::own_write`), so nothing is lost
+/// by waiting.
+pub(crate) fn reload_foreign_config(app: &mut App) -> bool {
+    let settings_up = match &app.modals.overlay {
+        Some(Overlay::Settings(_)) => true,
+        Some(Overlay::Prompt(prompt)) => matches!(prompt.kind, PromptKind::SettingText { .. }),
+        _ => false,
+    };
+    if settings_up || !app.chrome.config_watch.poll() {
+        return false;
+    }
+    let cfg = crate::config::Config::load();
+    apply_config(app, &cfg);
+    app.chrome.keymap = cfg.keymap();
+    app.chrome.dirty = true;
+    true
+}
+
 /// Adopt every config value the running app mirrors. Shared by startup and
 /// the settings overlay so a new setting can't reach one and miss the
 /// other — the overlay is a live editor, not a restart-to-apply screen.
@@ -459,6 +487,9 @@ pub(crate) fn reset_settings(app: &mut App) {
         Ok(cfg) => {
             apply_config(app, &cfg);
             app.chrome.keymap = cfg.keymap();
+            // Every mirrored value was just adopted from the reset, so
+            // nothing the files held before it is still pending.
+            app.chrome.config_watch.arm();
             if let Some(view) = settings_mut(app) {
                 view.info("every setting is back to its default");
             }
