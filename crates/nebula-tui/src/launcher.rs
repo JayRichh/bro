@@ -1949,6 +1949,9 @@ pub enum BoxField {
     Agent,
     /// `^O` — that harness's MODEL, and its effort.
     Model,
+    /// `^A` — the PROFILE (account) it runs under. Drawn only while the
+    /// harness has profiles to step through.
+    Profile,
 }
 
 /// One project the PROJECT PICKER offers.
@@ -2100,6 +2103,7 @@ mod tests {
 
     fn agent(id: &str, worktree: &str, name: &str) -> Agent {
         Agent {
+            profile: None,
             id: AgentId(id.into()),
             worktree_id: WorktreeId(worktree.into()),
             name: name.into(),

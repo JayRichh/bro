@@ -54,7 +54,15 @@ impl Daemon {
             tracing::debug!(kind = kind.as_str(), "prewarm skipped: CLI not installed");
             return Ok(());
         }
+        // A spare boots on its harness's default PROFILE — what a create
+        // naming none resolves to — and only a create on that same account
+        // adopts it (`take_prewarmed`).
+        let profile = match resolve_harness(kind, None) {
+            Ok(harness) => resolve_profile_name(&harness, None).unwrap_or(None),
+            Err(_) => None,
+        };
         let agent = Agent {
+            profile: profile.clone(),
             id: AgentId::generate(),
             worktree_id: worktree_id.clone(),
             name: "prewarm".into(),
@@ -80,6 +88,7 @@ impl Daemon {
         let replaced = self.prewarmed.lock().insert(
             (worktree_id.clone(), kind),
             PrewarmEntry {
+                profile,
                 agent_id: agent.id,
                 spawned_at: Instant::now(),
                 model,
@@ -105,12 +114,16 @@ impl Daemon {
         kind: AgentKind,
         model: Option<&str>,
         effort: Option<&str>,
+        profile: Option<&str>,
     ) -> Option<PrewarmEntry> {
         let entry = self.prewarmed.lock().remove(&(worktree_id.clone(), kind))?;
         if !self.is_alive(&SessionRef::Agent(entry.agent_id.clone())) {
             return None;
         }
-        if entry.model.as_deref() != model || entry.effort.as_deref() != effort {
+        if entry.model.as_deref() != model
+            || entry.effort.as_deref() != effort
+            || entry.profile.as_deref() != profile
+        {
             self.kill_session(&SessionRef::Agent(entry.agent_id));
             return None;
         }

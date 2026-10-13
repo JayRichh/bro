@@ -265,6 +265,8 @@ pub(crate) struct CreatePrAgentSpec {
     /// The CLI's positional first prompt (an AGENT PRESET launched on the
     /// row); checked and sent exactly as `CreateAgentSpec`'s is.
     pub starting_prompt: Option<String>,
+    /// The PROFILE asked for; None = the harness's default.
+    pub profile: Option<String>,
 }
 
 impl Daemon {
@@ -286,12 +288,14 @@ impl Daemon {
             pr_url,
             head,
             starting_prompt,
+            profile,
         } = spec;
         let pr_url = validate_pr_url(&pr_url)?;
         let number = pr_number(&pr_url)?;
         let head = validate_head(&head)?;
         let worktree = self.pr_worktree(&project, number, &head).await?;
         self.create_agent(CreateAgentSpec {
+            profile,
             worktree: worktree.id,
             name,
             kind,

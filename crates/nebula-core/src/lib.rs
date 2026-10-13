@@ -9,6 +9,7 @@ pub mod ids;
 pub mod mem;
 pub mod paths;
 pub mod platform;
+pub mod profiles;
 pub mod project_file;
 pub mod protocol;
 pub mod settings;

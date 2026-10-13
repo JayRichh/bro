@@ -108,6 +108,8 @@ pub(crate) struct CreateAgentSpec {
     /// `pr_scope::issue_rule`). Persisted like `pr_url`.
     pub issue_url: Option<String>,
     pub role: nebula_core::AgentRole,
+    /// The PROFILE asked for; None = the harness's default.
+    pub profile: Option<String>,
 }
 
 /// A pre-spawned agent CLI waiting to be adopted by the next CreateAgent for
@@ -124,6 +126,10 @@ struct PrewarmEntry {
     /// model), so the entry is discarded instead.
     model: Option<String>,
     effort: Option<String>,
+    /// The PROFILE the warm CLI booted under — its harness's default when
+    /// the spare was made. A create resolving to another account cannot
+    /// adopt it: the CLI is already logged in as the wrong one.
+    profile: Option<String>,
     buffered_hooks: Vec<(HookEvent, Option<String>)>,
 }
 
@@ -862,7 +868,21 @@ fn resolve_harness_in(
 /// the profile's.
 #[cfg(unix)]
 fn login_shell_wrap(shell: &str, program: &str, args: &[String]) -> (String, Vec<String>) {
-    let mut line = command_word(program);
+    login_shell_wrap_env(shell, program, args, &Default::default())
+}
+
+/// [`login_shell_wrap`] for a launch under a PROFILE: its environment edit
+/// rides the line itself, after the rc files have run — set on the spawn
+/// alone, an `export ANTHROPIC_API_KEY=…` in `~/.zshrc` would win it back.
+#[cfg(unix)]
+fn login_shell_wrap_env(
+    shell: &str,
+    program: &str,
+    args: &[String],
+    env: &nebula_core::profiles::LaunchEnv,
+) -> (String, Vec<String>) {
+    let mut line = profile_env_line(env);
+    line.push_str(&command_word(program));
     for arg in args {
         line.push(' ');
         line.push_str(&nebula_core::shell::single_quote(arg));
@@ -903,6 +923,75 @@ fn login_shell_line(shell: &str, line: &str) -> (String, Vec<String>) {
 #[cfg(windows)]
 fn login_shell_wrap(_shell: &str, program: &str, args: &[String]) -> (String, Vec<String>) {
     (program.to_string(), args.to_vec())
+}
+
+/// Windows [`login_shell_wrap_env`]: no rc file runs between the spawn's
+/// environment and the CLI, so the edit rides the spawn alone.
+#[cfg(windows)]
+fn login_shell_wrap_env(
+    shell: &str,
+    program: &str,
+    args: &[String],
+    _env: &nebula_core::profiles::LaunchEnv,
+) -> (String, Vec<String>) {
+    login_shell_wrap(shell, program, args)
+}
+
+/// A PROFILE's environment edit as shell syntax ahead of the command word:
+/// `unset A B; export K='v'; `, or nothing when there is no edit.
+#[cfg(unix)]
+fn profile_env_line(env: &nebula_core::profiles::LaunchEnv) -> String {
+    let mut line = String::new();
+    let removals = env.removals();
+    if !removals.is_empty() {
+        line.push_str("unset");
+        for name in &removals {
+            line.push(' ');
+            line.push_str(name);
+        }
+        line.push_str("; ");
+    }
+    for (key, value) in &env.set {
+        let plain = !key.is_empty() && key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+        if !plain {
+            continue;
+        }
+        line.push_str(&format!(
+            "export {key}={}; ",
+            nebula_core::shell::single_quote(value)
+        ));
+    }
+    line
+}
+
+/// The PROFILE a create on `harness` runs under, by name: `asked` when
+/// the launch named one — it must exist and be an account for that
+/// harness — else the harness's default, else none.
+fn resolve_profile_name(
+    harness: &nebula_core::harness::HarnessDescriptor,
+    asked: Option<&str>,
+) -> Result<Option<String>> {
+    let config = crate::config::Config::load();
+    nebula_core::profiles::resolve(&config.profiles, &harness.id, asked)
+        .map(|profile| profile.map(|p| p.name.trim().to_string()))
+        .map_err(anyhow::Error::msg)
+}
+
+/// The PROFILE `agent` runs under, read fresh from the config: None for a
+/// session with none, `Err` when its profile was removed or now names
+/// another harness — the spawn is refused with the reason rather than
+/// booting on whatever login the daemon's environment has.
+fn session_profile(
+    agent: &Agent,
+    harness: &nebula_core::harness::HarnessDescriptor,
+) -> Result<Option<nebula_core::profiles::Profile>> {
+    let Some(name) = agent.profile.as_deref() else {
+        return Ok(None);
+    };
+    let config = crate::config::Config::load();
+    nebula_core::profiles::resolve(&config.profiles, &harness.id, Some(name))
+        .map(|profile| profile.cloned())
+        .map_err(anyhow::Error::msg)
 }
 
 /// Windows [`login_shell_wrap`] for a line in the user shell's own syntax
@@ -2137,6 +2226,28 @@ mod tests {
     /// reason a launch goes through the login shell at all. A function
     /// stands in for the alias: every POSIX sh honours one in a `-c` string,
     /// and the old `exec env` form bypassed both alike.
+    /// A PROFILE's environment edit rides the line after the rc files, so
+    /// a key exported there cannot win the login back.
+    #[cfg(unix)]
+    #[test]
+    fn a_profile_edit_rides_the_launch_line() {
+        let env = nebula_core::profiles::LaunchEnv {
+            unset: vec!["ANTHROPIC_API_KEY".into(), "CLAUDE_CONFIG_DIR".into()],
+            set: vec![("CLAUDE_CONFIG_DIR".into(), "/p/it's".into())],
+        };
+        assert_eq!(
+            profile_env_line(&env),
+            r"unset ANTHROPIC_API_KEY; export CLAUDE_CONFIG_DIR='/p/it'\''s'; "
+        );
+        let (_, args) = login_shell_wrap_env("/bin/zsh", "claude", &[], &env);
+        assert!(
+            args[7].ends_with(&format!("{} claude", profile_env_line(&env).trim_end())),
+            "{}",
+            args[7]
+        );
+        assert_eq!(profile_env_line(&Default::default()), "");
+    }
+
     #[cfg(unix)]
     #[test]
     fn login_shell_wrap_lets_the_shell_resolve_the_command() {
@@ -2453,6 +2564,7 @@ mod tests {
 
         let empty = daemon
             .create_agent(CreateAgentSpec {
+                profile: None,
                 worktree: worktree.clone(),
                 name: "cloud".into(),
                 kind: AgentKind::Claude,
@@ -2472,6 +2584,7 @@ mod tests {
 
         let nul = daemon
             .create_agent(CreateAgentSpec {
+                profile: None,
                 worktree: worktree.clone(),
                 name: "cloud".into(),
                 kind: AgentKind::Claude,
@@ -2491,6 +2604,7 @@ mod tests {
 
         let too_long = daemon
             .create_agent(CreateAgentSpec {
+                profile: None,
                 worktree: worktree.clone(),
                 name: "cloud".into(),
                 kind: AgentKind::Claude,
@@ -2510,6 +2624,7 @@ mod tests {
 
         let wrong_kind = daemon
             .create_agent(CreateAgentSpec {
+                profile: None,
                 worktree,
                 name: "cloud".into(),
                 kind: AgentKind::Codex,
@@ -2532,6 +2647,7 @@ mod tests {
     async fn pr_launch_context_is_accepted_for_every_kind_but_never_with_cloud() {
         let daemon = test_daemon();
         let spec = |kind: AgentKind, cloud: Option<&str>| CreateAgentSpec {
+            profile: None,
             worktree: WorktreeId("unused".into()),
             name: "pr".into(),
             kind,
@@ -2664,6 +2780,7 @@ mod tests {
                 pr_url: "https://github.com/o/r/pull/7".into(),
                 head: "--force".into(),
                 starting_prompt: None,
+                profile: None,
             })
             .await
             .unwrap_err();
@@ -2684,6 +2801,7 @@ mod tests {
                 pr_url: "https://github.com/o/r/pull/7".into(),
                 head: "feat-x".into(),
                 starting_prompt: Some("fix\0auth".into()),
+                profile: None,
             })
             .await
             .unwrap_err();
@@ -2697,6 +2815,7 @@ mod tests {
     async fn issue_launch_context_is_accepted_for_every_kind_but_never_with_cloud() {
         let daemon = test_daemon();
         let spec = |kind: AgentKind, cloud: Option<&str>| CreateAgentSpec {
+            profile: None,
             worktree: WorktreeId("unused".into()),
             name: "issue".into(),
             kind,
@@ -2743,6 +2862,7 @@ mod tests {
     async fn starting_prompt_is_validated_and_never_adopts_a_warm_cli() {
         let daemon = test_daemon();
         let spec = |kind: AgentKind, cloud: Option<&str>, starting: Option<&str>| CreateAgentSpec {
+            profile: None,
             worktree: WorktreeId("unused".into()),
             name: "preset".into(),
             kind,
@@ -2789,6 +2909,7 @@ mod tests {
         daemon.prewarmed.lock().insert(
             key.clone(),
             PrewarmEntry {
+                profile: None,
                 agent_id: AgentId("warm-1".into()),
                 spawned_at: Instant::now(),
                 model: None,
@@ -2992,6 +3113,7 @@ mod tests {
         daemon
             .store
             .insert_agent(&Agent {
+                profile: None,
                 id: AgentId(id.into()),
                 worktree_id: WorktreeId(worktree.into()),
                 name: id.into(),
@@ -3388,6 +3510,7 @@ mod tests {
             .store
             .insert_agent_with_auto_title(
                 &Agent {
+                    profile: None,
                     id: AgentId(id.into()),
                     worktree_id: WorktreeId(worktree.into()),
                     name: format!("{id}-default"),
@@ -4324,6 +4447,7 @@ mod tests {
         daemon.prewarmed.lock().insert(
             key.clone(),
             PrewarmEntry {
+                profile: None,
                 agent_id: AgentId("warm-1".into()),
                 spawned_at: Instant::now(),
                 model: None,
@@ -4377,13 +4501,20 @@ mod tests {
         // No live PTY backs the entry, so take() refuses it (create falls
         // back to a cold spawn) and reap clears it out.
         assert!(daemon
-            .take_prewarmed(&WorktreeId("w1".into()), AgentKind::Claude, None, None)
+            .take_prewarmed(
+                &WorktreeId("w1".into()),
+                AgentKind::Claude,
+                None,
+                None,
+                None
+            )
             .is_none());
         assert!(daemon.prewarmed.lock().is_empty());
 
         daemon.prewarmed.lock().insert(
             key.clone(),
             PrewarmEntry {
+                profile: None,
                 agent_id: AgentId("warm-2".into()),
                 spawned_at: Instant::now(),
                 model: None,
@@ -4414,6 +4545,7 @@ mod tests {
                 cwd: std::env::temp_dir(),
                 env: vec![],
                 scrub_env: &[],
+                unset_env: Vec::new(),
                 cols: 80,
                 rows: 24,
             },
@@ -4423,6 +4555,7 @@ mod tests {
         daemon.prewarmed.lock().insert(
             key.clone(),
             PrewarmEntry {
+                profile: None,
                 agent_id: id.clone(),
                 spawned_at: Instant::now(),
                 model: None,
@@ -4456,6 +4589,7 @@ mod tests {
             daemon.prewarmed.lock().insert(
                 (WorktreeId(wt.into()), AgentKind::Codex),
                 PrewarmEntry {
+                    profile: None,
                     agent_id: AgentId(id.into()),
                     spawned_at: Instant::now(),
                     model: None,

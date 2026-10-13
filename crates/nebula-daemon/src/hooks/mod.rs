@@ -551,6 +551,7 @@ mod tests {
             })
             .unwrap();
         let agent = |id: &str| Agent {
+            profile: None,
             id: AgentId(id.into()),
             worktree_id: WorktreeId("w1".into()),
             name: "agent-1".into(),

@@ -110,6 +110,13 @@ impl Daemon {
                             daemon.on_pty_title(id, &title);
                         }
                     }
+                    // Claude's PLAN USAGE notice: filed under the row's
+                    // PROFILE, for the pickers to show before a launch.
+                    Ok(PtyEvent::Usage { usage }) => {
+                        if let SessionRef::Agent(id) = &sref {
+                            daemon.on_pty_usage(id, usage);
+                        }
+                    }
                     // Cursor's ask-question dialog, which no hook reports
                     // (see `pty::question`). Owned PTYs only, as above.
                     Ok(PtyEvent::Question { open }) => {

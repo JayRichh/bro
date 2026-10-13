@@ -107,6 +107,19 @@ bro                       # open the TUI; the daemon starts on its own
 Press `p`, type a task, `Enter`. Press `Ctrl+N` in the box first to give it its own worktree. Press
 `q` to leave: the sessions keep running, and `bro` brings you back to them.
 
+## Several accounts per harness
+
+Two Claude subscriptions, a work and a personal Codex login: each is a profile with its own config
+dir, and sessions run on whichever you pick, side by side.
+
+```powershell
+bro profile add main --harness claude --use-default --default   # the login you have
+bro profile add max2 --harness claude                            # a second one
+bro profile login max2                                           # sign it in
+```
+
+In the quick prompt, `^A` steps through the harness's profiles. See [Profiles](docs/profiles.md).
+
 ## Where things live
 
 | | Windows | macOS | Linux |
@@ -121,13 +134,11 @@ A project's run and open commands live in `.bro.json` at the root of the repo. B
 
 These are planned and not in Bro yet:
 
-- **Profiles:** several accounts per harness (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GH_CONFIG_DIR`), picked per session.
 - **Kanban:** sessions laid out by status.
 - **A VS Code-grade diff:** side-by-side, inline and replacement modes, with per-hunk accept and reject.
 - **Theme and file icons:** follows your VS Code theme, light or dark, with Material-style file icons.
 - **Ports per worktree:** dev server ports allocated and shown per worktree, opened in Chrome, Edge or Firefox.
 - **A desktop GUI:** a Tauri window over the same daemon.
-- **GitHub Copilot** as a harness.
 
 ## Building
 

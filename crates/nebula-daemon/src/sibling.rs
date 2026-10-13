@@ -128,7 +128,13 @@ impl Daemon {
             model,
             effort,
         } = Self::sibling_harness(caller, kind);
+        // A sibling on the caller's own harness runs on the caller's
+        // account; one on another harness takes that harness's default.
+        let profile = (kind == caller.kind && custom_harness == caller.custom_harness)
+            .then(|| caller.profile.clone())
+            .flatten();
         Ok(CreateAgentSpec {
+            profile,
             worktree: worktree.clone(),
             name: self.free_name_in(worktree)?,
             kind,
@@ -240,6 +246,7 @@ mod tests {
 
     fn agent(id: &str, worktree: &str, kind: AgentKind, model: Option<&str>) -> Agent {
         Agent {
+            profile: None,
             id: AgentId(id.into()),
             worktree_id: WorktreeId(worktree.into()),
             name: id.into(),

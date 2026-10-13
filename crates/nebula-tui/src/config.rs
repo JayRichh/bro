@@ -1348,6 +1348,13 @@ pub struct Config {
     /// the whole file (see `nebula_core::settings`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub harnesses: BTreeMap<String, nebula_core::harness::HarnessOverride>,
+    /// PROFILES (`profiles` in config.json): the accounts a launch can run
+    /// under, several per harness. `bro profile` edits the list; the
+    /// QUICK PROMPT's `^A` cycles a launch through its harness's ones, and
+    /// a card names the one its session runs on when it is not the
+    /// harness's default. See `nebula_core::profiles`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub profiles: Vec<nebula_core::profiles::Profile>,
     /// Which AGENT KIND the QUICK PROMPT hotkey launches. Its model and
     /// effort come from that kind's own defaults above, so the setting is
     /// one name, not a third model/effort pair. Read through
@@ -1549,6 +1556,7 @@ impl Default for Config {
             hide_uninstalled_harnesses: false,
             custom_harnesses: Vec::new(),
             harnesses: BTreeMap::new(),
+            profiles: Vec::new(),
             quick_prompt_kind: AgentKind::Claude.as_str().into(),
             quick_prompt_focus: false,
             follow_new_session: true,

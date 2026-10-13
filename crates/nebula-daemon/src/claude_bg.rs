@@ -102,8 +102,13 @@ fn listing_rows(listing: &str) -> Option<Vec<Listed>> {
 /// Run the probe — `program args…` is `claude agents --json` behind the
 /// login shell — and read `session_id`'s attach id off it. `None` for every
 /// failure: no CLI, a timeout, an older Claude with no `agents` command.
-pub fn probe(program: &str, args: &[String], session_id: &str) -> Option<String> {
-    let listing = run_captured(program, args, PROBE_TIMEOUT)?;
+pub fn probe(
+    program: &str,
+    args: &[String],
+    env: &nebula_core::profiles::LaunchEnv,
+    session_id: &str,
+) -> Option<String> {
+    let listing = run_captured(program, args, env, PROBE_TIMEOUT)?;
     listed_background_id(&listing, session_id)
 }
 
@@ -111,11 +116,20 @@ pub fn probe(program: &str, args: &[String], session_id: &str) -> Option<String>
 /// (`nebula_core::shell::launch`), with no console window, and a timeout
 /// ends its process tree.
 #[cfg(windows)]
-fn run_captured(program: &str, args: &[String], timeout: Duration) -> Option<String> {
+fn run_captured(
+    program: &str,
+    args: &[String],
+    env: &nebula_core::profiles::LaunchEnv,
+    timeout: Duration,
+) -> Option<String> {
     let launch = nebula_core::shell::launch(program, args).ok()?;
     let mut command = Command::new(&launch.program);
+    for name in env.removals() {
+        command.env_remove(name);
+    }
     command
         .args(&launch.args)
+        .envs(env.set.iter().map(|(k, v)| (k, v)))
         .envs(launch.env.iter().map(|(k, v)| (k, v)))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -145,11 +159,20 @@ fn run_captured(program: &str, args: &[String], timeout: Duration) -> Option<Str
 }
 
 #[cfg(unix)]
-fn run_captured(program: &str, args: &[String], timeout: Duration) -> Option<String> {
+fn run_captured(
+    program: &str,
+    args: &[String],
+    env: &nebula_core::profiles::LaunchEnv,
+    timeout: Duration,
+) -> Option<String> {
     use std::os::unix::process::CommandExt;
     let mut command = Command::new(program);
+    for name in env.removals() {
+        command.env_remove(name);
+    }
     command
         .args(args)
+        .envs(env.set.iter().map(|(k, v)| (k, v)))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -291,12 +314,23 @@ mod tests {
     fn the_probe_reads_a_real_commands_stdout() {
         let script = format!("cat <<'EOF'\n{LISTING}EOF");
         let args = vec!["-c".to_string(), script];
-        assert_eq!(probe("/bin/sh", &args, SID).as_deref(), Some("1a3138b9"));
         assert_eq!(
-            probe("/bin/sh", &["-c".to_string(), "exit 3".to_string()], SID),
+            probe("/bin/sh", &args, &Default::default(), SID).as_deref(),
+            Some("1a3138b9")
+        );
+        assert_eq!(
+            probe(
+                "/bin/sh",
+                &["-c".to_string(), "exit 3".to_string()],
+                &Default::default(),
+                SID
+            ),
             None
         );
-        assert_eq!(probe("/nebula-test/no-such-shell", &[], SID), None);
+        assert_eq!(
+            probe("/nebula-test/no-such-shell", &[], &Default::default(), SID),
+            None
+        );
     }
 
     #[cfg(windows)]
@@ -310,10 +344,21 @@ mod tests {
             "/c".to_string(),
             format!("type {}", listing.display()),
         ];
-        assert_eq!(probe("cmd.exe", &args, SID).as_deref(), Some("1a3138b9"));
+        assert_eq!(
+            probe("cmd.exe", &args, &Default::default(), SID).as_deref(),
+            Some("1a3138b9")
+        );
         let fail = vec!["/d".to_string(), "/c".to_string(), "exit 3".to_string()];
-        assert_eq!(probe("cmd.exe", &fail, SID), None);
-        assert_eq!(probe(r"C:\nebula-test\no-such-shell", &[], SID), None);
+        assert_eq!(probe("cmd.exe", &fail, &Default::default(), SID), None);
+        assert_eq!(
+            probe(
+                r"C:\nebula-test\no-such-shell",
+                &[],
+                &Default::default(),
+                SID
+            ),
+            None
+        );
     }
 
     #[cfg(windows)]
@@ -326,7 +371,12 @@ mod tests {
             "ping -n 30 127.0.0.1".to_string(),
         ];
         assert_eq!(
-            run_captured("cmd.exe", &args, Duration::from_millis(150)),
+            run_captured(
+                "cmd.exe",
+                &args,
+                &Default::default(),
+                Duration::from_millis(150)
+            ),
             None
         );
         assert!(started.elapsed() < Duration::from_secs(5));
@@ -338,7 +388,12 @@ mod tests {
         let started = Instant::now();
         let args = vec!["-c".to_string(), "sleep 30".to_string()];
         assert_eq!(
-            run_captured("/bin/sh", &args, Duration::from_millis(150)),
+            run_captured(
+                "/bin/sh",
+                &args,
+                &Default::default(),
+                Duration::from_millis(150)
+            ),
             None
         );
         assert!(started.elapsed() < Duration::from_secs(5));

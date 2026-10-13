@@ -54,6 +54,11 @@ pub struct Config {
     /// TUI's Project tab owns the map; the daemon reads the one key in it
     /// that is its to act on, through [`Config::run_command`].
     pub projects: BTreeMap<PathBuf, ProjectConfig>,
+    /// PROFILES (`profiles` in config.json): the accounts sessions run
+    /// under. The daemon resolves a create's profile — or its harness's
+    /// default — against this list, and points each spawn's environment
+    /// at the profile's config dirs (`nebula_core::profiles`).
+    pub profiles: Vec<nebula_core::profiles::Profile>,
 }
 
 /// One project's entry under `projects` — the rows of the TUI's Project
@@ -78,6 +83,7 @@ impl Default for Config {
             custom_harnesses: Vec::new(),
             harnesses: BTreeMap::new(),
             projects: BTreeMap::new(),
+            profiles: Vec::new(),
         }
     }
 }

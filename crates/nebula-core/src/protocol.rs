@@ -177,6 +177,10 @@ pub enum ClientRequest {
         /// privileged orchestrator command surface.
         #[serde(default)]
         role: AgentRole,
+        /// The PROFILE to run under, by name; None = the harness's default
+        /// profile (or none). Resolved and persisted with the row.
+        #[serde(default)]
+        profile: Option<String>,
     },
     /// Create a local AGENT of any kind from an OPEN PRS row — a PR
     /// SESSION. It never runs in the ROOT WORKTREE: the daemon finds the
@@ -221,6 +225,9 @@ pub enum ClientRequest {
         /// is the first prompt. Request-only, never persisted.
         #[serde(default)]
         starting_prompt: Option<String>,
+        /// The PROFILE to run under, as on `CreateAgent`.
+        #[serde(default)]
+        profile: Option<String>,
     },
     /// Fire-and-forget: pre-spawn an agent CLI for this (worktree, kind) so
     /// the next CreateAgent adopts an already-booted session. Sent the
@@ -584,6 +591,10 @@ pub struct SessionSummary {
     pub alive: bool,
     /// One-line recent context: newest user prompt when known, else title.
     pub summary: String,
+    /// The PROFILE an agent session runs under; None for none, and for
+    /// every terminal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
 }
 
 /// Daemon-side half of the metrics modal's data; the client stacks its own

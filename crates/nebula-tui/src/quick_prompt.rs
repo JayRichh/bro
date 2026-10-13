@@ -91,6 +91,11 @@ pub struct QuickLaunch {
     /// without launching. A launch closes it, the new session's card being
     /// what there is to see. Kept across the box's pickers, as the issue is.
     pub under: Option<ModalUnder>,
+    /// The PROFILE the launch runs under: its harness's default when the
+    /// box opens (None when the harness has no default — the CLI's own
+    /// environment), and whichever `^A` steps to. A `Tab` pick of another
+    /// harness starts over from that harness's default.
+    pub profile: Option<String>,
 }
 
 /// A modal a QUICK PROMPT box stands on ([`QuickLaunch::under`]), as it
@@ -245,7 +250,41 @@ pub(crate) fn draft_of_return(back: &QuickReturn) -> Option<QuickDraft> {
 /// aimed somewhere else keeps the aim and spec it was opened with. Either
 /// way the slot is emptied: the draft is in this box now, and clearing it
 /// here and pressing Esc is how it is thrown away.
+/// Read the PROFILES list and each one's latest PLAN USAGE into the app,
+/// for the box's profile field: once as a box opens and again on `^A`,
+/// never per frame. A handful of small files, the usage ones written by
+/// the DAEMON as Claude prints its notice.
+pub(crate) fn refresh_profiles(app: &mut App) {
+    let profiles = crate::config::Config::load().profiles;
+    app.launcher.profile_usage = profiles
+        .iter()
+        .filter_map(|p| Some((p.name.clone(), nebula_core::profiles::read_usage(p)?)))
+        .collect();
+    app.launcher.profiles = profiles;
+}
+
+/// `^A` in the box, or a click on its profile field: the launch steps to
+/// the next PROFILE of its harness, in place — the typed text and its
+/// caret stay as they are. A harness with no profiles says how to add one.
+pub(crate) fn cycle_box_profile(app: &mut App) {
+    refresh_profiles(app);
+    let profiles = app.launcher.profiles.clone();
+    let Some(Overlay::Prompt(prompt)) = &mut app.modals.overlay else {
+        return;
+    };
+    let PromptKind::QuickPrompt(launch) = &mut prompt.kind else {
+        return;
+    };
+    if !launch.cycle_profile(&profiles) {
+        let harness = launch.harness_id().to_string();
+        app.chrome.flash = Some(format!(
+            "{harness} has no profiles — bro profile add <name> --harness {harness}"
+        ));
+    }
+}
+
 pub(crate) fn open_box(app: &mut App, launch: QuickLaunch) {
+    refresh_profiles(app);
     let (launch, restored) = match app.modals.quick_draft.take() {
         // What the box stands on is where it is opened now, never where
         // the parked one was.
@@ -272,6 +311,7 @@ pub(crate) fn open_box(app: &mut App, launch: QuickLaunch) {
 /// overrides it the way [`open_box`]'s same-aim rule would; the slot is
 /// emptied all the same, the text being in this box now.
 pub(crate) fn open_picked_box(app: &mut App, launch: QuickLaunch) {
+    refresh_profiles(app);
     let restored = app.modals.quick_draft.take().map(|draft| draft.input);
     crate::event_loop::open_prompt(app, PromptKind::QuickPrompt(launch));
     if let (Some(input), Some(Overlay::Prompt(prompt))) = (restored, &mut app.modals.overlay) {
@@ -318,6 +358,8 @@ impl QuickLaunch {
             effort.or_else(|| descriptor.default_effort().map(str::to_string)),
             custom.as_deref(),
         );
+        let profile = nebula_core::profiles::default_for(&cfg.profiles, &descriptor.id)
+            .map(|p| p.name.trim().to_string());
         Self {
             target,
             kind,
@@ -329,7 +371,60 @@ impl QuickLaunch {
             pr: None,
             under: None,
             cloud: false,
+            profile,
         }
+    }
+
+    /// The same launch on `before`'s PROFILE when it runs the same harness
+    /// — what a picker's return trip does, so `^O` picking a model keeps
+    /// the account `^A` chose. A different harness keeps its own default.
+    pub fn with_profile_of(mut self, before: &QuickLaunch) -> Self {
+        if before.harness_id() == self.harness_id() {
+            self.profile = before.profile.clone();
+        }
+        self
+    }
+
+    /// The harness id PROFILES are filed under: the custom entry's id, or
+    /// the built-in kind's name.
+    pub fn harness_id(&self) -> &str {
+        self.custom.as_deref().unwrap_or_else(|| self.kind.as_str())
+    }
+
+    /// What `^A` steps through for this launch's harness: each of its
+    /// PROFILES in config order, led by "none" (None — the CLI's own
+    /// environment) when the harness has no default to stand for it.
+    /// Empty when the harness has no profiles at all, which keeps the
+    /// field off the box.
+    pub fn profile_choices(
+        &self,
+        profiles: &[nebula_core::profiles::Profile],
+    ) -> Vec<Option<String>> {
+        let all = nebula_core::profiles::for_harness(profiles, self.harness_id());
+        if all.is_empty() {
+            return Vec::new();
+        }
+        let lead = nebula_core::profiles::default_for(profiles, self.harness_id())
+            .is_none()
+            .then_some(None);
+        lead.into_iter()
+            .chain(all.iter().map(|p| Some(p.name.trim().to_string())))
+            .collect()
+    }
+
+    /// `^A`: step to the next of [`QuickLaunch::profile_choices`],
+    /// wrapping. False when the harness has none to step through.
+    pub fn cycle_profile(&mut self, profiles: &[nebula_core::profiles::Profile]) -> bool {
+        let choices = self.profile_choices(profiles);
+        if choices.is_empty() {
+            return false;
+        }
+        let at = choices.iter().position(|c| *c == self.profile);
+        self.profile = match at {
+            Some(i) => choices[(i + 1) % choices.len()].clone(),
+            None => choices[0].clone(),
+        };
+        true
     }
 
     /// The same launch, standing on the modal `under` (or on none). What
@@ -666,6 +761,7 @@ pub(crate) fn picker_context(app: &App, launch: &QuickLaunch) -> Option<Worktree
 /// launch, and on Esc with the one it left with. The text is restored
 /// either way; that is the whole point of the round trip.
 pub(crate) fn reopen(app: &mut App, launch: QuickLaunch, text: &str) {
+    refresh_profiles(app);
     crate::event_loop::open_prompt(app, PromptKind::QuickPrompt(launch));
     if let Some(crate::app::Overlay::Prompt(prompt)) = &mut app.modals.overlay {
         prompt.input.insert_str(text);
@@ -1211,5 +1307,72 @@ mod tests {
         }));
         assert!(!issue.takes_cloud());
         assert!(!issue.with_cloud(true).cloud);
+    }
+
+    /// A launch opens on its harness's default PROFILE, `^A` steps through
+    /// the harness's own accounts (led by "none" while no default stands
+    /// for it), and a model pick on the same harness keeps the choice.
+    #[test]
+    fn a_launch_opens_on_the_default_profile_and_steps_through_its_harness() {
+        let profile = |name: &str, harness: &str, default: bool| nebula_core::profiles::Profile {
+            name: name.into(),
+            harness: harness.into(),
+            env: Default::default(),
+            default,
+            use_default: false,
+        };
+        let cfg = Config {
+            profiles: vec![
+                profile("main", "claude", true),
+                profile("max2", "claude", false),
+                profile("work", "codex", false),
+            ],
+            ..Config::default()
+        };
+        let mut claude =
+            QuickLaunch::of_kind(worktree(), AgentKind::Claude, None, None, None, &cfg);
+        assert_eq!(claude.profile.as_deref(), Some("main"));
+        assert_eq!(
+            claude.profile_choices(&cfg.profiles),
+            vec![Some("main".to_string()), Some("max2".to_string())]
+        );
+        assert!(claude.cycle_profile(&cfg.profiles));
+        assert_eq!(claude.profile.as_deref(), Some("max2"));
+        assert!(claude.cycle_profile(&cfg.profiles));
+        assert_eq!(claude.profile.as_deref(), Some("main"), "it wraps");
+
+        let mut codex = QuickLaunch::of_kind(worktree(), AgentKind::Codex, None, None, None, &cfg);
+        assert_eq!(codex.profile, None, "no default: the CLI's own login");
+        assert_eq!(
+            codex.profile_choices(&cfg.profiles),
+            vec![None, Some("work".to_string())]
+        );
+        assert!(codex.cycle_profile(&cfg.profiles));
+        assert_eq!(codex.profile.as_deref(), Some("work"));
+
+        let mut pi = QuickLaunch::of_kind(worktree(), AgentKind::Pi, None, None, None, &cfg);
+        assert!(!pi.cycle_profile(&cfg.profiles), "no profiles, no field");
+
+        let picked = QuickLaunch::of_kind(
+            worktree(),
+            AgentKind::Codex,
+            None,
+            Some("gpt-5.5".into()),
+            None,
+            &cfg,
+        )
+        .with_profile_of(&codex);
+        assert_eq!(
+            picked.profile.as_deref(),
+            Some("work"),
+            "same harness keeps it"
+        );
+        let other = QuickLaunch::of_kind(worktree(), AgentKind::Claude, None, None, None, &cfg)
+            .with_profile_of(&codex);
+        assert_eq!(
+            other.profile.as_deref(),
+            Some("main"),
+            "another takes its own"
+        );
     }
 }

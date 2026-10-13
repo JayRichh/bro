@@ -6,6 +6,7 @@ pub mod progress;
 pub mod question;
 pub mod ring;
 pub mod title;
+pub mod usage;
 
 use crate::platform::RawFd;
 use anyhow::{Context, Result};
@@ -239,6 +240,12 @@ pub enum PtyEvent {
     Question {
         open: bool,
     },
+    /// Claude printed its PLAN USAGE notice (`You've used 91% of your
+    /// weekly limit`). Only scanned for on Claude sessions
+    /// (`arm_usage_scan`).
+    Usage {
+        usage: nebula_core::profiles::Usage,
+    },
 }
 
 enum ReaderMsg {
@@ -276,6 +283,9 @@ pub struct PtySession {
     /// Cursor's ask-question dialog watcher; `None` until a cursor-agent
     /// session arms it, so other sessions keep no screen for it.
     question: Mutex<Option<QuestionScanner>>,
+    /// Claude's PLAN USAGE notice watcher; `None` until a Claude session
+    /// arms it (see `pty::usage`).
+    usage: Mutex<Option<usage::UsageScanner>>,
     /// Screen for answering cursor position reports; `None` until the child
     /// first asks, so sessions that never do parse nothing.
     cursor: Mutex<Option<CursorTracker>>,
@@ -295,6 +305,9 @@ pub struct SpawnSpec {
     /// Env var names to scrub from the inherited environment. Only ever a
     /// fixed list (the agent-session vars), so it is borrowed, not built.
     pub scrub_env: &'static [&'static str],
+    /// More names to remove, worked out per spawn: the inherited
+    /// credential variables a session's PROFILE strips.
+    pub unset_env: Vec<String>,
     pub cols: u16,
     pub rows: u16,
 }
@@ -334,6 +347,9 @@ impl PtySession {
             cmd.env_remove(name);
         }
         for name in spec.scrub_env {
+            cmd.env_remove(name);
+        }
+        for name in &spec.unset_env {
             cmd.env_remove(name);
         }
         // Agents are told to run `bro rename`, `bro spawn` and friends, and
@@ -395,6 +411,7 @@ impl PtySession {
                 title: Mutex::new(title::TitleScanner::new()),
                 cloud: Mutex::new(None),
                 question: Mutex::new(None),
+                usage: Mutex::new(None),
                 cursor: Mutex::new(None),
                 #[cfg(windows)]
                 job,
@@ -449,6 +466,7 @@ impl PtySession {
                 title: Mutex::new(title::TitleScanner::restored(carried.title)),
                 cloud: Mutex::new(None),
                 question: Mutex::new(None),
+                usage: Mutex::new(None),
                 cursor: Mutex::new(None),
             },
             reader,
@@ -736,6 +754,12 @@ impl PtySession {
         for sighting in sightings {
             let _ = self.events.send(sighting.into());
         }
+    }
+
+    /// Start watching this Claude child's output for its PLAN USAGE
+    /// notice (see `pty::usage`); readings arrive as `PtyEvent::Usage`.
+    pub fn arm_usage_scan(&self) {
+        *self.usage.lock() = Some(usage::UsageScanner::new());
     }
 
     /// Start watching this cursor-agent child's screen for its
@@ -1063,6 +1087,11 @@ async fn pump(session: Arc<PtySession>, mut rx: mpsc::Receiver<ReaderMsg>) {
             .lock()
             .as_mut()
             .and_then(|scanner| scanner.feed(pending, std::time::Instant::now()));
+        let usage_reading = session
+            .usage
+            .lock()
+            .as_mut()
+            .and_then(|scanner| scanner.feed(pending));
         let seq = session.ring.lock().append(pending);
         let _ = session.events.send(PtyEvent::Output {
             seq,
@@ -1087,6 +1116,10 @@ async fn pump(session: Arc<PtySession>, mut rx: mpsc::Receiver<ReaderMsg>) {
         if let Some(open) = question_edge {
             tracing::debug!(session = ?session.sref, open, "child question dialog changed");
             let _ = session.events.send(PtyEvent::Question { open });
+        }
+        if let Some(usage) = usage_reading {
+            tracing::debug!(session = ?session.sref, usage = %usage.summary(), "child printed its plan usage");
+            let _ = session.events.send(PtyEvent::Usage { usage });
         }
     };
 
@@ -1216,6 +1249,7 @@ mod tests {
                 cwd: std::env::temp_dir(),
                 env: vec![],
                 scrub_env: &[],
+                unset_env: Vec::new(),
                 cols: DEFAULT_COLS,
                 rows: DEFAULT_ROWS,
             },
@@ -1261,6 +1295,7 @@ mod tests {
                 cwd: std::env::temp_dir(),
                 env: vec![],
                 scrub_env: &[],
+                unset_env: Vec::new(),
                 cols: DEFAULT_COLS,
                 rows: DEFAULT_ROWS,
             },
@@ -1313,6 +1348,7 @@ mod tests {
                 cwd: std::env::temp_dir(),
                 env: vec![],
                 scrub_env: &[],
+                unset_env: Vec::new(),
                 cols: DEFAULT_COLS,
                 rows: DEFAULT_ROWS,
             },
@@ -1360,6 +1396,7 @@ mod tests {
                 cwd: std::env::temp_dir(),
                 env: vec![],
                 scrub_env: &[],
+                unset_env: Vec::new(),
                 cols: DEFAULT_COLS,
                 rows: DEFAULT_ROWS,
             },
@@ -1395,6 +1432,7 @@ mod tests {
                 cwd: std::env::temp_dir(),
                 env: vec![],
                 scrub_env: &[],
+                unset_env: Vec::new(),
                 cols: DEFAULT_COLS,
                 rows: DEFAULT_ROWS,
             },
@@ -1434,6 +1472,7 @@ mod tests {
                 cwd: std::env::temp_dir(),
                 env: vec![],
                 scrub_env: &[],
+                unset_env: Vec::new(),
                 cols: DEFAULT_COLS,
                 rows: DEFAULT_ROWS,
             },

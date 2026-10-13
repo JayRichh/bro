@@ -279,6 +279,7 @@ impl ClientConnection {
                 starting_prompt,
                 issue_url,
                 role,
+                profile,
             } => {
                 self.handle_create_agent(
                     req_id,
@@ -293,6 +294,7 @@ impl ClientConnection {
                     starting_prompt,
                     issue_url,
                     role,
+                    profile,
                 )
                 .await;
                 Ok(true)
@@ -309,6 +311,7 @@ impl ClientConnection {
                 pr_url,
                 head,
                 starting_prompt,
+                profile,
             } => {
                 self.spawn_create_pr_agent(
                     req_id,
@@ -322,6 +325,7 @@ impl ClientConnection {
                     pr_url,
                     head,
                     starting_prompt,
+                    profile,
                 );
                 Ok(true)
             }
@@ -845,6 +849,7 @@ impl ClientConnection {
         starting_prompt: Option<String>,
         issue_url: Option<String>,
         role: nebula_core::AgentRole,
+        profile: Option<String>,
     ) {
         // Logged by mode only — never the task, prompt text or issue URL.
         let launch_mode = match (&cloud_prompt, &starting_prompt, &issue_url) {
@@ -856,6 +861,7 @@ impl ClientConnection {
         let result = self
             .daemon
             .create_agent(CreateAgentSpec {
+                profile,
                 worktree: worktree.clone(),
                 name,
                 kind,
@@ -958,6 +964,7 @@ impl ClientConnection {
         pr_url: String,
         head: String,
         starting_prompt: Option<String>,
+        profile: Option<String>,
     ) {
         // A PR SESSION whose checkout does not exist yet is a fetch, a `git
         // worktree add` and the WORKTREE HOOK before the CLI spawns. Off the
@@ -978,6 +985,7 @@ impl ClientConnection {
                     pr_url: pr_url.clone(),
                     head,
                     starting_prompt,
+                    profile,
                 })
                 .await;
             match &result {

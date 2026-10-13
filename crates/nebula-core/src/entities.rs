@@ -285,6 +285,13 @@ pub struct Agent {
     /// the bottom. Empty for every row that predates the capture.
     #[serde(default)]
     pub recent_prompts: Vec<PromptEntry>,
+    /// The PROFILE the session runs under (`nebula_core::profiles`): the
+    /// account whose config dirs its environment points at. Resolved at
+    /// create — a launch naming none takes its harness's default — and
+    /// kept, so a RESUME or restart boots under the same account. None =
+    /// no profile: the daemon's own environment, as before profiles.
+    #[serde(default)]
+    pub profile: Option<String>,
 }
 
 impl Agent {
