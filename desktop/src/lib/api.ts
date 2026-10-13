@@ -144,6 +144,8 @@ export interface Launchables {
   new_worktree?: boolean;
   /** Open the session a launch starts (Sessions tab). */
   follow?: boolean;
+  /** Archive asks first (Confirm on archive). */
+  ask_before_archive?: boolean;
 }
 /** An agent preset (agent_presets.json, shared with the terminal app). */
 export interface Preset {

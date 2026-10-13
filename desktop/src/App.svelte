@@ -1,21 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import {
-    app,
-    boot,
-    checkAdoStore,
-    focusQuickPrompt,
-    follow,
-    goHome,
-    loadDesktopPrefs,
-    openDiff,
-    openSettings,
-    openSession,
-    sessionWorktree,
-    setHome,
-    setThemePref,
-    type ThemePref,
-  } from './lib/store.svelte';
+  import { app, boot, checkAdoStore, follow, loadDesktopPrefs, openDiff, openSession, sessionWorktree, setHome } from './lib/store.svelte';
+  import { shortcutFor } from './lib/shortcuts';
+  import { focusedTarget, runShortcut, toggleArchived } from './lib/commands';
+  import { layerOpen } from './lib/ui/ui.svelte';
+  import Menu from './lib/ui/Menu.svelte';
+  import Dialog from './lib/ui/Dialog.svelte';
+  import Palette from './lib/Palette.svelte';
+  import Help from './lib/Help.svelte';
   import { api } from './lib/api';
   import { isDiffMode } from './lib/diff-api';
   import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -94,50 +86,15 @@
     else if (e.key === 'ArrowRight') app.splitWidth = Math.max(380, w - 40);
   }
 
-  function cycleTheme() {
-    const order: ThemePref[] = ['system', 'light', 'dark'];
-    setThemePref(order[(order.indexOf(app.themePref) + 1) % order.length]);
-  }
-
-  function toggleHome() {
-    setHome(app.home === 'overview' ? 'board' : 'overview', nav.current.repo);
-  }
-
+  // Every key goes through the one shortcut table (lib/shortcuts.ts),
+  // which the help overlay lists too.
   function onKey(e: KeyboardEvent) {
+    if (layerOpen()) return;
     const t = e.target as HTMLElement;
-    const inTerm = !!t.closest('.xterm');
-    const typing = inTerm || !!t.closest('input, textarea, select, .monaco-editor');
-    // History: global, except inside a terminal, where Alt+arrows belong to the shell.
-    if (e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && !inTerm) {
-      if (e.key === 'ArrowLeft') return (e.preventDefault(), nav.back());
-      if (e.key === 'ArrowRight') return (e.preventDefault(), nav.forward());
-    }
-    // Ctrl+, opens Settings, wherever the focus is (as in most editors).
-    if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key === ',') return (e.preventDefault(), openSettings());
-    if (e.ctrlKey && e.shiftKey && !e.altKey) {
-      const k = e.key.toUpperCase();
-      const act: Record<string, () => void> = {
-        B: () => setHome('board', nav.current.repo),
-        O: () => setHome('overview', nav.current.repo),
-        T: () => app.session && openSession(app.session),
-        D: () => openDiff(app.diffWorktree ?? sessionWorktree(app.session)),
-        N: () => focusQuickPrompt(),
-        P: () => focusQuickPrompt(),
-        L: cycleTheme,
-      };
-      if (act[k]) {
-        e.preventDefault();
-        act[k]();
-      }
-      return;
-    }
-    if (typing || e.ctrlKey || e.altKey || e.metaKey) return;
-    if (e.key === 'K' && e.shiftKey) return (e.preventDefault(), toggleHome());
-    if (e.key === 'p' || e.key === 'n') return (e.preventDefault(), focusQuickPrompt());
-    if (e.key === 'Escape' && (split || view === 'settings')) return goHome(nav.current.repo);
-    if (e.key === '1') goHome(nav.current.repo);
-    else if (e.key === '2' && app.session) openSession(app.session);
-    else if (e.key === '3') openDiff(app.diffWorktree ?? sessionWorktree(app.session));
+    const inTerminal = !!t.closest('.xterm');
+    const typing = inTerminal || !!t.closest('input, textarea, select, .monaco-editor');
+    const s = shortcutFor(e, { inTerminal, typing, onRow: !!focusedTarget() });
+    if (s && runShortcut(s.id)) e.preventDefault();
   }
 
   /** The mouse's back and forward buttons. */
@@ -188,6 +145,14 @@
       <Breadcrumb />
       <span class="flex-1"></span>
       <AttentionStrip />
+      {#if app.home === 'overview' && !adoView && view !== 'settings'}
+        <button
+          class="h-6 flex-none border px-2 text-[12px] {app.showArchived ? 'border-ink bg-ink text-bg' : 'border-rule bg-transparent text-muted hover:text-ink'}"
+          aria-pressed={app.showArchived}
+          title="Show archived sessions in the overview (Shift+A)"
+          onclick={toggleArchived}>Archived</button
+        >
+      {/if}
       <div class="flex h-6 flex-none border border-rule" role="radiogroup" aria-label="Home view">
         {#each [{ id: 'overview', label: 'Overview' }, { id: 'board', label: 'Board' }] as h, i (h.id)}
           {@const on = app.home === h.id}
@@ -267,6 +232,11 @@
     {/if}
   </main>
 </div>
+
+<Menu />
+<Dialog />
+<Palette />
+<Help />
 
 {#if app.toast}
   <div

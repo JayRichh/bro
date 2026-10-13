@@ -414,6 +414,8 @@ struct Launchables {
     new_worktree: bool,
     /// Open the session a launch starts (Sessions tab).
     follow: bool,
+    /// Archive asks first (Sessions tab, Confirm on archive).
+    ask_before_archive: bool,
 }
 
 /// What the quick prompt offers: the harnesses the TUI's New session
@@ -437,6 +439,7 @@ fn launchables() -> Launchables {
         default_harness,
         new_worktree: cfg.quick_prompt_new_worktree,
         follow: cfg.follow_new_session,
+        ask_before_archive: cfg.ask_before_archive,
     }
 }
 

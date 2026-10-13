@@ -10,7 +10,16 @@ import { diffItem, isDiffMode, parseDiffItem, type DiffMode, type DiffRange } fr
 export type ThemePref = 'system' | 'light' | 'dark';
 /** What the main column shows when no view is open: the overview or the board. */
 export type Home = 'overview' | 'board';
-export type QuickPreset = { project?: string; harness?: string; profile?: string };
+/** What the quick prompt should switch to, once (a rail pick, a duplicate). */
+export type QuickPreset = {
+  project?: string;
+  worktree?: string;
+  harness?: string;
+  profile?: string;
+  model?: string | null;
+  effort?: string | null;
+  newWorktree?: boolean;
+};
 
 const empty: Model = {
   connected: false,
@@ -57,6 +66,8 @@ export const app = $state({
   reveal: { repo: null as string | null, seq: 0, done: 0 },
   /** Worktree id to the command its Run button starts. */
   runCommands: {} as Record<string, string>,
+  /** The overview lists archived sessions too (Shift+A). */
+  showArchived: false,
 });
 
 /** The window's own preferences, saved under `desktop` in config.json. */

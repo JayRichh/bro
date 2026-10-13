@@ -8,7 +8,7 @@
   let { active = true }: { active?: boolean } = $props();
   let scroller: HTMLDivElement;
 
-  const rows = $derived(repoRows(app.model));
+  const rows = $derived(repoRows(app.model, { archived: app.showArchived }));
 
   // Only a repo picked in the rail scrolls the overview (`revealRepo`, which
   // nothing else sets). Session clicks, strip jumps, Esc and back/forward

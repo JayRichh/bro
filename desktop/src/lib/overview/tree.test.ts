@@ -114,3 +114,21 @@ test('a collapsed node can be opened and an open one closed', () => {
   expect(flatten(forest, new Set()).length).toBe(2);
   expect(flatten(forest, new Set(), new Set(['lead'])).map((r) => r.node.id)).toEqual(['lead']);
 });
+
+test('archived sessions show only when asked, as stopped, and never count for attention', async () => {
+  const { repoRows, tally } = await import('./repos');
+  const gone = { ...agent('gone', null, 'needs_feedback', true), archived: true };
+  const live = agent('live', null, 'running');
+  const m = {
+    connected: true, error: null, daemon_pid: 1, protocol_version: 1, runtime_dir: '',
+    projects: [{ id: 'p', name: 'p', repo_path: '/p', sort_order: 0 }],
+    worktrees: [{ id: 'w', project_id: 'p', path: '/p', branch: 'main', is_main: true, sort_order: 0 }],
+    agents: [gone, live].map((a) => ({ ...a, worktree_id: 'w' })),
+    terminals: [], ports: [], prs: {}, subagents: [],
+  };
+  expect(repoRows(m)[0].forest.map((n) => n.id)).toEqual(['live']);
+  const shown = repoRows(m, { archived: true });
+  expect(shown[0].forest.map((n) => n.id).sort()).toEqual(['gone', 'live']);
+  expect(shown[0].forest.find((n) => n.id === 'gone')?.status).toBe('stopped');
+  expect(tally(shown).needs ?? []).toEqual([]);
+});

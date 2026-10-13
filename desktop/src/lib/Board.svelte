@@ -5,6 +5,8 @@
   import { retract } from './motion';
   import Empty from './Empty.svelte';
   import type { Agent } from './api';
+  import { agentMenu } from './actions';
+  import { layerOpen, openMenu } from './ui/ui.svelte';
 
   let { active = true }: { active?: boolean } = $props();
   const board = $derived(lanes(app.model));
@@ -36,11 +38,16 @@
       row = Math.max(0, Math.min(ids[lane].length - 1, row + dy));
     }
     cursor = { lane, row };
-    queueMicrotask(() => document.querySelector('[data-card-sel]')?.scrollIntoView({ block: 'nearest' }));
+    // The card takes the focus, so its row keys (r, a, Del\u2026) reach it.
+    queueMicrotask(() => {
+      const el = document.querySelector<HTMLElement>('[data-card-sel]');
+      el?.focus();
+      el?.scrollIntoView({ block: 'nearest' });
+    });
   }
 
   function onKey(e: KeyboardEvent) {
-    if (!active) return;
+    if (!active || layerOpen()) return;
     const t = e.target as HTMLElement;
     if (t.closest('input, textarea, select, .xterm')) return;
     const map: Record<string, [number, number]> = {
@@ -95,6 +102,13 @@
             {@const alert = lane.id === 'needs'}
             <button
               data-card-sel={sel || undefined}
+              data-target="agent:{a.id}"
+              oncontextmenu={(e) => {
+                e.preventDefault();
+                cursor = { lane: li, row: ri };
+                (e.currentTarget as HTMLElement).focus();
+                openMenu(agentMenu(a), { x: e.clientX, y: e.clientY }, a.name);
+              }}
               class="relative flex flex-col gap-1 border-0 border-b border-rule px-4 py-2.5 text-left focus-visible:-outline-offset-2
                 {sel ? 'bg-surface' : 'bg-transparent hover:bg-surface'}"
               onclick={() => {

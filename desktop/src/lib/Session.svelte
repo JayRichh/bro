@@ -3,6 +3,13 @@
   import { toneOf, terminalTone, harnessLabel, placeOf, age, lastPrompt } from './status';
   import Status from './Status.svelte';
   import Terminal from './Terminal.svelte';
+  import { agentMenu, terminalMenu } from './actions';
+  import { openMenu } from './ui/ui.svelte';
+
+  function actions(at: HTMLElement | { x: number; y: number }) {
+    const items = agent ? agentMenu(agent) : terminal ? terminalMenu(terminal) : [];
+    openMenu(items, at, agent?.name ?? terminal?.name ?? 'Session');
+  }
 
   const s = $derived(app.session);
   const agent = $derived(s && 'Agent' in s ? app.model.agents.find((a) => a.id === s.Agent) : undefined);
@@ -20,7 +27,11 @@
 
 {#if s && (agent || terminal)}
   <div class="flex h-full min-h-0 flex-col">
-    <div class="flex min-w-0 flex-none flex-col gap-1 border-b border-rule px-4 py-2">
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="flex min-w-0 flex-none flex-col gap-1 border-b border-rule px-4 py-2"
+      oncontextmenu={(e) => (e.preventDefault(), actions({ x: e.clientX, y: e.clientY }))}
+    >
       <div class="flex min-w-0 items-center gap-3">
         <span class="min-w-0 truncate text-[15px] font-semibold {tone === 'needs' ? 'text-ember-ink' : 'text-ink'}"
           >{agent?.name ?? terminal?.name}</span
@@ -28,6 +39,12 @@
         <Status {tone} />
         <span class="flex-1"></span>
         <button class={tool} onclick={() => openDiff(wt)} title="Diff this worktree (Ctrl+Shift+D)">Diff</button>
+        <button
+          class={tool}
+          aria-haspopup="menu"
+          title="Session actions: rename, restart, move, archive, delete (or right-click the header)"
+          onclick={(e) => actions(e.currentTarget as HTMLElement)}>Actions</button
+        >
         <button
           class="grid size-7 place-items-center border border-rule bg-transparent text-ink hover:border-rule-strong"
           onclick={() => goHome(projectOf(wt))}

@@ -7,6 +7,8 @@
   import Status from '../Status.svelte';
   import RunButton from './RunButton.svelte';
   import { flatten, type Node } from './tree';
+  import { menuFor, type Target } from '../actions';
+  import { openMenu } from '../ui/ui.svelte';
 
   let { repo, forest, terminals }: { repo: string; forest: Node[]; terminals: TerminalTab[] } = $props();
 
@@ -48,7 +50,14 @@
     }
   }
 
+  function menu(e: MouseEvent, t: Target) {
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).focus();
+    openMenu(menuFor(t), { x: e.clientX, y: e.clientY });
+  }
+
   function meta(n: Node): string {
+    if (n.agent?.archived) return ['archived', harnessLabel(n.agent)].join(' \u00b7 ');
     if (n.agent) return [harnessLabel(n.agent), n.agent.profile].filter(Boolean).join(' \u00b7 ');
     // Indent and the lighter name already say "subagent"; the type is the news.
     if (n.sub) return n.sub.kind || 'subagent';
@@ -81,8 +90,10 @@
       aria-selected={sel}
       tabindex="0"
       data-row
-      class="{ROW} {sel ? 'bg-surface' : 'hover:bg-surface'}"
+      data-target={n.agent ? `agent:${n.agent.id}` : n.sub ? `agent:${n.sub.parent_agent}` : undefined}
+      class="{ROW} {sel ? 'bg-surface' : 'hover:bg-surface'} {n.agent?.archived ? 'opacity-60' : ''}"
       onclick={() => openNode(n)}
+      oncontextmenu={(e) => menu(e, { kind: 'agent', id: n.agent?.id ?? n.sub?.parent_agent ?? '' })}
       onkeydown={(e) => onRowKey(e, n, expanded, hasKids)}
     >
       {#if needs}
@@ -146,8 +157,10 @@
       aria-selected={sel}
       tabindex="0"
       data-row
+      data-target="terminal:{t.id}"
       class="{ROW} {sel ? 'bg-surface' : 'hover:bg-surface'}"
       onclick={() => openSession({ Terminal: t.id })}
+      oncontextmenu={(e) => menu(e, { kind: 'terminal', id: t.id })}
       onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), openSession({ Terminal: t.id }))}
     >
       <span class="pl-6"><Status tone={t.alive ? 'shell' : 'stopped'} /></span>

@@ -51,7 +51,8 @@ export function buildForest(agents: Agent[], subs: Subagent[]): Node[] {
     nodes.set(a.id, {
       id: a.id,
       kind: 'session',
-      status: toneOf(a),
+      // An archived session (shown on request) wants nothing.
+      status: a.archived ? 'stopped' : toneOf(a),
       label: a.name,
       children: [],
       depth: 0,

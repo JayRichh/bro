@@ -4,6 +4,8 @@
   import type { RepoRow } from './repos';
   import SessionTree from './SessionTree.svelte';
   import RunButton from './RunButton.svelte';
+  import { projectMenu } from '../actions';
+  import { openMenu } from '../ui/ui.svelte';
 
   let { row }: { row: RepoRow } = $props();
 
@@ -22,7 +24,11 @@
 </script>
 
 <section class="pt-6" data-repo={row.project.id} aria-labelledby="repo-{row.project.id}">
-  <header class="flex min-w-0 items-baseline gap-4 border-b border-rule-strong pr-4 pb-2 pl-6">
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <header
+    class="flex min-w-0 items-baseline gap-4 border-b border-rule-strong pr-4 pb-2 pl-6"
+    oncontextmenu={(e) => (e.preventDefault(), openMenu(projectMenu(row.project.id), { x: e.clientX, y: e.clientY }, row.name))}
+  >
     <h2 id="repo-{row.project.id}" class="m-0 min-w-0 truncate text-[15px] font-semibold text-ink" title={row.project.repo_path}>
       {row.name}
     </h2>
@@ -53,6 +59,16 @@
         <span class={label}>no PR</span>
       {/if}
     </span>
+    <button
+      class="grid size-6 flex-none place-items-center self-center border border-transparent bg-transparent p-0 text-muted hover:border-rule hover:text-ink"
+      title="Repo actions: new worktree, open, rename, locate, remove (or right-click)"
+      aria-label="{row.name} actions"
+      aria-haspopup="menu"
+      data-target="project:{row.project.id}"
+      onclick={(e) => openMenu(projectMenu(row.project.id), e.currentTarget as HTMLElement, row.name)}
+    >
+      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="5" width="2" height="2" fill="currentColor" /><rect x="5" y="5" width="2" height="2" fill="currentColor" /><rect x="9" y="5" width="2" height="2" fill="currentColor" /></svg>
+    </button>
   </header>
   {#if row.forest.length || row.terminals.length}
     <SessionTree repo={row.project.id} forest={row.forest} terminals={row.terminals} />

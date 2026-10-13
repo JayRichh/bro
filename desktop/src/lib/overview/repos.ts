@@ -17,13 +17,16 @@ export type RepoRow = {
   prs: { branch: string; pr: PrInfo }[];
 };
 
-export function repoRows(m: Model): RepoRow[] {
+/** Rows for every repo. `archived` lists archived sessions too (the
+ *  overview's Show archived): never for the rail, strip or board, which
+ *  count what wants attention. */
+export function repoRows(m: Model, opts: { archived?: boolean } = {}): RepoRow[] {
   const rows = m.projects.map((project): RepoRow => {
     const worktrees = m.worktrees
       .filter((w) => w.project_id === project.id)
       .sort((a, b) => Number(b.is_main) - Number(a.is_main) || a.sort_order - b.sort_order);
     const wids = new Set(worktrees.map((w) => w.id));
-    const agents = m.agents.filter((a) => wids.has(a.worktree_id) && !a.archived);
+    const agents = m.agents.filter((a) => wids.has(a.worktree_id) && (opts.archived || !a.archived));
     const ids = new Set(agents.map((a) => a.id));
     const subs = m.subagents.filter((s) => ids.has(s.parent_agent));
     const ports = [...new Set(m.ports.filter((p) => wids.has(p.worktree)).flatMap((p) => p.live))].sort((a, b) => a - b);
