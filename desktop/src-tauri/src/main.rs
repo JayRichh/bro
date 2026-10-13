@@ -9,6 +9,7 @@ mod ado;
 mod attribution;
 mod daemon;
 mod git;
+mod sessions;
 mod settings;
 
 use ado::client::CmdError;
@@ -736,6 +737,15 @@ fn main() {
             add_project,
             start_run,
             stop_run,
+            sessions::rename_agent,
+            sessions::archive_agent,
+            sessions::unarchive_agent,
+            sessions::delete_agent,
+            sessions::restart_agent,
+            sessions::move_agent,
+            sessions::rename_terminal,
+            sessions::close_terminal,
+            sessions::follow_up,
             settings::settings_schema,
             settings::settings_set,
             settings::settings_reset,

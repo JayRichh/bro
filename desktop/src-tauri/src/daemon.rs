@@ -250,6 +250,29 @@ impl Client {
         self.send(ClientRequest::Detach { session })
     }
 
+    /// A client "connected" to a test: every request it sends lands on the
+    /// receiver, and [`Client::answer`] plays the daemon's reply.
+    #[cfg(test)]
+    pub fn connected_for_test() -> (Arc<Self>, mpsc::UnboundedReceiver<ClientRequest>) {
+        let client = Self::new();
+        let (tx, rx) = mpsc::unbounded_channel();
+        *client.tx.lock().unwrap() = Some(tx);
+        client.model.lock().unwrap().connected = true;
+        (client, rx)
+    }
+
+    /// Feed the client one event as if the daemon sent it.
+    #[cfg(test)]
+    pub fn answer(&self, event: ServerEvent) {
+        self.handle(event);
+    }
+
+    /// Replace the mirrored model (a test's daemon state).
+    #[cfg(test)]
+    pub fn set_model(&self, f: impl FnOnce(&mut Model)) {
+        f(&mut self.model.lock().unwrap());
+    }
+
     pub fn set_prs(&self, prs: HashMap<String, PrInfo>) {
         let mut model = self.model.lock().expect("model lock");
         if model.prs != prs {
