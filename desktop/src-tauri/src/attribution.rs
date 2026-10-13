@@ -51,6 +51,16 @@ pub fn find_ai_commits(repo: &Path, range: &str) -> Result<Vec<String>> {
     Ok(found)
 }
 
+/// What a local upstream branch means to [`rewrite_unpushed`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalUpstream {
+    /// Its commits are its own business: they bound the walk.
+    Keep,
+    /// The branch is being published, so commits it shares with its local
+    /// upstream are about to be pushed and are cleaned too.
+    Clean,
+}
+
 /// Strip the co-author lines and footers from every commit on `branch` that
 /// is on no remote yet (not in `base`, the branch's upstream, or any
 /// remote-tracking ref), and move the branch to the rewritten tip. Returns
@@ -58,12 +68,24 @@ pub fn find_ai_commits(repo: &Path, range: &str) -> Result<Vec<String>> {
 ///
 /// `base` is the PR target as a remote ref. `None` (the target was not
 /// fetched) leaves the remote-tracking refs as the only bound; a `base`
-/// given but not found is an error.
+/// given but not found is an error. With no base and no remote-tracking
+/// refs at all nothing bounds the walk, so nothing is rewritten (0):
+/// a whole local history is never rewritten.
+///
+/// `upstream` says whether a local upstream branch bounds the walk too
+/// ([`LocalUpstream::Keep`]), or whether its unpushed commits are cleaned
+/// on this branch as well ([`LocalUpstream::Clean`], for a publish, which
+/// is about to push them). The upstream branch itself never moves.
 ///
 /// Refuses, before writing anything, when a checkout of `branch` has
 /// uncommitted changes, or when a commit it would rewrite is signed (a new
 /// message means a new commit, and the signature cannot come along).
-pub fn rewrite_unpushed(repo: &Path, base: Option<&str>, branch: &str) -> Result<usize> {
+pub fn rewrite_unpushed(
+    repo: &Path,
+    base: Option<&str>,
+    branch: &str,
+    upstream: LocalUpstream,
+) -> Result<usize> {
     let branch = branch.strip_prefix("refs/heads/").unwrap_or(branch);
     if branch.is_empty() || branch == "HEAD" {
         bail!("name the branch to rewrite, not {branch:?}");
@@ -82,17 +104,28 @@ pub fn rewrite_unpushed(repo: &Path, base: Option<&str>, branch: &str) -> Result
         "--reverse".into(),
         old_tip.clone(),
     ];
-    if let Some(base) = base {
-        let base_sha = resolve_commit(repo, base)?
-            .ok_or_else(|| anyhow!("base {base} not found; fetch first"))?;
-        args.push(format!("^{base_sha}"));
+    match base {
+        Some(base) => {
+            let base_sha = resolve_commit(repo, base)?
+                .ok_or_else(|| anyhow!("base {base} not found; fetch first"))?;
+            args.push(format!("^{base_sha}"));
+        }
+        None => {
+            let remotes = git(repo, &["for-each-ref", "--count=1", "refs/remotes"])?;
+            if remotes.trim().is_empty() {
+                return Ok(0);
+            }
+        }
     }
-    // The branch's upstream, local or remote, when it still exists.
-    let upstream = git(repo, &["for-each-ref", "--format=%(upstream)", &branch_ref])?;
-    let upstream = upstream.trim();
-    if !upstream.is_empty() {
-        if let Some(sha) = resolve_commit(repo, upstream)? {
-            args.push(format!("^{sha}"));
+    // The branch's upstream when it still exists. A remote one is covered
+    // by `--remotes` anyway; a local one bounds the walk only on `Keep`.
+    if upstream == LocalUpstream::Keep {
+        let up = git(repo, &["for-each-ref", "--format=%(upstream)", &branch_ref])?;
+        let up = up.trim();
+        if !up.is_empty() {
+            if let Some(sha) = resolve_commit(repo, up)? {
+                args.push(format!("^{sha}"));
+            }
         }
     }
     args.extend(["--not".into(), "--remotes".into()]);
@@ -520,7 +553,7 @@ mod tests {
         );
 
         assert_eq!(
-            rewrite_unpushed(&work, Some("origin/main"), "main").unwrap(),
+            rewrite_unpushed(&work, Some("origin/main"), "main", LocalUpstream::Keep).unwrap(),
             1
         );
 
@@ -553,7 +586,7 @@ mod tests {
         // Nothing left to do: a second pass changes nothing.
         let tip = run(&work, &["rev-parse", "main"]);
         assert_eq!(
-            rewrite_unpushed(&work, Some("origin/main"), "main").unwrap(),
+            rewrite_unpushed(&work, Some("origin/main"), "main", LocalUpstream::Keep).unwrap(),
             0
         );
         assert_eq!(run(&work, &["rev-parse", "main"]), tip);
@@ -580,7 +613,13 @@ mod tests {
         let main_tip = run(&work, &["rev-parse", "main"]);
 
         assert_eq!(
-            rewrite_unpushed(&work, Some("origin/main"), "refs/heads/feature").unwrap(),
+            rewrite_unpushed(
+                &work,
+                Some("origin/main"),
+                "refs/heads/feature",
+                LocalUpstream::Keep
+            )
+            .unwrap(),
             1
         );
         assert_eq!(run(&work, &["rev-parse", "main"]), main_tip);
@@ -609,14 +648,65 @@ mod tests {
         );
         let pushed = run(&work, &["rev-parse", "origin/main"]);
         let main_tip = run(&work, &["rev-parse", "main"]);
-        assert_eq!(rewrite_unpushed(&work, None, "loose").unwrap(), 1);
+        assert_eq!(
+            rewrite_unpushed(&work, None, "loose", LocalUpstream::Keep).unwrap(),
+            1
+        );
         assert_eq!(run(&work, &["rev-parse", "loose~2"]), pushed);
         assert_eq!(run(&work, &["rev-parse", "main"]), main_tip);
         assert_eq!(
             run(&work, &["log", "-1", "--format=%B", "loose~1"]).trim_end(),
             "Fix rounding"
         );
-        assert_eq!(rewrite_unpushed(&work, None, "loose").unwrap(), 0);
+        assert_eq!(
+            rewrite_unpushed(&work, None, "loose", LocalUpstream::Keep).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn no_base_and_no_remote_refs_rewrites_nothing() {
+        let scratch = Scratch::new("noremotes");
+        let (_remote, work) = fixture(&scratch);
+        // Nothing on a remote is known here any more.
+        run(&work, &["update-ref", "-d", "refs/remotes/origin/main"]);
+        run(&work, &["branch", "-q", "--unset-upstream", "main"]);
+        let tip = run(&work, &["rev-parse", "main"]);
+        assert_eq!(
+            rewrite_unpushed(&work, None, "main", LocalUpstream::Clean).unwrap(),
+            0
+        );
+        assert_eq!(run(&work, &["rev-parse", "main"]), tip);
+    }
+
+    #[test]
+    fn a_publish_cleans_what_it_shares_with_a_local_upstream() {
+        // `feature` tracks the LOCAL `main`, whose unpushed co-author
+        // commit `feature` is about to publish.
+        let scratch = Scratch::new("publish");
+        let (_remote, work) = fixture(&scratch);
+        run(&work, &["checkout", "-q", "-b", "feature", "main"]);
+        run(
+            &work,
+            &["branch", "-q", "--set-upstream-to=main", "feature"],
+        );
+        let main_tip = run(&work, &["rev-parse", "main"]);
+        let pushed = run(&work, &["rev-parse", "origin/main"]);
+
+        assert_eq!(
+            rewrite_unpushed(&work, Some("origin/main"), "feature", LocalUpstream::Clean).unwrap(),
+            1
+        );
+        // feature has clean copies; main itself never moved.
+        assert_eq!(run(&work, &["rev-parse", "main"]), main_tip);
+        assert_eq!(run(&work, &["rev-parse", "feature~2"]), pushed);
+        assert_eq!(
+            run(&work, &["log", "-1", "--format=%B", "feature~1"]).trim_end(),
+            "Fix rounding"
+        );
+        assert!(find_ai_commits(&work, "origin/main..feature")
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -625,10 +715,17 @@ mod tests {
         let (_remote, work) = fixture(&scratch);
         let tip = run(&work, &["rev-parse", "main"]);
 
-        let err = rewrite_unpushed(&work, Some("origin/gone"), "main").unwrap_err();
+        let err =
+            rewrite_unpushed(&work, Some("origin/gone"), "main", LocalUpstream::Keep).unwrap_err();
         assert_eq!(err.to_string(), "base origin/gone not found; fetch first");
-        assert!(rewrite_unpushed(&work, Some("origin/main"), "HEAD").is_err());
-        assert!(rewrite_unpushed(&work, Some("origin/main"), "refs/heads/HEAD").is_err());
+        assert!(rewrite_unpushed(&work, Some("origin/main"), "HEAD", LocalUpstream::Keep).is_err());
+        assert!(rewrite_unpushed(
+            &work,
+            Some("origin/main"),
+            "refs/heads/HEAD",
+            LocalUpstream::Keep
+        )
+        .is_err());
 
         // A Latin-1 commit on top: its message cannot round-trip, so the
         // whole rewrite is refused.
@@ -650,7 +747,8 @@ mod tests {
             &work,
             &["update-ref", "refs/heads/main", sha.trim(), tip.trim()],
         );
-        let err = rewrite_unpushed(&work, Some("origin/main"), "main").unwrap_err();
+        let err =
+            rewrite_unpushed(&work, Some("origin/main"), "main", LocalUpstream::Keep).unwrap_err();
         assert!(err.to_string().contains("ISO-8859-1"), "{err}");
         assert_eq!(run(&work, &["rev-parse", "main"]), sha);
     }
@@ -661,7 +759,8 @@ mod tests {
         let (_remote, work) = fixture(&scratch);
         let tip = run(&work, &["rev-parse", "main"]);
         std::fs::write(work.join("a.txt"), "edited\n").unwrap();
-        let err = rewrite_unpushed(&work, Some("origin/main"), "main").unwrap_err();
+        let err =
+            rewrite_unpushed(&work, Some("origin/main"), "main", LocalUpstream::Keep).unwrap_err();
         assert!(err.to_string().contains("uncommitted changes"), "{err}");
         assert_eq!(run(&work, &["rev-parse", "main"]), tip);
     }
@@ -688,7 +787,8 @@ mod tests {
             &["update-ref", "refs/heads/main", sha.trim(), old.trim()],
         );
 
-        let err = rewrite_unpushed(&work, Some("origin/main"), "main").unwrap_err();
+        let err =
+            rewrite_unpushed(&work, Some("origin/main"), "main", LocalUpstream::Keep).unwrap_err();
         assert!(err.to_string().contains("signed"), "{err}");
         assert_eq!(run(&work, &["rev-parse", "main"]), sha);
     }

@@ -394,19 +394,33 @@ pub fn attach_prs(rows: &mut [BranchRow], prs: &[PrSummary], tasks: &BTreeMap<St
     }
 }
 
-/// How long the branch list waits for its PRs before it shows the
-/// branches without them.
-const PR_LOOKUP_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long the branch list waits for the PR list before it shows the
+/// branches without PRs.
+const PR_LIST_TIMEOUT: Duration = Duration::from_secs(10);
+/// The separate budget for the PRs' work items: running out keeps the
+/// PRs and whatever work items arrived.
+const WORK_ITEMS_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The repo's active PRs, with work items for branches that have no
-/// stored task. Empty when the lookup fails (offline, not signed in) or
-/// takes too long: the branches show without PRs.
+/// stored task. Empty when the list fails (offline, not signed in) or
+/// takes too long: the branches show without PRs. Slow work items never
+/// cost the PRs.
 async fn branch_prs(ctx: &AdoContext, tasks: &BTreeMap<String, u32>) -> Vec<PrSummary> {
-    let lookup = prs::active(ctx, |source| !tasks.contains_key(source));
-    match tokio::time::timeout(PR_LOOKUP_TIMEOUT, lookup).await {
-        Ok(Ok(found)) => found,
-        _ => Vec::new(),
-    }
+    branch_prs_within(ctx, tasks, PR_LIST_TIMEOUT, WORK_ITEMS_TIMEOUT).await
+}
+
+async fn branch_prs_within(
+    ctx: &AdoContext,
+    tasks: &BTreeMap<String, u32>,
+    list_budget: Duration,
+    work_items_budget: Duration,
+) -> Vec<PrSummary> {
+    let Ok(Ok(mut found)) = tokio::time::timeout(list_budget, prs::active(ctx)).await else {
+        return Vec::new();
+    };
+    let fill = prs::fill_work_items(ctx, &mut found, |source| !tasks.contains_key(source));
+    let _ = tokio::time::timeout(work_items_budget, fill).await;
+    found
 }
 
 /// The remote the branch commands read: the ADO context's, else
@@ -858,6 +872,52 @@ mod tests {
         assert_eq!(prs.len(), 2);
         assert_eq!(prs[0].source, "jari/fix-890");
         assert_eq!(prs[0].work_items, vec![4321]);
+    }
+
+    #[tokio::test]
+    async fn slow_work_items_keep_the_prs() {
+        use httpmock::prelude::*;
+        use serde_json::json;
+        let s = MockServer::start();
+        s.mock(|w, t| {
+            w.method(GET).path("/Platform/_apis/git/repositories/api");
+            t.status(200)
+                .json_body(json!({"id": "r1", "project": {"id": "p1"}}));
+        });
+        s.mock(|w, t| {
+            w.method(GET)
+                .path("/_apis/git/repositories/r1/pullrequests")
+                .query_param("searchCriteria.status", "active");
+            t.status(200).json_body(json!({"value": [{
+                "pullRequestId": 4, "status": "active", "isDraft": true,
+                "sourceRefName": "refs/heads/jari/fix-890",
+                "targetRefName": "refs/heads/main",
+                "repository": {"webUrl": "https://x"}
+            }]}));
+        });
+        s.mock(|w, t| {
+            w.method(GET)
+                .path("/_apis/git/repositories/r1/pullrequests/4/workitems");
+            t.status(200)
+                .delay(Duration::from_secs(3))
+                .json_body(json!({"value": [{"id": "4321"}]}));
+        });
+        let ctx = crate::ado::testing::context(&s.base_url(), crate::ado::testing::temp_store());
+        let tasks = BTreeMap::new();
+        let prs = branch_prs_within(
+            &ctx,
+            &tasks,
+            Duration::from_secs(10),
+            Duration::from_millis(200),
+        )
+        .await;
+        assert_eq!(prs.len(), 1);
+        assert!(prs[0].work_items.is_empty());
+        let mut rows = vec![sample("jari/fix-890")];
+        attach_prs(&mut rows, &prs, &tasks);
+        assert_eq!(rows[0].pr.as_ref().map(|p| p.id), Some(4));
+        // No work items arrived, so the task comes from the name.
+        assert_eq!(rows[0].task, Some(890));
     }
 
     #[tokio::test]

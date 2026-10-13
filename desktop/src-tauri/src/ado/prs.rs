@@ -5,7 +5,7 @@ use crate::ado::client::{AdoClient, AdoError};
 use crate::ado::remote::AdoRemote;
 use crate::ado::store::Reviewer;
 use crate::ado::{AdoContext, AdoState};
-use crate::attribution::strip_ai_trailers;
+use crate::attribution::{strip_ai_trailers, LocalUpstream};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -42,17 +42,15 @@ impl PrCtx {
     }
 
     /// The PR context for a user-initiated command on `worktree` (a daemon
-    /// worktree id or a path). A command that works for the org starts its
-    /// paused PR poll again.
+    /// worktree id or a path). Like every command context it starts the
+    /// org's paused PR poll again ([`AdoState::context`]).
     pub async fn for_command(
         state: &AdoState,
         client: &crate::daemon::Client,
         worktree: &str,
     ) -> Result<PrCtx, String> {
         let ado = state.context_for(client, worktree).await?;
-        let ctx = PrCtx::new(ado).await.map_err(|e| e.user_message())?;
-        state.resume(&ctx.ado.remote.org_url);
-        Ok(ctx)
+        PrCtx::new(ado).await.map_err(|e| e.user_message())
     }
 }
 
@@ -367,23 +365,31 @@ pub async fn for_source(
     query(client, repo_id, &[("sourceRefName", &r)]).await
 }
 
-/// The repo's active PRs in one list call. A PR whose source branch
-/// `wants_work_items` picks also gets its linked work items (one call
-/// each; a failed one leaves them empty).
-pub async fn active(
-    ado: &AdoContext,
-    wants_work_items: impl Fn(&str) -> bool,
-) -> Result<Vec<PrSummary>, AdoError> {
+/// The repo's active PRs in one list call, without work items.
+pub async fn active(ado: &AdoContext) -> Result<Vec<PrSummary>, AdoError> {
     let (repo_id, _) = repo_ids(&ado.client, &ado.remote).await?;
-    let mut prs = query(&ado.client, &repo_id, &[]).await?;
-    for pr in &mut prs {
-        if pr.work_items.is_empty() && wants_work_items(&pr.source) {
+    query(&ado.client, &repo_id, &[]).await
+}
+
+/// Fill the linked work items of each PR whose source branch
+/// `wanted` picks, one call each, in place: a failed call leaves that
+/// PR's list empty, and a caller that gives up midway keeps what was
+/// filled so far.
+pub async fn fill_work_items(
+    ado: &AdoContext,
+    prs: &mut [PrSummary],
+    wanted: impl Fn(&str) -> bool,
+) {
+    let Ok((repo_id, _)) = repo_ids(&ado.client, &ado.remote).await else {
+        return;
+    };
+    for pr in prs {
+        if pr.work_items.is_empty() && wanted(&pr.source) {
             if let Ok(w) = work_items(&ado.client, &repo_id, pr.id).await {
                 pr.work_items = w;
             }
         }
     }
-    Ok(prs)
 }
 
 /// The ids of the work items linked to a PR.
@@ -753,6 +759,8 @@ pub async fn create(ctx: &PrCtx, pr: NewPr) -> Result<CreateResult, AdoError> {
     if pr.title.trim().is_empty() {
         return Err(AdoError::Local("Add a title".into()));
     }
+    // The target goes into a fetch refspec, so it must be a branch name.
+    crate::ado::naming::validate_branch_name(&target, &[]).map_err(AdoError::Local)?;
 
     let base = fetch_target(repo_path, &ctx.ado.remote_name, &target).await;
     let (repo, remote, src) = (
@@ -761,7 +769,9 @@ pub async fn create(ctx: &PrCtx, pr: NewPr) -> Result<CreateResult, AdoError> {
         source.clone(),
     );
     let note = tokio::task::spawn_blocking(move || -> Result<Option<String>, AdoError> {
-        crate::attribution::rewrite_unpushed(&repo, base.as_deref(), &src)
+        // Publishing: commits shared with a local upstream are about to be
+        // pushed too, so they are cleaned as well.
+        crate::attribution::rewrite_unpushed(&repo, base.as_deref(), &src, LocalUpstream::Clean)
             .map_err(|e| AdoError::Local(format!("Could not clean the commit messages: {e}")))?;
         push(&repo, &remote, &src)?;
         // Without the target there is no telling the branch's own commits
@@ -1608,24 +1618,26 @@ mod tests {
     #[tokio::test]
     async fn create_fetches_the_target_before_the_clean() {
         let r = temp_repo();
-        // The target moved on the server and was never fetched here; the
-        // local tracking ref is gone too.
-        git(&r.work, &["update-ref", "-d", "refs/remotes/origin/main"]);
-        let other = r.root.join("other");
+        // A co-author commit reached the server's main, and ja/fix shares
+        // it. Locally nothing says so: the tracking ref for main is gone,
+        // and the only remote ref left predates it. Cleaned before the
+        // fetch, that shared commit would be rewritten.
         git(
-            &r.root,
+            &r.work,
             &[
-                "clone",
+                "commit",
                 "-q",
-                r.bare.to_str().unwrap(),
-                other.to_str().unwrap(),
+                "--allow-empty",
+                "-m",
+                "Shared\n\nCo-authored-by: Sam Lee <sam@tnt.co.nz>",
             ],
         );
-        std::fs::write(other.join("b.txt"), "b\n").unwrap();
-        git(&other, &["add", "."]);
-        git(&other, &["commit", "-q", "-m", "Elsewhere"]);
-        git(&other, &["push", "-q", "origin", "main"]);
+        let shared = git(&r.work, &["rev-parse", "HEAD"]);
+        git(&r.work, &["push", "-q", "origin", "HEAD:refs/heads/main"]);
+        git(&r.work, &["update-ref", "refs/remotes/origin/old", "main"]);
+        git(&r.work, &["update-ref", "-d", "refs/remotes/origin/main"]);
         let server_main = git(&r.bare, &["rev-parse", "main"]);
+        assert_eq!(server_main, shared);
         git(
             &r.work,
             &[
@@ -1651,6 +1663,67 @@ mod tests {
             git(&r.bare, &["log", "-1", "--format=%B", "ja/fix"]),
             "More"
         );
+        // The shared commit kept its SHA: the fetch came first.
+        assert_eq!(git(&r.bare, &["rev-parse", "ja/fix~1"]), shared);
+    }
+
+    #[tokio::test]
+    async fn a_publish_cleans_commits_from_a_local_upstream() {
+        let r = temp_repo();
+        // ja/fix tracks the LOCAL main, which holds an unpushed co-author
+        // commit that ja/fix is about to publish.
+        git(&r.work, &["checkout", "-q", "main"]);
+        git(
+            &r.work,
+            &[
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "Local\n\nCo-authored-by: Sam Lee <sam@tnt.co.nz>",
+            ],
+        );
+        let local_main = git(&r.work, &["rev-parse", "main"]);
+        git(&r.work, &["checkout", "-q", "-B", "ja/fix", "main"]);
+        git(
+            &r.work,
+            &["branch", "-q", "--set-upstream-to=main", "ja/fix"],
+        );
+        git(&r.work, &["commit", "-q", "--allow-empty", "-m", "Mine"]);
+
+        let s = MockServer::start();
+        mock_no_existing(&s);
+        mock_post(&s, 8);
+        let out = create(&ctx_for(&s.base_url(), &r.work), new_pr(None, "x"))
+            .await
+            .unwrap();
+        assert_eq!(out.outcome, CreateOutcome::Created(8));
+        // Cleaned on the way out, so no false "already on the server".
+        assert_eq!(out.note, None);
+        assert_eq!(
+            git(&r.bare, &["log", "-1", "--format=%B", "ja/fix~1"]),
+            "Local"
+        );
+        // The local upstream itself never moved.
+        assert_eq!(git(&r.work, &["rev-parse", "main"]), local_main);
+    }
+
+    #[tokio::test]
+    async fn a_bad_target_is_refused_before_any_git() {
+        let r = temp_repo();
+        let s = MockServer::start();
+        let list = mock_no_existing(&s);
+        let mut pr = new_pr(None, "x");
+        pr.target = "main:refs/heads/evil".into();
+        let e = create(&ctx_for(&s.base_url(), &r.work), pr)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&e, AdoError::Local(m) if m.contains("not a valid branch name")),
+            "{e}"
+        );
+        assert_eq!(list.hits(), 0);
+        assert!(!remote_has(&r.bare, "ja/fix"));
     }
 
     #[tokio::test]
