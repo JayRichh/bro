@@ -44,21 +44,28 @@ jobs:
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }}
 
+      # kete, and bro (its old name) as a copy of the same binary, so the two
+      # commands are byte for byte one program.
       - name: Package (unix)
         if: runner.os != 'Windows'
-        run: tar -czf bro-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release bro
+        run: |
+          cp target/${{ matrix.target }}/release/kete target/${{ matrix.target }}/release/bro
+          tar -czf kete-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release kete bro
 
       - name: Package (windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path target/${{ matrix.target }}/release/bro.exe -DestinationPath bro-${{ matrix.target }}.zip
+        run: |
+          $dir = "target/${{ matrix.target }}/release"
+          Copy-Item "$dir/kete.exe" "$dir/bro.exe" -Force
+          Compress-Archive -Path "$dir/kete.exe", "$dir/bro.exe" -DestinationPath kete-${{ matrix.target }}.zip
 
       - uses: actions/upload-artifact@v4
         with:
-          name: bro-${{ matrix.target }}
+          name: kete-${{ matrix.target }}
           path: |
-            bro-${{ matrix.target }}.tar.gz
-            bro-${{ matrix.target }}.zip
+            kete-${{ matrix.target }}.tar.gz
+            kete-${{ matrix.target }}.zip
           if-no-files-found: error
 
   release:
@@ -73,6 +80,6 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: |
-            bro-*.tar.gz
-            bro-*.zip
+            kete-*.tar.gz
+            kete-*.zip
           generate_release_notes: true

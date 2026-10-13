@@ -48,7 +48,7 @@ pub(crate) fn open_prompt(app: &mut App, kind: PromptKind) {
         // arm), and Ctrl+u clears it.
         PromptKind::AddProject => (
             "Open project".into(),
-            "a folder with a git repository — Enter opens it".into(),
+            "a folder with a git repository: Enter opens it".into(),
             add_project_prefill(app),
         ),
         PromptKind::SetProjectPath { old_path, .. } => (
@@ -70,13 +70,13 @@ pub(crate) fn open_prompt(app: &mut App, kind: PromptKind) {
             format!("Task for {}", preset.name).into(),
             if preset.has_wrapping() {
                 format!(
-                    "{} — prefix + your task + postfix (empty = prefix + postfix only)",
+                    "{}: prefix + your task + postfix (empty = prefix + postfix only)",
                     preset.spec_label()
                 )
                 .into()
             } else {
                 format!(
-                    "{} — sent as the first prompt (empty = start with no prompt)",
+                    "{}: sent as the first prompt (empty = start with no prompt)",
                     preset.spec_label()
                 )
                 .into()
@@ -101,12 +101,12 @@ pub(crate) fn open_prompt(app: &mut App, kind: PromptKind) {
                     .map_or("session", |a| a.name.as_str())
             )
             .into(),
-            "the agent's next turn — Enter sends it straight to its CLI".into(),
+            "the agent's next turn: Enter sends it straight to its CLI".into(),
             String::new(),
         ),
         PromptKind::PrComment { label, .. } => (
             format!("Comment on {label}").into(),
-            "posted on the pull request as you, through gh — markdown".into(),
+            "posted on the pull request as you, through gh: markdown".into(),
             String::new(),
         ),
         PromptKind::RenameAgent { id } => {
@@ -167,10 +167,10 @@ pub(crate) fn open_prompt(app: &mut App, kind: PromptKind) {
                     "branch new worktrees start from (empty = auto: origin's default branch)"
                 }
                 crate::config::SettingKind::RunCommand => {
-                    "shell line r runs in this project's worktrees (empty = the checkout's .bro.json \"run\")"
+                    "shell line r runs in this project's worktrees (empty = the checkout's .kete.json \"run\")"
                 }
                 crate::config::SettingKind::OpenCommand => {
-                    "shell line Shift+Enter / Shift+O runs to open a worktree of this project (empty = the checkout's .bro.json \"open\")"
+                    "shell line Shift+Enter / Shift+O runs to open a worktree of this project (empty = the checkout's .kete.json \"open\")"
                 }
                 _ => "value (empty = default)",
             };

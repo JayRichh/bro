@@ -95,7 +95,7 @@ pub(super) fn draw(f: &mut Frame, app: &mut App, body: Rect) {
         if cards.is_empty() {
             if let Some(line) = row_rect(r, LANE_HEAD_H as usize) {
                 f.render_widget(
-                    Paragraph::new(Span::styled("—", Style::default().fg(th.dim))),
+                    Paragraph::new(Span::styled("-", Style::default().fg(th.dim))),
                     line,
                 );
             }
@@ -146,9 +146,9 @@ pub(super) fn draw(f: &mut Frame, app: &mut App, body: Rect) {
     if total == 0 {
         if let Some(line) = row_rect(area, (area.height / 2) as usize) {
             let what = if app.launcher.kanban_all {
-                "no sessions in any project — p starts one"
+                "no sessions in any project: p starts one"
             } else {
-                "no sessions in this project — p starts one, Tab shows every project's"
+                "no sessions in this project: p starts one, Tab shows every project's"
             };
             f.render_widget(
                 Paragraph::new(Span::styled(what, Style::default().fg(th.dim)))

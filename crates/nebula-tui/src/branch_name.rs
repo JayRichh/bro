@@ -174,8 +174,8 @@ mod tests {
             "issue-15-fix-login-redirect"
         );
         assert_eq!(
-            issue_name(7, "  Crash: `bro open` on a PDF!  ", &[]),
-            "issue-7-crash-bro-open-on-a-pdf"
+            issue_name(7, "  Crash: `kete open` on a PDF!  ", &[]),
+            "issue-7-crash-kete-open-on-a-pdf"
         );
         assert_eq!(issue_name(3, "", &[]), "issue-3");
         assert_eq!(issue_name(3, "!!!", &[]), "issue-3");

@@ -79,7 +79,7 @@ fn draw_review_overlay(f: &mut Frame, app: &mut App, mut view: crate::review_mod
         }
         Some(nebula_core::ReviewTabKind::Diff) => "Diff review is planned for this tab.",
         Some(nebula_core::ReviewTabKind::History) => {
-            "Recent session history is available through `bro orchestrator read <session-id>`."
+            "Recent session history is available through `kete orchestrator read <session-id>`."
         }
         Some(nebula_core::ReviewTabKind::PullRequest) => {
             "Pull request review is planned for this tab."
@@ -520,10 +520,10 @@ const HELP_RIGHT: &[HelpSection] = &[
             (Act(&[ToggleFullScreen]), "full-screen / normal size"),
             // The SHIFT PAIRS' rule (#93), once, for every
             // letter above that has a shifted twin.
-            (Lit("⇧ + letter"), "bigger, or outside bro"),
+            (Lit("⇧ + letter"), "bigger, or outside kete"),
             (Act(&[Hosts]), "ssh hosts (a: new, d: del)"),
             (Act(&[Settings]), "settings; Hotkeys tab rebinds"),
-            (Act(&[Metrics]), "memory: bro + agents"),
+            (Act(&[Metrics]), "memory: kete + agents"),
             (Act(&[Quit, Help]), "quit / toggle this help"),
         ],
     ),
@@ -704,7 +704,7 @@ fn draw_settings_overlay(f: &mut Frame, app: &mut App, view: crate::app::Setting
                 Some(names) => lines.push(Line::from(Span::styled(
                     truncate(
                         &format!(
-                            " ✗ this key also belongs to {} — whichever is listed first wins",
+                            " ✗ this key also belongs to {}, whichever is listed first wins",
                             names.join(", ")
                         ),
                         inner.width as usize,
@@ -839,7 +839,7 @@ fn append_settings_row(
                 ]));
             }
             None => lines.push(Line::from(Span::styled(
-                " no project selected — these rows are the selected project's",
+                " no project selected, these rows are the selected project's",
                 Style::default().fg(th.warn),
             ))),
         },
@@ -1060,7 +1060,7 @@ fn metrics_rows(
     rows.sort_by_key(|row| std::cmp::Reverse(row.bytes));
     append_warm_spares(&mut rows, spares);
     rows.push(MetricsRow {
-        name: "bro daemon".into(),
+        name: "kete daemon".into(),
         context: String::new(),
         pid: Some(snap.daemon_pid),
         procs: 1,
@@ -1068,7 +1068,7 @@ fn metrics_rows(
         sref: None,
     });
     rows.push(MetricsRow {
-        name: "bro ui (this window)".into(),
+        name: "kete ui (this window)".into(),
         context: String::new(),
         pid: Some(std::process::id()),
         procs: 1,
@@ -1141,7 +1141,7 @@ fn draw_metrics_overlay(f: &mut Frame, app: &mut App, view: crate::app::MetricsV
         }
         let nebula_bytes = snap.daemon_rss_bytes + view.client_rss_bytes;
         lines.push(Line::from(vec![
-            Span::styled(" bro   ", header),
+            Span::styled(" kete   ", header),
             Span::styled(format!("{:<42}", "daemon + this ui"), dim),
             Span::styled(format!("{:>9}", fmt_mem(nebula_bytes)), mem_style),
         ]));
@@ -2214,16 +2214,16 @@ fn draw_files_overlay(f: &mut Frame, app: &mut App, finder: crate::app::FileFind
     // No count to show until the listing lands: `(0/0)` reads as
     // "no files", which is not what is known yet.
     let title = if finder.listing.is_some() {
-        format!(" Find file — {} (listing…) ", finder.branch)
+        format!(" Find file: {} (listing…) ", finder.branch)
     } else if finder.list.query.is_empty() {
         format!(
-            " Find file — {} ({}) ",
+            " Find file: {} ({}) ",
             finder.branch,
             finder.list.items.len()
         )
     } else {
         format!(
-            " Find file — {} ({}/{}) ",
+            " Find file: {} ({}/{}) ",
             finder.branch,
             finder.list.matches.len(),
             finder.list.items.len()
@@ -2281,18 +2281,18 @@ fn draw_grep_overlay(f: &mut Frame, app: &mut App, view: crate::app::GrepView) {
     let th = app.chrome.theme;
     let area = centered_rect_pct(f.area(), GREP_MODAL_PCT.0, GREP_MODAL_PCT.1);
     let title = if view.list.query.chars().count() < crate::grep_search::MIN_QUERY_LEN {
-        format!(" Find in files — {} ", view.branch)
+        format!(" Find in files: {} ", view.branch)
     } else if view.waiting.is_some() {
-        format!(" Find in files — {} (searching…) ", view.branch)
+        format!(" Find in files: {} (searching…) ", view.branch)
     } else if view.truncated {
         format!(
-            " Find in files — {} ({}+ hits) ",
+            " Find in files: {} ({}+ hits) ",
             view.branch,
             view.list.items.len()
         )
     } else {
         format!(
-            " Find in files — {} ({} hits) ",
+            " Find in files: {} ({} hits) ",
             view.branch,
             view.list.items.len()
         )
@@ -2379,7 +2379,7 @@ fn draw_hosts_overlay(f: &mut Frame, app: &mut App, view: crate::app::HostsView)
     f.render_widget(block, area);
 
     if total == 0 && !adding {
-        empty_list_row(f, inner, "no hosts yet — a connects to a new one", th);
+        empty_list_row(f, inner, "no hosts yet, a connects to a new one", th);
     }
     // Follow-window keeps the cursor visible; while adding, pin the
     // window to the tail so the input row is always on screen.
@@ -2628,12 +2628,12 @@ fn draw_tree_overlay(f: &mut Frame, app: &mut App, mut view: crate::tree_browser
     // Left: the file tree; a stateless follow-window keeps the
     // selected row visible.
     let tree_title = if view.listing.is_some() {
-        format!("Tree — {} (listing…)", view.branch)
+        format!("Tree: {} (listing…)", view.branch)
     } else if view.list.query.is_empty() {
-        format!("Tree — {} ({})", view.branch, view.file_count)
+        format!("Tree: {} ({})", view.branch, view.file_count)
     } else {
         format!(
-            "Tree — {} ({}/{})",
+            "Tree: {} ({}/{})",
             view.branch, view.match_count, view.file_count
         )
     };
@@ -2703,7 +2703,7 @@ fn draw_tree_overlay(f: &mut Frame, app: &mut App, mut view: crate::tree_browser
     let sel_path = view.selected_node().map(|n| n.path.as_str()).unwrap_or("");
     let title = if editing {
         format!(
-            "{} — editing",
+            "{}: editing",
             truncate(sel_path, (preview_a.width as usize).saturating_sub(14))
         )
     } else {

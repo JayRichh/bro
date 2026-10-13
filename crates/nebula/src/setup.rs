@@ -1,6 +1,7 @@
-//! `bro setup terminal`: make Windows Terminal ready for Bro — the font
-//! the FILE ICONS' Nerd Font glyphs need, and a **Bro** profile that runs
-//! `bro` in it, under Bro's icon and a One Dark color scheme.
+//! `kete setup terminal`: make Windows Terminal ready for Kete — the font
+//! the FILE ICONS' Nerd Font glyphs need, and a **Kete** profile that runs
+//! `kete` in it, under Kete's icon and a One Dark color scheme. A **Bro**
+//! profile an earlier `bro setup terminal` made becomes the Kete one.
 //!
 //! 1. **The font.** JetBrainsMono Nerd Font (SIL OFL 1.1), from the
 //!    latest nerd-fonts GitHub release, installed for this user only: the
@@ -8,9 +9,9 @@
 //!    registered under `HKCU\Software\Microsoft\Windows NT\CurrentVersion\
 //!    Fonts`, which needs no administrator. Skipped when it is there
 //!    (per user or for the machine), or with `--no-font`.
-//! 2. **The icon.** The `bro.ico` beside `bro.exe` when the install put one
-//!    there; else Bro's 256px PNG, carried in the binary, written into
-//!    Bro's data dir — Windows Terminal wants a file path.
+//! 2. **The icon.** The `kete.ico` beside `kete.exe` when the install put
+//!    one there; else Kete's 256px PNG, carried in the binary, written into
+//!    Kete's data dir — Windows Terminal wants a file path.
 //! 3. **The profile.** Windows Terminal's `settings.json` gets the profile
 //!    and the scheme (`nebula_tui::wt_settings::plan`), spliced into the
 //!    file so its comments and layout stay, after it is backed up beside
@@ -33,9 +34,9 @@ const FONT_URL: &str =
 const FONT_PREFIX: &str = "JetBrainsMonoNerdFont-";
 /// Where a per-user font install keeps its fonts and their names.
 const FONTS_KEY: &str = r"HKCU\Software\Microsoft\Windows NT\CurrentVersion\Fonts";
-/// Bro's icon at 256px, for a profile when no `bro.ico` sits beside the
+/// Kete's icon at 256px, for a profile when no `kete.ico` sits beside the
 /// binary (a `cargo install`).
-const ICON_PNG: &[u8] = include_bytes!("../../../assets/brand/icons/bro-256.png");
+const ICON_PNG: &[u8] = include_bytes!("../../../assets/brand/kete/icons/kete-256.png");
 
 pub(crate) struct Options {
     pub dry_run: bool,
@@ -46,11 +47,11 @@ pub(crate) struct Options {
 pub(crate) fn run_terminal(opts: Options) -> Result<()> {
     if !cfg!(windows) && opts.wt_settings.is_none() {
         println!(
-            "bro setup terminal sets up Windows Terminal, which this OS doesn't have. \
-             Instead:\n  1. install a Nerd Font (https://www.nerdfonts.com — JetBrainsMono \
-             Nerd Font matches Bro's own), from your package manager or by hand;\n  \
+            "kete setup terminal sets up Windows Terminal, which this OS doesn't have. \
+             Instead:\n  1. install a Nerd Font (https://www.nerdfonts.com: JetBrainsMono \
+             Nerd Font matches Kete's own), from your package manager or by hand;\n  \
              2. set your terminal's font to it (and a One Dark color scheme, if it has \
-             one, to match the one-dark theme);\n  3. in Bro, Settings → Appearance → \
+             one, to match the one-dark theme);\n  3. in Kete, Settings → Appearance → \
              File icons → nerd."
         );
         return Ok(());
@@ -74,7 +75,7 @@ pub(crate) fn run_terminal(opts: Options) -> Result<()> {
     let wrote = add_profile(&path, &commandline(), icon.as_deref(), opts.dry_run, say)?;
     if !opts.dry_run && wrote {
         println!(
-            "\ndone: restart Windows Terminal and open a tab on the \"{}\" profile; Bro's file \
+            "\ndone: restart Windows Terminal and open a tab on the \"{}\" profile; Kete's file \
              icons are glyphs there. If it says the font isn't found, sign out and back in: \
              Windows may only load a newly installed font at the next sign-in.",
             wt_settings::PROFILE_NAME
@@ -83,11 +84,11 @@ pub(crate) fn run_terminal(opts: Options) -> Result<()> {
     Ok(())
 }
 
-/// The `bro` the profile runs: this binary, by its full path.
+/// The `kete` the profile runs: this binary, by its full path.
 fn commandline() -> String {
     std::env::current_exe()
         .map(|p| p.display().to_string())
-        .unwrap_or_else(|_| "bro".into())
+        .unwrap_or_else(|_| "kete".into())
 }
 
 /// `%LOCALAPPDATA%\Microsoft\Windows\Fonts`.
@@ -127,7 +128,7 @@ fn install_font(dry_run: bool, say: &str) -> Result<()> {
     if dry_run {
         return Ok(());
     }
-    let work = std::env::temp_dir().join(format!("bro-nerd-font-{}", std::process::id()));
+    let work = std::env::temp_dir().join(format!("kete-nerd-font-{}", std::process::id()));
     std::fs::create_dir_all(&work)?;
     let result = download_and_install(&work, &dir);
     let _ = std::fs::remove_dir_all(&work);
@@ -220,23 +221,23 @@ fn spaced(style: &str) -> String {
     out
 }
 
-/// The profile's icon, an absolute path: the `bro.ico` beside the binary,
+/// The profile's icon, an absolute path: the `kete.ico` beside the binary,
 /// else the PNG carried in it, written into the data dir (on a dry run,
 /// only said). None when neither can be had — the profile then goes
 /// without.
 fn profile_icon(dry_run: bool, say: &str) -> Result<Option<String>> {
     let beside = std::env::current_exe()
         .ok()
-        .and_then(|exe| Some(exe.parent()?.join("bro.ico")))
+        .and_then(|exe| Some(exe.parent()?.join("kete.ico")))
         .filter(|p| p.is_file());
     if let Some(ico) = beside {
         return Ok(Some(ico.display().to_string()));
     }
-    let png = nebula_core::paths::data_dir().join("bro-256.png");
+    let png = nebula_core::paths::data_dir().join("kete-256.png");
     if std::fs::read(&png).is_ok_and(|have| have == ICON_PNG) {
         return Ok(Some(png.display().to_string()));
     }
-    println!("icon: {say} write Bro's icon to {}", png.display());
+    println!("icon: {say} write Kete's icon to {}", png.display());
     if !dry_run {
         if let Some(dir) = png.parent() {
             std::fs::create_dir_all(dir)?;
@@ -299,14 +300,14 @@ fn add_profile(
     Ok(true)
 }
 
-/// `settings.json` → `settings.json.bro-backup-<unix seconds>`.
+/// `settings.json` → `settings.json.kete-backup-<unix seconds>`.
 fn backup_path(path: &Path) -> PathBuf {
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or_default();
     let mut name = path.file_name().unwrap_or_default().to_os_string();
-    name.push(format!(".bro-backup-{stamp}"));
+    name.push(format!(".kete-backup-{stamp}"));
     path.with_file_name(name)
 }
 
@@ -335,14 +336,14 @@ mod tests {
         let original =
             "{\n    // mine\n    \"profiles\": { \"list\": [ { \"name\": \"pwsh\" }, ] },\n}\n";
         std::fs::write(&path, original).unwrap();
-        let bro = r"C:\bin\bro.exe";
-        assert!(add_profile(&path, bro, Some(r"C:\bin\bro.ico"), true, "would").unwrap());
+        let kete = r"C:\bin\kete.exe";
+        assert!(add_profile(&path, kete, Some(r"C:\bin\kete.ico"), true, "would").unwrap());
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             original,
             "a dry run writes nothing"
         );
-        assert!(add_profile(&path, bro, Some(r"C:\bin\bro.ico"), false, "will").unwrap());
+        assert!(add_profile(&path, kete, Some(r"C:\bin\kete.ico"), false, "will").unwrap());
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("// mine"), "comments kept:\n{text}");
         let written = nebula_tui::jsonc::parse(&text).unwrap();
@@ -350,18 +351,18 @@ mod tests {
             written["profiles"]["list"][1]["name"],
             wt_settings::PROFILE_NAME
         );
-        assert_eq!(written["profiles"]["list"][1]["icon"], r"C:\bin\bro.ico");
+        assert_eq!(written["profiles"]["list"][1]["icon"], r"C:\bin\kete.ico");
         let backups: Vec<_> = std::fs::read_dir(dir.path())
             .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| e.file_name().to_string_lossy().contains(".bro-backup-"))
+            .filter(|e| e.file_name().to_string_lossy().contains(".kete-backup-"))
             .collect();
         assert_eq!(backups.len(), 1);
         assert_eq!(
             std::fs::read_to_string(backups[0].path()).unwrap(),
             original
         );
-        assert!(!add_profile(&path, bro, Some(r"C:\bin\bro.ico"), false, "will").unwrap());
+        assert!(!add_profile(&path, kete, Some(r"C:\bin\kete.ico"), false, "will").unwrap());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
     }
 
@@ -371,7 +372,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
         std::fs::write(&path, "{ broken").unwrap();
-        assert!(add_profile(&path, "bro", None, false, "will").is_err());
+        assert!(add_profile(&path, "kete", None, false, "will").is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ broken");
     }
 }

@@ -190,7 +190,7 @@ impl Daemon {
             .as_ref()
             .and_then(|id| self.store.get_agent(id).ok().flatten())
             .map(|a| a.name)
-            .unwrap_or_else(|| "external bro CLI".into());
+            .unwrap_or_else(|| "external kete CLI".into());
         let prompt = labelled_question(&caller_name, question)?;
         let session_ref = SessionRef::Agent(target_id.clone());
         let session = self.ensure_session(

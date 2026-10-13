@@ -416,7 +416,7 @@ fn handle_tree_event(app: &mut App, event: ServerEvent, out: &mut Vec<ClientRequ
         // A straggler for a row deleted here a moment ago: the DAEMON sent
         // it before it got to the delete, and the row stays down.
         ServerEvent::EntityUpserted { entity } if optimistic::is_deleting(app, &entity) => {
-            tracing::debug!(?entity, "upsert of a row being deleted — ignored");
+            tracing::debug!(?entity, "upsert of a row being deleted: ignored");
         }
         ServerEvent::EntityUpserted { entity } => {
             // A checkout cut for a PR SESSION takes over its stand-in row

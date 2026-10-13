@@ -29,11 +29,11 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 /// The file's name at the root of a checkout.
-pub const FILE_NAME: &str = ".bro.json";
+pub const FILE_NAME: &str = ".kete.json";
 
-/// The name upstream nebula reads, still honoured in a checkout that has
-/// no `.bro.json`.
-pub const LEGACY_FILE_NAME: &str = ".nebula.json"; // rebrand:keep
+/// Older names still honoured, in order, in a checkout that has no
+/// `.kete.json`: Bro's, then upstream nebula's.
+pub const LEGACY_FILE_NAMES: &[&str] = &[".bro.json", ".nebula.json"]; // rebrand:keep
 
 /// What `.nebula.json` says. Unknown keys are ignored, so a file written
 /// for a newer nebula still works in this one.
@@ -84,13 +84,15 @@ impl ProjectFile {
     }
 }
 
-/// Parse one checkout's file: `.bro.json`, else `.nebula.json`. Ok(None)
-/// when the checkout has neither.
+/// Parse one checkout's file: `.kete.json`, else `.bro.json`, else
+/// `.nebula.json`. Ok(None) when the checkout has none of them.
 pub fn read(dir: &Path) -> Result<Option<ProjectFile>, String> {
-    match read_named(dir, FILE_NAME)? {
-        Some(file) => Ok(Some(file)),
-        None => read_named(dir, LEGACY_FILE_NAME),
+    for name in std::iter::once(FILE_NAME).chain(LEGACY_FILE_NAMES.iter().copied()) {
+        if let Some(file) = read_named(dir, name)? {
+            return Ok(Some(file));
+        }
     }
+    Ok(None)
 }
 
 fn read_named(dir: &Path, name: &str) -> Result<Option<ProjectFile>, String> {
@@ -140,10 +142,10 @@ pub fn command(worktree: &Path, main: &Path, which: ProjectCommand) -> Result<St
     let example = which.example();
     match find(worktree, main)? {
         Some((_, file)) => file.command(which).map(str::to_string).ok_or_else(|| {
-            format!("{FILE_NAME} has no \"{key}\" command — add \"{key}\": \"{example}\"")
+            format!("{FILE_NAME} has no \"{key}\" command: add \"{key}\": \"{example}\"")
         }),
         None => Err(format!(
-            "no {FILE_NAME} in this worktree — add one with {{\"{key}\": \"{example}\"}}"
+            "no {FILE_NAME} in this worktree: add one with {{\"{key}\": \"{example}\"}}"
         )),
     }
 }
@@ -231,7 +233,7 @@ mod tests {
     fn missing_file_blank_command_and_bad_json_say_what_to_fix() {
         let empty = TempDir::new();
         let err = command(&empty.0, &empty.0, ProjectCommand::Run).unwrap_err();
-        assert!(err.contains("no .bro.json"), "{err}");
+        assert!(err.contains("no .kete.json"), "{err}");
         assert!(err.contains(r#"{"run": "npm run dev"}"#), "{err}");
 
         let blank = TempDir::new().with_file(r#"{"run": "   "}"#);
@@ -245,18 +247,25 @@ mod tests {
     }
 
     #[test]
-    fn the_bro_file_wins_and_the_nebula_file_still_reads() {
+    fn the_kete_file_wins_and_the_older_names_still_read() {
+        let [bro, nebula] = [LEGACY_FILE_NAMES[0], LEGACY_FILE_NAMES[1]];
         let legacy = TempDir::new();
-        std::fs::write(legacy.0.join(LEGACY_FILE_NAME), r#"{"run": "npm run dev"}"#).unwrap();
+        std::fs::write(legacy.0.join(nebula), r#"{"run": "npm run dev"}"#).unwrap();
         assert_eq!(
             command(&legacy.0, &legacy.0, ProjectCommand::Run).unwrap(),
             "npm run dev"
         );
-
-        let both = TempDir::new().with_file(r#"{"run": "bun dev"}"#);
-        std::fs::write(both.0.join(LEGACY_FILE_NAME), r#"{"run": "npm run dev"}"#).unwrap();
+        std::fs::write(legacy.0.join(bro), r#"{"run": "pnpm dev"}"#).unwrap();
         assert_eq!(
-            command(&both.0, &both.0, ProjectCommand::Run).unwrap(),
+            command(&legacy.0, &legacy.0, ProjectCommand::Run).unwrap(),
+            "pnpm dev"
+        );
+
+        let all = TempDir::new().with_file(r#"{"run": "bun dev"}"#);
+        std::fs::write(all.0.join(bro), r#"{"run": "pnpm dev"}"#).unwrap();
+        std::fs::write(all.0.join(nebula), r#"{"run": "npm run dev"}"#).unwrap();
+        assert_eq!(
+            command(&all.0, &all.0, ProjectCommand::Run).unwrap(),
             "bun dev"
         );
     }

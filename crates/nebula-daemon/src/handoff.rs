@@ -204,12 +204,12 @@ pub fn restart(daemon: &Arc<Daemon>, handles: &Handles, request: &Request) -> Re
     let exe = &request.exe;
     let meta = std::fs::metadata(exe).with_context(|| format!("{}", exe.display()))?;
     if !exe.is_absolute() || !meta.is_file() {
-        bail!("{} is not a bro binary", exe.display());
+        bail!("{} is not a kete binary", exe.display());
     }
     match probe_version(exe) {
         Some(v) if v >= VERSION => {}
         _ => bail!(
-            "{} can't take over running sessions — it predates in-place restarts",
+            "{} can't take over running sessions, it predates in-place restarts",
             exe.display()
         ),
     }
@@ -427,7 +427,7 @@ pub fn request_restart(exe: &Path) -> Result<Restart> {
     }
     let _ = std::fs::remove_file(paths::restart_request_path());
     bail!(
-        "the daemon did not finish restarting within {}s — see {}",
+        "the daemon did not finish restarting within {}s, see {}",
         OUTCOME_TIMEOUT.as_secs(),
         paths::daemon_log_path().display()
     )

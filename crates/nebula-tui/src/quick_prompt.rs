@@ -278,7 +278,7 @@ pub(crate) fn cycle_box_profile(app: &mut App) {
     if !launch.cycle_profile(&profiles) {
         let harness = launch.harness_id().to_string();
         app.chrome.flash = Some(format!(
-            "{harness} has no profiles — bro profile add <name> --harness {harness}"
+            "{harness} has no profiles: kete profile add <name> --harness {harness}"
         ));
     }
 }
@@ -570,7 +570,7 @@ impl QuickLaunch {
                     (false, Some(_)) => ("sent as the first prompt", "fix the issue"),
                     (false, None) => ("sent as the first prompt", "start with no prompt"),
                 };
-                format!("{} — {sends} (empty = {empty})", preset.name)
+                format!("{}: {sends} (empty = {empty})", preset.name)
             }
             (None, Some(issue)) => format!(
                 "what should the agent do about #{}? (empty = fix the issue)",
@@ -803,9 +803,9 @@ pub(crate) fn toggle_new_worktree(app: &mut App, launch: QuickLaunch, input: Tex
     }
     let target = match &launch.target {
         QuickTarget::NewWorktree { .. } => match app.selected_worktree().map(|w| w.id.clone()) {
-            None => Err("quick prompt: no worktree under the cursor — keeping the new one"),
+            None => Err("quick prompt: no worktree under the cursor: keeping the new one"),
             Some(worktree) if app.is_placeholder_worktree(&worktree) => {
-                Err("quick prompt: worktree is still being created — keeping the new one")
+                Err("quick prompt: worktree is still being created: keeping the new one")
             }
             Some(worktree) => Ok(QuickTarget::Worktree(worktree)),
         },
@@ -1109,13 +1109,13 @@ mod tests {
         assert_eq!(wrapped.title(), "Quick prompt · reviewer (cursor)");
         assert_eq!(
             wrapped.label(),
-            "reviewer — prefix + your task + postfix (empty = prefix + postfix only)"
+            "reviewer: prefix + your task + postfix (empty = prefix + postfix only)"
         );
 
         let bare = QuickLaunch::of_preset(worktree(), preset("scratch", AgentKind::Cursor), &cfg);
         assert_eq!(
             bare.label(),
-            "scratch — sent as the first prompt (empty = start with no prompt)"
+            "scratch: sent as the first prompt (empty = start with no prompt)"
         );
     }
 
@@ -1152,7 +1152,7 @@ mod tests {
         );
         assert_eq!(
             wrapped.label(),
-            "reviewer — sent as the first prompt (empty = fix the issue)"
+            "reviewer: sent as the first prompt (empty = fix the issue)"
         );
         assert!(wrapped.default_task().is_some());
         let none = QuickLaunch::of_kind(worktree(), AgentKind::Claude, None, None, None, &cfg);
@@ -1201,7 +1201,7 @@ mod tests {
         assert_eq!(wrapped.title(), "Quick prompt · PR #42 · reviewer (cursor)");
         assert_eq!(
             wrapped.label(),
-            "reviewer — prefix + your task + postfix (empty = prefix + postfix only)"
+            "reviewer: prefix + your task + postfix (empty = prefix + postfix only)"
         );
         assert!(wrapped.launches_empty(), "a preset's task is optional");
         assert_eq!(wrapped.compose("fix it"), "Be strict.\n\nfix it");

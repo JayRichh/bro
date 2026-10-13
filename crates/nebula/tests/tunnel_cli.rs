@@ -8,13 +8,13 @@ use std::process::Command;
 
 fn tunnel(args: &[&str]) -> std::process::Output {
     let data = tempfile::tempdir().expect("temp data dir");
-    Command::new(env!("CARGO_BIN_EXE_bro"))
+    Command::new(env!("CARGO_BIN_EXE_kete"))
         .arg("tunnel")
         .args(args)
         .env("PATH", "")
         .env(nebula_core::env::DATA_DIR, data.path())
         .output()
-        .expect("failed to run bro tunnel")
+        .expect("failed to run kete tunnel")
 }
 
 #[cfg(unix)]

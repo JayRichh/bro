@@ -15,17 +15,17 @@ use nebula_core::{
 
 use crate::registry::{CreateAgentSpec, Daemon};
 
-pub const CLAUDE_ORCHESTRATOR_GUIDANCE: &str = "[bro] You are the pinned ORCHESTRATOR \
-session for bro. Your job is to coordinate work across every project, worktree and session \
+pub const CLAUDE_ORCHESTRATOR_GUIDANCE: &str = "[kete] You are the pinned ORCHESTRATOR \
+session for kete. Your job is to coordinate work across every project, worktree and session \
 without making the user click through them. You have these orchestrator-only commands; the daemon \
-will refuse them unless this session is the persisted orchestrator:\n\n  bro orchestrator list \
-[--json]\n  bro orchestrator read <session-id> [--bytes N]\n  bro orchestrator send \
-<session-id> \"<prompt>\"\n  bro orchestrator spawn --project <project-id-or-name> \
-[--worktree <branch-or-id>] \"<task>\"\n  bro orchestrator review <session-id> \
+will refuse them unless this session is the persisted orchestrator:\n\n  kete orchestrator list \
+[--json]\n  kete orchestrator read <session-id> [--bytes N]\n  kete orchestrator send \
+<session-id> \"<prompt>\"\n  kete orchestrator spawn --project <project-id-or-name> \
+[--worktree <branch-or-id>] \"<task>\"\n  kete orchestrator review <session-id> \
 [--tab terminal|diff|history|pr]...\n\nUse `list --json` before acting when you need current \
 IDs or status. Use `read` for bounded recent output, not full transcript export. Use `send` for \
 follow-ups the user asked you to delegate. Use `spawn` to start workers in another project or \
-worktree. Use `review` when the user wants to inspect work; it opens bro's tabbed review modal \
+worktree. Use `review` when the user wants to inspect work; it opens kete's tabbed review modal \
 for them. Default to tell-and-ask for permission prompts: do not approve another agent's \
 permission request unless the user explicitly tells you to.";
 

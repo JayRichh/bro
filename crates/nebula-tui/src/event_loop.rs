@@ -136,7 +136,7 @@ const PR_GONE: &str = "pull request is no longer open";
 const NO_SESSIONS_TO_JUMP: &str = "no sessions to jump to";
 
 /// Flash for an action an archived agent refuses until it's unarchived.
-pub(crate) const AGENT_ARCHIVED: &str = "agent is archived — unarchive first (u)";
+pub(crate) const AGENT_ARCHIVED: &str = "agent is archived: unarchive first (u)";
 
 /// How often the worktree panel's changed-file badge re-reads `git status`
 /// for the selected checkout, so agent edits surface without a keypress.

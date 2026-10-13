@@ -459,7 +459,7 @@ macro_rules! main_loop_body {
         // has the backtrace.
         if take_worker_panic() {
             repaint($terminal)?;
-            app.chrome.flash = Some("a background task crashed — logged to tui.log".into());
+            app.chrome.flash = Some("a background task crashed: logged to tui.log".into());
             app.chrome.dirty = true;
         }
 

@@ -1,15 +1,23 @@
-# bro installer for Windows: installs or updates bro.exe.
+# Kete installer for Windows: installs or updates kete.exe, and bro.exe
+# (Kete's old name, the same program) beside it.
 #
-#   irm https://raw.githubusercontent.com/JayRichh/bro/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/JayRichh/kete/main/install.ps1 | iex
 #
-# Downloads bro-<target>.zip from the latest GitHub release into
-# %LOCALAPPDATA%\bro\bin and puts that folder on your user PATH. When the
+# Downloads kete-<target>.zip from the latest GitHub release into
+# %LOCALAPPDATA%\kete\bin and puts that folder on your user PATH. When the
 # release has no asset for this machine, it builds from source with
 # `cargo install` instead and says so. Running it again updates in place.
 #
+# Coming from Bro: an install in %LOCALAPPDATA%\bro\bin is taken off your
+# PATH (kete's folder has a bro.exe of its own), and its bro.exe is updated
+# too, so a shortcut or Windows Terminal profile that points at it still
+# starts the new build. Your data moves to %LOCALAPPDATA%\kete the first
+# time kete runs.
+#
 # Environment overrides:
-#   BRO_INSTALL_DIR   install destination (default: %LOCALAPPDATA%\bro\bin)
-#   BRO_BRANCH        branch the source fallback builds (default: windows)
+#   KETE_INSTALL_DIR   install destination (default: %LOCALAPPDATA%\kete\bin)
+#   KETE_BRANCH        branch the source fallback builds (default: windows)
+#   (BRO_INSTALL_DIR and BRO_BRANCH still work.)
 #
 # Written for Windows PowerShell 5.1 and PowerShell 7. It never calls `exit`,
 # so piping it into `iex` can't close your shell.
@@ -18,9 +26,10 @@
     $ErrorActionPreference = 'Stop'
     $ProgressPreference = 'SilentlyContinue'
 
-    $Repo = 'JayRichh/bro'
-    $Branch = if ($env:BRO_BRANCH) { $env:BRO_BRANCH } else { 'windows' }
-    $InstallDir = if ($env:BRO_INSTALL_DIR) { $env:BRO_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'bro\bin' }
+    $Repo = 'JayRichh/kete'
+    $Branch = if ($env:KETE_BRANCH) { $env:KETE_BRANCH } elseif ($env:BRO_BRANCH) { $env:BRO_BRANCH } else { 'windows' }
+    $InstallDir = if ($env:KETE_INSTALL_DIR) { $env:KETE_INSTALL_DIR } elseif ($env:BRO_INSTALL_DIR) { $env:BRO_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'kete\bin' }
+    $LegacyDir = Join-Path $env:LOCALAPPDATA 'bro\bin'
 
     function Say([string]$Message) { Write-Host $Message }
 
@@ -29,7 +38,7 @@
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     } catch { }
 
-    function Get-BroTarget {
+    function Get-KeteTarget {
         $arch = $null
         try {
             $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
@@ -44,37 +53,44 @@
         }
     }
 
+    # Put $Source at $Dest. A running daemon keeps its exe locked, but a
+    # locked file can still be renamed out of the way. Leftovers from earlier
+    # updates go when nothing holds them any more; one still held gets a
+    # fresh name instead.
+    function Replace-Exe([string]$Source, [string]$Dest) {
+        $dir = Split-Path $Dest -Parent
+        $name = Split-Path $Dest -Leaf
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        Get-ChildItem -Path $dir -Filter "$name*.old" -ErrorAction SilentlyContinue |
+            ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
+        $old = "$Dest.old"
+        if (Test-Path $old) { $old = Join-Path $dir ("$name." + [Guid]::NewGuid().ToString('N') + ".old") }
+        if (Test-Path $Dest) { Move-Item $Dest $old -Force }
+        Copy-Item $Source $Dest -Force
+        if (Test-Path $old) { Remove-Item $old -Force -ErrorAction SilentlyContinue }
+    }
+
     function Install-FromRelease([string]$Target) {
-        $url = "https://github.com/$Repo/releases/latest/download/bro-$Target.zip"
-        $tmp = Join-Path ([IO.Path]::GetTempPath()) ("bro-install-" + [Guid]::NewGuid().ToString('N'))
+        $url = "https://github.com/$Repo/releases/latest/download/kete-$Target.zip"
+        $tmp = Join-Path ([IO.Path]::GetTempPath()) ("kete-install-" + [Guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $tmp | Out-Null
         try {
-            $zip = Join-Path $tmp 'bro.zip'
+            $zip = Join-Path $tmp 'kete.zip'
             Say "downloading $url"
             try {
                 Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
             } catch {
-                return $false
+                return $null
             }
             $unpacked = Join-Path $tmp 'unpacked'
             Expand-Archive -Path $zip -DestinationPath $unpacked -Force
-            $exe = Get-ChildItem -Path $unpacked -Filter 'bro.exe' -Recurse | Select-Object -First 1
-            if (-not $exe) { throw "the release archive has no bro.exe in it" }
+            $exe = Get-ChildItem -Path $unpacked -Filter 'kete.exe' -Recurse | Select-Object -First 1
+            if (-not $exe) { throw "the release archive has no kete.exe in it" }
 
-            New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-            $dest = Join-Path $InstallDir 'bro.exe'
-            $old = "$dest.old"
-            # A running daemon keeps bro.exe locked, but a locked file can
-            # still be renamed out of the way. Leftovers from earlier updates
-            # go when nothing holds them any more; one still held gets a
-            # fresh name instead.
-            Get-ChildItem -Path $InstallDir -Filter 'bro.exe*.old' -ErrorAction SilentlyContinue |
-                ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
-            if (Test-Path $old) { $old = Join-Path $InstallDir ("bro.exe." + [Guid]::NewGuid().ToString('N') + ".old") }
-            if (Test-Path $dest) { Move-Item $dest $old -Force }
-            Copy-Item $exe.FullName $dest -Force
-            if (Test-Path $old) { Remove-Item $old -Force -ErrorAction SilentlyContinue }
-            return $true
+            $dest = Join-Path $InstallDir 'kete.exe'
+            Replace-Exe $exe.FullName $dest
+            Replace-Exe $exe.FullName (Join-Path $InstallDir 'bro.exe')
+            return $dest
         } finally {
             Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
         }
@@ -82,39 +98,53 @@
 
     function Install-FromSource {
         if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
-            throw "no prebuilt bro for this machine and cargo is not installed. Get Rust from https://rustup.rs and run this again."
+            throw "there's no prebuilt kete for this machine and cargo isn't installed. Get Rust from https://rustup.rs and run this again."
         }
-        Say "building bro from source with cargo (this takes a few minutes)..."
+        Say "building kete from source with cargo (this takes a few minutes)..."
         & cargo install --git "https://github.com/$Repo" --branch $Branch nebula --locked --force | Out-Host
         if ($LASTEXITCODE -ne 0) { throw "cargo install failed (exit $LASTEXITCODE)" }
-        return (Join-Path $env:USERPROFILE '.cargo\bin\bro.exe')
+        return (Join-Path $env:USERPROFILE '.cargo\bin\kete.exe')
     }
+
+    function Same-Dir([string]$A, [string]$B) { $A.TrimEnd('\') -ieq $B.TrimEnd('\') }
 
     function Add-ToUserPath([string]$Dir) {
         $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
         $parts = @()
         if ($userPath) { $parts = $userPath -split ';' | Where-Object { $_ } }
-        $already = $parts | Where-Object { $_.TrimEnd('\') -ieq $Dir.TrimEnd('\') }
-        if (-not $already) {
+        if (-not ($parts | Where-Object { Same-Dir $_ $Dir })) {
             [Environment]::SetEnvironmentVariable('Path', (($parts + $Dir) -join ';'), 'User')
             Say "added $Dir to your user PATH (new terminals pick it up)"
         }
-        if (-not (($env:Path -split ';') | Where-Object { $_.TrimEnd('\') -ieq $Dir.TrimEnd('\') })) {
+        if (-not (($env:Path -split ';') | Where-Object { Same-Dir $_ $Dir })) {
             $env:Path = "$env:Path;$Dir"
         }
     }
 
+    function Remove-FromUserPath([string]$Dir) {
+        $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+        if ($userPath) {
+            $parts = $userPath -split ';' | Where-Object { $_ }
+            $kept = $parts | Where-Object { -not (Same-Dir $_ $Dir) }
+            if (@($kept).Count -ne @($parts).Count) {
+                [Environment]::SetEnvironmentVariable('Path', (@($kept) -join ';'), 'User')
+                Say "took $Dir off your user PATH; kete's folder has bro.exe now"
+            }
+        }
+        $env:Path = (($env:Path -split ';') | Where-Object { $_ -and -not (Same-Dir $_ $Dir) }) -join ';'
+    }
+
     $installed = $null
-    $target = Get-BroTarget
+    $target = Get-KeteTarget
     if ($target) {
-        if (Install-FromRelease $target) {
-            $installed = Join-Path $InstallDir 'bro.exe'
+        $installed = Install-FromRelease $target
+        if ($installed) {
             Add-ToUserPath $InstallDir
         } else {
-            Say "no bro-$target.zip in the latest release of $Repo."
+            Say "no kete-$target.zip in the latest release of $Repo."
         }
     } else {
-        Say "no prebuilt bro for this CPU architecture."
+        Say "no prebuilt kete for this CPU architecture."
     }
 
     if (-not $installed) {
@@ -123,7 +153,18 @@
         Add-ToUserPath (Split-Path $installed -Parent)
     }
 
+    # A Bro install from before the rename: refresh its bro.exe so anything
+    # pointing at it runs this build, and take its folder off PATH so it
+    # can't shadow the new one.
+    $legacyExe = Join-Path $LegacyDir 'bro.exe'
+    if ((Test-Path $legacyExe) -and -not (Same-Dir $LegacyDir (Split-Path $installed -Parent))) {
+        Replace-Exe $installed $legacyExe
+        Remove-FromUserPath $LegacyDir
+        Say "updated the old Bro install at $legacyExe to this build"
+        Say "run 'kete setup terminal' to point your Windows Terminal profile at kete"
+    }
+
     $version = & $installed --version
-    Say "installed $version -> $installed"
-    Say "run 'bro' to start."
+    Say "installed $version at $installed (and bro.exe beside it)"
+    Say "run 'kete' to start."
 }

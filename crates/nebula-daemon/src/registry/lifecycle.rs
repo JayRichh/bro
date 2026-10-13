@@ -22,8 +22,8 @@ impl Daemon {
         let agent = self.store.get_agent(id)?.context("agent not found")?;
         if !self.store.rename_agent_if_auto_pending(id, &title)? {
             bail!(
-                "session already has a title ({:?}); leaving it unchanged — a user-set \
-                 title is only replaced with `bro rename --force`",
+                "session already has a title ({:?}); leaving it unchanged, a user-set \
+                 title is only replaced with `kete rename --force`",
                 agent.name
             );
         }
@@ -452,7 +452,7 @@ impl Daemon {
     pub async fn restart_agent(self: &Arc<Self>, id: &AgentId) -> Result<()> {
         let agent = self.store.get_agent(id)?.context("agent not found")?;
         if agent.archived {
-            bail!("agent is archived — unarchive it first");
+            bail!("agent is archived: unarchive it first");
         }
         // A Cloud row has no local session to restart: the agent runs in
         // the cloud sandbox, and a plain restart would boot a bare CLI with

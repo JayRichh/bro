@@ -50,7 +50,7 @@ macro_rules! reuse_existing_ttyd {
     () => {
         concat!(
             "if curl -sI --max-time 2 \"http://127.0.0.1:$2/\" 2>/dev/null | grep -qi \"^server: ttyd\"; then ",
-            "echo \"bro tunnel: a bro browser is already serving on this host at port $2; reusing it ",
+            "echo \"kete tunnel: a kete browser is already serving on this host at port $2; reusing it ",
             "(if it was started with --credential, the tab will ask for that)\" >&2; ",
             "exec sleep 2147483647; ",
             "fi; "
@@ -88,12 +88,12 @@ macro_rules! reuse_existing_ttyd {
 const REMOTE_SCRIPT: &str = concat!(
     install_prelude!(),
     reuse_existing_ttyd!(),
-    "bro browser --help 2>/dev/null | grep -q -- --no-open || { ",
-    "echo \"bro tunnel: the bro on this host is too old to tunnel into; ",
-    "reach it with bro ssh and run bro upgrade there\" >&2; exit 1; }; ",
+    "kete browser --help 2>/dev/null | grep -q -- --no-open || { ",
+    "echo \"kete tunnel: the kete on this host is too old to tunnel into; ",
+    "reach it with kete ssh and run kete upgrade there\" >&2; exit 1; }; ",
     "cd -- \"${3:-$HOME}\" || exit 1; ",
     export_settings_bundle!("4"),
-    "exec bro browser --no-open --port \"$2\" >/dev/null"
+    "exec kete browser --no-open --port \"$2\" >/dev/null"
 );
 
 /// Everything `nebula tunnel` was asked for, straight off the CLI.
@@ -118,7 +118,7 @@ pub struct TunnelOpts {
 pub fn run_tunnel(opts: TunnelOpts) -> Result<()> {
     // The remote half is `nebula browser`, which Windows lacks too.
     if cfg!(windows) {
-        anyhow::bail!("`bro tunnel` is not supported on Windows yet");
+        anyhow::bail!("`kete tunnel` is not supported on Windows yet");
     }
     let local = resolve_local_port(opts.port)?;
     let remote = opts.remote_port.unwrap_or(local);
@@ -128,7 +128,7 @@ pub fn run_tunnel(opts: TunnelOpts) -> Result<()> {
     nebula_tui::hosts::record(&opts.host, opts.path.as_deref());
 
     println!(
-        "bro tunnel: connecting to {} (localhost:{local} → its 127.0.0.1:{remote})",
+        "kete tunnel: connecting to {} (localhost:{local} → its 127.0.0.1:{remote})",
         opts.host
     );
     let mut child = spawn_ssh(&opts, local, remote)?;
@@ -139,10 +139,10 @@ pub fn run_tunnel(opts: TunnelOpts) -> Result<()> {
 
     let url = format!("http://{addr}");
     if browser::open_url(&url) {
-        println!("bro tunnel: {} is serving on {url}", opts.host);
+        println!("kete tunnel: {} is serving on {url}", opts.host);
     } else {
         println!(
-            "bro tunnel: {} is serving on {url} (open it yourself — no browser launched)",
+            "kete tunnel: {} is serving on {url} (open it yourself, no browser launched)",
             opts.host
         );
     }
@@ -176,7 +176,7 @@ fn resolve_local_port(requested: Option<u16>) -> Result<u16> {
         None => {
             let port = browser::free_port(LOOPBACK)?;
             println!(
-                "bro tunnel: {} is busy here — forwarding {port} instead",
+                "kete tunnel: {} is busy here: forwarding {port} instead",
                 browser::DEFAULT_PORT
             );
             Ok(port)
@@ -213,7 +213,7 @@ fn spawn_ssh(opts: &TunnelOpts, local: u16, remote: u16) -> Result<Child> {
         .spawn()
         .map_err(|e| match e.kind() {
             std::io::ErrorKind::NotFound => {
-                anyhow!("ssh not found on PATH — bro tunnel requires the OpenSSH client")
+                anyhow!("ssh not found on PATH: kete tunnel requires the OpenSSH client")
             }
             _ => anyhow::Error::new(e).context("failed to start ssh"),
         })
@@ -284,7 +284,7 @@ fn wait_until_forwarded(child: &mut Child, addr: SocketAddr, host: &str) -> Resu
         // ssh is gone: auth failed, the host is unreachable, or the remote
         // command exited (no ttyd there, say). It has said why on its way out.
         if let Some(status) = child.try_wait().context("failed to poll ssh")? {
-            bail!("ssh exited before the tunnel came up ({status}) — see its output above");
+            bail!("ssh exited before the tunnel came up ({status}), see its output above");
         }
         if answers_http(addr) {
             return Ok(());
@@ -292,7 +292,7 @@ fn wait_until_forwarded(child: &mut Child, addr: SocketAddr, host: &str) -> Resu
         if Instant::now() >= deadline {
             let _ = child.kill();
             bail!(
-                "{host} did not start serving within {}s — connect with `bro ssh {host}` and check that ttyd is installed there",
+                "{host} did not start serving within {}s: connect with `kete ssh {host}` and check that ttyd is installed there",
                 STARTUP_TIMEOUT.as_secs()
             );
         }
@@ -353,7 +353,7 @@ mod tests {
     #[test]
     fn the_remote_serves_without_opening_anything() {
         let cmd = remote_command(URL, 7681, None, None);
-        assert!(cmd.contains("bro browser --no-open --port"), "{cmd}");
+        assert!(cmd.contains("kete browser --no-open --port"), "{cmd}");
         assert!(cmd.ends_with("7681"), "{cmd}");
     }
 
@@ -392,7 +392,7 @@ mod tests {
                 nebula_core::env::IMPORT_BUNDLE
             ))
             .expect("exports the bundle");
-        let start = REMOTE_SCRIPT.find("exec bro browser").unwrap();
+        let start = REMOTE_SCRIPT.find("exec kete browser").unwrap();
         assert!(export < start, "{REMOTE_SCRIPT}");
     }
 
@@ -419,7 +419,7 @@ mod tests {
     fn an_existing_ttyd_on_the_remote_port_is_reused_before_anything_starts() {
         let probe = REMOTE_SCRIPT.find("curl -sI").expect("probes the port");
         let gate = REMOTE_SCRIPT.find("grep -q -- --no-open").unwrap();
-        let start = REMOTE_SCRIPT.find("exec bro browser").unwrap();
+        let start = REMOTE_SCRIPT.find("exec kete browser").unwrap();
         assert!(probe < gate && gate < start, "{REMOTE_SCRIPT}");
         assert!(REMOTE_SCRIPT.contains("http://127.0.0.1:$2/"));
         assert!(REMOTE_SCRIPT.contains("grep -qi \"^server: ttyd\""));
@@ -459,7 +459,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let stub = home.path().join("stub");
         std::fs::create_dir(&stub).unwrap();
-        let nebula = stub.join("bro");
+        let nebula = stub.join("kete");
         std::fs::write(&nebula, "#!/bin/sh\nexit 0\n").unwrap();
         #[cfg(unix)]
         {
@@ -532,7 +532,7 @@ mod tests {
     #[test]
     fn a_remote_too_old_to_tunnel_is_named_as_such() {
         assert!(REMOTE_SCRIPT.contains("grep -q -- --no-open"));
-        assert!(REMOTE_SCRIPT.contains("bro upgrade"));
+        assert!(REMOTE_SCRIPT.contains("kete upgrade"));
     }
 
     /// Both ends of the forward are pinned to loopback: the remote ttyd is

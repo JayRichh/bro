@@ -1026,7 +1026,7 @@ pub(crate) fn land_answer(app: &mut App, answer: IssuesAnswer) {
                 schedule_detail(app);
             } else {
                 app.chrome.flash = Some(format!(
-                    "couldn't post the comment on #{} — is gh logged in?",
+                    "couldn't post the comment on #{}: is gh logged in?",
                     issue.number
                 ));
                 // The box comes back with the text for a retry — unless
@@ -1344,7 +1344,7 @@ fn save_editor(app: &mut App) {
         return;
     }
     if !dir.is_dir() {
-        editor.notice = Some("the checkout isn't on disk — gh has nowhere to run".into());
+        editor.notice = Some("the checkout isn't on disk: gh has nowhere to run".into());
         return;
     }
     let Some(tx) = app.github.issues_tx.clone() else {
@@ -1836,7 +1836,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App, view: &IssuesView, th: Theme, b
         rows.len().to_string()
     };
     let title = format!(
-        "Issues — {} ({}{})",
+        "Issues: {} ({}{})",
         view.project_name,
         count,
         if inflight { ", refreshing…" } else { "" }
@@ -1858,7 +1858,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App, view: &IssuesView, th: Theme, b
     let rows_area = crate::ui::below_first_row(list_inner);
     if rows.is_empty() {
         let text = if failed {
-            "couldn't list issues — is gh installed and logged in?"
+            "couldn't list issues: is gh installed and logged in?"
         } else if inflight
             || app.github.issues_tx.is_some() && !app.github.issues.contains_key(&view.project)
         {

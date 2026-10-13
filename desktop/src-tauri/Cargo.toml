@@ -1,12 +1,12 @@
 [package]
-name = "bro-desktop"
+name = "kete-desktop"
 version = "0.44.0"
 edition = "2021"
 license = "MIT"
-description = "Bro's desktop window: kanban, live terminals and diffs over the Bro daemon"
+description = "Kete's desktop window: the board, live sessions and diffs over the Kete daemon"
 
 [[bin]]
-name = "bro-desktop"
+name = "kete-desktop"
 path = "src/main.rs"
 
 [build-dependencies]

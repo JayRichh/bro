@@ -14,8 +14,8 @@
 //! a two-letter tag in the icon's color (`rs`, `ts`, `{}`), which any font
 //! has; `off`. Nothing can see which font the terminal draws with, so
 //! `auto`, the default, guesses: `nerd` on Windows when the Windows
-//! Terminal profile Bro runs in names a Nerd Font (`Nerd` or ` NF` in its
-//! `font.face`), else `ascii`. `bro setup terminal` installs one and points
+//! Terminal profile Kete runs in names a Nerd Font (`Nerd` or ` NF` in its
+//! `font.face`), else `ascii`. `kete setup terminal` installs one and points
 //! a profile at it.
 
 use crate::icons_table::{
@@ -66,7 +66,7 @@ pub fn detect() -> IconStyle {
     detect_from(in_wt, profile.as_deref(), settings.as_ref())
 }
 
-/// `auto`: a Nerd Font in the Windows Terminal profile Bro runs in, by
+/// `auto`: a Nerd Font in the Windows Terminal profile Kete runs in, by
 /// its `font.face` — the profile `profile` (`WT_PROFILE_ID`) names, else
 /// the default profile's, else the profiles' defaults. Only inside
 /// Windows Terminal (`in_wt`, its `WT_SESSION` set): in the VS Code

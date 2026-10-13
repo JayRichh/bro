@@ -26,13 +26,13 @@ use nebula_core::{AgentId, ClientRequest, ProjectId, SessionRef, WorktreeId};
 const HALF_PAGE: i64 = 2;
 
 /// What `⇧A` says each way: which of the two lists the grid is now of.
-const ARCHIVED_VIEW: &str = "archived sessions — u unarchives one, ⇧A back to the live ones";
-const LIVE_VIEW: &str = "live sessions — ⇧A reads the archived ones";
+const ARCHIVED_VIEW: &str = "archived sessions: u unarchives one, ⇧A back to the live ones";
+const LIVE_VIEW: &str = "live sessions: ⇧A reads the archived ones";
 
 /// What the grid says when there is nothing to step through yet — of
 /// whichever of the two lists it is showing ([`toggle_archived`]).
-const NO_SESSIONS: &str = "no sessions yet — p starts one";
-const NO_ARCHIVED_SESSIONS: &str = "nothing archived here — ⇧A back to the live sessions";
+const NO_SESSIONS: &str = "no sessions yet: p starts one";
+const NO_ARCHIVED_SESSIONS: &str = "nothing archived here: ⇧A back to the live sessions";
 
 /// Is the card under this id one of the ARCHIVED VIEW's? Its session was
 /// reaped when it was archived, so nothing on it can be stepped into.
@@ -51,12 +51,12 @@ fn nothing_here(app: &App) -> &'static str {
 
 /// What the PROJECT DROPDOWN says with no project to list — never on
 /// screen in practice: the view is only up once there is one.
-const NO_PROJECTS: &str = "no projects yet — o opens a folder";
+const NO_PROJECTS: &str = "no projects yet: o opens a folder";
 
 /// What folding the PANE away says, and what bringing it back says. The
 /// first names what went with it: the card under the cursor is let go of
 /// too, as an Esc lets it go.
-const PANE_HIDDEN: &str = "pane hidden, nothing selected — ^` brings it back";
+const PANE_HIDDEN: &str = "pane hidden, nothing selected: ^` brings it back";
 const PANE_SHOWN: &str = "pane back under the cards";
 
 /// What the pane's SIDE BUTTON says once it has moved the pane.
@@ -71,7 +71,7 @@ const BACK_TO_CARD: &str = "Back to the card";
 
 /// What letting the card under the cursor go says: nothing in the GRID is
 /// selected any more, and the PANE has no session to read.
-pub(super) const UNAIMED: &str = "nothing selected — j/k or a click picks a card again";
+pub(super) const UNAIMED: &str = "nothing selected: j/k or a click picks a card again";
 
 /// The box: the QUICK PROMPT, aimed at the project under the list's cursor
 /// (the selected project). It lands in the checkout under the grid's
@@ -292,16 +292,16 @@ pub(super) fn center_pane(app: &mut App) {
 // ---- the BANDS ----
 
 /// What `` ` `` says with no terminal to walk to in the checkout.
-const NO_TERMINALS: &str = "no terminal in this checkout — t opens one";
+const NO_TERMINALS: &str = "no terminal in this checkout: t opens one";
 
 /// What it says over a full-screen session, which has no grid to walk.
-pub(super) const NO_PANE_HERE: &str = "the terminals are cards on the grid — ^q back to it";
+pub(super) const NO_PANE_HERE: &str = "the terminals are cards on the grid: ^q back to it";
 
 /// What `t` says when it opened the terminal on the ROOT checkout for
 /// want of a band under the cursor.
-const TERMINAL_ON_ROOT: &str = "nothing selected — the terminal opens on the root checkout";
+const TERMINAL_ON_ROOT: &str = "nothing selected, the terminal opens on the root checkout";
 /// And what it says with no root checkout to fall back on.
-const NO_ROOT_FOR_TERMINAL: &str = "no checkout selected — j/k onto a worktree, then t";
+const NO_ROOT_FOR_TERMINAL: &str = "no checkout selected: j/k onto a worktree, then t";
 
 /// The band the cursor wears — None once the aim has been let go of
 /// (`App::launcher_unaimed`), as `ui::launcher_view::wearing` draws it.
@@ -1010,7 +1010,7 @@ pub(super) fn follow_up(app: &mut App) {
 
 /// What a card's key says when the cursor sits on a child a folded
 /// NESTED thread is hiding.
-pub(super) const FOLDED: &str = "this thread is folded — l or → expands it";
+pub(super) const FOLDED: &str = "this thread is folded: l or → expands it";
 
 /// Does `action` act on the card under the cursor — the session or the
 /// terminal itself, rather than its checkout or the grid? The keys a
@@ -1033,7 +1033,7 @@ fn acts_on_card(action: Action) -> bool {
 
 /// What `⇧V` says with no card under the cursor to read a pull request
 /// off — the aim let go of, or a grid with no sessions in it.
-const NO_CARD_FOR_PR: &str = "no card selected — j/k onto one, then ⇧V opens its pull request";
+const NO_CARD_FOR_PR: &str = "no card selected: j/k onto one, then ⇧V opens its pull request";
 
 /// `⇧V` on the grid, and **Open pull request** in a card's menu: the pull
 /// request of the checkout under the cursor — the `#42 title` on its
@@ -1054,7 +1054,7 @@ pub(super) fn open_pull_request(app: &mut App, out: &mut Vec<ClientRequest>) {
 /// What `y` says with no card under the cursor to comment on the pull
 /// request of.
 pub(super) const NO_CARD_FOR_COMMENT: &str =
-    "no card selected — j/k onto one, then y comments on its pull request";
+    "no card selected: j/k onto one, then y comments on its pull request";
 
 /// The pull request of the checkout under the grid's cursor — the
 /// `#42 title` on its band's rule — or what to say instead: `no_card`
@@ -1069,7 +1069,7 @@ pub(super) fn card_pull_request(app: &App, no_card: &str) -> Result<view::RowPr,
     let band = &bands[band];
     band.pr.clone().ok_or_else(|| {
         format!(
-            "no pull request on {} yet — ⇧R reloads from GitHub",
+            "no pull request on {} yet: ⇧R reloads from GitHub",
             band.branch
         )
     })
@@ -1099,10 +1099,10 @@ pub(super) fn click_pull_request(
 }
 
 /// What `⇧I` says with no card under the cursor to read an issue off.
-const NO_CARD_FOR_ISSUE: &str = "no card selected — j/k onto one, then ⇧I opens its issue";
+const NO_CARD_FOR_ISSUE: &str = "no card selected: j/k onto one, then ⇧I opens its issue";
 
 /// What `⇧I` says on a card that was not started from an issue.
-const NO_ISSUE: &str = "this session wasn't started from an issue — i lists the project's issues";
+const NO_ISSUE: &str = "this session wasn't started from an issue: i lists the project's issues";
 
 /// `⇧I` on a card, and **Open issue** in its menu: the GitHub issue the
 /// card's session was started from (an ISSUE SESSION, launched out of the
@@ -1155,7 +1155,7 @@ pub(super) fn select_issue_card(app: &mut App, id: &AgentId, out: &mut Vec<Clien
 
 /// What `⇧P` says with no card under the cursor to copy the settings of.
 const NO_CARD_TO_DUPLICATE: &str =
-    "no card selected — j/k onto one, then ⇧P opens the quick prompt on its settings";
+    "no card selected: j/k onto one, then ⇧P opens the quick prompt on its settings";
 
 /// `⇧P` on a card, and **Duplicate** in its menu: the QUICK PROMPT, set to
 /// launch what the card runs — the same harness, model and effort, into
@@ -1556,15 +1556,15 @@ fn crumb_anchor(app: &App, crumb: &HitTarget) -> (u16, u16) {
 
 /// What the tab keys say over a full-screen session, where the header
 /// they walk is not on screen.
-pub(super) const NO_TABS_HERE: &str = "project tabs are on the grid's header — ^q back to it";
+pub(super) const NO_TABS_HERE: &str = "project tabs are on the grid's header: ^q back to it";
 /// What the tab keys say with nothing to move between.
-const NO_TABS: &str = "no projects open — + in the header opens one";
-const ONE_TAB: &str = "one project open — + in the header opens another";
+const NO_TABS: &str = "no projects open: + in the header opens one";
+const ONE_TAB: &str = "one project open: + in the header opens another";
 /// The PROJECT DROPDOWN's last row: a folder that is not a project yet.
 const OPEN_FOLDER: &str = "+ open a folder…";
 /// What closing the last tab says: nebula is back on the splash, and
 /// nothing about the projects changed.
-const LAST_TAB: &str = "all projects closed — their sessions run on; + opens one again";
+const LAST_TAB: &str = "all projects closed: their sessions run on; + opens one again";
 
 /// A click on a PROJECT TAB, `[` / `]` onto it, and the tab that slides
 /// into a closed one's place: that project's sessions, through the one
@@ -1589,7 +1589,7 @@ fn open_tab_slot(app: &mut App, slot: u8, out: &mut Vec<ClientRequest>) {
         .get(usize::from(slot).saturating_sub(1))
         .cloned()
     else {
-        app.chrome.flash = Some(format!("no project tab {slot} — + in the header opens one"));
+        app.chrome.flash = Some(format!("no project tab {slot}: + in the header opens one"));
         return;
     };
     open_tab(app, &id, out);
@@ -1807,7 +1807,7 @@ fn confirm_close_cursor_tab(app: &mut App, on: &ProjectId) {
 fn confirm_close_tab(name: &str, id: ProjectId) -> ConfirmDialog {
     ConfirmDialog {
         title: "Close project tab".into(),
-        message: format!("Close the tab for '{name}'? Its sessions run on — + opens it again."),
+        message: format!("Close the tab for '{name}'? Its sessions run on: + opens it again."),
         action: PendingAction::CloseProjectTab(id),
         area: ratatui::layout::Rect::default(),
     }
@@ -2770,14 +2770,14 @@ pub(super) fn click_box_field(app: &mut App, field: BoxField) {
 fn open_project_picker(app: &mut App, back: QuickReturn) {
     if let Some(issue) = &back.launch.issue {
         app.chrome.flash = Some(format!(
-            "this box is for issue #{} — its project is fixed",
+            "this box is for issue #{}, its project is fixed",
             issue.number
         ));
         return;
     }
     if let Some(pr) = &back.launch.pr {
         app.chrome.flash = Some(format!(
-            "this box is for PR #{} — its project is fixed",
+            "this box is for PR #{}, its project is fixed",
             pr.number
         ));
         return;
@@ -2795,7 +2795,7 @@ fn open_model_picker(app: &mut App, back: QuickReturn) {
     if crate::config::model_choices(kind, custom.as_deref()).is_empty() {
         let harness = crate::agent_picker::harness_label(kind, custom.as_deref());
         app.chrome.flash = Some(format!(
-            "{harness} has no model list — Tab picks the harness"
+            "{harness} has no model list: Tab picks the harness"
         ));
         return;
     }
@@ -4718,7 +4718,9 @@ mod tests {
             assert!(app.modals.overlay.is_none(), "no box over a cloud session");
             assert_eq!(
                 app.chrome.flash.as_deref(),
-                Some("cloud sessions take a queued message — right-click, then Send to cloud session"),
+                Some(
+                    "cloud sessions take a queued message: right-click, then Send to cloud session"
+                ),
             );
         });
     }
@@ -5011,7 +5013,7 @@ mod tests {
             assert_eq!(
                 selected(&app).as_deref(),
                 Some("a1"),
-                "the cursor starts on the selected session — the root band's"
+                "the cursor starts on the selected session, the root band's"
             );
 
             // Alone in its band, the card has nowhere to walk.
@@ -5940,7 +5942,7 @@ mod tests {
                     "ack_first={ack_first}: the pane folded away: {text}"
                 );
                 assert_eq!(app.chrome.flash.as_deref(), Some(super::NO_SESSIONS));
-                assert!(text.contains("Welcome to bro"), "{text}");
+                assert!(text.contains("Welcome to kete"), "{text}");
                 assert!(!text.contains("shell-1"), "no terminal of demo's: {text}");
             }
         });
@@ -6031,7 +6033,7 @@ mod tests {
                 assert!(!super::has_pane(&app), "{way}: the pane folded: {text}");
                 assert!(!text.contains("polish-nav"), "{way}: {text}");
                 assert!(
-                    text.contains("Welcome to bro"),
+                    text.contains("Welcome to kete"),
                     "{way}: docs' lone empty root is the welcome: {text}"
                 );
                 assert_eq!(
@@ -6044,7 +6046,7 @@ mod tests {
                 let text = buffer_text(&draw(&mut app));
                 assert!(!super::has_pane(&app), "{way}: no band to aim at: {text}");
                 assert_eq!(reading(&app), None, "{way}");
-                assert!(text.contains("Welcome to bro"), "{way}: {text}");
+                assert!(text.contains("Welcome to kete"), "{way}: {text}");
             }
         });
     }
@@ -6277,14 +6279,14 @@ mod tests {
             let mut by_click = on_an_empty_project();
             let terminal = draw(&mut by_click);
             let text = buffer_text(&terminal);
-            assert!(text.contains("Welcome to bro"), "{text}");
+            assert!(text.contains("Welcome to kete"), "{text}");
             assert!(text.contains("press  p  to prompt"), "{text}");
             assert!(!text.contains("type a task"), "only the welcome: {text}");
             let (x, y) = crumb_cell(&by_click, HitTarget::LauncherWelcomePrompt);
             let cap = &terminal.backend().buffer()[(x + 7, y)];
             assert_eq!(cap.symbol(), "p", "{text}");
             assert_eq!(cap.bg, by_click.chrome.theme.accent, "the key is a key cap");
-            assert!(by_click.welcome_active(), "the bro ticks while it is up");
+            assert!(by_click.welcome_active(), "the kete ticks while it is up");
 
             mouse(&mut by_click, MouseEventKind::Down(MouseButton::Left), x, y);
             let mut by_key = on_an_empty_project();
@@ -6332,7 +6334,7 @@ mod tests {
             let (_, key_y) = crumb_cell(&app, HitTarget::LauncherWelcomePrompt);
             let sky = glyphs(&terminal, grid.y..key_y - 3);
             assert!(sky > 40, "{sky} specks of dust: {}", buffer_text(&terminal));
-            assert!(row(&terminal, key_y - 2).contains("   Welcome to bro   "));
+            assert!(row(&terminal, key_y - 2).contains("   Welcome to kete   "));
             assert!(row(&terminal, key_y).contains("   press  p  to prompt   "));
             assert!(!app.welcome_active(), "animations off: a still frame");
 
@@ -6341,7 +6343,7 @@ mod tests {
             let terminal = draw_at(&mut small, 40, 12);
             let grid = crate::launcher::grid(small.chrome.body_area).area;
             let (_, key_y) = crumb_cell(&small, HitTarget::LauncherWelcomePrompt);
-            assert!(row(&terminal, key_y - 2).contains("Welcome to bro"));
+            assert!(row(&terminal, key_y - 2).contains("Welcome to kete"));
             let specks =
                 glyphs(&terminal, grid.y..key_y - 2) + glyphs(&terminal, key_y + 1..grid.bottom());
             assert_eq!(specks, 0, "{}", buffer_text(&terminal));
@@ -7616,7 +7618,7 @@ mod tests {
                 let out = ctrl_f(&mut app);
                 assert!(
                     !out.iter().any(|r| matches!(r, ClientRequest::Input { .. })),
-                    "^F is bro's, not the agent's: {out:?}"
+                    "^F is kete's, not the agent's: {out:?}"
                 );
                 assert!(app.pane.collapsed, "full-screen");
                 assert_eq!(app.nav.focus, Focus::Terminal);
@@ -7628,7 +7630,7 @@ mod tests {
                 let out = key(&mut app, back_down.0, back_down.1);
                 assert!(
                     !out.iter().any(|r| matches!(r, ClientRequest::Input { .. })),
-                    "{back_down:?} is bro's: {out:?}"
+                    "{back_down:?} is kete's: {out:?}"
                 );
                 in_pane(&app);
                 draw(&mut app);
@@ -9407,7 +9409,7 @@ mod tests {
             assert_eq!(
                 app.chrome.flash,
                 Some(format!(
-                    "no pull request on {branch} yet — ⇧R reloads from GitHub"
+                    "no pull request on {branch} yet: ⇧R reloads from GitHub"
                 ))
             );
             assert_eq!(pr_menu_row(&mut app), None);
@@ -10567,7 +10569,7 @@ mod tests {
             );
             assert!(
                 crate::launcher::cursor(&app, &bands).is_some(),
-                "the grid still knows where the cursor was — it is left, not forgotten"
+                "the grid still knows where the cursor was, it is left, not forgotten"
             );
 
             // A click on the card aims the band at it and no more: the
@@ -12310,7 +12312,7 @@ mod tests {
             key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
             assert!(crate::launcher::bands(&app).is_empty());
             let text = buffer_text(&draw_tall(&mut app));
-            assert!(text.contains("Welcome to bro"), "{text}");
+            assert!(text.contains("Welcome to kete"), "{text}");
             assert!(!super::has_pane(&app), "nothing for the pane to read");
         });
     }

@@ -1,14 +1,14 @@
 //! Windows Terminal's `settings.json` (JSONC, `crate::jsonc`): read for the
-//! font the profile Bro runs in draws with — which decides whether the
+//! font the profile Kete runs in draws with — which decides whether the
 //! FILE ICONS can be Nerd Font glyphs (`crate::icons::detect`) — and
-//! written by `bro setup terminal`, which adds a **Bro** profile: `bro` as
-//! its command line, Bro's icon, JetBrainsMono Nerd Font, and a One Dark
+//! written by `kete setup terminal`, which adds a **Kete** profile: `kete` as
+//! its command line, Kete's icon, JetBrainsMono Nerd Font, and a One Dark
 //! color scheme to match the `one-dark` theme.
 //!
-//! The write is the one place Bro edits a file it does not own, so it is
+//! The write is the one place Kete edits a file it does not own, so it is
 //! careful:
 //!
-//! - **What** changes is decided on the parsed JSON ([`add_bro_profile`]),
+//! - **What** changes is decided on the parsed JSON ([`add_kete_profile`]),
 //!   a pure function: the profile has a fixed GUID, so a second run
 //!   updates the one the first made rather than adding another; the
 //!   scheme goes in only when no scheme of its name is there; a profile or
@@ -17,7 +17,7 @@
 //!   Terminal) wrote it ([`plan`]): the new profile and scheme are spliced
 //!   into the text at the places the JSONC OUTLINE finds, so every comment,
 //!   every key's order and every other byte stays. The spliced text is
-//!   parsed again and must come out equal to what [`add_bro_profile`]
+//!   parsed again and must come out equal to what [`add_kete_profile`]
 //!   decided, or nothing is written.
 //! - The caller backs the file up beside itself before writing it, and
 //!   `--dry-run` prints [`unified_diff`] of the two texts instead.
@@ -26,15 +26,17 @@ use crate::jsonc::{Node, Shape};
 use serde_json::{json, Map, Value};
 use std::path::PathBuf;
 
-/// The Bro profile's GUID: fixed, so `bro setup terminal` run twice finds
-/// the profile it made the first time.
+/// The Kete profile's GUID: fixed, so `kete setup terminal` run twice finds
+/// the profile it made the first time. It is the GUID Bro's profile had,
+/// so a "Bro" profile from `bro setup terminal` turns into this one rather
+/// than sitting beside it.
 pub const PROFILE_GUID: &str = "{8b0f3d6e-6a2b-4d8c-9b5e-62726f000001}";
 /// The profile's name in Windows Terminal's dropdown.
-pub const PROFILE_NAME: &str = "Bro";
+pub const PROFILE_NAME: &str = "Kete";
 /// The color scheme the profile wears. A "One Dark" the user already has
 /// is theirs and stays as it is — the profile wears that one.
 pub const SCHEME_NAME: &str = "One Dark";
-/// The font the profile draws with, the one `bro setup terminal` installs.
+/// The font the profile draws with, the one `kete setup terminal` installs.
 pub const FONT_FACE: &str = "JetBrainsMono Nerd Font";
 
 /// Where Windows Terminal keeps its settings: the Store build's
@@ -99,7 +101,7 @@ fn face_of(profile: &Value) -> Option<String> {
 }
 
 /// The font face the profile `guid` draws with — its own, else the
-/// profiles' defaults'. With no `guid` (Bro was not started from Windows
+/// profiles' defaults'. With no `guid` (Kete was not started from Windows
 /// Terminal, or by a build that does not say), the default profile's.
 pub fn font_face(settings: &Value, guid: Option<&str>) -> Option<String> {
     let default_guid = settings.get("defaultProfile").and_then(Value::as_str);
@@ -144,11 +146,11 @@ pub fn one_dark_scheme() -> Value {
     })
 }
 
-/// The Bro profile: `commandline` (the `bro` to run, a full path when it
+/// The Kete profile: `commandline` (the `kete` to run, a full path when it
 /// is known — quoted when it has a space, as Windows Terminal splits the
 /// line), its `icon` (an absolute path) when there is one, the Nerd Font,
 /// the One Dark scheme.
-pub fn bro_profile(commandline: &str, icon: Option<&str>) -> Value {
+pub fn kete_profile(commandline: &str, icon: Option<&str>) -> Value {
     let commandline = if commandline.contains(' ') && !commandline.starts_with('"') {
         format!("\"{commandline}\"")
     } else {
@@ -180,12 +182,16 @@ fn merged_profile(old: &Value, ours: &Value) -> Value {
     merged
 }
 
-/// Put the Bro profile and its scheme into `settings`: the scheme when
+/// Put the Kete profile and its scheme into `settings`: the scheme when
 /// none of its name is there, the profile by its GUID (replacing what an
 /// earlier run put there, keeping what the user added to it), touching
 /// nothing else. Returns what changed, one line each, for the dry run and
 /// the summary; empty when it was all there already.
-pub fn add_bro_profile(settings: &mut Value, commandline: &str, icon: Option<&str>) -> Vec<String> {
+pub fn add_kete_profile(
+    settings: &mut Value,
+    commandline: &str,
+    icon: Option<&str>,
+) -> Vec<String> {
     let mut changes = Vec::new();
     if !settings.is_object() {
         *settings = Value::Object(Map::new());
@@ -207,7 +213,7 @@ pub fn add_bro_profile(settings: &mut Value, commandline: &str, icon: Option<&st
 
     // The profile, by GUID — in `profiles.list`, or in the bare array an
     // older file keeps its profiles in.
-    let profile = bro_profile(commandline, icon);
+    let profile = kete_profile(commandline, icon);
     let profiles = root
         .entry("profiles")
         .or_insert_with(|| json!({ "defaults": {}, "list": [] }));
@@ -245,7 +251,7 @@ pub fn add_bro_profile(settings: &mut Value, commandline: &str, icon: Option<&st
     changes
 }
 
-/// The order the keys of what Bro writes go in — the profile's as Windows
+/// The order the keys of what Kete writes go in — the profile's as Windows
 /// Terminal's own UI writes a profile, the scheme's as its schema lists a
 /// scheme — rather than `serde_json`'s alphabetical one, which would put
 /// a profile's `colorScheme` above its `name`. Keys not named here follow,
@@ -316,8 +322,8 @@ fn write(value: &Value, indent: &str) -> String {
     }
 }
 
-/// What `bro setup terminal` would do to a settings file: the changes,
-/// one line each ([`add_bro_profile`]), and the file's text with them made.
+/// What `kete setup terminal` would do to a settings file: the changes,
+/// one line each ([`add_kete_profile`]), and the file's text with them made.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plan {
     pub changes: Vec<String>,
@@ -417,7 +423,7 @@ fn append(text: &str, node: &Node, item: impl Fn(&str) -> String) -> Vec<Edit> {
     vec![edit]
 }
 
-/// [`add_bro_profile`] made in `text` itself, every other byte kept (the
+/// [`add_kete_profile`] made in `text` itself, every other byte kept (the
 /// module docs). Errors when the text is not JSONC, or when a splice
 /// would not come out as the parsed change says — then nothing should be
 /// written, and the caller says so.
@@ -425,7 +431,7 @@ pub fn plan(text: &str, commandline: &str, icon: Option<&str>) -> Result<Plan, S
     let text = if text.trim().is_empty() { "{}" } else { text };
     let before = crate::jsonc::parse(text)?;
     let mut want = before.clone();
-    let changes = add_bro_profile(&mut want, commandline, icon);
+    let changes = add_kete_profile(&mut want, commandline, icon);
     if changes.is_empty() {
         return Ok(Plan {
             changes,
@@ -436,7 +442,7 @@ pub fn plan(text: &str, commandline: &str, icon: Option<&str>) -> Result<Plan, S
     if !matches!(root.shape, Shape::Object(_)) {
         return Err("the settings are not a JSON object".into());
     }
-    let profile = bro_profile(commandline, icon);
+    let profile = kete_profile(commandline, icon);
     let mut edits = Vec::new();
     // Members the root object lacks, added in one splice: two splices at
     // the one place would each think they were the first.
@@ -604,9 +610,9 @@ mod tests {
     "schemes": [ { "name": "Campbell", "background": "#0C0C0C" } ],
 }"##;
 
-    const BRO: &str = r"C:\Users\me\.cargo\bin\bro.exe";
+    const KETE_EXE: &str = r"C:\Users\me\.cargo\bin\kete.exe";
 
-    /// The profile Bro runs in decides: its own face, the defaults' when
+    /// The profile Kete runs in decides: its own face, the defaults' when
     /// it sets none, the default profile's with no GUID to go on.
     #[test]
     fn the_font_face_is_the_profiles_or_the_defaults() {
@@ -626,32 +632,63 @@ mod tests {
     /// The profile and its scheme go in once — a second run changes
     /// nothing — and nothing the user made is touched.
     #[test]
-    fn the_bro_profile_goes_in_once_and_leaves_the_rest_alone() {
+    fn the_kete_profile_goes_in_once_and_leaves_the_rest_alone() {
         let mut s = crate::jsonc::parse(SETTINGS).unwrap();
         let before = s.clone();
-        let changes = add_bro_profile(&mut s, BRO, Some(r"C:\bro\bro.ico"));
+        let changes = add_kete_profile(&mut s, KETE_EXE, Some(r"C:\kete\kete.ico"));
         assert_eq!(changes.len(), 2, "{changes:?}");
         let list = s.pointer("/profiles/list").unwrap().as_array().unwrap();
         assert_eq!(list.len(), 3);
-        let bro = &list[2];
-        assert_eq!(bro["guid"], PROFILE_GUID);
-        assert_eq!(bro["font"]["face"], FONT_FACE);
-        assert_eq!(bro["colorScheme"], SCHEME_NAME);
-        assert_eq!(bro["icon"], r"C:\bro\bro.ico");
+        let ours = &list[2];
+        assert_eq!(ours["guid"], PROFILE_GUID);
+        assert_eq!(ours["font"]["face"], FONT_FACE);
+        assert_eq!(ours["colorScheme"], SCHEME_NAME);
+        assert_eq!(ours["icon"], r"C:\kete\kete.ico");
         assert_eq!(s["schemes"][0], before["schemes"][0], "theirs untouched");
         assert_eq!(s["schemes"][1]["name"], SCHEME_NAME);
         assert_eq!(list[0], before["profiles"]["list"][0]);
 
-        assert!(add_bro_profile(&mut s, BRO, Some(r"C:\bro\bro.ico")).is_empty());
+        assert!(add_kete_profile(&mut s, KETE_EXE, Some(r"C:\kete\kete.ico")).is_empty());
         // A moved binary updates the one profile, keeping what the user
         // set on it since.
         s["profiles"]["list"][2]["opacity"] = json!(90);
-        let changes = add_bro_profile(&mut s, r"D:\my tools\bro.exe", None);
+        let changes = add_kete_profile(&mut s, r"D:\my tools\kete.exe", None);
         assert_eq!(changes.len(), 1, "{changes:?}");
-        let bro = &s["profiles"]["list"][2];
-        assert_eq!(bro["commandline"], r#""D:\my tools\bro.exe""#, "quoted");
-        assert_eq!(bro["opacity"], 90);
+        let ours = &s["profiles"]["list"][2];
+        assert_eq!(ours["commandline"], r#""D:\my tools\kete.exe""#, "quoted");
+        assert_eq!(ours["opacity"], 90);
         assert_eq!(s["profiles"]["list"].as_array().unwrap().len(), 3);
+    }
+
+    /// The "Bro" profile an earlier `bro setup terminal` made becomes the
+    /// Kete one, in place: renamed, its command line and icon moved on,
+    /// and no second profile beside it.
+    #[test]
+    fn a_bro_profile_becomes_the_kete_profile() {
+        let mut s = json!({ "profiles": { "list": [
+            { "name": "pwsh" },
+            {
+                "guid": PROFILE_GUID,
+                "name": "Bro",
+                "commandline": r"C:\Users\me\AppData\Local\bro\bin\bro.exe",
+                "icon": r"C:\Users\me\AppData\Local\bro\bin\bro.ico",
+                "font": { "face": FONT_FACE },
+                "colorScheme": SCHEME_NAME,
+                "hidden": false,
+                "startingDirectory": r"C:\Code"
+            }
+        ] } });
+        let changes = add_kete_profile(&mut s, KETE_EXE, Some(r"C:\kete\kete.ico"));
+        assert!(
+            changes.iter().any(|c| c.starts_with("update profile")),
+            "{changes:?}"
+        );
+        let list = s["profiles"]["list"].as_array().unwrap();
+        assert_eq!(list.len(), 2, "replaced, not added: {list:?}");
+        assert_eq!(list[1]["name"], PROFILE_NAME);
+        assert_eq!(list[1]["commandline"], KETE_EXE);
+        assert_eq!(list[1]["icon"], r"C:\kete\kete.ico");
+        assert_eq!(list[1]["startingDirectory"], r"C:\Code", "the user's kept");
     }
 
     /// A "One Dark" the user already has is theirs: it stays as it is, and
@@ -659,7 +696,7 @@ mod tests {
     #[test]
     fn a_one_dark_already_there_is_kept() {
         let mut s = json!({ "schemes": [ { "name": "One Dark", "background": "#000000" } ] });
-        let changes = add_bro_profile(&mut s, "bro", None);
+        let changes = add_kete_profile(&mut s, "kete", None);
         assert_eq!(changes.len(), 1, "only the profile: {changes:?}");
         assert_eq!(s["schemes"].as_array().unwrap().len(), 1);
         assert_eq!(s["schemes"][0]["background"], "#000000");
@@ -670,10 +707,10 @@ mod tests {
     #[test]
     fn older_and_empty_files_take_the_profile_too() {
         let mut s = json!({ "profiles": [ { "name": "x" } ] });
-        add_bro_profile(&mut s, "bro", None);
+        add_kete_profile(&mut s, "kete", None);
         assert_eq!(s["profiles"].as_array().unwrap().len(), 2);
         let mut s = json!({});
-        add_bro_profile(&mut s, "bro", None);
+        add_kete_profile(&mut s, "kete", None);
         assert_eq!(s["profiles"]["list"][0]["name"], PROFILE_NAME);
         assert_eq!(
             font_face(&s, Some(PROFILE_GUID)).as_deref(),
@@ -683,11 +720,11 @@ mod tests {
 
     /// The plan splices the profile and scheme into the text: every
     /// comment and every other line stays where it was, the result parses
-    /// to what [`add_bro_profile`] decided, and planning again on the
+    /// to what [`add_kete_profile`] decided, and planning again on the
     /// result changes nothing.
     #[test]
     fn the_plan_keeps_the_files_comments_and_layout() {
-        let plan = plan(SETTINGS, BRO, Some(r"C:\bro\bro.ico")).unwrap();
+        let plan = plan(SETTINGS, KETE_EXE, Some(r"C:\kete\kete.ico")).unwrap();
         assert_eq!(plan.changes.len(), 2);
         assert!(plan.text.contains("    // the one that opens\n"));
         assert!(
@@ -695,7 +732,7 @@ mod tests {
             "key order kept"
         );
         let mut want = crate::jsonc::parse(SETTINGS).unwrap();
-        add_bro_profile(&mut want, BRO, Some(r"C:\bro\bro.ico"));
+        add_kete_profile(&mut want, KETE_EXE, Some(r"C:\kete\kete.ico"));
         assert_eq!(crate::jsonc::parse(&plan.text).unwrap(), want);
         // Every line of the original is still there but the one-line
         // `schemes`, which is opened out to take the second scheme, its
@@ -716,10 +753,10 @@ mod tests {
         // The new profile sits at the list's indent, its keys in Windows
         // Terminal's order.
         assert!(plan.text.contains(
-            "\n            {\n                \"guid\": \"{8b0f3d6e-6a2b-4d8c-9b5e-62726f000001}\",\n                \"name\": \"Bro\",\n                \"commandline\""
+            "\n            {\n                \"guid\": \"{8b0f3d6e-6a2b-4d8c-9b5e-62726f000001}\",\n                \"name\": \"Kete\",\n                \"commandline\""
         ));
 
-        let again = super::plan(&plan.text, BRO, Some(r"C:\bro\bro.ico")).unwrap();
+        let again = super::plan(&plan.text, KETE_EXE, Some(r"C:\kete\kete.ico")).unwrap();
         assert!(again.changes.is_empty());
         assert_eq!(again.text, plan.text);
         assert!(unified_diff(&plan.text, &again.text, "x").is_empty());
@@ -729,17 +766,17 @@ mod tests {
     /// additions to it ride along.
     #[test]
     fn the_plan_updates_its_own_profile_in_place() {
-        let first = plan(SETTINGS, BRO, None).unwrap().text;
+        let first = plan(SETTINGS, KETE_EXE, None).unwrap().text;
         let tweaked = first.replace(
             "\"hidden\": false",
             "\"hidden\": false,\n                \"opacity\": 90",
         );
-        let second = plan(&tweaked, r"D:\bro.exe", None).unwrap();
+        let second = plan(&tweaked, r"D:\kete.exe", None).unwrap();
         assert_eq!(second.changes.len(), 1, "{:?}", second.changes);
         let v = crate::jsonc::parse(&second.text).unwrap();
         let list = v["profiles"]["list"].as_array().unwrap();
         assert_eq!(list.len(), 3);
-        assert_eq!(list[2]["commandline"], r"D:\bro.exe");
+        assert_eq!(list[2]["commandline"], r"D:\kete.exe");
         assert_eq!(list[2]["opacity"], 90);
         assert!(second.text.contains("// the one that opens"));
     }
@@ -757,19 +794,19 @@ mod tests {
             "{ \"profiles\": { \"defaults\": {} } }",
             "{ \"profiles\": { \"list\": [ /* none */ ] }, }",
         ] {
-            let plan = plan(text, "bro", None).unwrap_or_else(|e| panic!("{text}: {e}"));
+            let plan = plan(text, "kete", None).unwrap_or_else(|e| panic!("{text}: {e}"));
             let mut want = crate::jsonc::parse(if text.is_empty() { "{}" } else { text }).unwrap();
-            add_bro_profile(&mut want, "bro", None);
+            add_kete_profile(&mut want, "kete", None);
             assert_eq!(crate::jsonc::parse(&plan.text).unwrap(), want, "{text}");
             if text.contains("//") || text.contains("/*") {
                 assert!(plan.text.contains("nothing yet") || plan.text.contains("/* none */"));
             }
         }
-        assert!(plan("{ not json", "bro", None).is_err());
+        assert!(plan("{ not json", "kete", None).is_err());
 
         // CRLF in, CRLF out: no bare newline is spliced in.
         let crlf = SETTINGS.replace('\n', "\r\n");
-        let plan = plan(&crlf, "bro", None).unwrap();
+        let plan = plan(&crlf, "kete", None).unwrap();
         assert_eq!(plan.changes.len(), 2);
         assert!(
             !plan.text.replace("\r\n", "").contains('\n'),

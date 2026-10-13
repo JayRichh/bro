@@ -39,6 +39,7 @@ pub const MAX_PROMPT_CHARS: usize = 200;
 /// do, and a panel showing them says `<cross-session-message from="uds:`
 /// where the user's own sentence belongs.
 const INJECTED_PREFIXES: &[&str] = &[
+    "[kete]",
     "[bro]",
     "[nebula]", // rebrand:keep
     "[Cross-session idle notice]",
@@ -118,14 +119,14 @@ mod tests {
         assert_eq!(condense(""), None);
         assert_eq!(condense("  \n\t "), None);
         assert_eq!(
-            condense("[bro] This session now runs inside the worktree `x`"),
+            condense("[kete] This session now runs inside the worktree `x`"),
             None
         );
-        assert_eq!(condense("\n  [bro] anything"), None);
+        assert_eq!(condense("\n  [kete] anything"), None);
         // Only the opening marker counts: a user mentioning nebula stays.
         assert_eq!(
-            condense("why does [bro] show a red dot").as_deref(),
-            Some("why does [bro] show a red dot")
+            condense("why does [kete] show a red dot").as_deref(),
+            Some("why does [kete] show a red dot")
         );
     }
 

@@ -2,65 +2,65 @@
 
 <sub>[← README](../README.md) · [Keys](keys.md) · [Commands](commands.md) · [Sessions](sessions.md) · [Configuration](configuration.md) · [How it works](how-it-works.md)</sub>
 
-The `bro` CLI. Every command carries its own help — `bro <command> --help` is the full page,
-flags and examples included, and `-h` is the one-screen reminder. `bro --version` (short `-V`)
-prints the version of the binary you're running (`bro 0.44.0`) — the same version the TUI's
+The `kete` CLI. Every command carries its own help: `kete <command> --help` is the full page,
+flags and examples included, and `-h` is the one-screen reminder. `kete --version` (short `-V`)
+prints the version of the binary you're running (`kete 0.44.0`), the same version the TUI's
 FOOTER carries at its left edge (with `⇡ vX.Y.Z` beside it once a newer release is published), and
-what to check after `bro upgrade`. This page is the same surface in one place. Commands marked *(agents run this)* are the ones a coding agent invokes on
-your behalf — see [How it works](how-it-works.md).
+what to check after `kete upgrade`. This page is the same surface in one place. Commands marked *(agents run this)* are the ones a coding agent invokes on
+your behalf, see [How it works](how-it-works.md).
 
 ```
-bro                      open the TUI (auto-starts the daemon)
-bro desktop              open the desktop window: kanban, terminals, diffs
-bro add <dir>            register a git checkout as a project
-bro daemon               run the daemon that owns every session
-bro kill                 shut the running daemon down (stops all sessions)
-bro reload               move the daemon onto the installed binary, keeping every session
-bro rename <title>       title the session this runs inside          (agents run this)
-bro worktree [name]      move this session into a worktree           (agents run this)
-bro spawn <task>         start another agent session beside it       (agents run this)
-bro open <file>…         show files/images/diagrams in file tabs     (agents run this)
-bro sessions             list every session across every project     (agents run this)
-bro read <session>       read recent context from another session    (agents run this)
-bro ask <session> <q>    ask another session and print its answer    (agents run this)
-bro config <cmd>         back up, restore or locate this machine's settings
-bro profile <cmd>        several accounts per harness: add, sign in, list, remove
-bro setup terminal       install a Nerd Font and add a "Bro" Windows Terminal profile
-bro browser              serve this TUI in a web browser via ttyd
-bro ssh <host>           open bro on a remote host over ssh
-bro tunnel <host>        open a remote host's bro in a tab here
-bro upgrade              install the latest published bro
+kete                      open the TUI (auto-starts the daemon)
+kete desktop              open the desktop window: kanban, terminals, diffs
+kete add <dir>            register a git checkout as a project
+kete daemon               run the daemon that owns every session
+kete kill                 shut the running daemon down (stops all sessions)
+kete reload               move the daemon onto the installed binary, keeping every session
+kete rename <title>       title the session this runs inside          (agents run this)
+kete worktree [name]      move this session into a worktree           (agents run this)
+kete spawn <task>         start another agent session beside it       (agents run this)
+kete open <file>…         show files/images/diagrams in file tabs     (agents run this)
+kete sessions             list every session across every project     (agents run this)
+kete read <session>       read recent context from another session    (agents run this)
+kete ask <session> <q>    ask another session and print its answer    (agents run this)
+kete config <cmd>         back up, restore or locate this machine's settings
+kete profile <cmd>        several accounts per harness: add, sign in, list, remove
+kete setup terminal       install a Nerd Font and add a "Kete" Windows Terminal profile
+kete browser              serve this TUI in a web browser via ttyd
+kete ssh <host>           open kete on a remote host over ssh
+kete tunnel <host>        open a remote host's kete in a tab here
+kete upgrade              install the latest published kete
 ```
 
 ## The TUI
 
 ```sh
-bro                    # launch the TUI (auto-starts the daemon). With no project yet, a
-                          # launch from inside a git repo offers it on the splash — Enter
+kete                    # launch the TUI (auto-starts the daemon). With no project yet, a
+                          # launch from inside a git repo offers it on the splash: Enter
                           # opens it; anywhere else, `o` browses for one
-bro desktop            # the same sessions in a native window (bro-desktop, built from
-                          # desktop/; looked for beside bro, then on PATH). After `--`:
+kete desktop            # the same sessions in a native window (kete-desktop, built from
+                          # desktop/; looked for beside kete, then on PATH). After `--`:
                           # --view board|session|diff, --session <name>, --theme light|dark
 ```
 
 ## Projects and the daemon
 
 ```sh
-bro add <dir>          # add a repo as a project, named after its root directory
-bro add .              # same, for the repo you're in (bare `bro <dir>` / `bro .` also work)
-                          # — but a directory whose name collides with a subcommand needs the long
-                          # form (`bro add browser`) or a `./` prefix, or bare `bro browser`
+kete add <dir>          # add a repo as a project, named after its root directory
+kete add .              # same, for the repo you're in (bare `kete <dir>` / `kete .` also work),
+                          # but a directory whose name collides with a subcommand needs the long
+                          # form (`kete add browser`) or a `./` prefix, or bare `kete browser`
                           # serves the TUI over ttyd instead of adding the directory
                           # If an existing project's old folder has gone missing, use the TUI's
-                          # Locate project prompt on that project to relink it; `bro add` still
+                          # Locate project prompt on that project to relink it; `kete add` still
                           # registers the path as a project and does not guess which stranded row
                           # should move.
-bro daemon             # run the daemon (normally auto-spawned)
-bro daemon --foreground  # daemon with logs to stdout, for debugging
-bro kill               # stop the daemon and all sessions cleanly
-bro reload             # restart the daemon in place onto the binary this runs from: every
+kete daemon             # run the daemon (normally auto-spawned)
+kete daemon --foreground  # daemon with logs to stdout, for debugging
+kete kill               # stop the daemon and all sessions cleanly
+kete reload             # restart the daemon in place onto the binary this runs from: every
                           # session keeps its process, scrollback and status, and agents' hooks
-                          # keep reaching it. Open TUIs drop their connection — relaunch `bro`
+                          # keep reaching it. Open TUIs drop their connection: relaunch `kete`
                           # to pick the sessions back up. The cut-over after `make install`; a
                           # daemon from before reload existed can only be restarted by `kill`
 ```
@@ -68,34 +68,34 @@ bro reload             # restart the daemon in place onto the binary this runs f
 ## What agents run for you
 
 ```sh
-bro rename <title>     # title the current session (agents run this; --force to retitle)
-bro worktree [name] [--base <ref>]  # move the current session into a worktree of its project,
+kete rename <title>     # title the current session (agents run this; --force to retitle)
+kete worktree [name] [--base <ref>]  # move the current session into a worktree of its project,
                           # creating the branch if it's new (agents run this when you ask for a
                           # worktree; no name invents one; --base picks a new branch's start point,
-                          # a branch name meaning origin's fetched copy — main is origin/main —
+                          # a branch name meaning origin's fetched copy (main is origin/main)
                           # but is ignored when the branch already exists; without it the
                           # worktree_base_branch setting applies, else origin's default)
-bro spawn <task> [--kind <claude|codex|cursor|pi|muse|grok|opencode|copilot>] [--worktree <branch> [--base <ref>]]
+kete spawn <task> [--kind <claude|codex|cursor|pi|muse|grok|opencode|copilot>] [--worktree <branch> [--base <ref>]]
                           # start a new agent session beside the current one, in the same worktree,
-                          # opening on <task> (agents run this when you ask for a new bro session;
+                          # opening on <task> (agents run this when you ask for a new kete session;
                           # --kind defaults to this session's harness; custom harnesses launch from
                           # the TUI picker and presets, not --kind); --worktree starts it in the
                           # project's worktree on <branch> instead, creating it when the branch has
                           # none (--base picks a new branch's start point and is refused when the
                           # branch already exists), and leaves this session where it is
-bro open <file>…       # show the files in this bro's FILE TABS — a modal with one tab per
+kete open <file>…       # show the files in this kete's FILE TABS, a modal with one tab per
                           # file, the focused one previewed, Enter editing it (agents run this only
                           # when you ask to see a file, image, mockup or diagram; text files,
                           # supported local images and Mermaid diagrams render inline, other
                           # binaries are refused and the agent names the path instead)
-bro sessions [--json]  # list every session across every project: id, name, project, worktree
+kete sessions [--json]  # list every session across every project: id, name, project, worktree
                           # branch/path, harness, status and one-line recent summary. Agents run
                           # this when you name another session and they need an exact id.
-bro read <session> [--lines N]
+kete read <session> [--lines N]
                           # print clean recent context from another session, resolving by id or
                           # unambiguous fuzzy name. Claude transcript text is preferred; otherwise
                           # the daemon strips ANSI from bounded PTY scrollback.
-bro ask <session> "<question>" [--timeout S] [--no-wait]
+kete ask <session> "<question>" [--timeout S] [--no-wait]
                           # send a labelled question into another local agent, wait for that turn
                           # to finish, and print the answer. A busy target is queued until idle by
                           # default; --no-wait fails fast instead.
@@ -104,15 +104,15 @@ bro ask <session> "<question>" [--timeout S] [--no-wait]
 ## Settings
 
 ```sh
-bro config path              # where config.json, config.local.json, agent_presets.json and
+kete config path              # where config.json, config.local.json, agent_presets.json and
                                 # ssh_hosts.json live
-bro config export [path]     # one JSON file of this machine's settings: stdout, a file, or
+kete config export [path]     # one JSON file of this machine's settings: stdout, a file, or
                                 # nebula-settings.json inside a folder. Never config.local.json
-bro config import <source>   # merge a backup in: an export, a bare config.json /
+kete config import <source>   # merge a backup in: an export, a bare config.json /
                                 # agent_presets.json / ssh_hosts.json, a folder holding any of
                                 # them, or - for stdin. Keys it sets replace this machine's, keys
                                 # it lacks stay, and config.local.json is never written
-bro config harnesses         # print the effective harness registry: every harness with
+kete config harnesses         # print the effective harness registry: every harness with
                                 # the program, flags, resume shape, hook dialect and defaults a
                                 # launch uses. Copy a row into config.json `harnesses` to override it
 ```
@@ -122,15 +122,15 @@ See [Configuration](configuration.md#backup-restore-and-other-machines).
 ## Profiles
 
 ```sh
-bro profile add <name> --harness <h> [--use-default] [--default] [--env K=V]…
+kete profile add <name> --harness <h> [--use-default] [--default] [--env K=V]…
                                 # a named account for one harness; --use-default adopts the
                                 # CLI's existing login instead of a home of its own
-bro profile login <name> [-- <args>]
+kete profile login <name> [-- <args>]
                                 # run the harness's sign-in here under the profile:
                                 # claude auth login --claudeai, codex login, copilot login
-bro profile list             # accounts, homes, defaults and the last plan usage seen
-bro profile default <name>   # launches that pick no profile take it
-bro profile remove <name> [--purge]
+kete profile list             # accounts, homes, defaults and the last plan usage seen
+kete profile default <name>   # launches that pick no profile take it
+kete profile remove <name> [--purge]
                                 # drop it; --purge deletes its home (and the login) too
 ```
 
@@ -139,13 +139,13 @@ See [Profiles](profiles.md).
 ## Windows Terminal
 
 ```sh
-bro setup terminal           # install JetBrainsMono Nerd Font for this user (from the latest
+kete setup terminal           # install JetBrainsMono Nerd Font for this user (from the latest
                                 # nerd-fonts release, into %LOCALAPPDATA%\Microsoft\Windows\Fonts,
-                                # registered under HKCU) and add or update a "Bro" profile in
-                                # Windows Terminal's settings.json: this bro.exe, Bro's icon, the
+                                # registered under HKCU) and add or update a "Kete" profile in
+                                # Windows Terminal's settings.json: this bro.exe, Kete's icon, the
                                 # font, a "One Dark" color scheme (one already there is kept)
-bro setup terminal --dry-run # say all of it and print the diff of settings.json; do nothing
-bro setup terminal --no-font # only the profile
+kete setup terminal --dry-run # say all of it and print the diff of settings.json; do nothing
+kete setup terminal --no-font # only the profile
 ```
 
 `settings.json` is backed up beside itself (`settings.json.bro-backup-<seconds>`) before it is
@@ -156,45 +156,45 @@ font is what `nerd` [file icons](configuration.md) need.
 ## Other machines, other screens
 
 ```sh
-bro ssh <host> [dir]   # open bro on a remote machine over ssh (installs it there if
+kete ssh <host> [dir]   # open kete on a remote machine over ssh (installs it there if
                           # missing); destinations are remembered for the TUI's HOSTS PICKER
                           # (`Shift+H`). Needs the OpenSSH client (`ssh`) on PATH here. This
                           # machine's config.json and agent presets ride along, and the remote
-                          # bro merges them into its own settings (its config.local.json
+                          # kete merges them into its own settings (its config.local.json
                           # still wins); --no-sync-config or the ssh_sync_config setting leaves
                           # them here
-bro tunnel <host> [dir] [--port N] [--remote-port N]
-                          # that host's bro in a browser tab here, over one ssh tunnel: installs
-                          # bro there if missing, runs `bro browser` on its loopback, forwards
+kete tunnel <host> [dir] [--port N] [--remote-port N]
+                          # that host's kete in a browser tab here, over one ssh tunnel: installs
+                          # kete there if missing, runs `kete browser` on its loopback, forwards
                           # the port, and opens the local URL. Nothing is exposed on the remote's
-                          # network — the tunnel is the only way in — so it needs no --credential.
-                          # If that host already has a `bro browser` on the port, the tunnel
+                          # network (the tunnel is the only way in) so it needs no --credential.
+                          # If that host already has a `kete browser` on the port, the tunnel
                           # reuses it instead of failing on the clash (a --credential one will ask
                           # for it in the tab).
                           # Needs the OpenSSH client (`ssh`) on PATH here and ttyd on the remote;
                           # Ctrl+C takes both ends down. --port is the local end (same rules as
-                          # `bro browser`), --remote-port the far end when something there
+                          # `kete browser`), --remote-port the far end when something there
                           # already holds that number. Settings ride along as they do for
-                          # `bro ssh` (--no-sync-config leaves them here)
-bro browser [--port N] [--bind ADDR | --public] [--credential USER:PASSWORD] [--no-open]
+                          # `kete ssh` (--no-sync-config leaves them here)
+kete browser [--port N] [--bind ADDR | --public] [--credential USER:PASSWORD] [--no-open]
                           # serve this TUI in a browser tab via ttyd and open it; needs ttyd on
                           # PATH. With no --port it takes 7681 when that's free and a free port
-                          # otherwise, saying which — so one per checkout can serve at once.
+                          # otherwise, saying which, so one per checkout can serve at once.
                           # --port 0 always picks a free one; --port N is that port or an error,
                           # which is what you want behind an ssh tunnel. Listens on 127.0.0.1
                           # unless --bind names an interface address or --public takes them all
-                          # (0.0.0.0) — for a bro on a remote box, where the access control
+                          # (0.0.0.0), for a kete on a remote box, where the access control
                           # is the firewall/security group in front of the port. That serves a
                           # live, writable terminal, so put something in front of it and use
                           # --credential to add ttyd's HTTP basic auth on top. --no-open serves
                           # without launching a desktop browser, for a box that has none
-bro upgrade            # install the latest release (--force on a dev build). Swapping the
+kete upgrade            # install the latest release (--force on a dev build). Swapping the
                           # binary doesn't touch a running daemon, so afterwards it shuts an idle
                           # one (no live sessions) down for you and the next launch starts on the
                           # new binary. With sessions live it restarts the daemon in place onto
-                          # the new binary (what `bro reload` does), and they keep running.
-                          # A daemon from before in-place restarts is left up — its sessions
-                          # would die with it — and it says to run `bro kill` when you're
+                          # the new binary (what `kete reload` does), and they keep running.
+                          # A daemon from before in-place restarts is left up (its sessions
+                          # would die with it) and it says to run `kete kill` when you're
                           # ready. When the new build speaks another protocol, and so can't
                           # attach to that daemon, it says that too and offers the restart then
                           # and there

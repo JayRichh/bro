@@ -218,7 +218,7 @@ impl HeadCount {
 }
 
 /// What the ARCHIVED VIEW says with nothing in it.
-const NO_ARCHIVED: &str = "nothing archived in this project — ⇧A back to the live sessions";
+const NO_ARCHIVED: &str = "nothing archived in this project: ⇧A back to the live sessions";
 
 /// The header over the grid: the PROJECT TABS on the left, each with its
 /// status dots, how many cards the grid holds on the right — and how many
@@ -2620,7 +2620,7 @@ fn draw_empty(f: &mut Frame, app: &mut App, area: Rect) {
     let th = app.chrome.theme;
     let t = crate::splash::scene_time(app, app.chrome.splash_epoch);
     let mut welcome = vec![Span::styled("Welcome to ", Style::default().fg(th.text))];
-    welcome.extend(crate::splash::wordmark_word("bro", t));
+    welcome.extend(crate::splash::wordmark_word("kete", t));
     // The key line is a button, and marked as one under the pointer the
     // way the header's are.
     let mut words = Style::default().fg(th.muted);

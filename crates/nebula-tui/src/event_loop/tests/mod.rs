@@ -1696,7 +1696,7 @@ fn opening_a_known_folder_opens_its_project() {
     );
     assert_eq!(
         app.chrome.flash.as_deref(),
-        Some("demo is already a project — opened it")
+        Some("demo is already a project: opened it")
     );
     assert_eq!(
         app.selected_project().map(|p| p.name.as_str()),
@@ -2248,7 +2248,7 @@ fn terminal_window_focus_re_asks_for_pull_requests() {
     handle_terminal_event(&mut app, Event::FocusGained, &mut out);
     assert!(app.open_prs_lookup_due(&pid));
     assert!(app.pr_lookup_due(&wid));
-    assert!(out.is_empty(), "no daemon traffic — gh runs client-side");
+    assert!(out.is_empty(), "no daemon traffic: gh runs client-side");
 }
 
 /// The filter reads each pull request's draft flag as GitHub last gave
@@ -2723,7 +2723,7 @@ fn the_cursor_follows_its_pull_request_across_a_reorder() {
     assert_eq!(app.nav.sel_worktree, 3);
     assert_eq!(
         app.github.pr_preview_scroll, 12,
-        "and still where they were reading — a beat this quick must not \
+        "and still where they were reading, a beat this quick must not \
              rewind the pane under them"
     );
 }
@@ -3392,7 +3392,7 @@ fn ctrl_t_flips_the_pr_diff_file_list_between_flat_and_tree() {
     assert!(view.selected_file().is_none());
     assert_eq!(
         view.diff,
-        "crates/tui/src/ — 2 changed files\n\nM    a.rs\nM    b.rs"
+        "crates/tui/src/: 2 changed files\n\nM    a.rs\nM    b.rs"
     );
     terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
     let text = buffer_text(&terminal);
@@ -3419,7 +3419,7 @@ fn ctrl_t_flips_the_pr_diff_file_list_between_flat_and_tree() {
     assert_eq!(view.selected_file().unwrap().path, "docs/keys.md");
     assert!(view.diff.contains("+new-keys"), "{}", view.diff);
     assert!(!app.modals.diff_tree);
-    assert!(out.is_empty(), "the list's shape is bro's own business");
+    assert!(out.is_empty(), "the list's shape is kete's own business");
 }
 
 /// INPUT PARITY: Enter on a tree directory's row and a click on it are
@@ -4173,7 +4173,7 @@ fn shift_r_on_the_worktrees_panel_refreshes_pull_requests_now() {
     );
     assert!(app.modals.overlay.is_none(), "nothing to rename here");
     assert_eq!(app.chrome.flash.as_deref(), Some(RELOAD_FLASH));
-    assert!(out.is_empty(), "no daemon traffic — gh runs client-side");
+    assert!(out.is_empty(), "no daemon traffic: gh runs client-side");
 
     // The same from an open-PR row of the group, which the pane is
     // reading: its conversation is asked for again too.
@@ -4985,7 +4985,7 @@ fn mid_stream_snapshot_preserves_the_live_selection() {
 /// is not.
 #[test]
 fn footer_shows_the_nebula_version_but_never_truncates_a_flash() {
-    let stamp = concat!("bro v", env!("CARGO_PKG_VERSION"));
+    let stamp = concat!("kete v", env!("CARGO_PKG_VERSION"));
     let mut app = App::new();
     seed_tree(&mut app);
     let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
@@ -5016,7 +5016,7 @@ fn footer_shows_the_nebula_version_but_never_truncates_a_flash() {
 /// one.
 #[test]
 fn footer_flags_a_newer_release_beside_the_nameplate() {
-    let stamp = concat!("bro v", env!("CARGO_PKG_VERSION"));
+    let stamp = concat!("kete v", env!("CARGO_PKG_VERSION"));
     let mut app = App::new();
     seed_tree(&mut app);
     let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
@@ -6052,13 +6052,13 @@ fn tab_on_claude_toggles_cloud_and_collects_a_multiline_task() {
             &mut app,
             ServerEvent::Error {
                 req_id: Some(req_id),
-                message: "cloud unavailable — retry".into(),
+                message: "cloud unavailable: retry".into(),
             },
             &mut out,
         );
         assert_eq!(
             app.chrome.flash.as_deref(),
-            Some("cloud unavailable — retry")
+            Some("cloud unavailable: retry")
         );
         assert!(matches!(
             &app.modals.overlay,
@@ -7276,13 +7276,13 @@ fn shift_enter_on_a_worktree_fires_its_open_command() {
         assert!(
             flash.contains("no open command")
                 && flash.contains("Settings")
-                && flash.contains(".bro.json"),
+                && flash.contains(".kete.json"),
             "names both places: {flash}"
         );
         assert_eq!(app.nav.focus, Focus::Worktrees, "not Enter's drill-in");
 
         std::fs::write(
-            dir.path().join(".bro.json"),
+            dir.path().join(".kete.json"),
             r#"{"open": "open http://localhost:3000"}"#,
         )
         .unwrap();
@@ -7549,7 +7549,7 @@ fn menu_confirms_match_the_key_path_word_for_word() {
     assert_eq!(key_project.title, "Remove project");
     assert_eq!(
         key_project.message,
-        "Remove 'demo' from bro? Nothing on disk is touched."
+        "Remove 'demo' from kete? Nothing on disk is touched."
     );
     assert!(matches!(
         menu_project.action,
@@ -9560,7 +9560,7 @@ fn the_left_button_goes_to_a_program_that_asked_for_the_mouse() {
         &mut out,
     );
     assert_eq!(only_input(&out), b"\x1b[<0;6;4M");
-    assert!(app.pane.term_selection.is_none(), "no selection of bro's");
+    assert!(app.pane.term_selection.is_none(), "no selection of kete's");
     assert!(
         app.pane.term_locked,
         "a click into the pane still locks input"
@@ -9597,7 +9597,7 @@ fn the_left_button_goes_to_a_program_that_asked_for_the_mouse() {
     );
     assert_eq!(only_input(&out), b"\x1b[<0;11;5m");
     assert!(app.pane.term_mouse_grab.is_none(), "the release lets go");
-    assert!(app.chrome.flash.is_none(), "bro copied nothing");
+    assert!(app.chrome.flash.is_none(), "kete copied nothing");
     assert!(app.pane.term_selection.is_none());
 }
 
@@ -10629,7 +10629,7 @@ fn switching_contexts_restores_the_remembered_session() {
         matches!(out.last(), Some(ClientRequest::Detach { session }) if *session == sref),
         "leaving the worktree detaches: {out:?}"
     );
-    assert!(app.pane.term.is_none(), "no history on w2 — pane blanks");
+    assert!(app.pane.term.is_none(), "no history on w2: pane blanks");
 
     // Walking back restores the remembered session, re-attached.
     assert!(select_worktree_by_id(
@@ -10663,7 +10663,7 @@ fn switching_contexts_restores_the_remembered_session() {
         app.selected_project().map(|p| p.name.clone()),
         Some("two".into())
     );
-    assert!(app.pane.term.is_none(), "no history on p2 — pane blanks");
+    assert!(app.pane.term.is_none(), "no history on p2: pane blanks");
 
     select_project_row(&mut app, 0, &mut out);
     assert_eq!(
@@ -12146,7 +12146,7 @@ fn palette_enter_only_focuses_the_row_when_auto_attach_is_off() {
     );
     assert!(
         !app.pane.term_locked,
-        "no input lock — Enter on the row commits"
+        "no input lock: Enter on the row commits"
     );
     assert!(
         out.iter()
@@ -13483,7 +13483,7 @@ fn confirming_a_duplicate_moves_the_chord_off_its_old_action() {
         assert_eq!(app.chrome.keymap.label(crate::keymap::Action::Help), "g");
         assert_eq!(
             app.chrome.keymap.label(crate::keymap::Action::GitDiff),
-            "—",
+            "-",
             "one keystroke can only mean one thing"
         );
         // The panels agree with the map.
@@ -13535,7 +13535,7 @@ fn a_hotkey_row_resets_to_its_default_and_can_be_unbound() {
         press(&mut app, KeyCode::Char('x'), KeyModifiers::NONE, &mut out);
         assert_eq!(
             app.chrome.keymap.label(crate::keymap::Action::FocusNext),
-            "—"
+            "-"
         );
         press(&mut app, KeyCode::Backspace, KeyModifiers::NONE, &mut out);
         assert_eq!(
@@ -13805,7 +13805,7 @@ fn metrics_modal_opens_requests_and_renders() {
     );
     assert!(text.contains("1.5 GB"), "subtree memory rendered:\n{text}");
     assert!(
-        text.contains("bro daemon") && text.contains("40 MB"),
+        text.contains("kete daemon") && text.contains("40 MB"),
         "daemon row rendered:\n{text}"
     );
     assert!(
@@ -13891,8 +13891,8 @@ fn metrics_groups_prewarm_spares_under_their_own_header() {
         pos("agent-1 (claude)") < pos("warm spares (2)")
             && pos("warm spares (2)") < pos("├ claude · opus")
             && pos("├ claude · opus") < pos("└ claude")
-            && pos("└ claude") < pos("bro daemon"),
-        "live rows, then the spares tree, then bro's own:\n{text}"
+            && pos("└ claude") < pos("kete daemon"),
+        "live rows, then the spares tree, then kete's own:\n{text}"
     );
     let leaf = text
         .lines()
@@ -14017,7 +14017,7 @@ fn metrics_enter_opens_selected_session() {
     press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
     assert!(
         matches!(app.modals.overlay, Some(Overlay::Metrics(_))),
-        "Enter on a bro row keeps the modal open"
+        "Enter on a kete row keeps the modal open"
     );
 }
 
@@ -14336,7 +14336,7 @@ fn file_finder_renders_query_row_and_matches() {
     let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
     terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
     let text = buffer_text(&terminal);
-    assert!(text.contains("Find file — main (2)"), "title:\n{text}");
+    assert!(text.contains("Find file: main (2)"), "title:\n{text}");
     assert!(text.contains("type to filter…"), "query hint:\n{text}");
     assert!(text.contains("src/alpha.rs"), "rows rendered:\n{text}");
     let fin = finder(&app);
@@ -14394,7 +14394,7 @@ fn ctrl_r_flips_a_markdown_preview_between_the_page_and_its_source() {
     let view = tree_view(&app);
     assert_eq!(
         view.preview_line_count, 4,
-        "heading, rule, blank, bullet — the rendered rows"
+        "heading, rule, blank, bullet, the rendered rows"
     );
     assert!(view.rendered.is_some(), "the flowed page is kept");
 
@@ -14584,7 +14584,7 @@ fn tree_browser_renders_tree_and_preview_panes() {
     let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
     terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
     let text = buffer_text(&terminal);
-    assert!(text.contains("Tree — main (1)"), "tree title:\n{text}");
+    assert!(text.contains("Tree: main (1)"), "tree title:\n{text}");
     assert!(text.contains("type to filter…"), "filter hint:\n{text}");
     assert!(text.contains("a.txt"), "tree rows rendered:\n{text}");
     assert!(text.contains("orig"), "preview rendered:\n{text}");
@@ -14661,10 +14661,7 @@ fn embedded_editor_takes_over_the_preview_pane() {
 
     terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
     let text = buffer_text(&terminal);
-    assert!(
-        text.contains("— editing"),
-        "title shows edit state:\n{text}"
-    );
+    assert!(text.contains("editing"), "title shows edit state:\n{text}");
     assert_eq!(
         app.pane.vim.as_ref().unwrap().area,
         tree_view(&app).preview_area,
@@ -14893,7 +14890,7 @@ fn grep_overlay_renders_hits_and_editor_modal_renders_on_top() {
     terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
     let text = buffer_text(&terminal);
     assert!(
-        text.contains("Find in files — main (2 hits)"),
+        text.contains("Find in files: main (2 hits)"),
         "title:\n{text}"
     );
     assert!(text.contains("src/alpha.rs:3"), "hit location:\n{text}");
@@ -16645,7 +16642,7 @@ fn the_issue_quick_prompt_stands_on_the_modal() {
         terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
         let screen = buffer_text(&terminal);
         assert!(
-            screen.contains("Issues — demo"),
+            screen.contains("Issues: demo"),
             "the modal under:\n{screen}"
         );
         assert!(screen.contains("issue #14"), "the box over it:\n{screen}");
@@ -16790,7 +16787,7 @@ fn the_issue_preset_picker_stands_on_the_modal() {
         terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
         let screen = buffer_text(&terminal);
         assert!(
-            screen.contains("Issues — demo"),
+            screen.contains("Issues: demo"),
             "the modal under:\n{screen}"
         );
         assert!(screen.contains("reviewer"), "the picker over it:\n{screen}");
@@ -16830,7 +16827,7 @@ fn the_issue_preset_picker_stands_on_the_modal() {
         terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
         let screen = buffer_text(&terminal);
         assert!(
-            screen.contains("Issues — demo"),
+            screen.contains("Issues: demo"),
             "the modal under:\n{screen}"
         );
         press(&mut app, KeyCode::Esc, KeyModifiers::NONE, &mut out);
@@ -17386,7 +17383,7 @@ fn presets_e_edits_in_place() {
         let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
         terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
         let text = buffer_text(&terminal);
-        assert!(text.contains("Edit preset — scratch"), "title:\n{text}");
+        assert!(text.contains("Edit preset: scratch"), "title:\n{text}");
         assert!(text.contains("◂ default ▸"), "focused choice:\n{text}");
 
         press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
@@ -17874,7 +17871,7 @@ fn the_project_tab_run_command_is_typed_into_the_selected_projects_entry() {
         let screen = draw_to_string(&mut app, 100, 40);
         assert!(screen.contains("Run command"), "{screen}");
         assert!(
-            screen.contains("[.bro.json]"),
+            screen.contains("[.kete.json]"),
             "unset reads as the file: {screen}"
         );
 
@@ -17948,7 +17945,7 @@ fn the_project_tab_run_command_is_typed_into_the_selected_projects_entry() {
         open_on_row(&mut app, &mut out);
         let screen = draw_to_string(&mut app, 100, 40);
         assert!(screen.contains("/tmp/other"), "{screen}");
-        assert!(screen.contains("[.bro.json]"), "{screen}");
+        assert!(screen.contains("[.kete.json]"), "{screen}");
         press(&mut app, KeyCode::Esc, KeyModifiers::NONE, &mut out);
 
         // An empty Enter is the way back to the file — the entry goes.
@@ -17962,7 +17959,7 @@ fn the_project_tab_run_command_is_typed_into_the_selected_projects_entry() {
         assert_eq!(saved(&path)["projects"], serde_json::json!({}));
         let view = settings_view(&app);
         assert!(
-            matches!(&view.notice, Some((t, _)) if t.contains(".bro.json")),
+            matches!(&view.notice, Some((t, _)) if t.contains(".kete.json")),
             "back to the file: {:?}",
             view.notice
         );
@@ -18768,7 +18765,7 @@ fn shift_tab_without_presets_opens_a_picker_that_adds_one() {
             terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
             let text = buffer_text(&terminal);
             assert!(
-                text.contains("no presets yet — Ctrl+a creates one"),
+                text.contains("no presets yet: Ctrl+a creates one"),
                 "{text}"
             );
 
@@ -19710,7 +19707,7 @@ fn empty_presets_list_shows_the_hint() {
             terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
             let text = buffer_text(&terminal);
             assert!(
-                text.contains("no presets yet — Ctrl+a creates one"),
+                text.contains("no presets yet: Ctrl+a creates one"),
                 "{text}"
             );
             // Enter and Ctrl+e on nothing only nudge toward Ctrl+a.
@@ -19721,7 +19718,7 @@ fn empty_presets_list_shows_the_hint() {
             ));
             assert_eq!(
                 app.chrome.flash.as_deref(),
-                Some("no preset selected — Ctrl+a creates one")
+                Some("no preset selected: Ctrl+a creates one")
             );
             press(
                 &mut app,
@@ -21532,7 +21529,7 @@ fn key_combo_display_sits_on_the_footers_padding_row_at_the_left() {
         "  j  - Move down",
         "the row above the bar, at the far left"
     );
-    assert!(rows[29].contains("bro v"), "the bar itself is untouched");
+    assert!(rows[29].contains("kete v"), "the bar itself is untouched");
     let cell = &terminal.backend().buffer()[(2, 28)];
     assert_eq!(cell.symbol(), "j");
     assert_eq!(cell.bg, app.chrome.theme.sel_bg, "the key sits in a keycap");

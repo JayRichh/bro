@@ -1198,7 +1198,7 @@ pub(crate) fn open_pr_diff_view(
     }
     let Some(diff) = diff else {
         app.chrome.flash = Some(format!(
-            "couldn't read the diff for #{number} — is `gh` set up?"
+            "couldn't read the diff for #{number}: is `gh` set up?"
         ));
         return;
     };

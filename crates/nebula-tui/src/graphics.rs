@@ -307,7 +307,7 @@ fn image_title(path: &Path) -> String {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string());
-    format!("Image preview — {name}")
+    format!("Image preview: {name}")
 }
 
 fn raster_to_lines(

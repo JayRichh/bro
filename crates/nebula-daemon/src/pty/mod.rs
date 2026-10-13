@@ -352,7 +352,7 @@ impl PtySession {
         for name in &spec.unset_env {
             cmd.env_remove(name);
         }
-        // Agents are told to run `bro rename`, `bro spawn` and friends, and
+        // Agents are told to run `kete rename`, `kete spawn` and friends, and
         // there is no login shell here to put an install dir on PATH: lead
         // PATH with the daemon's own dir so those calls reach this binary,
         // installed or not.
@@ -661,7 +661,7 @@ impl PtySession {
                         groups.push(pgid);
                     }
                 }
-                tracing::warn!(session = ?sref, pid, ?groups, "still running after SIGHUP — SIGKILLing its process groups");
+                tracing::warn!(session = ?sref, pid, ?groups, "still running after SIGHUP: SIGKILLing its process groups");
                 for pgid in groups {
                     let _ = killpg(Pid::from_raw(pgid as i32), Signal::SIGKILL);
                 }
@@ -679,7 +679,7 @@ impl PtySession {
         let Some(pid) = self.child_pid else { return };
         let ended = self.job.as_ref().map(|job| job.terminate());
         if !matches!(ended, Some(Ok(()))) {
-            tracing::warn!(session = ?self.sref, pid, ?ended, "no job to end — killing the pid tree");
+            tracing::warn!(session = ?self.sref, pid, ?ended, "no job to end: killing the pid tree");
             crate::platform::kill_tree(pid);
         }
     }
@@ -1392,7 +1392,7 @@ mod tests {
             SessionRef::Agent(AgentId::generate()),
             SpawnSpec {
                 program: "cmd.exe".into(),
-                args: vec!["/d".into(), "/c".into(), "echo bro-pty-ok& exit 3".into()],
+                args: vec!["/d".into(), "/c".into(), "echo kete-pty-ok& exit 3".into()],
                 cwd: std::env::temp_dir(),
                 env: vec![],
                 scrub_env: &[],
@@ -1417,7 +1417,7 @@ mod tests {
         assert_eq!(code, Some(3));
         let (_, bytes) = session.snapshot(None);
         let out = String::from_utf8_lossy(&bytes);
-        assert!(out.contains("bro-pty-ok"), "child printed: {out:?}");
+        assert!(out.contains("kete-pty-ok"), "child printed: {out:?}");
     }
 
     /// `kill` ends the child's whole tree through its job object.

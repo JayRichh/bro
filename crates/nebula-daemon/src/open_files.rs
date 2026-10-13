@@ -21,17 +21,17 @@ use crate::registry::Daemon;
 /// pi, like the worktree and spawn guidance (all three take
 /// `--append-system-prompt`): codex and cursor have no such flag.
 pub const CLAUDE_OPEN_GUIDANCE: &str =
-    "[bro] Only when the user explicitly asks you to open or \
-show a file, image, mockup or diagram in bro (\"open it\", \"show me the file\", \"show the \
-diagram\", \"open these in bro\") — and never on \
-your own initiative — save it to a local file when needed, then run this shell command, exactly \
-once per set of files:\n\n  bro open \
+    "[kete] Only when the user explicitly asks you to open or \
+show a file, image, mockup or diagram in kete (\"open it\", \"show me the file\", \"show the \
+diagram\", \"open these in kete\") (and never on \
+your own initiative) save it to a local file when needed, then run this shell command, exactly \
+once per set of files:\n\n  kete open \
 <file> [<file>…]\n\nwith paths relative to your working directory or absolute. A file you wrote or \
 changed, a report, options for the user to pick from: none of these is a reason to open anything \
-unasked — name the path in your reply and let the user ask. For diagrams, write a `.mmd` file or a \
+unasked: name the path in your reply and let the user ask. For diagrams, write a `.mmd` file or a \
 ```mermaid fenced block in Markdown; for mockups, write an image file (png, jpg, gif, webp, or svg). \
-bro shows text, images and Mermaid diagrams to the user at once, inside this app, as a tabbed \
-modal — one tab per file, previewed, editable on Enter — so do not paste the files' contents into \
+kete shows text, images and Mermaid diagrams to the user at once, inside this app, as a tabbed \
+modal (one tab per file, previewed, editable on Enter) so do not paste the files' contents into \
 your reply as well: say in one line what you opened and carry on. If the command fails, report the \
 error and name the paths instead.";
 
@@ -68,12 +68,12 @@ mod tests {
     /// only, and for previewable local files only.
     #[test]
     fn the_open_guidance_is_explicit_ask_and_previewable_files_only() {
-        assert!(GUIDANCE.starts_with("[bro] Only when the user explicitly asks"));
+        assert!(GUIDANCE.starts_with("[kete] Only when the user explicitly asks"));
         assert!(GUIDANCE.contains("never on your own initiative"));
         assert!(GUIDANCE.contains("name the path in your reply and let the user ask"));
         assert!(GUIDANCE.contains("image, mockup or diagram"));
         assert!(GUIDANCE.contains("```mermaid fenced block"));
-        assert!(GUIDANCE.contains("bro open <file> [<file>…]"));
+        assert!(GUIDANCE.contains("kete open <file> [<file>…]"));
         assert!(!GUIDANCE.contains("When you want the user to look at a file"));
     }
 }

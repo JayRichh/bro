@@ -618,7 +618,7 @@ pub(super) fn draw_strip(
     let dim = Style::default().fg(th.nested_dim);
     let Some(band) = cursor.and_then(|i| bands.get(i)) else {
         f.render_widget(
-            Paragraph::new(Span::styled("nothing selected — j/k picks a row", dim)),
+            Paragraph::new(Span::styled("nothing selected: j/k picks a row", dim)),
             inner,
         );
         app.chrome

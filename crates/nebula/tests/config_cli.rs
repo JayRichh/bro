@@ -9,7 +9,7 @@ use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
 fn command(data: &Path, args: &[&str]) -> Command {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_bro"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_kete"));
     cmd.args(args)
         .env(DATA_DIR, data)
         .env_remove(CONFIG_FILE)
@@ -18,7 +18,7 @@ fn command(data: &Path, args: &[&str]) -> Command {
 }
 
 fn nebula(data: &Path, args: &[&str]) -> Output {
-    command(data, args).output().expect("failed to run bro")
+    command(data, args).output().expect("failed to run kete")
 }
 
 fn text(bytes: &[u8]) -> String {

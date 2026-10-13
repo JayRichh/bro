@@ -605,7 +605,7 @@ pub const SETTINGS_TABS: &[SettingsTab] = &[
             SettingSpec {
                 kind: SettingKind::SshSyncConfig,
                 label: "Sync settings over ssh",
-                hint: "bro ssh / tunnel carry config.json and presets to the remote (config.local.json stays)",
+                hint: "kete ssh / tunnel carry config.json and presets to the remote (config.local.json stays)",
                 group: "",
             },
         ]),
@@ -693,7 +693,7 @@ pub const SETTINGS_TABS: &[SettingsTab] = &[
             SettingSpec {
                 kind: SettingKind::Icons,
                 label: "File icons",
-                hint: "Per-file-type icons where files are listed: nerd (Nerd Font glyphs), ascii (a two-letter tag), off; auto picks nerd when the Windows Terminal profile's font is a Nerd Font (bro setup terminal installs one)",
+                hint: "Per-file-type icons where files are listed: nerd (Nerd Font glyphs), ascii (a two-letter tag), off; auto picks nerd when the Windows Terminal profile's font is a Nerd Font (kete setup terminal installs one)",
                 group: "",
             },
             SettingSpec {
@@ -735,7 +735,7 @@ pub const SETTINGS_TABS: &[SettingsTab] = &[
             SettingSpec {
                 kind: SettingKind::Kanban,
                 label: "Kanban",
-                hint: "Lay the grid out as lanes by status — Needs input, Running, Unseen, Done, PR open — instead of a band per worktree (⇧K)",
+                hint: "Lay the grid out as lanes by status (Needs input, Running, Unseen, Done, PR open) instead of a band per worktree (⇧K)",
                 group: "",
             },
             SettingSpec {
@@ -806,13 +806,13 @@ pub const SETTINGS_TABS: &[SettingsTab] = &[
             SettingSpec {
                 kind: SettingKind::RunCommand,
                 label: "Run command",
-                hint: "Shell line a menu's Run starts in this project's worktrees (empty = its .bro.json \"run\")",
+                hint: "Shell line a menu's Run starts in this project's worktrees (empty = its .kete.json \"run\")",
                 group: "",
             },
             SettingSpec {
                 kind: SettingKind::OpenCommand,
                 label: "Open command",
-                hint: "Shell line ⇧Enter / ⇧O runs to open a worktree of this project, e.g. open http://localhost:3000 (empty = its .bro.json \"open\")",
+                hint: "Shell line ⇧Enter / ⇧O runs to open a worktree of this project, e.g. open http://localhost:3000 (empty = its .kete.json \"open\")",
                 group: "",
             },
         ]),
@@ -1137,7 +1137,7 @@ pub struct Config {
     pub theme: String,
     /// The ICON STYLE of the FILE ICONS (`crate::icons`): `nerd`,
     /// `ascii`, `off`, or `auto` — the default — which picks `nerd` when
-    /// the Windows Terminal profile Bro runs in names a Nerd Font, else
+    /// the Windows Terminal profile Kete runs in names a Nerd Font, else
     /// `ascii`. Resolved when the setting is applied; the file keeps the
     /// word, so `auto` looks again on the next start.
     pub icons: String,
@@ -1422,7 +1422,7 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub harnesses: BTreeMap<String, nebula_core::harness::HarnessOverride>,
     /// PROFILES (`profiles` in config.json): the accounts a launch can run
-    /// under, several per harness. `bro profile` edits the list; the
+    /// under, several per harness. `kete profile` edits the list; the
     /// QUICK PROMPT's `^A` cycles a launch through its harness's ones, and
     /// a card names the one its session runs on when it is not the
     /// harness's default. See `nebula_core::profiles`.
@@ -1698,7 +1698,7 @@ impl Config {
         #[cfg(test)]
         assert!(
             CONFIG_PATH_OVERRIDE.with(|p| p.borrow().is_some()),
-            "Config::save() in a test without a path override — wrap the \
+            "Config::save() in a test without a path override: wrap the \
              test body in config::with_config_path (or with_default_config)"
         );
         self.write_layers(&settings_path(), &local_settings_path(), false)
@@ -1713,7 +1713,7 @@ impl Config {
         #[cfg(test)]
         assert!(
             CONFIG_PATH_OVERRIDE.with(|p| p.borrow().is_some()),
-            "Config::reset_to_defaults() in a test without a path override — wrap \
+            "Config::reset_to_defaults() in a test without a path override: wrap \
              the test body in config::with_config_path (or with_default_config)"
         );
         let local = local_settings_path();
@@ -2174,7 +2174,7 @@ impl Config {
             }
         };
         if let Some(problem) = descriptor.problem() {
-            hint.push_str(&format!(" — broken: {problem}"));
+            hint.push_str(&format!(" broken: {problem}"));
         }
         hint
     }
@@ -4452,7 +4452,7 @@ mod tests {
             cfg.project(demo).value_label(SettingKind::RunCommand),
             PROJECT_FILE_CHOICE
         );
-        assert_eq!(cfg.value_label(SettingKind::RunCommand), ".bro.json");
+        assert_eq!(cfg.value_label(SettingKind::RunCommand), ".kete.json");
         assert_eq!(cfg.project_text_value(demo, SettingKind::RunCommand), "");
 
         // The tab's cycle never touches a typed row.
@@ -4541,7 +4541,7 @@ mod tests {
             cfg.project(demo).value_label(SettingKind::OpenCommand),
             PROJECT_FILE_CHOICE
         );
-        assert_eq!(cfg.value_label(SettingKind::OpenCommand), ".bro.json");
+        assert_eq!(cfg.value_label(SettingKind::OpenCommand), ".kete.json");
 
         // A typed row: cycling its tab row changes nothing, and the
         // top-level setter is not its.

@@ -52,8 +52,8 @@
 
 <aside class="flex min-h-0 flex-col border-r border-line-soft bg-side">
   <div class="flex h-11 flex-none items-center gap-2 pr-3 pl-3.5">
-    <img src="/bro-64.png" alt="" width="22" height="22" draggable="false" class="rounded-[5px]" />
-    <span class="text-[15px] font-bold tracking-tight text-fg-strong">bro</span>
+    <img src="/kete-64.png" alt="" width="22" height="22" draggable="false" class="rounded-[5px]" />
+    <span class="text-[15px] font-bold tracking-tight text-fg-strong">kete</span>
     <span
       class="ml-auto inline-flex items-center gap-[5px] text-[10.5px] text-muted"
       title={m.connected ? `daemon pid ${m.daemon_pid}` : 'Not connected'}

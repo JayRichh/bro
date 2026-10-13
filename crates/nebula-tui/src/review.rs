@@ -94,14 +94,20 @@ fn read_store(path: &Path) -> StoreFile {
     })
 }
 
+#[cfg(not(test))]
 fn store_path() -> PathBuf {
-    #[cfg(test)]
-    {
-        if let Some(path) = STORE_PATH_OVERRIDE.with(|p| p.borrow().clone()) {
-            return path;
-        }
-    }
     nebula_core::paths::data_dir().join("reviewed.json")
+}
+
+/// Tests: the override, else a temp file. A test that marks a file without
+/// a store of its own must not write the user's real data dir.
+#[cfg(test)]
+fn store_path() -> PathBuf {
+    STORE_PATH_OVERRIDE
+        .with(|p| p.borrow().clone())
+        .unwrap_or_else(|| {
+            std::env::temp_dir().join(format!("kete-test-reviewed-{}.json", std::process::id()))
+        })
 }
 
 #[cfg(test)]

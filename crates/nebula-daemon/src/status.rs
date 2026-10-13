@@ -1505,7 +1505,7 @@ mod tests {
             now,
         );
         let fx = m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(5));
-        assert_eq!(status_of(&fx), None, "stays running — no transition");
+        assert_eq!(status_of(&fx), None, "stays running, no transition");
         assert_eq!(m.status(), AgentStatus::Running);
 
         // Subagent finishes; drain grace must elapse before finished.
@@ -1716,7 +1716,7 @@ mod tests {
             now,
         );
         let fx = progress(&mut m, false, now + Duration::from_secs(5));
-        assert_eq!(status_of(&fx), None, "stays running — no transition");
+        assert_eq!(status_of(&fx), None, "stays running, no transition");
         assert_eq!(m.status(), AgentStatus::Running);
         // The Stop that follows a beat later agrees, and the drain still owns
         // the promotion.

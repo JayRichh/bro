@@ -1,9 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "bro",
-  "mainBinaryName": "bro-desktop",
+  "productName": "kete",
+  "mainBinaryName": "kete-desktop",
   "version": "0.44.0",
-  "identifier": "nz.bro.desktop",
+  "identifier": "nz.kete.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -15,7 +15,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "bro",
+        "title": "kete",
         "width": 1440,
         "height": 900,
         "minWidth": 900,

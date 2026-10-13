@@ -1,6 +1,6 @@
-# Bro — Windows port of nebula
+# Kete — Windows port of nebula
 
-Bro is a cross-platform fork of [nebula](https://github.com/AgentSystemLabs/nebula) (MIT) that runs natively on Windows 10 1809+ and Windows 11 (x64, ARM64). macOS and Linux keep building from the same tree. Binary: `bro`.
+Kete is a cross-platform fork of [nebula](https://github.com/AgentSystemLabs/nebula) (MIT) that runs natively on Windows 10 1809+ and Windows 11 (x64, ARM64). macOS and Linux keep building from the same tree. Binary: `kete`.
 
 ## Ground rules
 
@@ -14,7 +14,7 @@ Bro is a cross-platform fork of [nebula](https://github.com/AgentSystemLabs/nebu
 - **Startup DSR:** ConPTY sends `ESC[6n` at startup and blocks until it gets a reply. The daemon already answers DSR (`pty/kitty.rs` `Reply::CursorPosition`).
 - **Passthrough:** OSC 0 titles, OSC 8 hyperlinks, OSC 9;4 progress, kitty keyboard queries (`ESC[>5u`, `ESC[?u`) and DECSET 2026 all reach the reader unchanged.
 - **Claude on Windows:** emits no OSC 9;4 even with `TERM=xterm-256color`, `WT_SESSION` or `TERM_PROGRAM` set. Busy/idle uses hooks plus the OSC 0 spinner glyph (`pty/title.rs`). Cancel detection uses the title flipping to the idle glyph while no permission notification is pending.
-- **Codex:** spinner glyph titles (`⠋ bro`) arrive. On first run in a folder, Codex shows trust and update dialogs.
+- **Codex:** spinner glyph titles (`⠋ kete`) arrive. On first run in a folder, Codex shows trust and update dialogs.
 
 ## Platform map
 
@@ -31,7 +31,7 @@ Bro is a cross-platform fork of [nebula](https://github.com/AgentSystemLabs/nebu
 | In-place restart (`handoff.rs`) | exec over self, fds kept | unsupported: the daemon stops and sessions resume by id |
 | Agent launch | `/bin/sh -c` login-shell wrapper | direct spawn: resolve via PATH + PATHEXT; `.cmd`/`.bat` through `cmd /d /s /c` with strict quoting; `.ps1` through `pwsh -NoProfile -File` (or `powershell`) |
 | User shell | `$SHELL` | `BRO_SHELL`, else pwsh 7, then `powershell.exe`, then `%COMSPEC%` |
-| Hooks | `curl … ${API_TOKEN}` shell strings | `bro _hook <event>` subcommand: token from env, payload from stdin |
+| Hooks | `curl … ${API_TOKEN}` shell strings | `kete _hook <event>` subcommand: token from env, payload from stdin |
 | `ssh` / `tunnel` / `browser` | supported | disabled on Windows at first (clear error) |
 
 ## Features beyond the port

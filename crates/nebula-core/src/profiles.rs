@@ -414,7 +414,7 @@ fn edit_file(
 /// The latest PLAN USAGE a profile's sessions printed — Claude's
 /// `You've used 91% of your weekly limit · resets 2pm` — read off a
 /// session's screen by the daemon (`pty::usage`) and kept per profile, so
-/// the QUICK PROMPT's profile field and `bro profile list` can say how
+/// the QUICK PROMPT's profile field and `kete profile list` can say how
 /// much of each account is left before you pick one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Usage {

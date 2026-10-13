@@ -17,7 +17,7 @@
 use std::time::Duration;
 
 /// GitHub's "latest release" page for this repo.
-pub const LATEST_URL: &str = "https://github.com/JayRichh/bro/releases/latest";
+pub const LATEST_URL: &str = "https://github.com/JayRichh/kete/releases/latest";
 
 /// How often the check re-runs once the TUI is up; the first runs at start.
 pub const DEFAULT_INTERVAL: Duration = Duration::from_secs(60 * 60);

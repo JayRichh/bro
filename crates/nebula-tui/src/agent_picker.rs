@@ -16,7 +16,7 @@ use nebula_core::{Agent, AgentKind, WorktreeId};
 /// Shown instead of a picker when a hand-edited config has switched every
 /// harness off (the AGENTS TAB refuses to turn off the last one).
 pub(crate) const NO_HARNESS_FLASH: &str =
-    "every harness is disabled — enable one in Settings › Agents";
+    "every harness is disabled: enable one in Settings › Agents";
 
 /// What one kind picker opens with: its title, where its rows launch, and
 /// the context every row carries.

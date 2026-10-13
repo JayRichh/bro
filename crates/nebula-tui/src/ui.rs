@@ -677,7 +677,7 @@ fn key_hint(app: &App, action: crate::keymap::Action) -> String {
         .keymap
         .shown_first(action)
         .map(|c| c.display())
-        .unwrap_or_else(|| "—".into())
+        .unwrap_or_else(|| "-".into())
 }
 
 /// The keys line at the bottom of the settings overlay. It changes with
@@ -1311,7 +1311,7 @@ fn draw_pr_preview(f: &mut Frame, app: &mut App, area: Rect, focused: bool) {
     let lines: Vec<Line> = match (&detail, failed) {
         (Some(detail), _) => crate::pr_preview::lines(detail, inner.width as usize, th),
         (None, true) => placeholder(&format!(
-                "couldn't read this pull request — is `gh` installed and logged in?                  {} still opens it in the browser.",
+                "couldn't read this pull request: is `gh` installed and logged in?                  {} still opens it in the browser.",
             key_hint(app, Action::Activate)
         )),
         (None, false) => placeholder("reading it…"),
@@ -1742,7 +1742,7 @@ fn draw_booting_terminal(f: &mut Frame, inner: Rect, th: Theme) {
         )),
         Line::from(""),
         Line::from(Span::styled(
-            "booting — the screen appears as soon as it paints",
+            "booting, the screen appears as soon as it paints",
             Style::default().fg(th.dim),
         )),
     ])
@@ -1805,7 +1805,7 @@ fn draw_empty_terminal_hero(f: &mut Frame, inner: Rect, th: Theme) {
     lines.push(Line::from(vec![
         Span::styled("◆ ", Style::default().fg(th.accent)),
         Span::styled(
-            "bro",
+            "kete",
             Style::default().fg(th.text).add_modifier(Modifier::BOLD),
         ),
     ]));

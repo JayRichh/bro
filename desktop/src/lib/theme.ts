@@ -66,14 +66,14 @@ export function xtermTheme(): ITheme {
   };
 }
 
-/** (Re)define the `bro` Monaco theme from the current tokens. */
+/** (Re)define the `kete` Monaco theme from the current tokens. */
 export function defineMonacoTheme(
   monaco: typeof import('monaco-esm/editor/editor.api.js'),
   dark: boolean,
 ) {
   const c = (n: string) => token(`color-${n}`);
   const fgOf = (n: string) => token(`color-${n}`).slice(1, 7);
-  monaco.editor.defineTheme('bro', {
+  monaco.editor.defineTheme('kete', {
     base: dark ? 'vs-dark' : 'vs',
     inherit: true,
     rules: [
@@ -113,5 +113,5 @@ export function defineMonacoTheme(
       focusBorder: '#00000000',
     },
   });
-  monaco.editor.setTheme('bro');
+  monaco.editor.setTheme('kete');
 }

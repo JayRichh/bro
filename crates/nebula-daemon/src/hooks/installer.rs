@@ -1,7 +1,7 @@
 //! Managed-hook installation into the agent CLI's config:
 //! `<worktree>/.claude/settings.local.json` (Claude Code),
 //! `~/.codex/hooks.json` (Codex CLI), `<worktree>/.cursor/hooks.json`
-//! (Cursor CLI), or `~/.copilot/hooks/bro.json` (Copilot CLI, a file of
+//! (Cursor CLI), or `~/.copilot/hooks/kete.json` (Copilot CLI, a file of
 //! its own in its own dialect). Pi and OpenCode have no hook file — their managed
 //! TypeScript extension and plugin are `pi_extension.rs` and
 //! `opencode_plugin.rs`, which share this module's atomic writer.
@@ -131,7 +131,10 @@ const COPILOT_EVENTS: &[(&str, &str)] = &[
 const COPILOT_HOOKS_DIR: &str = "hooks";
 /// The managed file in [`COPILOT_HOOKS_DIR`]: wholly nebula's, rewritten
 /// on every spawn, so no merge with the user's own hook files is needed.
-const COPILOT_HOOKS_FILE: &str = "bro.json";
+const COPILOT_HOOKS_FILE: &str = "kete.json";
+/// The same file under Kete's old name. Copilot loads every file in the
+/// dir, so it goes when the new one is written, or each event fires twice.
+const LEGACY_COPILOT_HOOKS_FILE: &str = "bro.json";
 /// `~/.copilot`, Copilot's home when `$COPILOT_HOME` is unset.
 const COPILOT_DIR: &str = ".copilot";
 /// How long Copilot lets a managed hook run before abandoning it.
@@ -147,7 +150,7 @@ const COPILOT_HOOK_TIMEOUT_SECS: u32 = 10;
 fn hook_subcommand(endpoint: &str, event: &str) -> String {
     let exe = std::env::current_exe()
         .map(|p| shell_neutral_path(&p.display().to_string()))
-        .unwrap_or_else(|_| "bro".into());
+        .unwrap_or_else(|_| "kete".into());
     format!("{exe} {HOOK_SUBCOMMAND} {endpoint} {event}")
 }
 
@@ -155,7 +158,7 @@ fn hook_subcommand(endpoint: &str, event: &str) -> String {
 /// word: `/` separators (bash eats a bare `\`), and the part after the
 /// drive quoted (spaces survive, and cmd reads no `/` as a switch) while
 /// the drive stays bare (PowerShell takes a line opening with a quote as a
-/// string, not a command): `C:"/Program Files/bro/bro.exe"`.
+/// string, not a command): `C:"/Program Files/kete/kete.exe"`.
 #[cfg(windows)]
 fn shell_neutral_path(path: &str) -> String {
     let path = path
@@ -247,6 +250,13 @@ fn hook_command(endpoint: &str, event: &str) -> String {
 /// its appended system prompt tells it to use (codex/cursor run with their
 /// skip-permissions flags).
 const CLAUDE_ALLOW_RULES: &[&str] = &[
+    "Bash(kete rename:*)",
+    "Bash(kete worktree:*)",
+    "Bash(kete spawn:*)",
+    "Bash(kete open:*)",
+    "Bash(kete sessions:*)",
+    "Bash(kete read:*)",
+    "Bash(kete ask:*)",
     "Bash(bro rename:*)",
     "Bash(bro worktree:*)",
     "Bash(bro spawn:*)",
@@ -353,7 +363,7 @@ fn root_object_mut<'a>(root: &'a mut Value, path: &Path) -> Result<&'a mut Map<S
     match root.as_object_mut() {
         Some(obj) => Ok(obj),
         None => bail!(
-            "{} is not a JSON object — refusing to modify it",
+            "{} is not a JSON object: refusing to modify it",
             path.display()
         ),
     }
@@ -365,7 +375,7 @@ fn object_mut<'a>(v: &'a mut Value, what: &str, path: &Path) -> Result<&'a mut M
     match v.as_object_mut() {
         Some(obj) => Ok(obj),
         None => bail!(
-            "{what} in {} is not an object — refusing to modify it",
+            "{what} in {} is not an object: refusing to modify it",
             path.display()
         ),
     }
@@ -376,7 +386,7 @@ fn array_mut<'a>(v: &'a mut Value, what: &str, path: &Path) -> Result<&'a mut Ve
     match v.as_array_mut() {
         Some(arr) => Ok(arr),
         None => bail!(
-            "{what} in {} is not an array — refusing to modify it",
+            "{what} in {} is not an array: refusing to modify it",
             path.display()
         ),
     }
@@ -489,7 +499,7 @@ pub fn copilot_home() -> PathBuf {
 }
 
 /// Write nebula's managed hooks for Copilot into
-/// `<copilot_home>/hooks/bro.json`, in Copilot's own dialect: a top-level
+/// `<copilot_home>/hooks/kete.json`, in Copilot's own dialect: a top-level
 /// `"version": 1`, camelCase event keys, and per entry a `bash` and a
 /// `powershell` command (Copilot picks the one for its platform) with a
 /// timeout. The file is nebula's alone, so it is written whole — and left
@@ -509,11 +519,18 @@ pub fn install_copilot_hooks(copilot_home: &Path) -> Result<()> {
         );
     }
     let root = json!({ "version": 1, "hooks": hooks });
+    let dir = copilot_home.join(COPILOT_HOOKS_DIR);
     install_unless_unchanged(
-        &copilot_home.join(COPILOT_HOOKS_DIR),
+        &dir,
         COPILOT_HOOKS_FILE,
         &serde_json::to_string_pretty(&root)?,
-    )
+    )?;
+    match std::fs::remove_file(dir.join(LEGACY_COPILOT_HOOKS_FILE)) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            Err(e).context("remove the old Copilot hooks file")
+        }
+        _ => Ok(()),
+    }
 }
 
 fn load_hooks_root(path: &Path) -> Result<Value> {
@@ -527,7 +544,7 @@ fn load_hooks_root(path: &Path) -> Result<Value> {
     match serde_json::from_str(&text) {
         Ok(v) => Ok(v),
         Err(e) => bail!(
-            "{} is not valid JSON ({e}) — refusing to modify it; fix or remove the file",
+            "{} is not valid JSON ({e}): refusing to modify it; fix or remove the file",
             path.display()
         ),
     }
@@ -628,12 +645,12 @@ pub fn install_cursor_title_rule(cwd: &Path) -> Result<()> {
 fn cursor_title_rule() -> String {
     format!(
         "---
-description: Bro session auto-title (managed by bro — edits are overwritten)
+description: Kete session auto-title (managed by kete: edits are overwritten)
 alwaysApply: true
 ---
 
 This rule applies only when the environment variable NEBULA_AGENT_ID is set
-(the session runs inside bro). If it is unset, ignore this rule entirely.
+(the session runs inside kete). If it is unset, ignore this rule entirely.
 
 On the first user message of a new conversation:
 
@@ -769,13 +786,16 @@ mod tests {
     fn hook_commands_run_the_hook_subcommand() {
         let exe = shell_neutral_path(&std::env::current_exe().unwrap().display().to_string());
         assert_eq!(
-            shell_neutral_path(r"C:\Program Files\bro\bro.exe"),
-            r#"C:"/Program Files/bro/bro.exe""#
+            shell_neutral_path(r"C:\Program Files\kete\kete.exe"),
+            r#"C:"/Program Files/kete/kete.exe""#
         );
-        assert_eq!(shell_neutral_path(r"\\?\D:\b\bro.exe"), r#"D:"/b/bro.exe""#);
         assert_eq!(
-            shell_neutral_path(r"\\host\share\bro.exe"),
-            r#""//host/share/bro.exe""#
+            shell_neutral_path(r"\\?\D:\b\kete.exe"),
+            r#"D:"/b/kete.exe""#
+        );
+        assert_eq!(
+            shell_neutral_path(r"\\host\share\kete.exe"),
+            r#""//host/share/kete.exe""#
         );
         assert_eq!(
             hook_command("claude", "UserPromptSubmit"),
@@ -882,7 +902,7 @@ mod tests {
     fn copilot_installs_its_own_dialect_into_its_hooks_dir() {
         let tmp = tempfile::tempdir().unwrap();
         install_copilot_hooks(tmp.path()).unwrap();
-        let hooks = read_json(tmp.path(), "hooks/bro.json");
+        let hooks = read_json(tmp.path(), "hooks/kete.json");
         assert_eq!(hooks["version"], json!(1));
         let events: Vec<&str> = hooks["hooks"]
             .as_object()
@@ -903,10 +923,16 @@ mod tests {
 
         // Rewritten whole and only when it changed: a second install
         // leaves the file's bytes as they were.
-        let path = tmp.path().join("hooks").join("bro.json");
+        let path = tmp.path().join("hooks").join("kete.json");
         let before = std::fs::read_to_string(&path).unwrap();
         install_copilot_hooks(tmp.path()).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+
+        // The file Bro wrote goes, so no event fires twice.
+        let legacy = tmp.path().join("hooks").join(LEGACY_COPILOT_HOOKS_FILE);
+        std::fs::write(&legacy, &before).unwrap();
+        install_copilot_hooks(tmp.path()).unwrap();
+        assert!(!legacy.exists());
     }
 
     #[test]
@@ -999,13 +1025,13 @@ mod tests {
         let path = tmp.path().join(".cursor/rules/nebula-title.mdc");
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("alwaysApply: true"));
-        assert!(text.contains("bro rename"));
+        assert!(text.contains("kete rename"));
         assert!(text.contains("NEBULA_AGENT_ID"), "must be env-guarded");
         // Wholly nebula-owned: a scribbled-on file is simply replaced.
         std::fs::write(&path, "user scribbles").unwrap();
         install_cursor_title_rule(tmp.path()).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("bro rename"));
+        assert!(text.contains("kete rename"));
     }
 
     #[test]
@@ -1031,7 +1057,7 @@ mod tests {
         let settings = read_settings(tmp.path());
         assert_eq!(settings["permissions"]["allow"][0], json!("Bash(ls:*)"));
         let stop = settings["hooks"]["Stop"].as_array().unwrap();
-        assert_eq!(stop.len(), 2, "user group + bro group");
+        assert_eq!(stop.len(), 2, "user group + kete group");
         assert_eq!(stop[0]["hooks"][0]["command"], json!("say done"));
         assert_eq!(stop[1]["_nebulaManaged"], json!(true));
     }
@@ -1114,7 +1140,7 @@ mod tests {
         install_codex_hooks(tmp.path()).unwrap();
         let hooks = read_json(tmp.path(), "hooks.json");
         let stop = hooks["hooks"]["Stop"].as_array().unwrap();
-        assert_eq!(stop.len(), 2, "foreign managed group + bro group");
+        assert_eq!(stop.len(), 2, "foreign managed group + kete group");
         assert_eq!(stop[0]["_mcManaged"], json!(true));
         assert_eq!(stop[1]["_nebulaManaged"], json!(true));
     }
@@ -1238,7 +1264,7 @@ mod tests {
         assert!(hooks["hooks"].get("UserPromptSubmit").is_none());
         // Foreign managed group survives ahead of ours.
         let stop = hooks["hooks"]["stop"].as_array().unwrap();
-        assert_eq!(stop.len(), 2, "mc group + bro group");
+        assert_eq!(stop.len(), 2, "mc group + kete group");
         assert_eq!(stop[0]["_mcManaged"], json!(true));
         assert_eq!(stop[1]["_nebulaManaged"], json!(true));
     }

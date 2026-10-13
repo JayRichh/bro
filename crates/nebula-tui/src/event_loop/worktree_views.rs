@@ -35,14 +35,14 @@ pub(crate) fn open_folder(app: &mut App, path: std::path::PathBuf, out: &mut Vec
         .map(|p| (p.id.clone(), p.name.clone()));
     if let Some((id, name)) = known {
         launcher::open_project(app, &id, out);
-        app.chrome.flash = Some(format!("{name} is already a project — opened it"));
+        app.chrome.flash = Some(format!("{name} is already a project: opened it"));
         return;
     }
     if canon.is_dir() && !in_git_repo(&canon) {
         app.modals.overlay = Some(Overlay::Confirm(ConfirmDialog {
             title: "Not a git repository".into(),
             message: format!(
-                "{} isn't a git repository — bro projects are. Run git init in it?",
+                "{} isn't a git repository: kete projects are. Run git init in it?",
                 path.display()
             ),
             action: PendingAction::InitProjectRepo(path),
@@ -165,7 +165,7 @@ pub(crate) fn open_in_app(bundle: &std::path::Path, path: &std::path::Path) -> b
 /// or stop it when it is already up.
 pub(crate) fn toggle_run(app: &mut App, out: &mut Vec<ClientRequest>) {
     if app.selected_worktree_pr().is_some() {
-        app.chrome.flash = Some("a pull request has no checkout to run — pick a worktree".into());
+        app.chrome.flash = Some("a pull request has no checkout to run: pick a worktree".into());
         return;
     }
     let Some(w) = app.selected_worktree().cloned() else {
@@ -209,7 +209,7 @@ pub(crate) fn toggle_run_in(
 /// `Shift+Enter` / `Shift+O`: fire the selected checkout's OPEN COMMAND.
 pub(crate) fn open_selected_worktree(app: &mut App) {
     if app.selected_worktree_pr().is_some() {
-        app.chrome.flash = Some("a pull request has no checkout to open — pick a worktree".into());
+        app.chrome.flash = Some("a pull request has no checkout to open: pick a worktree".into());
         return;
     }
     let Some(w) = app.selected_worktree().cloned() else {
@@ -222,8 +222,8 @@ pub(crate) fn open_selected_worktree(app: &mut App) {
 /// Why `Shift+Enter` has nothing to run, naming both places to put one —
 /// the twin of the DAEMON's line for `r`.
 const NO_OPEN_COMMAND: &str =
-    "no open command for this worktree — set one in Settings (s) → Project, \
-                               or add .bro.json with {\"open\": \"open http://localhost:3000\"}";
+    "no open command for this worktree: set one in Settings (s) → Project, \
+                               or add .kete.json with {\"open\": \"open http://localhost:3000\"}";
 
 /// Run `worktree`'s OPEN COMMAND once and say so: the project's **Open
 /// command** setting (Settings → Project) when it is set, else the

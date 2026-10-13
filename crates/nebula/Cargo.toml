@@ -6,8 +6,14 @@ license.workspace = true
 build = "build.rs"
 
 [[bin]]
-name = "bro"
+name = "kete"
 path = "src/main.rs"
+
+# The old name, still installed: the same program (src/bro.rs includes
+# src/main.rs), and usage lines say `bro` when it is run as `bro`.
+[[bin]]
+name = "bro"
+path = "src/bro.rs"
 
 [dependencies]
 nebula-core = { workspace = true }
@@ -25,7 +31,7 @@ serde_json = { workspace = true }
 portable-pty = { workspace = true }
 vt100 = { workspace = true }
 
-# The app icon in bro.exe's resources, so Explorer, the taskbar and
-# Windows Terminal profiles show the koru mark.
+# The app icon in kete.exe's (and bro.exe's) resources, so Explorer, the
+# taskbar and Windows Terminal profiles show the kete mark.
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"

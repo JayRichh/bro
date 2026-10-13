@@ -41,16 +41,16 @@ out.
 ## Commands
 
 ```sh
-bro profile add main --harness claude --use-default --default   # adopt today's login
-bro profile add max2 --harness claude                            # a second subscription
-bro profile login max2                                           # sign it in, here
-bro profile list
-bro profile default max2                                         # launches with no pick take it
-bro profile remove max2 [--purge]                                # --purge deletes its home too
+kete profile add main --harness claude --use-default --default   # adopt today's login
+kete profile add max2 --harness claude                            # a second subscription
+kete profile login max2                                           # sign it in, here
+kete profile list
+kete profile default max2                                         # launches with no pick take it
+kete profile remove max2 [--purge]                                # --purge deletes its home too
 ```
 
 - **`add`:** `--use-default` points the profile at the CLI's own default config (`~/.claude`, `~/.codex`, `~/.copilot`). It moves no dir and copies nothing, so the login you already have becomes one of the profiles the picker cycles through. `--default` makes the profile what a launch takes when it names none; there is one default per harness. `--env KEY=VALUE` (repeatable) fills its `env`.
-- **`login`:** runs the harness's own sign-in in the current terminal with the profile's environment applied: `claude auth login --claudeai`, `codex login` or `copilot login`. The CLI opens your browser for the OAuth flow and takes the callback, or prints the URL and asks for the code. The credentials it writes land in the profile's home. Anything after `--` is passed on: `bro profile login max2 -- --email you@example.com`.
+- **`login`:** runs the harness's own sign-in in the current terminal with the profile's environment applied: `claude auth login --claudeai`, `codex login` or `copilot login`. The CLI opens your browser for the OAuth flow and takes the callback, or prints the URL and asks for the code. The credentials it writes land in the profile's home. Anything after `--` is passed on: `kete profile login max2 -- --email you@example.com`.
 - **`list`:** each profile's harness, whether it is the default, its home, and the last PLAN USAGE seen (below).
 - **`remove`:** drops the entry and keeps the home, so adding the name back signs nothing in again. `--purge` also deletes the home, and only ever a directory directly inside `<data dir>/profiles`. An adopted login's config is never touched.
 
@@ -71,15 +71,15 @@ The daemon resolves a create's profile when the session is created: the one pick
 harness's default. It stores the profile with the row, so a resume, a restart or a move to another
 worktree boots under the same account. Changing the default later never moves a running session to
 another login. A session whose profile has since been removed, or now names another harness, refuses
-to start and says why. `bro spawn` from inside a session runs its sibling on the caller's profile when
+to start and says why. `kete spawn` from inside a session runs its sibling on the caller's profile when
 it runs the caller's harness.
 
 Things that follow the profile:
 
 - **WARM SPARES:** a spare boots on its harness's default profile, and only a create on that same account adopts it.
-- **Hooks:** Codex and Copilot keep their hooks in their home, so a session under a second Codex or Copilot profile gets bro's hooks installed into that profile's `CODEX_HOME` / `COPILOT_HOME`. Claude's hooks are per worktree (`.claude/settings.local.json`) and need nothing per profile.
+- **Hooks:** Codex and Copilot keep their hooks in their home, so a session under a second Codex or Copilot profile gets kete's hooks installed into that profile's `CODEX_HOME` / `COPILOT_HOME`. Claude's hooks are per worktree (`.claude/settings.local.json`) and need nothing per profile.
 - **Transcripts:** Claude transcripts are looked for in every Claude profile's `projects/` dir, so a resume after a daemon restart finds them. A backgrounded session is listed through `claude agents` under the session's own profile.
-- **`bro sessions --json`:** carries each agent's `profile`.
+- **`kete sessions --json`:** carries each agent's `profile`.
 
 ## Plan usage
 
@@ -87,7 +87,7 @@ Claude prints its plan usage in the session, e.g. `You've used 91% of your weekl
 The daemon reads that line off every Claude session that runs under a profile, with the same kind of
 output scanner it uses for the Claude Cloud id. It keeps the latest reading per profile in
 `<data dir>/profiles/.usage/<name>.json`. The QUICK PROMPT's profile field shows it beside the name
-(`max2 91%`), and `bro profile list` shows it in full. A session with no profile has nowhere to file
+(`max2 91%`), and `kete profile list` shows it in full. A session with no profile has nowhere to file
 a reading, so none is kept.
 
 ## Configuration
