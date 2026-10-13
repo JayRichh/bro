@@ -63,6 +63,21 @@ fn pty_size(cols: u16, rows: u16) -> PtySize {
     }
 }
 
+/// The inherited PATH with the running binary's dir in front, unless it is
+/// already the first entry. `None` when the binary's location is unknown.
+#[cfg(windows)]
+fn path_with_own_dir() -> Option<std::ffi::OsString> {
+    let exe = std::env::current_exe().ok()?;
+    let own = exe.parent()?.to_path_buf();
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    let mut dirs: Vec<std::path::PathBuf> = std::env::split_paths(&inherited).collect();
+    if dirs.first() == Some(&own) {
+        return Some(inherited);
+    }
+    dirs.insert(0, own);
+    std::env::join_paths(dirs).ok()
+}
+
 /// Windows has no process groups or sessions for a `ps` sweep to report,
 /// so the table is always "unknown" there: [`detached_job_under`] then
 /// counts every agent as busy, which keeps the idle reaper off it.
@@ -320,6 +335,14 @@ impl PtySession {
         }
         for name in spec.scrub_env {
             cmd.env_remove(name);
+        }
+        // Agents are told to run `bro rename`, `bro spawn` and friends, and
+        // there is no login shell here to put an install dir on PATH: lead
+        // PATH with the daemon's own dir so those calls reach this binary,
+        // installed or not.
+        #[cfg(windows)]
+        if let Some(path) = path_with_own_dir() {
+            cmd.env("PATH", path);
         }
         for (k, v) in &spec.env {
             cmd.env(k, v);
