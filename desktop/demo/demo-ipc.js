@@ -7,7 +7,10 @@
 //
 // Query: view=tasks|branches, theme=light|dark, start=1 (open the Start
 // dialog), offline=1 (tasks come back as a saved list), sel=<branch>,
-// diff=1 (run Diff vs main on the selected branch).
+// diff=1 (run Diff vs main on the selected branch), view=settings with
+// tab=<id> (desktop, general, sessions, appearance, agents, project,
+// experimental, hotkeys). The settings rows are the real schema, exported
+// by `cargo test -- --ignored write_demo_settings` in src-tauri.
 
 const q = new URLSearchParams(location.search);
 const now = Date.now();
@@ -152,6 +155,10 @@ Move rounding out of InvoiceLine.Total and into Invoice.GstTotal. Keep the per-l
 - Existing invoices are not re-rounded
 `;
 
+let settingsSchema = null;
+const loadSchema = async () => (settingsSchema ??= await (await fetch('/demo/settings-schema.json')).json());
+const sameTarget = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
 const handlers = {
   get_state: () => model,
   'plugin:event|listen': () => 1,
@@ -179,6 +186,17 @@ const handlers = {
   ado_delete_local: () => null,
   diff_range: () => range,
   open_url: () => null,
+  settings_schema: () => loadSchema(),
+  settings_set: async ({ target, value }) => {
+    const s = await loadSchema();
+    for (const t of s.tabs) for (const g of t.groups) for (const r of g.rows) if (sameTarget(r.target, target)) r.value = value;
+    return null;
+  },
+  settings_reset: () => null,
+  desktop_prefs: () => ({ theme: 'system', diff_mode: 'side', home: 'overview' }),
+  run_commands: () => ({ w1: 'dotnet watch run', w2: 'dotnet watch run' }),
+  start_run: () => 't9',
+  stop_run: () => null,
 };
 
 let cb = 0;
@@ -210,6 +228,12 @@ const byText = (sel, text) => () => [...document.querySelectorAll(sel)].find((e)
 window.addEventListener('load', async () => {
   const view = q.get('view');
   if (!view) return;
+  if (view === 'settings') {
+    (await until(byText('aside button', 'Settings'))).click();
+    const tab = q.get('tab');
+    if (tab) (await until(() => document.getElementById('settings-tab-' + tab))).click();
+    return;
+  }
   const label = view === 'tasks' ? 'Tasks' : 'Branches';
   (await until(byText('aside nav button', label))).click();
   if (view === 'tasks') {

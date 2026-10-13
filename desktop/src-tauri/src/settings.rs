@@ -275,3 +275,42 @@ mod tests {
         }
     }
 }
+
+/// The demo's settings: what the screenshot harness (`desktop/demo`)
+/// renders, exported from the real schema so the screenshots show the
+/// real rows. Run with `cargo test -- --ignored write_demo_settings`.
+#[cfg(test)]
+mod demo {
+    use nebula_config::desktop::DesktopPrefs;
+    use nebula_config::schema::{export, ProjectRef};
+    use nebula_config::Config;
+
+    #[test]
+    #[ignore = "writes desktop/demo/settings-schema.json"]
+    fn write_demo_settings() {
+        let mut cfg = Config::default();
+        cfg.claude_model = "opus".into();
+        cfg.claude_effort = "high".into();
+        cfg.session_idle_timeout = "15m".into();
+        cfg.set_project_text(
+            std::path::Path::new(r"C:\demo\ledger-api"),
+            nebula_config::SettingKind::RunCommand,
+            "dotnet watch run",
+        );
+        let projects = [
+            ProjectRef {
+                name: "ledger-api".into(),
+                path: r"C:\demo\ledger-api".into(),
+            },
+            ProjectRef {
+                name: "storefront-web".into(),
+                path: r"C:\demo\storefront-web".into(),
+            },
+        ];
+        let schema = export(&cfg, &DesktopPrefs::default(), &projects);
+        let out = concat!(env!("CARGO_MANIFEST_DIR"), "/../demo/settings-schema.json");
+        let mut json = serde_json::to_string_pretty(&schema).unwrap();
+        json.push('\n');
+        std::fs::write(out, json).unwrap();
+    }
+}
