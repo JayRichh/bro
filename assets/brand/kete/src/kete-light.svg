@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Kete: a tapered woven body (two weave lines) carried by one koru handle; the ember tip is the live agent. -->
+  <rect width="64" height="64" fill="#EDE6DA"/>
+  <path d="M11 31h42l-6.5 26h-29z" fill="#1C1917"/>
+  <path d="M12.6 39.5h38.8M14.6 48h34.8" stroke="#EDE6DA" stroke-width="1.6"/>
+  <path d="M21 31V22a11 11 0 0 1 22 0a5.5 5.5 0 0 1 -11 0" fill="none" stroke="#1C1917" stroke-width="6"/>
+  <circle cx="32" cy="22" r="3.2" fill="#D9822B"/>
+</svg>
