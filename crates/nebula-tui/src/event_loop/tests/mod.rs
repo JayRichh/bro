@@ -6219,7 +6219,7 @@ fn claude_cloud_task_prompt_soft_wraps_instead_of_horizontally_scrolling() {
         },
     )));
     let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
-    terminal.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+    terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
 
     let begin = find_cell(&terminal, "BEGIN");
     let end = find_cell(&terminal, "END");
@@ -6231,7 +6231,7 @@ fn claude_cloud_task_prompt_soft_wraps_instead_of_horizontally_scrolling() {
     };
     prompt.input.set_text("VISIBLE");
     let mut small = Terminal::new(TestBackend::new(32, 6)).unwrap();
-    small.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+    small.draw(|f| ui::draw(f, &mut app)).unwrap();
     let text = buffer_text(&small);
     assert!(
         text.contains("VISIBLE"),
@@ -16642,7 +16642,7 @@ fn the_issue_quick_prompt_stands_on_the_modal() {
             "the box carries the modal it stands on: {:?}",
             launch.under
         );
-        terminal.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
         let screen = buffer_text(&terminal);
         assert!(
             screen.contains("Issues — demo"),
@@ -16787,7 +16787,7 @@ fn the_issue_preset_picker_stands_on_the_modal() {
             "the picker carries the modal it stands on: {:?}",
             back.launch.under
         );
-        terminal.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
         let screen = buffer_text(&terminal);
         assert!(
             screen.contains("Issues — demo"),
@@ -16805,7 +16805,7 @@ fn the_issue_preset_picker_stands_on_the_modal() {
 
         // A click outside the picker: the same.
         press(&mut app, KeyCode::BackTab, KeyModifiers::SHIFT, &mut out);
-        terminal.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
         crate::overlay_close::click_outside(&mut app, &mut out);
         assert!(on_row(&app), "a click outside: {:?}", app.modals.overlay);
 
@@ -16827,7 +16827,7 @@ fn the_issue_preset_picker_stands_on_the_modal() {
             "{:?}",
             launch.under
         );
-        terminal.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
         let screen = buffer_text(&terminal);
         assert!(
             screen.contains("Issues — demo"),
@@ -16854,7 +16854,7 @@ fn the_preset_list_tab_flips_a_new_worktree() {
             other => panic!("expected the presets list, got {other:?}"),
         };
         let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
-        terminal.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
         let screen = buffer_text(&terminal);
         assert!(!fresh(&app), "the list starts on the worktree `e` was on");
         assert!(screen.contains("worktree: main"), "{screen}");
@@ -16862,7 +16862,7 @@ fn the_preset_list_tab_flips_a_new_worktree() {
 
         press(&mut app, KeyCode::Tab, KeyModifiers::NONE, &mut out);
         assert!(fresh(&app), "Tab flips it on");
-        terminal.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
         let screen = buffer_text(&terminal);
         assert!(screen.contains("NEW WORKTREE"), "{screen}");
         assert!(screen.contains("[✓] new worktree Tab"), "{screen}");
@@ -22003,5 +22003,105 @@ fn archived_sessions_keep_the_question_with_show_all_worktrees_on() {
             "{:?}",
             c.action
         );
+    });
+}
+
+/// WORKTREE PORTS reach the tree from the DAEMON's event, and `w` opens
+/// the LOCALHOST PREVIEW chooser on the port the worktree's sessions
+/// listen on: the system default first, the pick remembered for the
+/// project on Enter so the chooser opens on it next time.
+#[test]
+fn w_opens_the_browser_chooser_on_the_live_port_and_remembers_the_pick() {
+    use nebula_core::ports::{PortBlock, WorktreePorts};
+    use nebula_core::WorktreeId;
+    with_default_config(|| {
+        let mut app = App::new();
+        seed_tree(&mut app);
+        let mut out = Vec::new();
+
+        // Nothing known yet: a flash, no chooser.
+        press(&mut app, KeyCode::Char('w'), KeyModifiers::NONE, &mut out);
+        assert!(app.modals.overlay.is_none(), "{:?}", app.modals.overlay);
+        assert!(
+            app.chrome
+                .flash
+                .as_deref()
+                .is_some_and(|f| f.contains("nothing is listening")),
+            "{:?}",
+            app.chrome.flash
+        );
+
+        hse(
+            &mut app,
+            ServerEvent::WorktreePorts {
+                ports: vec![WorktreePorts {
+                    worktree: WorktreeId("w1".into()),
+                    block: Some(PortBlock {
+                        first: 3010,
+                        size: 10,
+                    }),
+                    // A stray listener outside the block loses to the
+                    // one inside it.
+                    live: vec![3011, 9229],
+                }],
+            },
+        );
+        assert_eq!(app.tree.browse_port(&WorktreeId("w1".into())), Some(3011));
+
+        press(&mut app, KeyCode::Char('w'), KeyModifiers::NONE, &mut out);
+        let Some(Overlay::Menu(menu)) = &app.modals.overlay else {
+            panic!("expected the chooser, got {:?}", app.modals.overlay);
+        };
+        assert_eq!(menu.title.as_deref(), Some("Open http://localhost:3011"));
+        assert_eq!(menu.items[0].label, "System default");
+        assert_eq!(menu.hover, 0);
+
+        press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
+        assert!(app.modals.overlay.is_none(), "{:?}", app.modals.overlay);
+        assert_eq!(
+            crate::config::Config::load()
+                .project(std::path::Path::new("/tmp/demo"))
+                .browser,
+            "default"
+        );
+
+        // Next time it opens on the remembered row, marked.
+        press(&mut app, KeyCode::Char('w'), KeyModifiers::NONE, &mut out);
+        let Some(Overlay::Menu(menu)) = &app.modals.overlay else {
+            panic!("expected the chooser, got {:?}", app.modals.overlay);
+        };
+        assert_eq!(menu.items[menu.hover].label, "System default ✓");
+    });
+}
+
+/// The band's rule draws each live port with its dot.
+#[test]
+fn a_live_port_shows_on_its_band_rule() {
+    use nebula_core::ports::WorktreePorts;
+    use nebula_core::WorktreeId;
+    with_default_config(|| {
+        let mut app = App::new();
+        seed_tree(&mut app);
+        hse(
+            &mut app,
+            ServerEvent::WorktreePorts {
+                ports: vec![WorktreePorts {
+                    worktree: WorktreeId("w1".into()),
+                    block: None,
+                    live: vec![3010],
+                }],
+            },
+        );
+        let backend = TestBackend::new(160, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
+        let screen: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(screen.contains(":3010 ●"), "{screen}");
     });
 }

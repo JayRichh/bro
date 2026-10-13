@@ -19,6 +19,12 @@ pub(crate) fn handle_server_event(app: &mut App, event: ServerEvent, out: &mut V
         | event @ ServerEvent::OutputTail { .. }
         | event @ ServerEvent::AttachRefused { .. } => handle_tree_event(app, event, out),
         event @ ServerEvent::Error { .. } => handle_error_event(app, event, out),
+        ServerEvent::WorktreePorts { ports } => {
+            app.tree.ports = ports
+                .into_iter()
+                .map(|info| (info.worktree.clone(), info))
+                .collect();
+        }
         _ => {}
     }
 }

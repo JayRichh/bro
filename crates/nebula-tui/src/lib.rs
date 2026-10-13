@@ -30,6 +30,7 @@ pub mod keys;
 pub mod launcher;
 pub mod links;
 pub(crate) mod list_hit;
+pub mod localhost;
 pub mod markdown;
 pub mod overlay_close;
 pub mod palette;

@@ -696,6 +696,9 @@ pub(crate) fn run_menu_action(app: &mut App, action: MenuAction, out: &mut Vec<C
         }
         MenuAction::NewWorktree(project) => open_new_worktree_prompt(app, project),
         MenuAction::OpenLink(url) => open_link(app, &url, out),
+        MenuAction::OpenInBrowser { browser, url, repo } => {
+            crate::localhost::open_in(app, &browser, &url, &repo)
+        }
         MenuAction::ViewPrDiff => request_pr_diff(app),
         MenuAction::CommentPullRequest => open_pr_comment(app),
         // In the LAUNCHER VIEW the composer is a STRIP along the bottom

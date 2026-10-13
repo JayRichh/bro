@@ -1414,6 +1414,12 @@ pub struct Config {
     /// harness's default. See `nebula_core::profiles`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub profiles: Vec<nebula_core::profiles::Profile>,
+    /// LOCALHOST PREVIEWS: a browser profile per browser, by id
+    /// (`chrome`, `edge`, `firefox`) — `{"chrome": {"profile": "Profile
+    /// 1"}}` — for `w`'s chooser to open the dev server in. Passed as
+    /// `--profile-directory` to Chrome and Edge, `-P` to Firefox.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub browsers: BTreeMap<String, BrowserSettings>,
     /// Which AGENT KIND the QUICK PROMPT hotkey launches. Its model and
     /// effort come from that kind's own defaults above, so the setting is
     /// one name, not a third model/effort pair. Read through
@@ -1472,6 +1478,17 @@ pub struct Config {
 /// project's repo path in [`Config::projects`]. Read through
 /// [`Config::project`], which supplies the defaults for a project with no
 /// entry; written through [`Config::set_project`].
+/// One browser's entry under `browsers` (`crate::localhost`).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct BrowserSettings {
+    /// The browser profile to open in: Chrome's and Edge's profile
+    /// directory name (`Default`, `Profile 1`), Firefox's profile name.
+    /// Empty: the browser's own pick.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub profile: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct ProjectSettings {
@@ -1493,6 +1510,11 @@ pub struct ProjectSettings {
     /// empty, like `run_command`.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub open_command: String,
+    /// The browser `w` last opened this project's dev server in
+    /// (`chrome`, `edge`, `firefox`, `default`): the row its chooser
+    /// opens on next time. Left out while empty.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub browser: String,
     /// Keys in the entry this build doesn't know — a newer nebula's, most
     /// likely, or the retired `hide_root_worktree` an older one wrote —
     /// carried through a save untouched, as the file's top-level keys
@@ -1620,6 +1642,7 @@ impl Default for Config {
             custom_harnesses: Vec::new(),
             harnesses: BTreeMap::new(),
             profiles: Vec::new(),
+            browsers: BTreeMap::new(),
             quick_prompt_kind: AgentKind::Claude.as_str().into(),
             quick_prompt_focus: false,
             follow_new_session: true,

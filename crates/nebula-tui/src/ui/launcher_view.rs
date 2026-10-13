@@ -1702,7 +1702,20 @@ fn draw_band_rule(
                 plural(band.terminals())
             ));
         }
-        let mut spans = vec![Span::styled(words, Style::default().fg(th.dim))];
+        let mut spans = Vec::new();
+        // WORKTREE PORTS its sessions are listening on, each with a live
+        // dot: `:3010 ●` — the dev server is up, and `w` opens it.
+        if let Some(info) = app.tree.ports.get(&band.worktree) {
+            for port in &info.live {
+                spans.push(Span::styled(
+                    format!(":{port}"),
+                    Style::default().fg(th.text),
+                ));
+                spans.push(Span::styled(" ● ", Style::default().fg(th.ok)));
+                spans.push(Span::raw(" "));
+            }
+        }
+        spans.push(Span::styled(words, Style::default().fg(th.dim)));
         if more > 0 {
             spans.push(Span::styled(
                 format!("  ▸ {more} more"),

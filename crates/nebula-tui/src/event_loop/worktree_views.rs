@@ -618,6 +618,7 @@ pub(crate) fn land_view_answer(app: &mut App, answer: crate::view_jobs::Answer) 
             app.chrome.flash = Some(flash);
         }
         Answer::Flash(message) => app.chrome.flash = Some(message),
+        Answer::Screenshot { url, result } => crate::localhost::land_screenshot(app, url, result),
         Answer::ClientRss(bytes) => land_client_rss(app, bytes),
         Answer::Slow { ticket } => match &mut app.modals.overlay {
             Some(Overlay::Diff(view)) => crate::git_diff::diff_slow(view, ticket),

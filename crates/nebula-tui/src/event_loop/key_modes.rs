@@ -650,6 +650,9 @@ fn handle_tool_action(app: &mut App, action: crate::keymap::Action, out: &mut Ve
         // cursor stands, as it is for `g`, `f` and `b`, so the key is never
         // quietly dropped on Sessions.
         Action::OpenWorktree => open_selected_worktree(app),
+        // `w` / `W`: the worktree's dev server, in a browser or as a shot.
+        Action::OpenInBrowser => crate::localhost::open_chooser(app),
+        Action::Screenshot => crate::localhost::screenshot(app),
         // AddProject adds a project from ANY panel — unlike New it never
         // changes meaning with focus, matching the "open a repo" instinct.
         Action::AddProject => open_prompt(app, PromptKind::AddProject),

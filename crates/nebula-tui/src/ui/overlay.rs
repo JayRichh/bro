@@ -450,6 +450,10 @@ const HELP_LEFT: &[HelpSection] = &[
         "CHECKOUTS & GITHUB",
         &[
             (Act(&[OpenWorktree]), "open in editor (open command)"),
+            (
+                Act(&[OpenInBrowser, Screenshot]),
+                "localhost: browser / screenshot",
+            ),
             (Act(&[GitDiff]), "diff (^r reviewed, ^t tree)"),
             (Act(&[OpenRepo]), "the repo on GitHub"),
             (

@@ -110,6 +110,12 @@ pub enum Action {
     /// Option+Enter on a Mac with Option as Meta — gets through both and
     /// parses as Alt+Enter. Its RUN COMMAND is the project menu's **Run**.
     OpenWorktree,
+    /// `w`: the selected worktree's dev server, `http://localhost:<port>`,
+    /// in a browser picked from the ones installed (`crate::localhost`).
+    OpenInBrowser,
+    /// `Shift+W`: a headless screenshot of that page, shown in the image
+    /// modal.
+    Screenshot,
     // sessions
     NewTerminal,
     Rename,
@@ -461,6 +467,24 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
         defaults: &["shift+enter", "shift+o", "alt+enter"],
+    },
+    ActionSpec {
+        action: Action::OpenInBrowser,
+        id: "open_in_browser",
+        label: "Open localhost in a browser",
+        hint: "Open the selected worktree's dev server (http://localhost:<port>, the port its sessions listen on) in a browser picked from Chrome, Edge, Firefox or the system default; the pick is remembered per project",
+        group: "PROJECTS & WORKTREES",
+        scope: Scope::Global,
+        defaults: &["w"],
+    },
+    ActionSpec {
+        action: Action::Screenshot,
+        id: "screenshot",
+        label: "Screenshot localhost",
+        hint: "Take a headless Edge or Chrome screenshot (1280×800) of the selected worktree's dev server and show it in the image view",
+        group: "PROJECTS & WORKTREES",
+        scope: Scope::Global,
+        defaults: &["shift+w"],
     },
     // ---- SESSIONS ----
     ActionSpec {

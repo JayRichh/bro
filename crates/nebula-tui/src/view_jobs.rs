@@ -113,6 +113,12 @@ pub enum Answer {
     /// The outcome of something a key started and did not wait for, in the
     /// footer's words (`Shift+G`: which page was opened, or why not).
     Flash(String),
+    /// A LOCALHOST PREVIEW's headless screenshot (`W`): the picture's
+    /// file, or why there is none.
+    Screenshot {
+        url: String,
+        result: Result<std::path::PathBuf, String>,
+    },
 }
 
 /// A view's way onto the blocking pool and back. Cheap to clone — the

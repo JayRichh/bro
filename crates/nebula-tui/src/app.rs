@@ -304,6 +304,13 @@ pub enum MenuAction {
     NewWorktree(ProjectId),
     /// Hand a link row's URL to the browser.
     OpenLink(String),
+    /// A LOCALHOST PREVIEW chooser row: open `url` in `browser` and
+    /// remember the pick for the project at `repo`.
+    OpenInBrowser {
+        browser: String,
+        url: String,
+        repo: PathBuf,
+    },
     /// Read the selected open pull request's diff in the diff modal. Carries
     /// no id: the row is the selection, and the fetch reads it back off the
     /// cursor the same way `g` does.
@@ -2998,9 +3005,27 @@ pub struct Tree {
     pub agents: Vec<Agent>,
     pub terminals: Vec<TerminalTab>,
     pub links: Vec<Link>,
+    /// WORKTREE PORTS by worktree: its PORT BLOCK and the ports its
+    /// sessions listen on, as the DAEMON last reported them
+    /// (`ServerEvent::WorktreePorts`). The band's rule draws the live ones.
+    pub ports: std::collections::HashMap<WorktreeId, nebula_core::ports::WorktreePorts>,
 }
 
 impl Tree {
+    /// The port a browser opened on `worktree` should go to: the first one
+    /// its sessions listen on inside its PORT BLOCK, else the first one
+    /// they listen on at all, else the block's first port (a server that
+    /// is about to come up there). None when nothing is known.
+    pub fn browse_port(&self, worktree: &WorktreeId) -> Option<u16> {
+        let info = self.ports.get(worktree)?;
+        info.live
+            .iter()
+            .copied()
+            .find(|p| info.block.is_some_and(|b| b.contains(*p)))
+            .or_else(|| info.live.first().copied())
+            .or_else(|| info.block.map(|b| b.first))
+    }
+
     /// Any project at all? None is a first run: the splash, with the way
     /// to open one, is all there is to draw.
     pub fn has_projects(&self) -> bool {
