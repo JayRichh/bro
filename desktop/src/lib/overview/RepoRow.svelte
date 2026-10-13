@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { focusQuickPrompt, toast } from '../store.svelte';
+  import { app, focusQuickPrompt, toast } from '../store.svelte';
   import { api } from '../api';
   import type { RepoRow } from './repos';
   import SessionTree from './SessionTree.svelte';
@@ -8,6 +8,16 @@
   let { row }: { row: RepoRow } = $props();
 
   const others = $derived(row.worktrees.length - 1);
+  // Run buttons: the main checkout always, a linked one while it has
+  // sessions or a live run, so a repo with many worktrees stays readable.
+  const runnable = $derived(
+    row.worktrees.filter(
+      (w) =>
+        w.is_main ||
+        app.model.agents.some((a) => a.worktree_id === w.id && !a.archived) ||
+        app.model.terminals.some((t) => t.worktree_id === w.id && t.run_command && t.alive),
+    ),
+  );
   const label = 'font-mono text-[12px] text-muted whitespace-nowrap';
 </script>
 
@@ -17,7 +27,7 @@
       {row.name}
     </h2>
     <span class="flex-1"></span>
-    {#each row.worktrees as w (w.id)}
+    {#each runnable as w (w.id)}
       <RunButton worktree={w} label={w.is_main ? '' : w.branch} />
     {/each}
     <span class="flex min-w-0 items-baseline justify-end gap-4 overflow-hidden">
