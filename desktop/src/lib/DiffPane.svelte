@@ -10,7 +10,7 @@
   - `lead`: a snippet drawn at the left of the toolbar.
 -->
 <script lang="ts">
-  import { onDestroy, onMount, type Snippet } from 'svelte';
+  import { onDestroy, onMount, tick, type Snippet } from 'svelte';
   import { app, toast } from './store.svelte';
   import { diffApi, type Blob, type DiffFile, type DiffMode, type DiffRange, type DiffSide, type Hunk, type HunkAction } from './diff-api';
   import { fileIcon, languageOf } from './icons';
@@ -33,7 +33,7 @@
   } = $props();
 
   /** `absent`: the status says this side has no file, so why. */
-  type Side = { label: string; blob: Blob; absent?: string };
+  type Side = { label: string; blob: Blob; absent?: string; which: 'old' | 'new' };
   /** A side that is not text, or text that should be there and is not. */
   type Problem = { path: string; sides: Side[] };
 
@@ -156,6 +156,7 @@
     stops = [];
     stopAt = -1;
     if (!f || !worktree) {
+      landOn = null;
       setText(null);
       hunks = { unstaged: [], staged: [], note: null };
       return;
@@ -175,15 +176,18 @@
         problem = {
           path: f.path,
           sides: [
-            { label: s.oldLabel, blob: o, absent: s.old ? undefined : 'Added here, so there is no earlier copy.' },
-            { label: s.newLabel, blob: n, absent: s.new ? undefined : 'Deleted here.' },
+            { label: s.oldLabel, blob: o, absent: s.old ? undefined : 'Added here, so there is no earlier copy.', which: 'old' },
+            { label: s.newLabel, blob: n, absent: s.new ? undefined : 'Deleted here.', which: 'new' },
           ],
         };
+        // No text, so no changes to land on.
+        landOn = null;
         setText(null);
       }
     } catch (e) {
       if (mine !== pickSeq) return;
       fileError = String(e);
+      landOn = null;
       setText(null);
     }
     if (!pinned) loadHunks(f, mine);
@@ -191,6 +195,11 @@
   }
 
   async function loadHunks(f: DiffFile, mine: number) {
+    // Too large or binary: git has no hunks to offer, so offer none.
+    if (problem?.sides.some((s) => s.blob.state === 'tooLarge' || s.blob.state === 'binary')) {
+      hunks = { unstaged: [], staged: [], note: 'No hunks: this file has no text to split.' };
+      return;
+    }
     if (f.status === 'U') {
       hunks = { unstaged: [], staged: [], note: 'Untracked, so there are no hunks yet. Add the file whole first.' };
       return;
@@ -293,15 +302,21 @@
       const count = repEditor?.getModel()?.getLineCount() ?? 1;
       stops = rep ? rep.blocks.map((b) => blockLine(b, count)) : [];
     } else {
-      const changes = diffEditor?.getLineChanges() ?? [];
+      const changes = diffEditor?.getLineChanges();
+      // Null: the diff is not computed yet, so keep where to land for when it is.
+      if (!changes) {
+        stops = [];
+        stopAt = -1;
+        return;
+      }
       stops = changes.map((c) => Math.max(1, c.modifiedEndLineNumber === 0 ? c.modifiedStartLineNumber + 1 : c.modifiedStartLineNumber));
     }
     stopAt = -1;
-    if (landOn && stops.length) {
-      const where = landOn;
-      landOn = null;
-      goStop(where === 'first' ? 0 : stops.length - 1);
-    }
+    if (!landOn) return;
+    const where = landOn;
+    // Spent either way: a file with no stops has nowhere to land.
+    landOn = null;
+    if (stops.length) goStop(where === 'first' ? 0 : stops.length - 1);
   }
 
   function goStop(i: number) {
@@ -366,6 +381,26 @@
     return m ? { range: `\u2212${m[1]} +${m[2]}`, context: m[3] } : { range: h.header, context: '' };
   }
 
+  /** Open or close a hunk's Discard question. Open, focus sits on Keep, the safe answer. */
+  function askDiscard(k: string) {
+    confirming = confirming === k ? null : k;
+    if (confirming) tick().then(() => list?.querySelector<HTMLButtonElement>('[data-keep]')?.focus());
+  }
+
+  /** Escape answers Keep, and focus goes back to the hunk's Discard. */
+  function onConfirmKey(e: KeyboardEvent, k: string) {
+    if (e.key !== 'Escape') return;
+    // Ahead of the window's Escape, which closes the split.
+    e.preventDefault();
+    e.stopPropagation();
+    keep(k);
+  }
+
+  function keep(k: string) {
+    confirming = null;
+    tick().then(() => list?.querySelector<HTMLButtonElement>(`[data-discard="${CSS.escape(k)}"]`)?.focus());
+  }
+
   async function act(h: Hunk, action: HunkAction) {
     if (!worktree || busy) return;
     busy = true;
@@ -392,12 +427,14 @@
 
   function onWindowKey(e: KeyboardEvent) {
     if (!keys || e.defaultPrevented) return;
+    // Typing, a terminal or another editor keeps its keys, F7 included.
+    // F7 inside this pane's own editors never gets here (onPaneKey).
+    const t = e.target as HTMLElement;
+    if (t.closest('input, textarea, select, .monaco-editor, .xterm')) return;
     if (e.key === 'F7' && !e.ctrlKey && !e.altKey && !e.metaKey) {
       e.preventDefault();
       return step(e.shiftKey ? -1 : 1);
     }
-    const t = e.target as HTMLElement;
-    if (t.closest('input, textarea, select, .monaco-editor, .xterm')) return;
     if (e.ctrlKey || e.altKey || e.metaKey) return;
     if (e.key === 'ArrowDown' || e.key === 'j') (e.preventDefault(), moveFile(1));
     else if (e.key === 'ArrowUp' || e.key === 'k') (e.preventDefault(), moveFile(-1));
@@ -488,16 +525,24 @@
     { id: 'replacement', label: 'Replacement', key: 'E', icon: 'M4 5.5h8M4 8h5M4 10.5h8' },
   ];
 
-  function blobWord(b: Blob): { word: string; detail: string; tone: string } {
+  function blobWord(b: Blob, which: 'old' | 'new'): { word: string; detail: string; tone: string } {
     switch (b.state) {
       case 'missing':
-        return { word: 'Missing', detail: 'The file is not on this side.', tone: 'bg-fail' };
+        return {
+          word: 'Missing',
+          // A range reads commits, so a missing blob is a ref not fetched yet.
+          detail: pinned
+            ? `The file is missing on the ${which === 'old' ? 'base' : 'source'} side. Fetch and reopen.`
+            : 'The file is not on this side.',
+          tone: 'bg-fail',
+        };
       case 'tooLarge':
         return { word: 'Too large', detail: `${(b.value / (1024 * 1024)).toFixed(1)} MB, over the 2 MB limit.`, tone: 'bg-faint' };
       case 'binary':
         return { word: 'Binary', detail: 'Not text, so there is nothing to compare line by line.', tone: 'bg-faint' };
       default: {
-        const n = b.value === '' ? 0 : b.value.split('\n').length;
+        // A trailing newline ends the last line; it does not start another.
+        const n = b.value === '' ? 0 : b.value.split('\n').length - (b.value.endsWith('\n') ? 1 : 0);
         return { word: 'Text', detail: `${n === 1 ? '1 line' : `${n} lines`}.`, tone: 'bg-done' };
       }
     }
@@ -664,8 +709,9 @@
                             <button
                               class="flex-none border border-rule bg-bg px-1.5 leading-5 text-ink enabled:hover:bg-raised disabled:text-faint {confirming === k ? 'border-fail' : ''}"
                               disabled={busy}
+                              data-discard={k}
                               aria-expanded={confirming === k}
-                              onclick={() => (confirming = confirming === k ? null : k)}>Discard</button
+                              onclick={() => askDiscard(k)}>Discard</button
                             >
                           {:else}
                             <span class="min-w-0 flex-1 truncate font-mono text-ink" title={h.header}>{lab.range}</span>
@@ -680,10 +726,16 @@
                           <div class="-mt-0.5 mb-1 truncate pr-2 font-mono text-[11.5px] text-muted" title={lab.context}>{lab.context}</div>
                         {/if}
                         {#if confirming === k}
-                          <div class="mr-2 mb-1.5 border border-fail bg-bg px-2 py-1.5" role="group" aria-label="Discard this hunk">
+                          <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+                          <div
+                            class="mr-2 mb-1.5 border border-fail bg-bg px-2 py-1.5"
+                            role="group"
+                            aria-label="Discard this hunk"
+                            onkeydown={(e) => onConfirmKey(e, k)}
+                          >
                             <p class="m-0 text-ink">Discard this hunk from disk? It cannot be undone.</p>
                             <div class="mt-1.5 flex justify-end gap-1">
-                              <button class="border border-rule bg-bg px-1.5 leading-5 text-ink hover:bg-raised" onclick={() => (confirming = null)}
+                              <button data-keep class="border border-rule bg-bg px-1.5 leading-5 text-ink hover:bg-raised" onclick={() => keep(k)}
                                 >Keep</button
                               >
                               <button class="border-0 bg-fail px-1.5 leading-5 font-medium text-bg" disabled={busy} onclick={() => act(h, 'discard')}
@@ -716,7 +768,7 @@
           <p class="mt-1 mb-4 text-[15px] font-semibold text-ink">No text diff for this file</p>
           <dl class="m-0 grid max-w-[560px] grid-cols-[minmax(110px,auto)_auto_1fr] items-baseline gap-x-3 gap-y-2 border-t border-rule pt-3 text-[13px]">
             {#each problem.sides as s (s.label)}
-              {@const w = s.absent ? { word: 'None', detail: s.absent, tone: 'bg-faint' } : blobWord(s.blob)}
+              {@const w = s.absent ? { word: 'None', detail: s.absent, tone: 'bg-faint' } : blobWord(s.blob, s.which)}
               <dt class="font-mono text-[12px] text-muted">{s.label}</dt>
               <dd class="m-0 flex items-center gap-1.5 font-medium text-ink"><span class="size-1.5 {w.tone}" aria-hidden="true"></span>{w.word}</dd>
               <dd class="m-0 text-muted">{w.detail}</dd>
