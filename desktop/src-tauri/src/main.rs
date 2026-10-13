@@ -406,6 +406,10 @@ fn main() {
             open_url,
             launchables,
             startup,
+            ado::branches::ado_branches,
+            ado::branches::ado_fetch,
+            ado::branches::ado_checkout_worktree,
+            ado::branches::ado_delete_local,
         ])
         .run(tauri::generate_context!())
         .expect("kete-desktop failed to start");
