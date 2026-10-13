@@ -554,6 +554,34 @@ async fn ado_recent_reviewers(
         .read_repo(&ctx.key, |s| s.recent_reviewers.clone()))
 }
 
+/// What the PR composer starts from for `branch`: target, commit
+/// subjects in range, and the branch's task.
+#[tauri::command]
+async fn ado_compose_seed(
+    client: State<'_, Arc<Client>>,
+    ado: State<'_, AdoState>,
+    worktree: String,
+    branch: String,
+) -> Res<prs::ComposeSeed> {
+    let ctx = ado.context_for(&client, &worktree).await?;
+    Ok(prs::compose_seed(&ctx, &branch).await)
+}
+
+/// Ask a session a question (`kete ask`) and hand back its answer, for
+/// the composer's "Ask the session to summarise".
+#[tauri::command]
+async fn session_ask(
+    client: State<'_, Arc<Client>>,
+    agent: String,
+    question: String,
+) -> Res<String> {
+    let question = question.trim();
+    if question.is_empty() {
+        return Err("The question is empty.".into());
+    }
+    client.ask(&agent, question).await.map_err(err)
+}
+
 /// The open ADO pull request from `branch`, for the PR open lane. Its
 /// client is silent: the poll never opens a sign-in window, and finds a
 /// token once a user-initiated command has signed in. A sign-in failure
@@ -683,6 +711,9 @@ fn main() {
             ado_reply,
             ado_search_identities,
             ado_recent_reviewers,
+            // PR composer (Task 17)
+            ado_compose_seed,
+            session_ask,
             ado::branches::ado_branches,
             ado::branches::ado_fetch,
             ado::branches::ado_checkout_worktree,

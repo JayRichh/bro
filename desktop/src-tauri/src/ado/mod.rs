@@ -398,6 +398,31 @@ pub async fn git_out(cwd: &Path, args: &[&str]) -> Result<String, String> {
     }
 }
 
+/// `KETE_ADO_BASE`: a local mock server (`http://127.0.0.1:<port>`) that
+/// every ADO request goes to instead of Azure DevOps, signed with a dummy
+/// token. For screenshots and manual tests; loopback only, so neither a
+/// real token nor a real request is ever involved.
+pub fn base_override() -> Option<String> {
+    let base = std::env::var("KETE_ADO_BASE").ok()?;
+    let base = base.trim().trim_end_matches('/');
+    (base.starts_with("http://127.0.0.1:") || base.starts_with("http://localhost:"))
+        .then(|| base.to_string())
+}
+
+/// `url` with its scheme and host swapped for `base`'s, path kept.
+pub fn rebase_url(url: &str, base: &str) -> String {
+    let Some(rest) = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+    else {
+        return url.to_string();
+    };
+    match rest.find('/') {
+        Some(i) => format!("{base}{}", &rest[i..]),
+        None => base.to_string(),
+    }
+}
+
 /// The repo's ADO remote and its name: `origin` when it is one, else the
 /// only remote that is. `None` when no remote is; several and none of
 /// them `origin` is an error.
@@ -469,6 +494,20 @@ mod tests {
     use super::*;
     use crate::ado::auth::fake::Fake;
     use httpmock::prelude::*;
+
+    #[test]
+    fn rebase_url_swaps_scheme_and_host_only() {
+        let base = "http://127.0.0.1:7070";
+        assert_eq!(
+            rebase_url("https://dev.azure.com/synth/p/_apis/x?a=1", base),
+            "http://127.0.0.1:7070/synth/p/_apis/x?a=1"
+        );
+        assert_eq!(
+            rebase_url("https://vssps.dev.azure.com/synth/_apis/identities", base),
+            "http://127.0.0.1:7070/synth/_apis/identities"
+        );
+        assert_eq!(rebase_url("https://synth.visualstudio.com", base), base);
+    }
 
     fn temp_repo(remote: Option<&str>) -> PathBuf {
         use std::sync::atomic::{AtomicUsize, Ordering};

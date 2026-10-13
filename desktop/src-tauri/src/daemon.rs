@@ -87,12 +87,18 @@ pub enum PtyEvent {
 }
 
 type Pending = HashMap<u64, oneshot::Sender<Result<Option<EntityId>, String>>>;
+/// `AskSession` waiters: answered by `SessionAnswer`, not `Ack`.
+type Answers = HashMap<u64, oneshot::Sender<Result<String, String>>>;
+
+/// How long the daemon may wait for an asked session to answer.
+const ASK_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Shared between the Tauri commands and the connection task.
 pub struct Client {
     pub model: Mutex<Model>,
     tx: Mutex<Option<mpsc::UnboundedSender<ClientRequest>>>,
     pending: Mutex<Pending>,
+    answers: Mutex<Answers>,
     panes: Mutex<HashMap<SessionRef, Channel<PtyEvent>>>,
     next_req: AtomicU64,
     /// Bumped on every model change; the emitter task watches it.
@@ -110,6 +116,7 @@ impl Client {
             }),
             tx: Mutex::new(None),
             pending: Mutex::new(HashMap::new()),
+            answers: Mutex::new(HashMap::new()),
             panes: Mutex::new(HashMap::new()),
             next_req: AtomicU64::new(1),
             changed: tokio::sync::Notify::new(),
@@ -161,6 +168,39 @@ impl Client {
         }
     }
 
+    /// Ask a session a question (`kete ask`): the daemon waits for it to
+    /// go idle, asks, and answers with the clean text of that turn.
+    pub async fn ask(&self, agent: &str, question: &str) -> Result<String> {
+        let req_id = self.req_id();
+        let (done_tx, done_rx) = oneshot::channel();
+        self.answers
+            .lock()
+            .expect("answers lock")
+            .insert(req_id, done_tx);
+        let req = ClientRequest::AskSession {
+            req_id,
+            caller: None,
+            target: agent.to_string(),
+            question: question.to_string(),
+            timeout_ms: ASK_TIMEOUT.as_millis() as u64,
+            wait: true,
+        };
+        if let Err(e) = self.send(req) {
+            self.answers.lock().expect("answers lock").remove(&req_id);
+            return Err(e);
+        }
+        // A little longer than the daemon's own wait, so its error wins.
+        match tokio::time::timeout(ASK_TIMEOUT + Duration::from_secs(10), done_rx).await {
+            Ok(Ok(Ok(answer))) => Ok(answer),
+            Ok(Ok(Err(message))) => Err(anyhow!(message)),
+            Ok(Err(_)) => bail!("the daemon connection closed before it answered"),
+            Err(_) => {
+                self.answers.lock().expect("answers lock").remove(&req_id);
+                bail!("the session did not answer in time")
+            }
+        }
+    }
+
     pub fn attach(
         &self,
         session: SessionRef,
@@ -201,6 +241,9 @@ impl Client {
     fn set_disconnected(&self, error: Option<String>) {
         *self.tx.lock().expect("tx lock") = None;
         for (_, waiter) in self.pending.lock().expect("pending lock").drain() {
+            let _ = waiter.send(Err("the daemon connection closed".into()));
+        }
+        for (_, waiter) in self.answers.lock().expect("answers lock").drain() {
             let _ = waiter.send(Err("the daemon connection closed".into()));
         }
         self.panes.lock().expect("panes lock").clear();
@@ -294,6 +337,13 @@ impl Client {
             } => {
                 if let Some(w) = self.pending.lock().expect("pending lock").remove(&req_id) {
                     let _ = w.send(Err(message));
+                } else if let Some(w) = self.answers.lock().expect("answers lock").remove(&req_id) {
+                    let _ = w.send(Err(message));
+                }
+            }
+            ServerEvent::SessionAnswer { req_id, answer, .. } => {
+                if let Some(w) = self.answers.lock().expect("answers lock").remove(&req_id) {
+                    let _ = w.send(Ok(answer));
                 }
             }
             ServerEvent::Scrollback { session, data, .. } => {
@@ -590,6 +640,30 @@ pub async fn run(client: Arc<Client>) {
 mod tests {
     use super::*;
     use nebula_core::{AgentId, AgentKind, AgentRole, AgentStatus, WorktreeId};
+
+    #[test]
+    fn a_session_answer_or_error_reaches_its_asker() {
+        let client = Client::new();
+        let (tx, mut rx) = oneshot::channel();
+        client.answers.lock().unwrap().insert(7, tx);
+        client.handle(ServerEvent::SessionAnswer {
+            req_id: 7,
+            session: AgentId("a".into()),
+            answer: "It adds a GST rounding fix.".into(),
+        });
+        assert_eq!(
+            rx.try_recv().unwrap(),
+            Ok("It adds a GST rounding fix.".into())
+        );
+
+        let (tx, mut rx) = oneshot::channel();
+        client.answers.lock().unwrap().insert(8, tx);
+        client.handle(ServerEvent::Error {
+            req_id: Some(8),
+            message: "no such session".into(),
+        });
+        assert_eq!(rx.try_recv().unwrap(), Err("no such session".into()));
+    }
 
     fn agent(id: &str, parent: Option<&str>) -> Agent {
         Agent {

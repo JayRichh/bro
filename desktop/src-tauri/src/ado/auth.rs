@@ -131,6 +131,9 @@ impl TokenSource {
         if self.fixed.is_some() {
             return;
         }
+        if crate::ado::base_override().is_some() {
+            return;
+        }
         let _ = self
             .runner
             .run(
@@ -205,6 +208,10 @@ impl TokenSource {
     }
 
     async fn token_with(&self, org_url: &str, silent: bool) -> Result<Credential, AuthError> {
+        // A local mock server gets a dummy token; real sign-in never runs.
+        if crate::ado::base_override().is_some() {
+            return Ok(Credential::Bearer("kete-mock".into()));
+        }
         #[cfg(test)]
         if let Some(c) = &self.fixed {
             return Ok(c.clone());

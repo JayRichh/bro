@@ -979,6 +979,101 @@ pub async fn search_identities(ctx: &PrCtx, q: &str) -> Result<Vec<Reviewer>, Ad
         .unwrap_or_default())
 }
 
+// ---------------------------------------------------------------------------
+// Composer seed
+// ---------------------------------------------------------------------------
+
+/// Most commit subjects the composer prefills Changes with.
+const SEED_SUBJECTS: usize = 50;
+
+/// What the composer starts from for a branch: the target (the repo's
+/// default branch), the commit subjects in range, and the branch's task.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComposeSeed {
+    pub target: String,
+    pub subjects: Vec<String>,
+    pub task: Option<u32>,
+    pub task_title: Option<String>,
+}
+
+/// The commit subjects on `branch` and not on `target_ref`, oldest first,
+/// merges left out. Empty when either side does not resolve.
+pub async fn subjects_in_range(repo: &Path, target_ref: &str, branch: &str) -> Vec<String> {
+    let range = format!("{target_ref}..{branch}");
+    let max = format!("--max-count={SEED_SUBJECTS}");
+    let out = crate::ado::git_out(
+        repo,
+        &["log", "--no-merges", "--format=%s", &max, &range, "--"],
+    )
+    .await
+    .unwrap_or_default();
+    let mut subjects: Vec<String> = out
+        .lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+    subjects.reverse();
+    subjects
+}
+
+/// The first of `names` that resolves to a commit in `repo`.
+async fn first_commit(repo: &Path, names: &[String]) -> Option<String> {
+    for n in names {
+        let rev = format!("{n}^{{commit}}");
+        if crate::ado::git_out(repo, &["rev-parse", "--verify", "--quiet", &rev])
+            .await
+            .is_ok()
+        {
+            return Some(n.clone());
+        }
+    }
+    None
+}
+
+/// The composer's starting point for `branch`. ADO failures fall back:
+/// the target to `main`, the task title to none.
+pub async fn compose_seed(ado: &AdoContext, branch: &str) -> ComposeSeed {
+    let branch = strip_heads(branch.trim());
+    let remote = ado.remote_name.as_str();
+    let target = match ado.default_branch_ref().await {
+        Ok(Some(r)) => r
+            .strip_prefix(&format!("{remote}/"))
+            .unwrap_or(&r)
+            .to_string(),
+        _ => "main".to_string(),
+    };
+    let repo = ado.path.as_path();
+    let target_ref = first_commit(repo, &[format!("{remote}/{target}"), target.clone()]).await;
+    let tip = first_commit(repo, &[branch.clone(), format!("{remote}/{branch}")]).await;
+    let subjects = match (target_ref, tip) {
+        (Some(t), Some(b)) => subjects_in_range(repo, &t, &b).await,
+        _ => Vec::new(),
+    };
+    let links = ado.store.read_repo(&ado.key, |s| s.branch_tasks.clone());
+    let task = crate::ado::branches::resolve_task(&branch, &links, None);
+    let task_title = match task {
+        Some(id) => ado
+            .client
+            .get::<Value>(&format!(
+                "/{}/_apis/wit/workitems/{id}?fields=System.Title",
+                enc(&ado.remote.project)
+            ))
+            .await
+            .ok()
+            .map(|v| str_at(&v, &["fields", "System.Title"]))
+            .filter(|t| !t.is_empty()),
+        None => None,
+    };
+    ComposeSeed {
+        target,
+        subjects,
+        task,
+        task_title,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1293,6 +1388,21 @@ mod tests {
         std::fs::write(work.join("a.txt"), "two\n").unwrap();
         git(&work, &["commit", "-q", "-am", "Fix rounding"]);
         TempRepo { root, work, bare }
+    }
+
+    #[tokio::test]
+    async fn seed_subjects_are_the_branch_commits_oldest_first() {
+        let r = temp_repo();
+        std::fs::write(r.work.join("b.txt"), "b\n").unwrap();
+        git(&r.work, &["add", "."]);
+        git(&r.work, &["commit", "-q", "-m", "Add tests"]);
+        assert_eq!(
+            subjects_in_range(&r.work, "origin/main", "ja/fix").await,
+            vec!["Fix rounding".to_string(), "Add tests".to_string()]
+        );
+        assert!(subjects_in_range(&r.work, "origin/nope", "ja/fix")
+            .await
+            .is_empty());
     }
 
     fn remote_has(bare: &Path, branch: &str) -> bool {

@@ -24,6 +24,7 @@
   import QuickPrompt from './lib/QuickPrompt.svelte';
   import Tasks from './lib/ado/Tasks.svelte';
   import Branches from './lib/ado/Branches.svelte';
+  import Prs from './lib/ado/Prs.svelte';
 
   const media = window.matchMedia('(prefers-color-scheme: dark)');
   let osDark = $state(media.matches);
@@ -191,6 +192,8 @@
         {#key nav.current.repo}<Tasks repo={nav.current.repo} />{/key}
       {:else if view === 'branches' && nav.current.repo}
         {#key nav.current.repo}<Branches repo={nav.current.repo} />{/key}
+      {:else if view === 'prs'}
+        <Prs />
       {:else if adoView}
         <section class="min-w-0 flex-1 px-6 pt-6">
           <h1 class="m-0 text-[28px] font-semibold tracking-tight text-ink">{ADO_TITLE[view]}</h1>

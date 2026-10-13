@@ -183,7 +183,10 @@ impl AdoClient {
             url.push_str("api-version=");
             url.push_str(API_VERSION);
         }
-        url
+        match crate::ado::base_override() {
+            Some(base) => crate::ado::rebase_url(&url, &base),
+            None => url,
+        }
     }
 
     async fn send<T: DeserializeOwned>(
