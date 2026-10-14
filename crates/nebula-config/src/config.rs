@@ -432,6 +432,9 @@ pub enum SettingKind {
     HideUninstalledHarnesses,
     AskBeforeArchive,
     ConfirmDragMove,
+    AccountSpread,
+    AccountSpreadThreshold,
+    UsageStatusline,
 }
 
 /// One harness field row in the Agents tab. The tab renders one section
@@ -525,6 +528,9 @@ impl SettingKind {
             SettingKind::ExpandAllWorktrees | SettingKind::FollowNewSession => (2026, 9, 26),
             SettingKind::HighlightCurrentCard => (2026, 9, 28),
             SettingKind::AskBeforeArchive => (2026, 10, 3),
+            SettingKind::AccountSpread
+            | SettingKind::AccountSpreadThreshold
+            | SettingKind::UsageStatusline => (2026, 10, 15),
             SettingKind::ConfirmDragMove => (2026, 10, 2),
             SettingKind::SourceControlGraph | SettingKind::InlineGraphics => (2026, 10, 9),
             SettingKind::DiffMode
@@ -675,6 +681,24 @@ pub const SETTINGS_TABS: &[SettingsTab] = &[
                 label: "Confirm drag move",
                 hint: "A session card dropped on another worktree or project tab asks before it moves (off = the drop moves it at once; m's picker never asks)",
                 group: "",
+            },
+            SettingSpec {
+                kind: SettingKind::AccountSpread,
+                label: "Account spread",
+                hint: "Which profile a new session takes when none is picked: manual = the harness's default; failover = the default until its 5h or weekly use reaches the threshold, then the next enabled one; least_used = the enabled one with the least use",
+                group: "Accounts",
+            },
+            SettingSpec {
+                kind: SettingKind::AccountSpreadThreshold,
+                label: "Failover at",
+                hint: "Percent of an account's 5h or weekly limit at which failover moves to the next enabled profile",
+                group: "Accounts",
+            },
+            SettingSpec {
+                kind: SettingKind::UsageStatusline,
+                label: "Usage status line",
+                hint: "Claude sessions get kete's status line, which reads plan usage and context for the accounts list (your own statusLine still runs and prints; off = only the on-screen usage notice)",
+                group: "Accounts",
             },
         ]),
     },
@@ -1269,6 +1293,15 @@ pub struct Config {
     /// archives at once (`u` in the ARCHIVED VIEW brings it back), and a
     /// held `a` still archives one card per press (the RELEASE WATCH).
     pub ask_before_archive: bool,
+    /// ACCOUNT SPREAD (Settings → Sessions → Accounts): which profile a
+    /// launch naming none takes — `manual`, `failover`, `least_used`
+    /// (`nebula_core::accounts`).
+    pub account_spread: String,
+    /// The percent at which `failover` moves on.
+    pub account_spread_threshold: String,
+    /// Install kete's statusLine wrapper into Claude sessions, the source
+    /// of their plan usage and context (`kete _statusline`).
+    pub usage_statusline: bool,
     /// The key of the **Focused panel tint** SETTING (Settings →
     /// Appearance, through 0.34): whether the faint accent wash behind
     /// whatever keys land in — the card under the cursor, or the session
@@ -1620,6 +1653,9 @@ impl Default for Config {
             skip_session_naming: false,
             confirm_on_archive: false,
             ask_before_archive: true,
+            account_spread: nebula_core::accounts::SPREADS[0].into(),
+            account_spread_threshold: nebula_core::accounts::DEFAULT_THRESHOLD.to_string(),
+            usage_statusline: true,
             focus_tint: true,
             show_workspaces: true,
             hide_projects: false,
@@ -2668,6 +2704,9 @@ impl Config {
             SettingKind::AutoCleanupMerged => on_off(self.auto_cleanup_merged).into(),
             SettingKind::ShowAllWorktrees => on_off(self.show_all_worktrees).into(),
             SettingKind::AskBeforeArchive => on_off(self.ask_before_archive).into(),
+            SettingKind::AccountSpread => self.account_spread.clone(),
+            SettingKind::AccountSpreadThreshold => self.account_spread_threshold.clone(),
+            SettingKind::UsageStatusline => on_off(self.usage_statusline).into(),
             SettingKind::Theme => self.theme.clone(),
             SettingKind::Icons => self.icons_word().into(),
             SettingKind::Animations => on_off(self.animations).into(),
@@ -2863,6 +2902,21 @@ impl Config {
             }
             SettingKind::QuickPromptNewWorktree => {
                 self.quick_prompt_new_worktree = !self.quick_prompt_new_worktree;
+            }
+            SettingKind::AccountSpread => {
+                self.account_spread =
+                    cycle_choice(&self.account_spread, nebula_core::accounts::SPREADS, step).into();
+            }
+            SettingKind::AccountSpreadThreshold => {
+                self.account_spread_threshold = cycle_choice(
+                    &self.account_spread_threshold,
+                    nebula_core::accounts::THRESHOLDS,
+                    step,
+                )
+                .into();
+            }
+            SettingKind::UsageStatusline => {
+                self.usage_statusline = !self.usage_statusline;
             }
         }
     }

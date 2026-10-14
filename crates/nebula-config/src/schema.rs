@@ -112,6 +112,9 @@ impl SettingKind {
             SettingKind::HideUninstalledHarnesses => "hide_uninstalled_harnesses",
             SettingKind::AskBeforeArchive => "ask_before_archive",
             SettingKind::ConfirmDragMove => "confirm_drag_move",
+            SettingKind::AccountSpread => nebula_core::accounts::SPREAD_KEY,
+            SettingKind::AccountSpreadThreshold => nebula_core::accounts::THRESHOLD_KEY,
+            SettingKind::UsageStatusline => "usage_statusline",
         }
     }
 }
@@ -221,6 +224,7 @@ fn flag(cfg: &mut Config, kind: SettingKind) -> Option<&mut bool> {
         SettingKind::ShowAllWorktrees => &mut cfg.show_all_worktrees,
         SettingKind::AskBeforeArchive => &mut cfg.ask_before_archive,
         SettingKind::ConfirmDragMove => &mut cfg.confirm_drag_move,
+        SettingKind::UsageStatusline => &mut cfg.usage_statusline,
         SettingKind::Animations => &mut cfg.animations,
         SettingKind::BlackBackground => &mut cfg.black_background,
         SettingKind::HighlightCurrentCard => &mut cfg.highlight_current_card,
@@ -271,6 +275,14 @@ fn choice_options(cfg: &Config, kind: SettingKind) -> Option<Vec<String>> {
             (strs(&["shown", "hidden"]), String::new())
         }
         SettingKind::QuickPromptKind => (agent_kind_names(), cfg.quick_prompt_kind.clone()),
+        SettingKind::AccountSpread => (
+            strs(nebula_core::accounts::SPREADS),
+            cfg.account_spread.clone(),
+        ),
+        SettingKind::AccountSpreadThreshold => (
+            strs(nebula_core::accounts::THRESHOLDS),
+            cfg.account_spread_threshold.clone(),
+        ),
         _ => return None,
     };
     let current = current.trim();
@@ -370,6 +382,8 @@ pub fn set_value(cfg: &mut Config, kind: SettingKind, value: &Value) -> Result<(
         SettingKind::HideCardMarks => cfg.hide_card_marks = word == "hidden",
         SettingKind::HideDraftPrs => cfg.hide_draft_prs = word == "hidden",
         SettingKind::QuickPromptKind => cfg.quick_prompt_kind = word,
+        SettingKind::AccountSpread => cfg.account_spread = word,
+        SettingKind::AccountSpreadThreshold => cfg.account_spread_threshold = word,
         _ => return Err(format!("{} is not a choice", kind.key())),
     }
     Ok(())
