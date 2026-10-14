@@ -138,8 +138,9 @@ kete profile add <name> --harness <h> [--use-default] [--default] [--env K=V]…
 kete profile login <name> [-- <args>]
                                 # run the harness's sign-in here under the profile:
                                 # claude auth login --claudeai, codex login, copilot login
-kete profile list             # accounts, homes, defaults and the last plan usage seen
+kete profile list             # accounts: 5h and weekly usage bars, defaults, login state
 kete profile default <name>   # launches that pick no profile take it
+kete profile enable <name>    # disable <name>: never picked unless named
 kete profile remove <name> [--purge]
                                 # drop it; --purge deletes its home (and the login) too
 ```
