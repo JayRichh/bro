@@ -83,7 +83,7 @@ export function elsewhere(m: Model, root: Node | null): Node[] {
     );
 }
 
-/** Words for the counts line: `2 need you · 1 running`. */
+/** Words for the counts line: `2 need you \u00b7 1 running`. */
 export function countWords(c: Partial<Record<Status, number>>): { status: Status; text: string }[] {
   const word: Partial<Record<Status, (n: number) => string>> = {
     needs: (n) => (n === 1 ? 'needs you' : 'need you'),

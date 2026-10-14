@@ -189,7 +189,14 @@ export function revealRepo(repo: string) {
 /** Make the window's selection follow a place reached by back or forward. */
 export function follow(p: Place) {
   if (p.view === 'overview' || p.view === 'board') app.home = p.view;
-  if (p.view === 'session') {
+  if (p.view === 'orchestrator') {
+    // The orchestrator view shows its session in the split's pane.
+    const o = app.model.agents.find((a) => a.role === 'orchestrator' && !a.archived);
+    if (o) {
+      app.session = { Agent: o.id };
+      markSeen(app.session);
+    }
+  } else if (p.view === 'session') {
     const s = sessionFromKey(p.item);
     if (s) app.session = s;
     // Back or forward onto a session shows it again: it is seen.
@@ -273,7 +280,7 @@ function take(m: Model) {
 /** Mark the session on screen seen when it reads unread and the window has focus. */
 export function seeOpenSession() {
   const s = app.session;
-  if (nav.current.view !== 'session' || !s || !('Agent' in s)) return;
+  if ((nav.current.view !== 'session' && nav.current.view !== 'orchestrator') || !s || !('Agent' in s)) return;
   if (typeof document !== 'undefined' && !document.hasFocus()) return;
   if (app.model.agents.find((a) => a.id === s.Agent)?.unseen) markSeen(s);
 }

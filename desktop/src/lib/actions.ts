@@ -9,6 +9,7 @@ import { api, type Agent, type Model, type TerminalTab, type Worktree } from './
 import { app, focusQuickPrompt, markSeen, openDiff, openSession, projectOf, toast } from './store.svelte';
 import { ask, type MenuEntry } from './ui/ui.svelte';
 import { keysOf, type ShortcutId } from './shortcuts';
+import { orchestratorMenuItems } from './orch.svelte';
 
 export type Target =
   | { kind: 'agent'; id: string }
@@ -331,6 +332,7 @@ export function agentMenu(a: Agent): MenuEntry[] {
     item('Rename\u2026', () => renameAgent(a.id), 'rename'),
   ];
   if (a.unseen) out.push(item('Mark seen', () => seeAgent(a.id)));
+  out.push(...orchestratorMenuItems(a));
   out.push(item('Archive', () => archiveAgent(a.id), 'archive'), item('Delete\u2026', () => deleteAgent(a.id), 'delete', true));
   return [...out, 'sep', ...worktreeItems(w)];
 }

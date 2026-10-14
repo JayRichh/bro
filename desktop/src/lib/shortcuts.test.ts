@@ -57,6 +57,17 @@ describe('the shortcut table', () => {
   });
 });
 
+describe('the orchestrator keys', () => {
+  it('0 when not typing, F10 in fields, neither inside a shell', () => {
+    expect(shortcutFor(key('0'), idle)?.id).toBe('orchestrator');
+    expect(shortcutFor(key('0'), field)).toBeUndefined();
+    expect(shortcutFor(key('F10'), field)?.id).toBe('orchestrator_f10');
+    expect(shortcutFor(key('F10'), term)).toBeUndefined();
+    // Shift+F10 stays the row menu.
+    expect(shortcutFor(key('F10', { shiftKey: true }), row)?.id).toBe('row_menu');
+  });
+});
+
 describe('chordOf and shortcutFor', () => {
   it('spells modifiers and keys as the table does', () => {
     expect(chordOf(key('B', { ctrlKey: true, shiftKey: true }))).toBe('ctrl+shift+b');

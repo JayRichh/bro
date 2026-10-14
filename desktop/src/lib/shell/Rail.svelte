@@ -3,8 +3,14 @@
   import { api } from '../api';
   import { nav, type View } from './history.svelte';
   import { repoRows, tally } from '../overview/repos';
+  import { canProvision, descendantCounts, orchestratorOf, orchestratorTree } from '../orchestrator';
+  import { askStartOrchestrator, openOrchestrator } from '../orch.svelte';
+  import { toneOf } from '../status';
+  import Status from '../Status.svelte';
 
   const rows = $derived(repoRows(app.model));
+  const orch = $derived(orchestratorOf(app.model));
+  const orchNeeds = $derived(descendantCounts(orchestratorTree(app.model)).needs ?? 0);
   /** Projects in the user's own order: the rail is a map, not a ranking. */
   const projects = $derived([...rows].sort((a, b) => a.project.sort_order - b.project.sort_order));
   const here = $derived(nav.current.repo);
@@ -58,6 +64,37 @@
   </div>
 
   <nav class="min-h-0 flex-1 overflow-y-auto pb-4" aria-label="Repos">
+    <!-- The orchestrator, pinned above the repos: the place most work starts. -->
+    <div class="border-b border-rule py-1.5">
+      {#if orch}
+        {@const onOrch = nav.current.view === 'orchestrator'}
+        <button
+          class="{item} {onOrch ? 'bg-surface font-semibold text-ink' : 'bg-transparent text-ink'}"
+          onclick={openOrchestrator}
+          title="The orchestrator, {orch.name} (0 or F10)"
+          aria-current={onOrch ? 'page' : undefined}
+        >
+          <span class="flex-none font-mono text-[12px]" aria-hidden="true">&#9670;</span>
+          <span class="min-w-0 flex-1 truncate">Orchestrator</span>
+          {#if orchNeeds}
+            <span class="inline-flex flex-none items-center gap-1.5 text-[12px] text-ember-ink"
+              ><span class="size-1.5 bg-ember" aria-hidden="true"></span><span class="font-bold">{orchNeeds}</span> {orchNeeds === 1 ? 'needs you' : 'need you'}</span
+            >
+          {:else}
+            <Status tone={toneOf(orch)} class="font-normal" />
+          {/if}
+        </button>
+      {:else}
+        <button
+          class="{item} bg-transparent text-[13px] text-muted hover:text-ink"
+          onclick={() => (canProvision(app.model) ? openOrchestrator() : askStartOrchestrator())}
+          title="Start an orchestrator: one session that coordinates the others (0 or F10)"
+        >
+          <span class="flex-none font-mono text-[12px]" aria-hidden="true">&#9671;</span>
+          <span class="min-w-0 flex-1 truncate">Start orchestrator</span>
+        </button>
+      {/if}
+    </div>
     <h2 class="m-0 {heading}">Repos</h2>
     {#each projects as r (r.project.id)}
       {@const c = tally([r])}

@@ -22,6 +22,14 @@ import { keysOf, type ShortcutId } from './shortcuts';
 import { menuFor, newWorktree, parseTarget, runRowKey, type Target } from './actions';
 import { ask, openMenu, ui, type MenuItem } from './ui/ui.svelte';
 import type { PaletteCommand } from './palette';
+import { askStartOrchestrator, openOrchestrator, orchestratorCommands } from './orch.svelte';
+import { orchestratorOf } from './orchestrator';
+
+/** 0 / F10: the orchestrator, or the Start form when there is none. */
+function orchestratorKey() {
+  if (orchestratorOf(app.model)) openOrchestrator();
+  else askStartOrchestrator();
+}
 
 export function cycleTheme() {
   const order: ThemePref[] = ['system', 'light', 'dark'];
@@ -55,7 +63,7 @@ export function currentTarget(): Target | null {
   return 'Agent' in s ? { kind: 'agent', id: s.Agent } : { kind: 'terminal', id: s.Terminal };
 }
 
-const split = () => nav.current.view === 'session' || nav.current.view === 'diff';
+const split = () => nav.current.view === 'session' || nav.current.view === 'diff' || nav.current.view === 'orchestrator';
 
 /** Run the action a shortcut names. False when it does nothing here. */
 export function runShortcut(id: ShortcutId): boolean {
@@ -78,6 +86,8 @@ export function runShortcut(id: ShortcutId): boolean {
     go_home: () => goHome(nav.current.repo),
     go_session: () => app.session && openSession(app.session),
     go_diff: () => openDiff(app.diffWorktree ?? sessionWorktree(app.session)),
+    orchestrator: orchestratorKey,
+    orchestrator_f10: orchestratorKey,
     close_split: () => {
       if (!split() && nav.current.view !== 'settings') return false;
       goHome(nav.current.repo);
@@ -133,6 +143,7 @@ export function paletteCommands(): Command[] {
     cmd('profiles', 'Profiles', 'Window', () => openSettings('profiles'), undefined, 'accounts login'),
     cmd('help', 'Keyboard shortcuts', 'Window', () => (ui.help = true), 'help_f1', 'help keys'),
     cmd('add-repo', 'Add a repo\u2026', 'Window', () => addRepo(), undefined, 'project folder'),
+    ...orchestratorCommands(),
   ];
   const t = currentTarget();
   if (t) {
