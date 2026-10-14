@@ -1320,6 +1320,7 @@ mod tests {
             env: Default::default(),
             default,
             use_default: false,
+            disabled: false,
         };
         let cfg = Config {
             profiles: vec![

@@ -70,6 +70,7 @@ pub fn run_profile(op: ProfileOp) -> Result<()> {
                 env: vars,
                 default,
                 use_default,
+                disabled: false,
             };
             profiles::add_to_file(&config, &profile).map_err(anyhow::Error::msg)?;
             match profile.home() {

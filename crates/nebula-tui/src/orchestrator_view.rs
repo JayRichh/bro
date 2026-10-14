@@ -291,6 +291,7 @@ mod tests {
             env: Default::default(),
             default: false,
             use_default: false,
+            disabled: false,
         }
     }
 
