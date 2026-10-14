@@ -136,7 +136,9 @@ pub fn accounts_list(
 
 #[tauri::command]
 pub fn profile_set_enabled(name: String, enabled: bool) -> Res<()> {
-    set_enabled_at(&nebula_core::paths::config_path(), &name, enabled)
+    // The layer the profiles come from, under the config lock, as every
+    // other profile edit.
+    crate::profiles::on_layer(|config, _| set_enabled_at(config, &name, enabled))
 }
 
 #[cfg(test)]
@@ -237,5 +239,33 @@ mod tests {
         let raw = std::fs::read_to_string(&config).unwrap();
         assert!(!raw.contains("disabled") && raw.contains("colour"), "{raw}");
         assert!(set_enabled_at(&config, "nope", true).is_err());
+    }
+
+    /// The switch lands in config.local.json when that layer's list is the
+    /// one in force, as the other profile edits do.
+    #[test]
+    fn the_switch_edits_the_layer_the_profiles_come_from() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config.json");
+        let local = dir.path().join("config.local.json");
+        std::fs::write(
+            &config,
+            r#"{"profiles":[{"name":"base","harness":"claude"}]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &local,
+            r#"{"profiles":[{"name":"work","harness":"claude"}]}"#,
+        )
+        .unwrap();
+        let layer = crate::profiles::profiles_layer(&config, &local);
+        assert_eq!(layer, local);
+        set_enabled_at(&layer, "work", false).unwrap();
+        assert!(std::fs::read_to_string(&local)
+            .unwrap()
+            .contains("disabled"));
+        assert!(!std::fs::read_to_string(&config)
+            .unwrap()
+            .contains("disabled"));
     }
 }

@@ -219,7 +219,7 @@ pub fn profiles_layer(config: &Path, local: &Path) -> std::path::PathBuf {
 /// Run a profile edit on the layer the profiles come from. An edit of the
 /// local layer also holds config.json's lock, which the settings writers
 /// take for both layers.
-fn on_layer<T>(edit: impl FnOnce(&Path, &Path) -> Res<T>) -> Res<T> {
+pub(crate) fn on_layer<T>(edit: impl FnOnce(&Path, &Path) -> Res<T>) -> Res<T> {
     let config = nebula_core::paths::config_path();
     let local = nebula_core::paths::config_local_path();
     let layer = profiles_layer(&config, &local);

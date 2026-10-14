@@ -41,10 +41,20 @@ pub enum ProfileOp {
 }
 
 pub fn run_profile(op: ProfileOp) -> Result<()> {
-    let config = profiles_layer(
-        &nebula_core::paths::config_path(),
-        &nebula_core::paths::config_local_path(),
-    )?;
+    let base = nebula_core::paths::config_path();
+    let local = nebula_core::paths::config_local_path();
+    let config = profiles_layer(&base, &local)?;
+    // An edit of the local layer also holds config.json's lock: the
+    // settings writers (`Config::save`, the window's profile edits) take
+    // that one for both layers. The base layer's edit locks it itself.
+    let _lock = match &op {
+        ProfileOp::List | ProfileOp::Login { .. } => None,
+        _ if config == local => Some(
+            nebula_core::settings::lock(&base)
+                .with_context(|| format!("lock {}", base.display()))?,
+        ),
+        _ => None,
+    };
     match op {
         ProfileOp::List => list(),
         ProfileOp::Add {
