@@ -169,17 +169,78 @@ fn checkout(client: &Client, worktree: &str) -> Res<(PathBuf, PathBuf)> {
 /// The OPEN COMMAND for a checkout, as the TUI resolves it: the project's
 /// Open command setting, else the checkout's `.kete.json` `open`, else the
 /// main checkout's.
-pub fn open_command_for(cfg: &nebula_config::Config, worktree: &Path, main: &Path) -> Res<String> {
+pub fn open_command_for(
+    cfg: &nebula_config::Config,
+    worktree: &Path,
+    main: &Path,
+) -> Res<OpenCommand> {
     let setting = cfg.project(main).open_command;
     let setting = setting.trim();
     if !setting.is_empty() {
-        return Ok(setting.to_string());
+        return Ok(OpenCommand {
+            command: setting.to_string(),
+            from_file: false,
+        });
     }
-    project_file::lookup(worktree, main, ProjectCommand::Open)?.ok_or_else(|| {
-        "No open command for this repo: set one in Settings, Project, or add \
-         .kete.json with {\"open\": \"code .\"}."
-            .to_string()
-    })
+    project_file::lookup(worktree, main, ProjectCommand::Open)?
+        .map(|command| OpenCommand {
+            command,
+            from_file: true,
+        })
+        .ok_or_else(|| {
+            "No open command for this repo: set one in Settings, Project, or add \
+             .kete.json with {\"open\": \"code .\"}."
+                .to_string()
+        })
+}
+
+/// An open command, and whether it came from a checkout's `.kete.json`
+/// (anyone who can push to the repo wrote it) rather than the user's own
+/// setting.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OpenCommand {
+    pub command: String,
+    pub from_file: bool,
+}
+
+/// What Open in editor did: ran `command`, or stopped to ask first.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenOutcome {
+    pub command: String,
+    /// False: the command comes from the repo's .kete.json and hasn't been
+    /// allowed for this repo yet; the window shows it and asks.
+    pub opened: bool,
+}
+
+/// Whether Open in editor may run now, for the repo at `main`: a command
+/// from the user's own setting always may; one from a .kete.json only once
+/// allowed for this repo. `approve` allows it, and the approval is kept in
+/// the window's prefs in the layers at `path` / `local`, so the same
+/// command doesn't ask again (a changed one does).
+pub fn open_allowed(
+    path: &Path,
+    local: &Path,
+    main: &Path,
+    open: &OpenCommand,
+    approve: bool,
+) -> Res<bool> {
+    use nebula_config::desktop::DesktopPrefs;
+    if !open.from_file {
+        return Ok(true);
+    }
+    let repo = main.to_string_lossy().into_owned();
+    if DesktopPrefs::load_at(path, local).open_approved(&repo, &open.command) {
+        return Ok(true);
+    }
+    if !approve {
+        return Ok(false);
+    }
+    DesktopPrefs::update_in(path, local, |p| {
+        p.approve_open(&repo, &open.command);
+        Ok(())
+    })?;
+    Ok(true)
 }
 
 /// Start `command` through the user's shell in `cwd`, with no console
@@ -272,11 +333,26 @@ pub async fn set_project_path(
 
 /// Run the worktree's open command (an editor, usually); the command run.
 #[tauri::command]
-pub async fn open_worktree(client: State<'_, Arc<Client>>, worktree: String) -> Res<String> {
+pub async fn open_worktree(
+    client: State<'_, Arc<Client>>,
+    worktree: String,
+    approve: Option<bool>,
+) -> Res<OpenOutcome> {
     let (path, main) = checkout(&client, &worktree)?;
-    let command = open_command_for(&nebula_config::Config::load(), &path, &main)?;
+    let open = open_command_for(&nebula_config::Config::load(), &path, &main)?;
+    let (config, local) = nebula_config::layer_paths();
+    if !open_allowed(&config, &local, &main, &open, approve.unwrap_or(false))? {
+        return Ok(OpenOutcome {
+            command: open.command,
+            opened: false,
+        });
+    }
+    let command = open.command;
     spawn_open_command(&command, &path).map_err(|e| format!("Could not run {command}: {e}"))?;
-    Ok(command)
+    Ok(OpenOutcome {
+        command,
+        opened: true,
+    })
 }
 
 /// Open the repo's remote page in the browser; the address opened.
@@ -468,10 +544,40 @@ mod tests {
             .unwrap_err()
             .contains("Settings"));
         std::fs::write(main.join(".kete.json"), r#"{"open": "code ."}"#).unwrap();
-        assert_eq!(open_command_for(&cfg, &wt, &main).unwrap(), "code .");
+        let file = open_command_for(&cfg, &wt, &main).unwrap();
+        assert_eq!(file.command, "code .");
+        assert!(file.from_file);
         let mut cfg = nebula_config::Config::default();
         cfg.set_project_text(&main, nebula_config::SettingKind::OpenCommand, "cursor .");
-        assert_eq!(open_command_for(&cfg, &wt, &main).unwrap(), "cursor .");
+        let setting = open_command_for(&cfg, &wt, &main).unwrap();
+        assert_eq!(setting.command, "cursor .");
+        assert!(!setting.from_file);
+    }
+
+    #[test]
+    fn a_repo_files_open_command_asks_once_per_repo_and_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let (path, local) = (
+            dir.path().join("config.json"),
+            dir.path().join("config.local.json"),
+        );
+        let main = dir.path().join("repo");
+        let other = dir.path().join("other");
+        let open = |command: &str, from_file| OpenCommand {
+            command: command.into(),
+            from_file,
+        };
+        // The user's own setting never asks.
+        assert!(open_allowed(&path, &local, &main, &open("code .", false), false).unwrap());
+        assert!(!path.exists(), "nothing recorded for a setting");
+        // A repo file's asks until allowed, then not again.
+        let file = open("code .", true);
+        assert!(!open_allowed(&path, &local, &main, &file, false).unwrap());
+        assert!(open_allowed(&path, &local, &main, &file, true).unwrap());
+        assert!(open_allowed(&path, &local, &main, &file, false).unwrap());
+        // Another repo, or a changed command, asks again.
+        assert!(!open_allowed(&path, &local, &other, &file, false).unwrap());
+        assert!(!open_allowed(&path, &local, &main, &open("make open", true), false).unwrap());
     }
 
     #[test]

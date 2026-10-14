@@ -24,6 +24,10 @@ pub struct DesktopPrefs {
     pub theme: String,
     pub diff_mode: String,
     pub home: String,
+    /// Open in editor commands from a repo's .kete.json the user has let
+    /// run, by repo path: the same command doesn't ask again.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub approved_open: BTreeMap<String, Vec<String>>,
     /// Keys a newer window wrote, kept through a save.
     #[serde(flatten)]
     pub other: BTreeMap<String, serde_json::Value>,
@@ -35,6 +39,7 @@ impl Default for DesktopPrefs {
             theme: THEMES[0].into(),
             diff_mode: DIFF_MODES[0].into(),
             home: HOMES[0].into(),
+            approved_open: BTreeMap::new(),
             other: BTreeMap::new(),
         }
     }
@@ -94,6 +99,21 @@ impl DesktopPrefs {
             "diff_mode" => self.diff_mode = value.into(),
             "home" => self.home = value.into(),
             _ => {}
+        }
+    }
+
+    /// `command` from the repo at `repo`'s .kete.json has been allowed.
+    pub fn open_approved(&self, repo: &str, command: &str) -> bool {
+        self.approved_open
+            .get(repo)
+            .is_some_and(|list| list.iter().any(|c| c == command))
+    }
+
+    /// Allow `command` for the repo at `repo`.
+    pub fn approve_open(&mut self, repo: &str, command: &str) {
+        let list = self.approved_open.entry(repo.to_string()).or_default();
+        if !list.iter().any(|c| c == command) {
+            list.push(command.to_string());
         }
     }
 

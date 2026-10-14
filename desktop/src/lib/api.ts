@@ -299,7 +299,10 @@ export const api = {
   renameProject: (project: string, name: string) => invoke<void>('rename_project', { project, name }),
   removeProject: (project: string) => invoke<void>('remove_project', { project }),
   setProjectPath: (project: string, path: string) => invoke<void>('set_project_path', { project, path }),
-  openWorktree: (worktree: string) => invoke<string>('open_worktree', { worktree }),
+  /** Run the open command; `opened: false` means it comes from the repo's
+   *  .kete.json and wants a yes first (call again with `approve`). */
+  openWorktree: (worktree: string, approve = false) =>
+    invoke<{ command: string; opened: boolean }>('open_worktree', { worktree, approve }),
   openRemote: (worktree: string) => invoke<string>('open_remote', { worktree }),
   // Presets and profiles
   presets: () => invoke<Preset[]>('presets_list'),
