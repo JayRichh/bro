@@ -22,7 +22,7 @@ The desktop app catches up with the terminal app, and both get an orchestrator, 
   session header or repo header for the terminal app's card menu: follow-up, restart, duplicate, move,
   rename, mark seen, archive, unarchive and delete, plus run and stop, new terminal, diff, open in
   editor, open remote, new and delete worktree, rename, locate and remove a repo. Row keys follow the
-  terminal app's (`r`, `a`, `u`, `m`, `Shift+P`, `Del`). Archived sessions show with `Shift+A`. Unread
+  terminal app's (`r`, `a`, `u`, `m`, `Shift+P`), and `Del` deletes. Archived sessions show with `Shift+A`. Unread
   clears wherever you see the session.
 - **Command palette and help.** `Ctrl+K` (or `Ctrl+Shift+P`) jumps to any repo, worktree, session or
   pull request, what needs you first, and runs any window action or menu verb. `?` or `F1` lists every
