@@ -67,13 +67,16 @@ pub(crate) fn row_lines(
     } else {
         Style::default().fg(th.text).add_modifier(Modifier::BOLD)
     };
-    let mut head = vec![
-        Span::styled(
-            if row.default { " * " } else { "   " },
-            Style::default().fg(th.accent),
-        ),
-        Span::styled(format!(" {} ", row.label()), name_style),
-    ];
+    // The star on the harness's default; dim on one flagged default but
+    // switched off, which no launch takes.
+    let star = if row.default {
+        Span::styled(" * ", Style::default().fg(th.accent))
+    } else if row.default_off {
+        Span::styled(" * ", Style::default().fg(th.dim))
+    } else {
+        Span::raw("   ")
+    };
+    let mut head = vec![star, Span::styled(format!(" {} ", row.label()), name_style)];
     if row.profile.is_some() {
         head.push(Span::styled(
             format!("  {}", row.harness),
@@ -81,7 +84,18 @@ pub(crate) fn row_lines(
         ));
     }
     if row.disabled() {
-        head.push(Span::styled("  off", Style::default().fg(th.warn)));
+        let off = if row.default_off {
+            "  off (default)"
+        } else {
+            "  off"
+        };
+        head.push(Span::styled(off, Style::default().fg(th.warn)));
+    }
+    if let Some(problem) = &row.problem {
+        head.push(Span::styled(
+            format!("  {problem}"),
+            Style::default().fg(th.err),
+        ));
     }
     let login = row.login_text();
     if !login.is_empty() {
@@ -110,10 +124,26 @@ pub(crate) fn row_lines(
         ),
         None => "   no reading yet: it shows after a session's first turn".into(),
     };
-    lines.push(Line::from(Span::styled(
-        source,
+    // How the account is used, ahead of where its numbers came from: the
+    // live sessions on it, by name.
+    let used = row.sessions_text();
+    let mut last = Vec::new();
+    if !used.is_empty() {
+        last.push(Span::styled(
+            format!("   {used}"),
+            Style::default().fg(th.muted),
+        ));
+        last.push(Span::styled(" \u{b7}", Style::default().fg(th.dim)));
+    }
+    last.push(Span::styled(
+        if used.is_empty() {
+            source
+        } else {
+            source.replacen("   ", " ", 1)
+        },
         Style::default().fg(th.dim),
-    )));
+    ));
+    lines.push(Line::from(last));
     lines
 }
 
