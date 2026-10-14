@@ -14,6 +14,7 @@ import { worktreeApi } from './worktrees/api';
 import { cardsLine, dirty, stateLines } from './worktrees/offer';
 import { deleteEmptied, offerConfirm, prepareOffer, stillOffered } from './worktrees/delete';
 import { canSwitchBranch, openBranchSwitch } from './worktrees/switcher.svelte';
+import { checkoutSessions, deleteAllSessions } from './checkout';
 
 export type Target =
   /** `viaSub`: picked from one of its subagents' rows, so it acts on
@@ -399,6 +400,9 @@ function worktreeItems(w: Worktree | undefined): MenuEntry[] {
     item('Open in editor', () => openEditor(w.id), 'open_editor'),
     item('Open remote in browser', () => openRemote(w.id), 'open_remote'),
   );
+  const doomed = checkoutSessions(m(), w.id, app.showArchived);
+  const count = doomed.agents.length + doomed.terminals.length;
+  if (count) out.push(item(`Delete all ${count} session${count === 1 ? '' : 's'}\u2026`, () => deleteAllSessions(w.id), undefined, true));
   if (!w.is_main) out.push(item('Delete worktree\u2026', () => deleteWorktree(w.id), undefined, true));
   return out;
 }

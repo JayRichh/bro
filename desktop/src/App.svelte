@@ -31,6 +31,8 @@
   import ReviewNotices from './lib/orchestrator/ReviewNotices.svelte';
   import { onReviewOpened, openOrchestrator } from './lib/orch.svelte';
   import { opensOnOrchestrator, orchestratorOf, placeKey } from './lib/orchestrator';
+  import FileSheet from './lib/files/FileSheet.svelte';
+  import { listenAlerts } from './lib/alerts';
 
   const media = window.matchMedia('(prefers-color-scheme: dark)');
   let osDark = $state(media.matches);
@@ -161,6 +163,7 @@
 
   onMount(() => {
     api.onReview(onReviewOpened).catch(() => {});
+    listenAlerts().catch(() => {});
     boot();
     applyStartup();
   });
@@ -275,6 +278,7 @@
 <ReviewSheet />
 <BranchSwitch />
 <ReviewNotices />
+<FileSheet />
 
 {#if app.toast}
   <div

@@ -150,3 +150,22 @@ export function labelMarks(item: PaletteItem, positions: number[]): Set<number> 
   for (const p of positions) if (p >= at && p < at + item.label.length) out.add(p - at);
   return out;
 }
+
+/** The ring `.` and `,` step through, as the terminal app's
+ *  (`attention_sessions`): every live session in the palette's idle order
+ *  (needs you, running, unread, then newest first, never-run last),
+ *  archived ones left out, from every repo. */
+export function attentionSessions(m: Model): string[] {
+  const rows = buildItems(m, []).filter((i) => i.target.kind === 'session');
+  rows.sort((a, b) => a.tier - b.tier || b.stamp - a.stamp);
+  return rows.map((i) => (i.target as { id: string }).id);
+}
+
+/** The session `step` places along `ring` from `current`, wrapping; from
+ *  outside the ring `.` lands on the first and `,` on the last. */
+export function stepRing(ring: string[], current: string | null, step: 1 | -1): string | null {
+  if (!ring.length) return null;
+  const at = current ? ring.indexOf(current) : -1;
+  if (at < 0) return step > 0 ? ring[0] : ring[ring.length - 1];
+  return ring[(at + step + ring.length) % ring.length];
+}

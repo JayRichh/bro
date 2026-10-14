@@ -68,6 +68,16 @@ describe('the orchestrator keys', () => {
   });
 });
 
+describe('the attention keys', () => {
+  it('. and , step the ring when not typing, and leave Ctrl+, to Settings', () => {
+    expect(shortcutFor(key('.'), idle)?.id).toBe('next_attention');
+    expect(shortcutFor(key(','), row)?.id).toBe('prev_attention');
+    expect(shortcutFor(key('.'), field)).toBeUndefined();
+    expect(shortcutFor(key(','), term)).toBeUndefined();
+    expect(shortcutFor(key(',', { ctrlKey: true }), idle)?.id).toBe('settings');
+  });
+});
+
 describe('chordOf and shortcutFor', () => {
   it('spells modifiers and keys as the table does', () => {
     expect(chordOf(key('B', { ctrlKey: true, shiftKey: true }))).toBe('ctrl+shift+b');
