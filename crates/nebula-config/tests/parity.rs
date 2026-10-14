@@ -356,3 +356,55 @@ fn a_project_row_must_name_a_repo_the_daemon_knows() {
     };
     assert_eq!(schema::resolve_target(&global, &[]).unwrap(), global);
 }
+
+/// The account rows are the window's too (its rail and quick prompt pick
+/// profiles through the same spread): an Accounts group in Sessions, not
+/// under "Terminal app", and the daemon's policy reads what they write.
+#[test]
+fn the_account_rows_are_shared_and_the_policy_reads_them() {
+    let schema = export(&Config::default(), &DesktopPrefs::default(), &[]);
+    let sessions = schema.tabs.iter().find(|t| t.title == "Sessions").unwrap();
+    let group = sessions
+        .groups
+        .iter()
+        .find(|g| g.title == "Accounts")
+        .expect("an Accounts group");
+    assert!(!group.terminal);
+    let keys: Vec<String> = group
+        .rows
+        .iter()
+        .map(|r| match &r.target {
+            Target::Global { key } => key.clone(),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            "account_spread",
+            "account_spread_threshold",
+            "usage_statusline"
+        ]
+    );
+    assert_eq!(group.rows[0].value, json!("manual"));
+    assert_eq!(group.rows[1].value, json!("90"));
+    assert_eq!(group.rows[2].value, json!(true));
+
+    let (_dir, path, local) = layers();
+    let global = |key: &str| Target::Global { key: key.into() };
+    set_in(&path, &local, &global("account_spread"), &json!("failover")).unwrap();
+    set_in(
+        &path,
+        &local,
+        &global("account_spread_threshold"),
+        &json!("80"),
+    )
+    .unwrap();
+    let saved = read(&path);
+    let policy = nebula_core::accounts::Policy::from_words(
+        saved["account_spread"].as_str(),
+        saved["account_spread_threshold"].as_str(),
+    );
+    assert_eq!(policy.spread, nebula_core::accounts::Spread::Failover);
+    assert_eq!(policy.threshold, 80);
+}

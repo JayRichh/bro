@@ -136,6 +136,17 @@ struct PrewarmEntry {
     buffered_hooks: Vec<(HookEvent, Option<String>)>,
 }
 
+impl PrewarmEntry {
+    /// Would a create with this spec adopt the spare? The model, effort
+    /// and PROFILE must all match: a spread that now picks another account
+    /// makes the spare useless, so the keep-check replaces it once.
+    fn fits(&self, model: Option<&str>, effort: Option<&str>, profile: Option<&str>) -> bool {
+        self.model.as_deref() == model
+            && self.effort.as_deref() == effort
+            && self.profile.as_deref() == profile
+    }
+}
+
 /// A relocation waiting on its agent's turn end (`Daemon::pending_moves`).
 #[derive(Debug, Clone)]
 struct PendingMove {
@@ -242,6 +253,8 @@ pub struct Daemon {
     /// Serializes orchestrator provisioning (start, set, clear), so a check,
     /// demote and create never interleave with another.
     pub(crate) provision_gate: tokio::sync::Mutex<()>,
+    /// ACCOUNT USAGE and SESSION CONTEXT readings (`usage.rs`), taken alone.
+    pub(crate) usage: Mutex<usage::UsageBook>,
 }
 
 mod exit;
@@ -254,6 +267,7 @@ mod spawn;
 mod status;
 mod subagents;
 mod terminals;
+mod usage;
 
 pub use subagents::{SubagentCarry, SubagentHookInfo};
 
@@ -285,6 +299,7 @@ impl Daemon {
             subagents: Mutex::new(subagents::SubagentBook::default()),
             orchestrator_home: Mutex::new(None),
             provision_gate: tokio::sync::Mutex::new(()),
+            usage: Mutex::new(usage::UsageBook::default()),
         })
     }
 
@@ -1022,15 +1037,25 @@ fn profile_env_line(env: &nebula_core::profiles::LaunchEnv) -> String {
 
 /// The PROFILE a create on `harness` runs under, by name: `asked` when
 /// the launch named one — it must exist and be an account for that
-/// harness — else the harness's default, else none.
+/// harness — else the ACCOUNT SPREAD's pick (`nebula_core::accounts`):
+/// under `manual`, the harness's default, else none.
 fn resolve_profile_name(
     harness: &nebula_core::harness::HarnessDescriptor,
     asked: Option<&str>,
 ) -> Result<Option<String>> {
     let config = crate::config::Config::load();
-    nebula_core::profiles::resolve(&config.profiles, &harness.id, asked)
-        .map(|profile| profile.map(|p| p.name.trim().to_string()))
-        .map_err(anyhow::Error::msg)
+    if asked.map(str::trim).is_some_and(|a| !a.is_empty()) {
+        return nebula_core::profiles::resolve(&config.profiles, &harness.id, asked)
+            .map(|profile| profile.map(|p| p.name.trim().to_string()))
+            .map_err(anyhow::Error::msg);
+    }
+    let pick = nebula_core::accounts::pick_now(
+        &config.profiles,
+        &harness.id,
+        nebula_core::accounts::load_policy(),
+    );
+    tracing::debug!(choice = %pick.describe(&harness.id), "account spread");
+    Ok(pick.profile.map(|p| p.name.trim().to_string()))
 }
 
 /// The PROFILE `agent` runs under, read fresh from the config: None for a
@@ -4746,6 +4771,25 @@ pub(crate) mod tests {
         );
         daemon.reap_prewarmed();
         assert!(daemon.prewarmed.lock().is_empty());
+    }
+
+    #[test]
+    fn a_spare_fits_only_a_create_on_its_own_account() {
+        let entry = PrewarmEntry {
+            profile: Some("work".into()),
+            agent_id: AgentId("warm".into()),
+            spawned_at: Instant::now(),
+            model: Some("opus".into()),
+            effort: None,
+            buffered_hooks: Vec::new(),
+        };
+        assert!(entry.fits(Some("opus"), None, Some("work")));
+        assert!(
+            !entry.fits(Some("opus"), None, Some("home")),
+            "the spread moved on"
+        );
+        assert!(!entry.fits(Some("opus"), None, None));
+        assert!(!entry.fits(None, None, Some("work")));
     }
 
     /// Switching `prewarm_agents` off drains the pool on the next sweep. A

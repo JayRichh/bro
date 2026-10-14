@@ -1,3 +1,4 @@
+pub mod accounts;
 pub mod branch_name;
 pub mod clock;
 pub mod codec;
@@ -17,6 +18,7 @@ pub mod protocol;
 pub mod remote;
 pub mod settings;
 pub mod shell;
+pub mod usage;
 
 pub use entities::*;
 pub use harness::*;

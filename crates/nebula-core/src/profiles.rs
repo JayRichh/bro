@@ -57,6 +57,11 @@ pub struct Profile {
     /// the existing login is one of the profiles a picker cycles through.
     #[serde(default, skip_serializing_if = "is_false")]
     pub use_default: bool,
+    /// Switched off in the accounts list: never picked for a launch that
+    /// names no profile (no default, no spread), and left out of the
+    /// pickers. A session already running under it keeps it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub disabled: bool,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -306,9 +311,40 @@ pub fn login_hint(profile: &Profile) -> Option<String> {
 }
 
 /// The harness's default profile: the first usable one flagged `default`.
+/// A disabled default is no default: a launch naming no profile runs on
+/// the CLI's own login, as when none is flagged.
 pub fn default_for<'a>(all: &'a [Profile], harness: &str) -> Option<&'a Profile> {
     all.iter()
         .find(|p| p.default && p.harness.trim() == harness.trim() && p.problem().is_none())
+        .filter(|p| !p.disabled)
+}
+
+/// Every usable, enabled profile for `harness`, in config order: what a
+/// picker offers and a spread chooses from.
+pub fn enabled_for<'a>(all: &'a [Profile], harness: &str) -> Vec<&'a Profile> {
+    for_harness(all, harness)
+        .into_iter()
+        .filter(|p| !p.disabled)
+        .collect()
+}
+
+/// Switch `name` on or off in the settings file, in place.
+pub fn set_enabled_in_file(path: &Path, name: &str, enabled: bool) -> Result<(), String> {
+    edit_file(path, |entries| {
+        let Some(entry) = entries
+            .iter_mut()
+            .find(|e| e.get("name").and_then(Value::as_str) == Some(name.trim()))
+            .and_then(Value::as_object_mut)
+        else {
+            return Err(format!("no profile named `{}`", name.trim()));
+        };
+        if enabled {
+            entry.remove("disabled");
+        } else {
+            entry.insert("disabled".into(), json!(true));
+        }
+        Ok(())
+    })
 }
 
 /// Every usable profile for `harness`, in config order.
@@ -395,7 +431,14 @@ pub fn update_in_file(path: &Path, profile: &Profile) -> Result<(), String> {
         };
         let mut entry = entries[at].as_object().cloned().unwrap_or_default();
         // Fields left out when empty or off must go, not linger.
-        for key in ["name", "harness", "env", "default", "use_default"] {
+        for key in [
+            "name",
+            "harness",
+            "env",
+            "default",
+            "use_default",
+            "disabled",
+        ] {
             entry.remove(key);
         }
         entry.extend(known);
@@ -678,6 +721,7 @@ mod tests {
             env: BTreeMap::new(),
             default: false,
             use_default: false,
+            disabled: false,
         }
     }
 
@@ -815,6 +859,47 @@ mod tests {
         assert_eq!(read_usage_in(dir.path(), "work"), None);
         write_usage_in(dir.path(), "work", &usage).unwrap();
         assert_eq!(read_usage_in(dir.path(), "work"), Some(usage));
+    }
+
+    #[test]
+    fn a_disabled_profile_is_never_the_default_and_its_flag_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let mut a = profile("a", "claude");
+        a.default = true;
+        add_to_file(&path, &a).unwrap();
+        add_to_file(&path, &profile("b", "claude")).unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !raw.contains("disabled"),
+            "an enabled profile writes no flag"
+        );
+        set_enabled_in_file(&path, "a", false).unwrap();
+        let obj = crate::settings::read_object(&path).unwrap().unwrap();
+        let all = from_settings(&obj);
+        assert!(all[0].disabled);
+        assert_eq!(
+            default_for(&all, "claude"),
+            None,
+            "a disabled default is none"
+        );
+        assert_eq!(
+            resolve(&all, "claude", Some("a")).unwrap().unwrap().name,
+            "a",
+            "a session naming it still resolves (restart, resume)"
+        );
+        let names: Vec<&str> = enabled_for(&all, "claude")
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["b"]);
+        // An edit that leaves it enabled takes the flag off.
+        let mut back = all[0].clone();
+        back.disabled = false;
+        update_in_file(&path, &back).unwrap();
+        let obj = crate::settings::read_object(&path).unwrap().unwrap();
+        assert!(!from_settings(&obj)[0].disabled);
+        assert!(set_enabled_in_file(&path, "nope", true).is_err());
     }
 
     #[test]

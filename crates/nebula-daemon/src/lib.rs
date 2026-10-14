@@ -150,11 +150,17 @@ async fn serve(opts: DaemonOpts) -> Result<()> {
     // Hook receiver: loopback HTTP endpoint the claude hook one-liners hit.
     // It shares the store to answer UserPromptSubmit hooks with the
     // auto-title instruction while a session is still untitled.
-    let (hook_env, mut hook_rx, hook_fd) =
-        hooks::start_hook_server(store.clone(), inherited_hooks).await?;
+    let (hook_env, mut hook_rx, mut usage_rx, hook_fd) =
+        hooks::start_hook_server_with_usage(store.clone(), inherited_hooks).await?;
     tracing::info!(port = hook_env.port, "hook receiver listening");
 
     let daemon = registry::Daemon::new(store, hook_env);
+
+    // Kete's statusLine settings (`--settings` on Claude spawns): this
+    // binary's path, rewritten at each start so it is never stale.
+    if let Err(e) = hooks::installer::write_statusline_settings(&paths::data_dir()) {
+        tracing::warn!(error = %e, "writing the statusLine settings failed");
+    }
 
     if let Some(carry) = carry {
         // Before the sessions move out: whose subagents can keep running.
@@ -223,6 +229,16 @@ async fn serve(opts: DaemonOpts) -> Result<()> {
             }) = hook_rx.recv().await
             {
                 let captures_session = event.captures_session();
+                // A turn's edges are when a session log has news: Codex's
+                // rollout limits, every harness's context (`registry::usage`).
+                if matches!(
+                    event,
+                    crate::status::HookEvent::UserPromptSubmit | crate::status::HookEvent::Stop
+                ) {
+                    let daemon = daemon.clone();
+                    let agent = agent_id.clone();
+                    tokio::task::spawn_blocking(move || daemon.refresh_log_usage(&agent));
+                }
                 daemon.apply_hook_event(&agent_id, event.clone(), session_id.clone());
                 daemon.track_subagent(&agent_id, &event, subagent);
                 // The prompt itself, for the row's RECENT PROMPTS. After
@@ -251,6 +267,40 @@ async fn serve(opts: DaemonOpts) -> Result<()> {
                 // still carries the old checkout's cwd, which must be seen
                 // (and ignored) while the relocation is still pending.
                 daemon.complete_pending_move(&agent_id, &event);
+            }
+        });
+    }
+
+    // Claude statusLine readings (`kete _statusline`): plan usage and
+    // context, folded in off the async workers (a transcript may be read).
+    {
+        let daemon = daemon.clone();
+        tokio::spawn(async move {
+            while let Some(hooks::UsageDelivery { agent_id, body }) = usage_rx.recv().await {
+                let daemon = daemon.clone();
+                let _ = tokio::task::spawn_blocking(move || daemon.on_statusline(&agent_id, &body))
+                    .await;
+            }
+        });
+    }
+
+    // Copilot quota: `gh` asked for each Copilot account now and then.
+    {
+        let daemon = daemon.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(15 * 60));
+            tokio::select! {
+                _ = daemon.shutdown.cancelled() => return,
+                _ = tokio::time::sleep(std::time::Duration::from_secs(20)) => {}
+            }
+            loop {
+                tokio::select! {
+                    _ = daemon.shutdown.cancelled() => break,
+                    _ = interval.tick() => {
+                        let daemon = daemon.clone();
+                        let _ = tokio::task::spawn_blocking(move || daemon.poll_copilot_accounts()).await;
+                    }
+                }
             }
         });
     }

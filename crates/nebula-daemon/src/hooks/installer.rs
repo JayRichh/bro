@@ -348,6 +348,65 @@ pub fn install_claude_hooks(cwd: &Path) -> Result<()> {
     )
 }
 
+/// The hidden subcommand kete's Claude statusLine runs (`kete
+/// _statusline`), and what marks a `statusLine` as kete's.
+pub const STATUSLINE_SUBCOMMAND: &str = "_statusline";
+
+/// The statusLine command: this binary's own `_statusline`, spelled for
+/// whichever shell Claude runs it under.
+fn statusline_command() -> String {
+    let exe = std::env::current_exe()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| "kete".into());
+    #[cfg(windows)]
+    let exe = shell_neutral_path(&exe);
+    #[cfg(unix)]
+    let exe = nebula_core::shell::single_quote(&exe);
+    format!("{exe} {STATUSLINE_SUBCOMMAND}")
+}
+
+fn is_kete_statusline(value: &Value) -> bool {
+    value
+        .get("command")
+        .and_then(Value::as_str)
+        .is_some_and(|c| c.contains(&format!(" {STATUSLINE_SUBCOMMAND}")))
+}
+
+/// The kete-owned settings file a Claude session gets through
+/// `--settings`: only kete's `statusLine`. It lives in the data dir, so no
+/// repository file carries it, and a plain `claude` run outside kete
+/// keeps Claude's own footer.
+pub const STATUSLINE_SETTINGS_FILE: &str = "claude-statusline.json";
+
+/// Write [`STATUSLINE_SETTINGS_FILE`] into `dir` with this binary's
+/// current path, unless it already says exactly that. Returns its path.
+pub fn write_statusline_settings(dir: &Path) -> Result<PathBuf> {
+    let text = serde_json::to_string_pretty(&json!({
+        "statusLine": { "type": "command", "command": statusline_command(), "padding": 0 }
+    }))?;
+    install_unless_unchanged(dir, STATUSLINE_SETTINGS_FILE, &text)?;
+    Ok(dir.join(STATUSLINE_SETTINGS_FILE))
+}
+
+/// One-release migration: a 0.45 dev build wrote kete's `statusLine` into
+/// `<cwd>/.claude/settings.local.json`. Take it out again when it is
+/// kete's own (`… _statusline`); a statusLine of the user's is never
+/// touched. Writes only when something changed.
+pub fn strip_kete_statusline(cwd: &Path) -> Result<()> {
+    let dir = cwd.join(CLAUDE_DIR);
+    let path = dir.join(CLAUDE_SETTINGS_FILE);
+    if !path.exists() {
+        return Ok(());
+    }
+    let mut root = load_hooks_root(&path)?;
+    let root_obj = root_object_mut(&mut root, &path)?;
+    if !root_obj.get("statusLine").is_some_and(is_kete_statusline) {
+        return Ok(());
+    }
+    root_obj.remove("statusLine");
+    write_hooks_root(&dir, CLAUDE_SETTINGS_FILE, &root)
+}
+
 /// Claude Code's two attribution switches, forced off on every spawn
 /// whatever the file said: the legacy boolean and the newer per-surface
 /// text (an empty string writes nothing).
@@ -798,6 +857,53 @@ mod tests {
     fn read_json(dir: &Path, rel: &str) -> Value {
         let text = std::fs::read_to_string(dir.join(rel)).unwrap();
         serde_json::from_str(&text).unwrap()
+    }
+
+    #[test]
+    fn the_statusline_settings_file_is_kete_s_own_and_rewritten_only_on_change() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_statusline_settings(tmp.path()).unwrap();
+        assert_eq!(path, tmp.path().join(STATUSLINE_SETTINGS_FILE));
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let cmd = v["statusLine"]["command"].as_str().unwrap();
+        assert!(cmd.ends_with(" _statusline"), "{cmd}");
+        assert_eq!(v["statusLine"]["type"], "command");
+        assert_eq!(
+            v.as_object().unwrap().len(),
+            1,
+            "nothing but the statusLine"
+        );
+        let stamp = std::fs::metadata(&path).unwrap().modified().unwrap();
+        write_statusline_settings(tmp.path()).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), stamp);
+    }
+
+    #[test]
+    fn the_migration_strips_only_kete_s_old_statusline() {
+        let tmp = tempfile::tempdir().unwrap();
+        strip_kete_statusline(tmp.path()).unwrap();
+        assert!(
+            !tmp.path().join(".claude").exists(),
+            "no file, nothing made"
+        );
+        install_claude_hooks(tmp.path()).unwrap();
+        let path = tmp.path().join(".claude").join("settings.local.json");
+        let mut settings = read_settings(tmp.path());
+        settings["statusLine"] =
+            json!({"type": "command", "command": "C:\"/k/kete.exe\" _statusline", "padding": 0});
+        std::fs::write(&path, settings.to_string()).unwrap();
+        strip_kete_statusline(tmp.path()).unwrap();
+        let after = read_settings(tmp.path());
+        assert!(after.get("statusLine").is_none());
+        assert!(after["hooks"]["Stop"].is_array(), "hooks kept");
+        let mut settings = after;
+        settings["statusLine"] = json!({"type": "command", "command": "my-line"});
+        std::fs::write(&path, settings.to_string()).unwrap();
+        strip_kete_statusline(tmp.path()).unwrap();
+        assert_eq!(
+            read_settings(tmp.path())["statusLine"]["command"],
+            "my-line"
+        );
     }
 
     fn read_settings(dir: &Path) -> Value {

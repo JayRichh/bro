@@ -1,4 +1,6 @@
 {
+  "account_spread": "manual",
+  "account_spread_threshold": "90",
   "animations": true,
   "ask_before_archive": true,
   "auto_cleanup_merged": false,
@@ -85,6 +87,7 @@
   "skip_session_naming": false,
   "source_control_graph": false,
   "ssh_sync_config": true,
+  "usage_statusline": true,
   "worktree_base_branch": "",
   "worktree_layout": "cards"
 }

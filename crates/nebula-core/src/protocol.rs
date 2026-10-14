@@ -10,7 +10,7 @@ use std::path::PathBuf;
 ///
 /// Bump on every protocol change. Additive changes keep
 /// [`MIN_COMPATIBLE_PROTOCOL`] where it is; breaking changes bump both.
-pub const PROTOCOL_VERSION: u32 = 54;
+pub const PROTOCOL_VERSION: u32 = 55;
 
 /// Oldest IPC protocol this build can safely talk to.
 ///
@@ -30,6 +30,30 @@ pub fn protocol_ranges_overlap(
 
 pub fn protocol_compatible_with(peer_version: u32) -> bool {
     peer_version >= MIN_COMPATIBLE_PROTOCOL
+}
+
+/// The first protocol whose peers decode [`ServerEvent::AccountUsage`]
+/// and [`ServerEvent::SessionContexts`]. Both are pushed unasked, so the
+/// daemon sends them only to a peer that said it speaks this or later:
+/// an older one would fail to decode an unknown variant mid-stream.
+///
+/// The enums inside them travel by variant name, and a peer refuses a
+/// name it has never seen: a new `usage::WindowKind` or
+/// `usage::UsageSource` variant (or a new field on their structs) needs a
+/// protocol bump and its own gate here, sending the new shape only to
+/// peers that said the new version.
+pub const USAGE_EVENTS_PROTOCOL: u32 = 55;
+
+impl ServerEvent {
+    /// Can a peer that said `peer_version` at Hello decode this event?
+    pub fn decodable_by(&self, peer_version: u32) -> bool {
+        match self {
+            ServerEvent::AccountUsage { .. } | ServerEvent::SessionContexts { .. } => {
+                peer_version >= USAGE_EVENTS_PROTOCOL
+            }
+            _ => true,
+        }
+    }
 }
 
 /// Max IPC frame size (length prefix sanity bound).
@@ -884,6 +908,19 @@ pub enum ServerEvent {
         req_id: u64,
         sessions: Vec<OrchestratorSession>,
     },
+
+    // -- protocol 55, appended; pushed only to 55+ peers
+    // (`ServerEvent::decodable_by`). --
+    /// Every ACCOUNT's latest plan usage (`nebula_core::usage`): the whole
+    /// list, after the Snapshot and again whenever a reading changes.
+    AccountUsage {
+        accounts: Vec<crate::usage::AccountUsage>,
+    },
+    /// Sessions' context windows, keyed by agent: every known one after
+    /// the Snapshot, then one at a time as they change. Folded in by id.
+    SessionContexts {
+        contexts: Vec<crate::usage::SessionContext>,
+    },
 }
 
 /// One row of `ServerEvent::OrchestratorSessions`: the `kete sessions`
@@ -988,6 +1025,65 @@ mod tests {
             bytes.windows(8).any(|w| w == b"Shutdown"),
             "variant encoded by index: appending variants would not be additive"
         );
+    }
+
+    #[test]
+    fn protocol_55_usage_events_round_trip_and_are_held_back_from_older_peers() {
+        use crate::usage::{
+            AccountUsage, ContextUsage, SessionContext, UsageSource, UsageWindow, WindowKind,
+        };
+        let usage = ServerEvent::AccountUsage {
+            accounts: vec![AccountUsage {
+                account: "@claude".into(),
+                harness: "claude".into(),
+                windows: vec![UsageWindow {
+                    kind: WindowKind::Session,
+                    label: None,
+                    percent: 21.5,
+                    resets_at: Some(1_791_891_379),
+                    read_at: 0,
+                }],
+                source: UsageSource::Statusline,
+                at: 9,
+                plan: None,
+            }],
+        };
+        let back: ServerEvent = rmp_serde::from_slice(&encode(&usage)).unwrap();
+        let ServerEvent::AccountUsage { accounts } = back else {
+            panic!("not AccountUsage");
+        };
+        assert_eq!(accounts[0].windows[0].percent, 21.5);
+        assert_eq!(accounts[0].account, "@claude");
+
+        let ctx = ServerEvent::SessionContexts {
+            contexts: vec![SessionContext {
+                agent: AgentId("a".into()),
+                context: ContextUsage {
+                    percent: Some(42.0),
+                    tokens: Some(84_000),
+                    window: Some(200_000),
+                    compactions: 2,
+                    last_compact_at: None,
+                    source: UsageSource::Transcript,
+                    at: 3,
+                },
+            }],
+        };
+        let back: ServerEvent = rmp_serde::from_slice(&encode(&ctx)).unwrap();
+        let ServerEvent::SessionContexts { contexts } = back else {
+            panic!("not SessionContexts");
+        };
+        assert_eq!(contexts[0].context.compactions, 2);
+
+        assert!(usage.decodable_by(55));
+        assert!(
+            !usage.decodable_by(54),
+            "a 54 peer would drop the connection"
+        );
+        assert!(!ctx.decodable_by(53));
+        assert!(ServerEvent::WorktreePorts { ports: Vec::new() }.decodable_by(53));
+        assert_eq!(MIN_COMPATIBLE_PROTOCOL, 53, "55 is additive");
+        assert!(protocol_compatible_with(54));
     }
 
     #[test]

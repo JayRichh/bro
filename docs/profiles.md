@@ -46,12 +46,15 @@ kete profile add max2 --harness claude                            # a second sub
 kete profile login max2                                           # sign it in, here
 kete profile list
 kete profile default max2                                         # launches with no pick take it
+kete profile disable max2                                         # never picked unless named
+kete profile enable max2
 kete profile remove max2 [--purge]                                # --purge deletes its home too
 ```
 
 - **`add`:** `--use-default` points the profile at the CLI's own default config (`~/.claude`, `~/.codex`, `~/.copilot`). It moves no dir and copies nothing, so the login you already have becomes one of the profiles the picker cycles through. `--default` makes the profile what a launch takes when it names none; there is one default per harness. `--env KEY=VALUE` (repeatable) fills its `env`.
 - **`login`:** runs the harness's own sign-in in the current terminal with the profile's environment applied: `claude auth login --claudeai`, `codex login` or `copilot login`. The CLI opens your browser for the OAuth flow and takes the callback, or prints the URL and asks for the code. The credentials it writes land in the profile's home. Anything after `--` is passed on: `kete profile login max2 -- --email you@example.com`.
-- **`list`:** each profile's harness, whether it is the default, its home, and the last PLAN USAGE seen (below).
+- **`list`:** every account (each profile, then each harness's own login that has a reading, e.g. `claude (own login)`): harness, `*` for the default and `(off)` for a disabled one, a bar and percent for its session (5h) and weekly use (Copilot: its monthly allowances), and whether it is signed in. One that is not shows the `kete profile login <name>` to run. The account spread in force is printed last.
+- **`enable` / `disable`:** a disabled profile is never picked for a launch that names no profile (not as the default, not by a spread) and pickers leave it out. Sessions already under it keep it, and a launch that names it still runs.
 - **`remove`:** drops the entry and keeps the home, so adding the name back signs nothing in again. `--purge` also deletes the home, and only ever a directory directly inside `<data dir>/profiles`. An adopted login's config is never touched.
 
 ## In the TUI
@@ -81,14 +84,50 @@ Things that follow the profile:
 - **Transcripts:** Claude transcripts are looked for in every Claude profile's `projects/` dir, so a resume after a daemon restart finds them. A backgrounded session is listed through `claude agents` under the session's own profile.
 - **`kete sessions --json`:** carries each agent's `profile`.
 
-## Plan usage
+## Usage and context
 
-Claude prints its plan usage in the session, e.g. `You've used 91% of your weekly limit · resets 2pm`.
-The daemon reads that line off every Claude session that runs under a profile, with the same kind of
-output scanner it uses for the Claude Cloud id. It keeps the latest reading per profile in
-`<data dir>/profiles/.usage/<name>.json`. The QUICK PROMPT's profile field shows it beside the name
-(`max2 91%`), and `kete profile list` shows it in full. A session with no profile has nowhere to file
-a reading, so none is kept.
+Kete keeps each ACCOUNT's plan usage and each session's context window, and shows them in the
+desktop window's Accounts list and session rows, the TUI's quick prompt, Accounts overlay and
+cards, and `kete profile list`. An account is a profile, or a harness's own login when a session
+runs under none (kept as `@claude`, `@codex`, …). Unknown numbers read `—`; nothing here ever
+holds up a launch.
+
+| Harness | Plan usage | Context |
+|---|---|---|
+| Claude | its statusLine JSON: `rate_limits.five_hour` / `seven_day` (Pro and Max plans, after the first reply) | the statusLine's `context_window`; compactions from the transcript's `compact_boundary` lines; the transcript's last reply as a fallback |
+| Codex | the rollout's `token_count` events: primary (5h) and secondary (weekly) limits | the last request's input over `model_context_window`; `compacted` lines |
+| Copilot | `gh api copilot_internal/user` under the profile's `GH_CONFIG_DIR`, every 15 minutes: premium requests and chat, monthly. A plan without an allowance reads `—`, not 100% | the session's `events.jsonl` `session.usage_record` |
+
+Claude's numbers come through a STATUS LINE kete passes to each Claude session it starts, as
+`--settings <data dir>/claude-statusline.json` (a file kete owns and rewrites at every daemon start,
+so it always names the current `kete` binary). Nothing is written into your repositories, and a
+plain `claude` run outside kete keeps Claude's own footer. The status line (`kete _statusline`)
+hands Claude's JSON to the daemon, then runs the statusLine Claude would have drawn without it (the
+project's `.claude/settings.local.json`, then `.claude/settings.json`, then your user settings) and
+prints its output. When you have none, or yours fails or runs past 5 seconds, it prints a compact
+`ctx 34% · 5h 21% · wk 3%`. Settings → Sessions → **Usage status line** turns it off for sessions
+started after the change. Claude's on-screen notice (`You've used 91% of your weekly limit`) is
+still read as a last source.
+
+A window with a reset time counts as empty once that time passes. One without (the on-screen notice,
+a reading an older kete kept) counts as empty once its nominal length (5 hours, 7 days, 30 days) has
+passed since it was read, and the apps draw a reading dim once it is older than a few hours (session)
+or its window (weekly, monthly).
+
+The latest reading per account is kept in `<data dir>/profiles/.usage/<account>.json`; older kete
+builds still read its `percent` and `window`.
+
+## Account spread
+
+Settings → Sessions → Accounts → **Account spread** (`account_spread`) decides the profile of a
+launch that names none, from the desktop window, the TUI, `kete spawn` and the orchestrator alike:
+
+- **manual** (the default): the harness's default profile, else none. One Claude subscription marked default is all most setups need.
+- **failover**: the default until its 5h or weekly use (only those two windows; a model weekly or monthly allowance never counts) reaches **Failover at** (`account_spread_threshold`, 90% unless set), then the next enabled profile of that harness under it; when every one is over, the least used.
+- **least_used**: the enabled profile with the least use. An account with no reading yet counts as unused.
+
+A window past its reset time counts as empty. The apps say which account a launch took and why
+(`claude: max2 (failover: main at 92%)`).
 
 ## Configuration
 
@@ -109,3 +148,4 @@ a reading, so none is kept.
 | `env` | Extra variables for its sessions, applied after the strip. |
 | `default` | The profile a launch on this harness takes when it names none. |
 | `use_default` | Adopt the CLI's default login instead of a home of its own. |
+| `disabled` | Never picked for a launch that names no profile. |

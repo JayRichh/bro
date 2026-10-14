@@ -65,6 +65,9 @@ pub struct Config {
     /// Ports per worktree: slot `n` gets `port_base + port_block × n` and
     /// the `port_block - 1` after it. Default 10.
     pub port_block: u16,
+    /// Install kete's statusLine wrapper into Claude sessions (Settings →
+    /// Sessions → Usage status line): their plan usage and context.
+    pub usage_statusline: bool,
 }
 
 /// One project's entry under `projects` — the rows of the TUI's Project
@@ -92,6 +95,7 @@ impl Default for Config {
             profiles: Vec::new(),
             port_base: nebula_core::ports::DEFAULT_BASE,
             port_block: nebula_core::ports::DEFAULT_BLOCK,
+            usage_statusline: true,
         }
     }
 }

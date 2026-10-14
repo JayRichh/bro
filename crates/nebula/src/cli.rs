@@ -492,6 +492,11 @@ pub(crate) enum Command {
         /// The hook event, as the daemon names it (`Stop`, …).
         event: String,
     },
+    /// Claude statusLine command: hand the statusLine JSON on stdin to the
+    /// daemon (plan usage, context), then print the user's own statusLine,
+    /// or a compact usage line when they have none. Always exits 0.
+    #[command(hide = true, name = "_statusline")]
+    Statusline,
 }
 
 #[derive(Subcommand)]
@@ -917,7 +922,8 @@ Examples:
 
 #[derive(Subcommand)]
 pub(crate) enum ProfileCommand {
-    /// List the profiles: harness, default flag, home, last usage seen.
+    /// List the accounts: harness, default and off flags, 5h and weekly
+    /// usage bars, and whether each is signed in.
     List,
     /// Add a profile.
     ///
@@ -953,6 +959,12 @@ pub(crate) enum ProfileCommand {
     },
     /// Make a profile its harness's default.
     Default { name: String },
+    /// Switch a profile on: launches that pick no profile may take it again.
+    Enable { name: String },
+    /// Switch a profile off: launches that pick no profile skip it (no
+    /// default, no spread), and pickers leave it out. Sessions already
+    /// under it keep it.
+    Disable { name: String },
     /// Sign a profile in: runs `claude auth login --claudeai`, `codex
     /// login` or `copilot login` here, under the profile's environment.
     ///

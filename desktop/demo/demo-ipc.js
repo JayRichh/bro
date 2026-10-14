@@ -14,7 +14,10 @@
 // expanded); view=orchestrator (the orchestrator view), view=start-orchestrator
 // (its start form), view=review (a ReviewOpened notice opened into the review
 // sheet; tab=terminal|diff|history|pr), view=overview-cue (sessions the
-// orchestrator started, in their repos). The settings rows are the real schema, exported
+// orchestrator started, in their repos), view=accounts (the rail's accounts,
+// a needs-login row's command open), view=context (a session open: context
+// bars in the tree and the session header). The settings rows are the real
+// schema, exported
 // by `cargo test -- --ignored write_demo_settings` in src-tauri.
 
 const q = new URLSearchParams(location.search);
@@ -57,7 +60,7 @@ const model = {
 // session per state, a nested one, a terminal and a PR.
 const ORCH_VIEWS = ['orchestrator', 'start-orchestrator', 'review', 'overview-cue'];
 const ORCH = ORCH_VIEWS.includes(q.get('view'));
-const W2 = ['menu', 'palette', 'help', 'quick', 'selftest'].includes(q.get('view')) || ORCH;
+const W2 = ['menu', 'palette', 'help', 'quick', 'selftest', 'accounts', 'context'].includes(q.get('view')) || ORCH;
 if (W2) {
   const a = (id, worktree_id, name, status, extra = {}) => ({
     id, worktree_id, name, status, archived: false, unseen: false, status_changed_at: now - 60_000,
@@ -129,6 +132,39 @@ const CHILD_SCREEN = [
 const b64 = (t) => btoa(unescape(encodeURIComponent(t)));
 const callbacks = {};
 const listeners = {};
+// ---- Accounts and context (synthetic): the CLI's own Claude login with
+// its 5h and weekly use (weekly in the ember band), a disabled profile, a
+// profile that needs a login, a Copilot account's monthly allowances. ----
+const H1 = 3600;
+const nowS = Math.floor(now / 1000);
+const win = (kind, percent, resets, label = null, readAgo = 60) => ({ kind, label, percent, resets_at: resets ? nowS + resets : null, read_at: nowS - readAgo });
+const accounts = {
+  '@claude': { account: '@claude', harness: 'claude', windows: [win('session', 34, 3 * H1 + 12 * 60), win('weekly', 82, 2 * 86400 + 4 * H1)], source: 'statusline', at: now - 40_000, plan: null },
+  'codex-team': { account: 'codex-team', harness: 'codex', windows: [win('session', 97, 40 * 60), win('weekly', 61, 5 * 86400)], source: 'rollout', at: now - 600_000, plan: 'plus' },
+  'codex-spare': { account: 'codex-spare', harness: 'codex', windows: [win('session', 22, null, null, 4 * H1), win('weekly', 48, 3 * 86400, null, 4 * H1)], source: 'rollout', at: now - 4 * H1 * 1000, plan: 'plus' },
+  'gh-work': { account: 'gh-work', harness: 'copilot', windows: [win('monthly', 41, 17 * 86400, 'premium'), win('monthly', 6, 17 * 86400, 'chat')], source: 'copilot_api', at: now - 1_800_000, plan: 'business' },
+};
+const accountRow = (key, name, harness, o = {}) => ({
+  key, name, harness, profile: true, default: false, disabled: false, useDefault: false, login: 'logged_in', loginHint: null,
+  usage: accounts[key] ?? null, ...o,
+});
+const accountRows = [
+  accountRow('@claude', 'claude', 'claude', { profile: false, useDefault: true }),
+  accountRow('codex-team', 'codex-team', 'codex', { default: true }),
+  accountRow('codex-spare', 'codex-spare', 'codex', { disabled: true }),
+  accountRow('gh-work', 'gh-work', 'copilot', { default: true }),
+  accountRow('gh-personal', 'gh-personal', 'copilot', { login: 'needs_login', loginHint: 'kete profile login gh-personal' }),
+];
+model.protocol_version = 55;
+model.accounts = accounts;
+model.contexts = {
+  a1: { percent: 96, tokens: 192_000, window: 200_000, compactions: 2, last_compact_at: now - 25 * 60_000, source: 'statusline', at: now - 30_000 },
+  ...(W2 ? {
+    a2: { percent: 41, tokens: 82_000, window: 200_000, compactions: 0, last_compact_at: null, source: 'statusline', at: now - 60_000 },
+    a3: { percent: 12, tokens: 57_000, window: 475_000, compactions: 0, last_compact_at: null, source: 'rollout', at: now - 400_000 },
+    a5: { percent: 83, tokens: 166_000, window: 200_000, compactions: 1, last_compact_at: now - 3_600_000, source: 'transcript', at: now - 90_000 },
+  } : {}),
+};
 
 // ---- Tasks (synthetic sprint) ----
 const sprints = [
@@ -337,7 +373,18 @@ const handlers = {
   profile_remove: () => ({ rows: profiles, login: null, home: null }),
   profile_set_default: () => profiles,
   suggest_branch: () => 'amber-otter-glides',
-  quick_launch: () => ({ worktree: 'w1', agent: 'a1', terminal: null }),
+  quick_launch: () => ({ worktree: 'w1', agent: 'a1', terminal: null, picked: 'claude: its own login (no profile)' }),
+  accounts_list: () => accountRows,
+  profile_set_enabled: ({ name, enabled }) => {
+    const r = accountRows.find((x) => x.name === name);
+    if (r) r.disabled = !enabled;
+    return null;
+  },
+  attach: () => null,
+  detach: () => null,
+  resize: () => null,
+  input: () => null,
+  mark_seen: () => null,
 };
 
 let cb = 0;
@@ -397,6 +444,15 @@ window.addEventListener('load', async () => {
       input.value = q.get('q');
       input.dispatchEvent(new Event('input', { bubbles: true }));
     }
+    return;
+  }
+  if (view === 'accounts') {
+    await ready();
+    (await until(() => document.querySelector('[aria-label="Accounts"] [aria-expanded]'))).click();
+    return;
+  }
+  if (view === 'context') {
+    (await ready()).click();
     return;
   }
   if (view === 'help') {

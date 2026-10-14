@@ -146,6 +146,8 @@ pub struct HookEnv {
 pub struct HookServerState {
     token: String,
     tx: mpsc::Sender<HookDelivery>,
+    /// Claude statusLine readings (`/api/usage/claude`).
+    usage_tx: mpsc::Sender<UsageDelivery>,
     /// Read-only peek at agent rows: drives the auto-title injection
     /// decision without a round-trip through the daemon's drain loop.
     store: Arc<Store>,
@@ -171,6 +173,14 @@ pub struct HookDelivery {
     /// Subagent news riding the event: its type, or a Task / Agent tool
     /// call's description (`registry::subagents`).
     pub subagent: SubagentHookInfo,
+}
+
+/// One statusLine JSON `kete _statusline` POSTed for an agent: plan
+/// usage and context (`nebula_core::usage::claude_statusline`).
+#[derive(Debug)]
+pub struct UsageDelivery {
+    pub agent_id: AgentId,
+    pub body: serde_json::Value,
 }
 
 /// Permissive payload: every field optional, unknown fields ignored. Hook
@@ -290,6 +300,21 @@ pub async fn start_hook_server(
     mpsc::Receiver<HookDelivery>,
     crate::platform::RawFd,
 )> {
+    let (env, rx, _usage, fd) = start_hook_server_with_usage(store, inherited).await?;
+    Ok((env, rx, fd))
+}
+
+/// [`start_hook_server`], plus the receiving end of the statusLine
+/// readings (`/api/usage/claude`).
+pub async fn start_hook_server_with_usage(
+    store: Arc<Store>,
+    inherited: Option<InheritedHooks>,
+) -> anyhow::Result<(
+    HookEnv,
+    mpsc::Receiver<HookDelivery>,
+    mpsc::Receiver<UsageDelivery>,
+    crate::platform::RawFd,
+)> {
     #[cfg(unix)]
     use std::os::fd::AsRawFd;
     let (listener, token) = match inherited {
@@ -309,10 +334,12 @@ pub async fn start_hook_server(
     #[cfg(windows)]
     let fd = -1;
     let (tx, rx) = mpsc::channel(256);
+    let (usage_tx, usage_rx) = mpsc::channel(64);
 
     let state = Arc::new(HookServerState {
         token: token.clone(),
         tx,
+        usage_tx,
         store,
     });
     // Claude and Codex UserPromptSubmit hooks pipe this server's response
@@ -329,6 +356,7 @@ pub async fn start_hook_server(
         .route("/api/hooks/pi", post(receive_pi_hook))
         .route("/api/hooks/opencode", post(receive_opencode_hook))
         .route("/api/hooks/copilot", post(receive_copilot_hook))
+        .route("/api/usage/claude", post(receive_claude_statusline))
         .with_state(state);
 
     tokio::spawn(async move {
@@ -337,7 +365,41 @@ pub async fn start_hook_server(
         }
     });
 
-    Ok((HookEnv { port, token }, rx, fd))
+    Ok((HookEnv { port, token }, rx, usage_rx, fd))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UsageQuery {
+    #[serde(rename = "agentId")]
+    pub agent_id: String,
+}
+
+/// `/api/usage/claude`: a statusLine JSON from `kete _statusline`. The
+/// wrapper prints nothing of this reply, and a reading that cannot be
+/// taken in (bad JSON, a full queue) is simply dropped: a status line is
+/// redrawn on the next event anyway.
+async fn receive_claude_statusline(
+    State(state): State<Arc<HookServerState>>,
+    Query(query): Query<UsageQuery>,
+    headers: HeaderMap,
+    body: String,
+) -> (StatusCode, String) {
+    let authorized = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|presented| presented.as_bytes().ct_eq(state.token.as_bytes()).into())
+        .unwrap_or(false);
+    if !authorized {
+        return (StatusCode::UNAUTHORIZED, String::new());
+    }
+    if let Ok(body) = serde_json::from_str::<serde_json::Value>(&body) {
+        let _ = state.usage_tx.try_send(UsageDelivery {
+            agent_id: AgentId(query.agent_id),
+            body,
+        });
+    }
+    (StatusCode::OK, String::new())
 }
 
 fn generate_token() -> String {
@@ -627,6 +689,38 @@ mod tests {
             })
             .unwrap();
         store
+    }
+
+    /// The statusLine route takes an authorised JSON body onto the usage
+    /// channel, answers empty either way, and drops anything else.
+    #[tokio::test]
+    async fn a_statusline_post_lands_on_the_usage_channel() {
+        let store = seeded_store();
+        let (env, _rx, mut usage, _) = start_hook_server_with_usage(store, None).await.unwrap();
+        let body = r#"{"rate_limits":{"five_hour":{"used_percentage":12}}}"#;
+        let (status, reply) = http_post(
+            env.port,
+            "/api/usage/claude?agentId=named",
+            &env.token,
+            body,
+        )
+        .await;
+        assert_eq!((status, reply.as_str()), (200, ""));
+        let got = usage.recv().await.unwrap();
+        assert_eq!(got.agent_id, AgentId("named".into()));
+        assert_eq!(got.body["rate_limits"]["five_hour"]["used_percentage"], 12);
+        let (status, _) =
+            http_post(env.port, "/api/usage/claude?agentId=named", "wrong", body).await;
+        assert_eq!(status, 401);
+        let (status, _) = http_post(
+            env.port,
+            "/api/usage/claude?agentId=named",
+            &env.token,
+            "nope",
+        )
+        .await;
+        assert_eq!(status, 200);
+        assert!(usage.try_recv().is_err(), "nothing queued for a bad body");
     }
 
     /// The reply's `sessionTitle` is how a nebula-side name reaches

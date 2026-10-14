@@ -455,7 +455,10 @@ impl Daemon {
         // exactly like that harness, and a harness with none runs
         // hookless (process-based status until a dialect is mapped).
         let install_result = match harness.hook_dialect() {
-            Some(AgentKind::Claude) => hooks::installer::install_claude_hooks(&worktree.path),
+            // Kete's statusLine rides `--settings` instead (below); an
+            // older dev build's copy in the worktree file is taken out.
+            Some(AgentKind::Claude) => hooks::installer::install_claude_hooks(&worktree.path)
+                .and_then(|()| hooks::installer::strip_kete_statusline(&worktree.path)),
             // Codex's hooks live in its home, not the worktree, so one
             // trust approval covers every worktree (see installer docs);
             // any per-worktree copy an older nebula left is pruned.
@@ -581,17 +584,28 @@ impl Daemon {
                     false,
                 )
             }
-            (None, None) => agent_spawn_command_with(
-                &harness,
-                agent.session_id.as_deref(),
-                Some(&worktree.path),
-                agent.model.as_deref(),
-                agent.effort.as_deref(),
-                cmd_override.as_deref(),
-                prompts.initial.as_deref(),
-                prompts.system.as_deref(),
-                true,
-            ),
+            (None, None) => {
+                let (program, mut args, resumed) = agent_spawn_command_with(
+                    &harness,
+                    agent.session_id.as_deref(),
+                    Some(&worktree.path),
+                    agent.model.as_deref(),
+                    agent.effort.as_deref(),
+                    cmd_override.as_deref(),
+                    prompts.initial.as_deref(),
+                    prompts.system.as_deref(),
+                    true,
+                );
+                // Kete's statusLine (plan usage and context,
+                // `registry::usage`) as a settings file of its own, for
+                // every fresh, resumed, restarted or warm Claude spawn.
+                if cmd_override.is_none() && agent.kind == AgentKind::Claude {
+                    if let Some(path) = statusline_settings() {
+                        insert_settings_flag(&mut args, &path);
+                    }
+                }
+                (program, args, resumed)
+            }
         };
         // Run the agent through the user's login+interactive shell so it sees
         // the same env as a Terminal.app tab (~/.zprofile, ~/.zshrc,
@@ -666,31 +680,12 @@ impl Daemon {
         if agent.kind == AgentKind::Cursor {
             session.arm_question_scan();
         }
-        // Only a session under a PROFILE has somewhere to file a reading.
-        if agent.kind == AgentKind::Claude && agent.profile.is_some() {
+        // A reading files under the session's PROFILE, or `@claude` for
+        // the CLI's own login (`registry::usage`).
+        if agent.kind == AgentKind::Claude {
             session.arm_usage_scan();
         }
         Ok(session)
-    }
-
-    /// A PLAN USAGE reading off `id`'s screen: kept as its PROFILE's latest
-    /// (`<data dir>/profiles/.usage/<name>.json`), stamped now. A row with
-    /// no profile has nowhere to keep it.
-    pub(crate) fn on_pty_usage(&self, id: &AgentId, mut usage: nebula_core::profiles::Usage) {
-        let Ok(Some(agent)) = self.store.get_agent(id) else {
-            return;
-        };
-        let Some(name) = agent.profile else {
-            return;
-        };
-        usage.at = nebula_core::clock::now_ms();
-        if let Err(e) = nebula_core::profiles::write_usage_in(
-            &nebula_core::profiles::profiles_root(),
-            &name,
-            &usage,
-        ) {
-            tracing::warn!(profile = %name, error = %e, "recording plan usage failed");
-        }
     }
 
     /// A resumed session (`claude --resume` / `codex resume` /
@@ -891,5 +886,50 @@ impl Daemon {
         let session = PtySession::spawn(sref, spec)?;
         self.install_session(session.clone());
         Ok(session)
+    }
+}
+
+/// The kete-owned statusLine settings file a Claude spawn passes with
+/// `--settings`, written when missing: None when Settings → Usage status
+/// line is off, or the file cannot be written (the spawn goes on without).
+fn statusline_settings() -> Option<std::path::PathBuf> {
+    if !crate::config::Config::load().usage_statusline {
+        return None;
+    }
+    let dir = nebula_core::paths::data_dir();
+    let path = dir.join(hooks::installer::STATUSLINE_SETTINGS_FILE);
+    if path.exists() {
+        return Some(path);
+    }
+    hooks::installer::write_statusline_settings(&dir)
+        .map_err(|e| tracing::warn!(error = %e, "writing the statusLine settings failed"))
+        .ok()
+}
+
+/// `--settings <path>` at the front of a Claude argv, ahead of any resume
+/// pair and the trailing prompt.
+fn insert_settings_flag(args: &mut Vec<String>, path: &std::path::Path) {
+    args.insert(0, path.to_string_lossy().into_owned());
+    args.insert(0, "--settings".into());
+}
+
+#[cfg(test)]
+mod statusline_flag_tests {
+    use super::*;
+
+    #[test]
+    fn the_settings_flag_goes_first() {
+        let mut args = vec!["--resume".to_string(), "sid".into(), "task".into()];
+        insert_settings_flag(&mut args, std::path::Path::new("/d/claude-statusline.json"));
+        assert_eq!(
+            args,
+            [
+                "--settings",
+                "/d/claude-statusline.json",
+                "--resume",
+                "sid",
+                "task"
+            ]
+        );
     }
 }
