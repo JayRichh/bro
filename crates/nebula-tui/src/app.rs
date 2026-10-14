@@ -703,7 +703,19 @@ pub enum PendingAction {
         worktree: WorktreeId,
     },
     CloseTerminal(TerminalId),
+    /// Delete a checkout, unforced: the DAEMON keeps one with
+    /// uncommitted changes (`delete_check`).
     DeleteWorktree(WorktreeId),
+    /// The DELETE CHECK found uncommitted changes (`why` says how many):
+    /// answering opens the forced delete's own confirm instead of
+    /// sending anything.
+    AskForceDeleteWorktree {
+        worktree: WorktreeId,
+        why: String,
+    },
+    /// Delete a checkout and whatever is uncommitted in it. Only ever
+    /// behind the second confirm, whose only yes is `y`.
+    ForceDeleteWorktree(WorktreeId),
     /// A row delete that empties a linked worktree — the last card of the
     /// band going — with the checkout's fate decided in the same dialog:
     /// `Enter`/`y` runs `first` (the row's own delete) and then deletes
@@ -2338,6 +2350,9 @@ pub struct WorktreeRollback {
     pub worktree: Worktree,
     /// Its agents, each with the index it held in `tree.agents`.
     pub agents: Vec<(usize, Agent)>,
+    /// One of several sent at once (`Shift+D`): a refusal says so in the
+    /// footer rather than opening the forced delete's confirm.
+    pub bulk: bool,
 }
 
 /// The rows a launch into a WORKTREE that does not exist yet puts up the

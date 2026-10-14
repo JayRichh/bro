@@ -230,6 +230,7 @@ pub(crate) fn remove_worktree_rows(app: &mut App, id: &WorktreeId) -> Option<Wor
         index,
         worktree,
         agents,
+        bulk: false,
     })
 }
 
@@ -240,6 +241,7 @@ pub(crate) fn restore_worktree_rows(app: &mut App, rollback: WorktreeRollback) {
         index,
         worktree,
         agents,
+        ..
     } = rollback;
     if !app.tree.worktrees.iter().any(|w| w.id == worktree.id) {
         let at = index.min(app.tree.worktrees.len());

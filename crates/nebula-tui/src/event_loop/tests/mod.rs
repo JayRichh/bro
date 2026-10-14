@@ -20281,7 +20281,7 @@ fn a_context_menu_row_is_its_hotkey() {
         );
         assert_eq!(confirm(&by_menu), confirm(&by_key));
         assert!(
-            confirm(&by_menu).contains("1 session(s) will be killed"),
+            confirm(&by_menu).contains("Stops 1 session"),
             "{}",
             confirm(&by_menu)
         );
@@ -21720,7 +21720,7 @@ fn deleting_the_last_card_asks_about_the_worktree_first() {
 }
 
 /// `Enter`/`y` is yes: the card's delete goes out, then the same
-/// forced worktree delete the band's own `d` sends, and the band drops.
+/// unforced worktree delete the band's own `d` sends, and the band drops.
 #[test]
 fn yes_deletes_the_card_and_then_the_worktree() {
     with_default_config(|| {
@@ -21740,7 +21740,7 @@ fn yes_deletes_the_card_and_then_the_worktree() {
             .filter_map(|r| match r {
                 ClientRequest::DeleteAgent { id, .. } if id.0 == "a2" => Some("delete-agent"),
                 ClientRequest::DeleteWorktree {
-                    force: true, id, ..
+                    force: false, id, ..
                 } if id.0 == "w2" => Some("delete-worktree"),
                 _ => None,
             })
@@ -22363,3 +22363,161 @@ fn a_desktop_write_waits_for_the_reset_confirm_too() {
 }
 mod dispatch;
 mod orch_view;
+
+/// The DELETE CHECK's two steps: `d` on a worktree asks, `Enter` sends
+/// the delete UNFORCED; a check that found changes makes `Enter` open the
+/// forced delete's own confirm instead, where `Enter` keeps the checkout
+/// and only `y` sends `force`.
+#[test]
+fn a_worktree_delete_is_unforced_and_force_takes_a_second_y() {
+    with_default_config(|| {
+        let w2 = WorktreeId("w2".into());
+        let mut app = App::new();
+        seed_emptiable_tree(&mut app);
+        upsert_agent(&mut app, "a2", "w2", "agent-2", false);
+        let mut out = Vec::new();
+        run_menu_action(&mut app, MenuAction::DeleteWorktree(w2.clone()), &mut out);
+        let Some(Overlay::Confirm(c)) = &app.modals.overlay else {
+            panic!("{:?}", app.modals.overlay);
+        };
+        assert!(
+            c.message.contains("Stops 1 session (agent-2)"),
+            "{}",
+            c.message
+        );
+        // The seeded checkout is not on disk: the check says so, and
+        // never reads as clean.
+        assert!(c.message.contains("Could not check it"), "{}", c.message);
+        assert_eq!(c.action, PendingAction::DeleteWorktree(w2.clone()));
+        press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
+        assert!(
+            matches!(
+                out.as_slice(),
+                [ClientRequest::DeleteWorktree { force: false, id, .. }] if *id == w2
+            ),
+            "{out:?}"
+        );
+
+        // A check that found changes.
+        let mut app = App::new();
+        seed_emptiable_tree(&mut app);
+        run_menu_action(&mut app, MenuAction::DeleteWorktree(w2.clone()), &mut out);
+        crate::delete_check::land(
+            &mut app,
+            w2.clone(),
+            Ok(crate::delete_check::Findings {
+                changes: 2,
+                unpushed: Some(1),
+            }),
+        );
+        let Some(Overlay::Confirm(c)) = &app.modals.overlay else {
+            panic!("{:?}", app.modals.overlay);
+        };
+        assert!(c.message.contains("2 uncommitted changes"), "{}", c.message);
+        assert!(c.message.contains("1 commit not pushed"), "{}", c.message);
+        let mut out = Vec::new();
+        press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
+        assert!(out.is_empty(), "nothing sent yet: {out:?}");
+        let Some(Overlay::Confirm(force)) = &app.modals.overlay else {
+            panic!("{:?}", app.modals.overlay);
+        };
+        assert_eq!(force.action, PendingAction::ForceDeleteWorktree(w2.clone()));
+        assert!(
+            force.message.contains("2 uncommitted changes"),
+            "{}",
+            force.message
+        );
+        let again = force.clone();
+        press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
+        assert!(app.modals.overlay.is_none(), "Enter keeps it");
+        assert!(out.is_empty(), "{out:?}");
+        app.modals.overlay = Some(Overlay::Confirm(again));
+        press(&mut app, KeyCode::Char('y'), KeyModifiers::NONE, &mut out);
+        assert!(
+            matches!(
+                out.as_slice(),
+                [ClientRequest::DeleteWorktree { force: true, id, .. }] if *id == w2
+            ),
+            "{out:?}"
+        );
+    });
+}
+
+/// The DAEMON keeping a checkout for its uncommitted work puts the rows
+/// back and offers the forced delete; among several (`Shift+D`) the
+/// refusals only name the kept checkouts in the footer.
+#[test]
+fn a_refused_delete_offers_force_alone_and_flashes_in_bulk() {
+    with_default_config(|| {
+        let w2 = WorktreeId("w2".into());
+        let refusal = "worktree 'feature' has uncommitted changes (1): kept, nothing in it stopped";
+        let mut app = App::new();
+        seed_emptiable_tree(&mut app);
+        let mut out = Vec::new();
+        run_pending_action(
+            &mut app,
+            PendingAction::DeleteWorktree(w2.clone()),
+            &mut out,
+        );
+        let [ClientRequest::DeleteWorktree { req_id, .. }] = out.as_slice() else {
+            panic!("{out:?}");
+        };
+        hse(
+            &mut app,
+            ServerEvent::Error {
+                req_id: Some(*req_id),
+                message: refusal.into(),
+            },
+        );
+        assert!(app.tree.worktrees.iter().any(|w| w.id == w2), "rows back");
+        let Some(Overlay::Confirm(c)) = &app.modals.overlay else {
+            panic!("{:?}", app.modals.overlay);
+        };
+        assert_eq!(c.action, PendingAction::ForceDeleteWorktree(w2.clone()));
+
+        let mut app = App::new();
+        seed_emptiable_tree(&mut app);
+        hse(
+            &mut app,
+            ServerEvent::EntityUpserted {
+                entity: nebula_core::Entity::Worktree(nebula_core::Worktree {
+                    id: WorktreeId("w3".into()),
+                    project_id: nebula_core::ProjectId("p1".into()),
+                    path: "/tmp/demo-worktrees/other".into(),
+                    branch: "other".into(),
+                    is_main: false,
+                    sort_order: 0,
+                }),
+            },
+        );
+        let mut out = Vec::new();
+        run_pending_action(
+            &mut app,
+            PendingAction::DeleteAllWorktrees(vec![w2.clone(), WorktreeId("w3".into())]),
+            &mut out,
+        );
+        let ids: Vec<u64> = out
+            .iter()
+            .filter_map(|r| match r {
+                ClientRequest::DeleteWorktree { req_id, force, .. } => {
+                    assert!(!force);
+                    Some(*req_id)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ids.len(), 2);
+        for (id, branch) in ids.iter().zip(["feature", "other"]) {
+            hse(
+                &mut app,
+                ServerEvent::Error {
+                    req_id: Some(*id),
+                    message: format!("worktree '{branch}' has uncommitted changes (1): kept"),
+                },
+            );
+        }
+        assert!(app.modals.overlay.is_none(), "{:?}", app.modals.overlay);
+        let flash = app.chrome.flash.clone().unwrap_or_default();
+        assert!(flash.ends_with("feature, other"), "{flash}");
+    });
+}

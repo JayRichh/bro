@@ -779,7 +779,11 @@ fn owning_session<T: Clone>(
 fn process_parents() -> HashMap<u32, u32> {
     use nebula_core::platform::process_created_at;
     let mut created: HashMap<u32, Option<u64>> = HashMap::new();
-    let mut at = |pid: u32| *created.entry(pid).or_insert_with(|| process_created_at(pid));
+    let mut at = |pid: u32| {
+        *created
+            .entry(pid)
+            .or_insert_with(|| process_created_at(pid))
+    };
     nebula_core::platform::process_table()
         .into_iter()
         .filter(|row| match (at(row.ppid), at(row.pid)) {

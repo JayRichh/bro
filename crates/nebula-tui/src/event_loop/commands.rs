@@ -342,6 +342,14 @@ pub(crate) fn run_pending_action(
             send(app, out, |req_id| ClientRequest::DeleteLink { req_id, id });
         }
         PendingAction::DeleteWorktree(id) => delete_worktree_and_settle(app, id, out),
+        PendingAction::AskForceDeleteWorktree { worktree, why } => {
+            ask_force_delete_worktree(app, &worktree, &why)
+        }
+        PendingAction::ForceDeleteWorktree(id) => {
+            let before = selection_snapshot(app);
+            send_delete_worktree(app, id, true, false, out);
+            reconcile_selection(app, before, out);
+        }
         PendingAction::ThenDeleteWorktree {
             first, worktree, ..
         } => {
@@ -355,8 +363,9 @@ pub(crate) fn run_pending_action(
             // removal + rollback, so one failure restores only its rows.
             // One reconcile at the end: the cursor settles on a survivor.
             let before = selection_snapshot(app);
+            let bulk = ids.len() > 1;
             for id in ids {
-                delete_worktree(app, id, out);
+                send_delete_worktree(app, id, false, bulk, out);
             }
             reconcile_selection(app, before, out);
         }
@@ -538,16 +547,51 @@ pub(crate) fn confirm_close_terminal_in(app: &App, t: &nebula_core::TerminalTab)
 /// in the background — `git worktree remove` can take seconds). The
 /// eventual EntityRemoved is a no-op; an Error for this req_id restores the
 /// rows via the rollback stashed in the intent.
+///
+/// Never forced: the DAEMON keeps a checkout with uncommitted changes and
+/// says so, and the refusal offers the forced delete behind a confirm of
+/// its own (`delete_check`). `bulk` marks one of several sent at once,
+/// whose refusal only flashes.
 pub(crate) fn delete_worktree(app: &mut App, id: WorktreeId, out: &mut Vec<ClientRequest>) {
+    send_delete_worktree(app, id, false, false, out);
+}
+
+fn send_delete_worktree(
+    app: &mut App,
+    id: WorktreeId,
+    force: bool,
+    bulk: bool,
+    out: &mut Vec<ClientRequest>,
+) {
     let intent = match remove_worktree_rows(app, &id) {
-        Some(rollback) => PendingIntent::DeleteWorktree(rollback),
+        Some(rollback) => {
+            PendingIntent::DeleteWorktree(crate::app::WorktreeRollback { bulk, ..rollback })
+        }
         None => PendingIntent::None,
     };
     send_with(app, out, intent, |req_id| ClientRequest::DeleteWorktree {
         req_id,
         id,
-        force: true,
+        force,
     });
+}
+
+/// The forced delete's own confirm for worktree `id`, `why` saying what
+/// it would throw away — from the first confirm once the DELETE CHECK
+/// found changes, or from the DAEMON's refusal of the unforced delete.
+pub(crate) fn ask_force_delete_worktree(app: &mut App, id: &WorktreeId, why: &str) {
+    let Some(branch) = app
+        .tree
+        .worktrees
+        .iter()
+        .find(|w| &w.id == id)
+        .map(|w| w.branch.clone())
+    else {
+        return;
+    };
+    app.modals.overlay = Some(Overlay::Confirm(crate::delete_check::force_confirm(
+        &branch, id, why,
+    )));
 }
 
 pub(crate) fn run_menu_action(app: &mut App, action: MenuAction, out: &mut Vec<ClientRequest>) {

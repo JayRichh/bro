@@ -24,9 +24,7 @@ use super::{
     attach_now, jump_to_target, open_link, open_session, run_menu_action, Landing, SettingsCmd,
     WORKTREE_STILL_CREATING,
 };
-use crate::app::{
-    App, ConfirmDialog, DiffView, Focus, FollowUp, Overlay, PendingAction, SessionRow,
-};
+use crate::app::{App, DiffView, Focus, FollowUp, Overlay, SessionRow};
 use nebula_core::{AgentId, ClientRequest, SessionRef, WorktreeId};
 
 /// A CONTEXT MENU row — Enter on the hovered row, a click on any: the menu
@@ -273,9 +271,9 @@ pub(super) fn unarchive(app: &mut App, id: AgentId, out: &mut Vec<ClientRequest>
 /// Ask before a checkout is deleted from disk — `d` on its row, **Delete
 /// worktree** in its CONTEXT MENU. One gate and one wording for both: the
 /// ROOT WORKTREE is never deleted, a stand-in git is still cutting has
-/// nothing on disk yet, and the confirm says how many live sessions go
-/// down with the checkout. The menu used to build a confirm of its own,
-/// which left that warning out.
+/// nothing on disk yet, and the confirm says which live sessions and
+/// terminals go down with the checkout and what the DELETE CHECK finds
+/// uncommitted or unpushed in it (`delete_check`).
 pub(super) fn delete_worktree(app: &mut App, id: &WorktreeId) {
     let Some(w) = app.tree.worktrees.iter().find(|w| &w.id == id) else {
         return;
@@ -288,25 +286,12 @@ pub(super) fn delete_worktree(app: &mut App, id: &WorktreeId) {
         app.chrome.flash = Some(WORKTREE_STILL_CREATING.into());
         return;
     }
-    let live_here = app
-        .tree
-        .agents
-        .iter()
-        .filter(|a| &a.worktree_id == id && !a.archived)
-        .count()
-        + app
-            .tree
-            .terminals
-            .iter()
-            .filter(|t| &t.worktree_id == id)
-            .count();
-    app.modals.overlay = Some(Overlay::Confirm(ConfirmDialog {
-        title: "Delete worktree".into(),
-        message: format!(
-            "Delete worktree '{}' from disk? {live_here} session(s) will be killed.",
-            w.branch
-        ),
-        action: PendingAction::DeleteWorktree(id.clone()),
-        area: ratatui::layout::Rect::default(),
-    }));
+    // The DELETE CHECK fills the confirm in once git answers; until then
+    // it says it is checking, and Enter sends the unforced delete, which
+    // keeps anything uncommitted anyway.
+    let check = crate::delete_check::Check::Checking;
+    if let Some(dialog) = crate::delete_check::worktree_confirm(app, id, &check) {
+        app.modals.overlay = Some(Overlay::Confirm(dialog));
+        crate::delete_check::start(app, id);
+    }
 }

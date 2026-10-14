@@ -430,6 +430,12 @@ fn handle_confirm_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>
                 app.modals.overlay = None;
                 run_pending_action(app, *first, out);
             }
+            // The forced worktree delete's only yes is `y`: Enter keeps
+            // the checkout, so the Enter that answered the confirm before
+            // it — doubled, or a key repeat — never throws work away.
+            KeyCode::Enter if matches!(confirm.action, PendingAction::ForceDeleteWorktree(_)) => {
+                app.modals.overlay = None;
+            }
             KeyCode::Esc | KeyCode::Char('n') => {
                 // Backing out lands where you were: a settings reset
                 // reopens the overlay, a preset delete the presets list —
