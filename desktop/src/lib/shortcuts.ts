@@ -27,6 +27,8 @@ export type ShortcutId =
   | 'orchestrator_f10'
   | 'close_split'
   | 'toggle_archived'
+  | 'next_attention'
+  | 'prev_attention'
   | 'new_worktree'
   | 'rename'
   | 'archive'
@@ -97,6 +99,9 @@ export const SHORTCUTS: Shortcut[] = [
   { id: 'orchestrator_f10', keys: ['f10'], scope: 'fields', label: 'Orchestrator (start one when there is none)', group: 'Views' },
   { id: 'close_split', keys: ['escape'], scope: 'global', label: 'Close the split or Settings', group: 'Views' },
   { id: 'toggle_archived', keys: ['shift+a'], scope: 'global', label: 'Show or hide archived sessions', group: 'Views' },
+  // The terminal app's `.` and `,`: the palette's attention order, every repo.
+  { id: 'next_attention', keys: ['.'], scope: 'global', label: 'Next session needing you', group: 'Views' },
+  { id: 'prev_attention', keys: [','], scope: 'global', label: 'Previous session needing you', group: 'Views' },
 
   { id: 'rename', keys: ['r'], scope: 'row', label: 'Rename', group: 'Sessions' },
   { id: 'archive', keys: ['a'], scope: 'row', label: 'Archive', group: 'Sessions' },

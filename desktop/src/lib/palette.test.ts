@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Agent, Model } from './api';
-import { buildItems, labelMarks, scattered, search } from './palette';
+import { attentionSessions, buildItems, labelMarks, scattered, search, stepRing } from './palette';
 
 const agent = (id: string, worktree: string, status: Agent['status'], extra: Partial<Agent> = {}): Agent => ({
   id,
@@ -114,5 +114,35 @@ describe('palette ranking', () => {
     expect(scattered('round', 'gst-rounding')).toBe(false);
     expect(scattered('ound', 'gst-rounding')).toBe(false);
     expect(scattered('gst', 'main')).toBe(false);
+  });
+});
+
+describe('the . and , ring', () => {
+  // The terminal app's own case: needs you, running, unread, then the rest
+  // newest first with the never-run last; archived sessions are no stop.
+  const m: Model = {
+    ...model,
+    agents: [
+      agent('fresh', 'w1', 'fresh'),
+      agent('read', 'w1', 'finished', { status_changed_at: 50 }),
+      agent('unread', 'w3', 'finished', { unseen: true, status_changed_at: 10 }),
+      agent('run', 'w2', 'running', { status_changed_at: 5 }),
+      agent('ask', 'w1', 'needs_feedback', { status_changed_at: 1 }),
+      agent('gone', 'w1', 'needs_feedback', { archived: true, status_changed_at: 9000 }),
+    ],
+  };
+
+  it('is every live session in attention order', () => {
+    expect(attentionSessions(m)).toEqual(['ask', 'run', 'unread', 'read', 'fresh']);
+  });
+
+  it('steps and wraps, entering at the first or the last', () => {
+    const ring = attentionSessions(m);
+    expect(stepRing(ring, 'run', 1)).toBe('unread');
+    expect(stepRing(ring, 'fresh', 1)).toBe('ask');
+    expect(stepRing(ring, 'ask', -1)).toBe('fresh');
+    expect(stepRing(ring, null, 1)).toBe('ask');
+    expect(stepRing(ring, 'gone', -1)).toBe('fresh');
+    expect(stepRing([], 'ask', 1)).toBeNull();
   });
 });

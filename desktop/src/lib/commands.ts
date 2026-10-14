@@ -22,7 +22,7 @@ import {
 import { keysOf, type ShortcutId } from './shortcuts';
 import { menuFor, newWorktree, parseTarget, runRowKey, type Target } from './actions';
 import { ask, openMenu, ui, type MenuItem } from './ui/ui.svelte';
-import type { PaletteCommand } from './palette';
+import { attentionSessions, stepRing, type PaletteCommand } from './palette';
 import { askStartOrchestrator, openOrchestrator, orchestratorCommands } from './orch.svelte';
 import { orchestratorOf } from './orchestrator';
 
@@ -44,6 +44,14 @@ export function toggleHome() {
 export function toggleArchived() {
   app.showArchived = !app.showArchived;
   if (app.home !== 'overview' || (nav.current.view !== 'overview' && nav.current.view !== 'board')) setHome('overview', nav.current.repo);
+}
+
+/** `.` / `,`: open the next (or previous) session in attention order. */
+export function jumpAttention(step: 1 | -1) {
+  const s = app.session;
+  const next = stepRing(attentionSessions(app.model), s && 'Agent' in s ? s.Agent : null, step);
+  if (next) openSession({ Agent: next });
+  else toast('No sessions to jump to.');
 }
 
 /** The repo the window is on: the one in view, else the open session's. */
@@ -95,6 +103,8 @@ export function runShortcut(id: ShortcutId): boolean {
       goHome(nav.current.repo);
     },
     toggle_archived: toggleArchived,
+    next_attention: () => jumpAttention(1),
+    prev_attention: () => jumpAttention(-1),
     new_worktree: () => newWorktree(focusedRepo() ?? currentRepo()),
   };
   const f = go[id];
@@ -138,6 +148,8 @@ export function paletteCommands(): Command[] {
     cmd('overview', 'Show the overview', 'Window', () => setHome('overview', nav.current.repo), 'home_overview'),
     cmd('board', 'Show the board', 'Window', () => setHome('board', nav.current.repo), 'home_board', 'kanban'),
     cmd('archived', app.showArchived ? 'Hide archived sessions' : 'Show archived sessions', 'Window', toggleArchived, 'toggle_archived'),
+    cmd('next-attention', 'Next session needing you', 'Window', () => jumpAttention(1), 'next_attention', 'attention jump feedback'),
+    cmd('prev-attention', 'Previous session needing you', 'Window', () => jumpAttention(-1), 'prev_attention', 'attention jump feedback'),
     cmd('diff', 'Diff the worktree', 'Window', () => openDiff(app.diffWorktree ?? sessionWorktree(app.session)), 'open_diff'),
     cmd('theme', `Cycle theme (now ${app.themePref})`, 'Window', cycleTheme, 'cycle_theme', 'dark light system'),
     cmd('settings', 'Settings', 'Window', () => openSettings(), 'settings', 'preferences config'),
