@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.47.0
+
+The desktop diff closes properly, worktree deletes stop losing work, and both apps say which account
+each session runs on.
+
+- **Desktop diff fixes.** Diff opened from the orchestrator (or a session) has a close button and
+  `Esc` closes it even from inside the editor, returning to where it was opened. A hidden diff no
+  longer paints over the terminal or takes its clicks, which was what looked like a stretched terminal
+  under a diff that wouldn't go away. A terminal shown again re-asserts its size.
+- **Worktree deletes keep uncommitted work.** The terminal app's delete confirm reads the checkout
+  first: the sessions and terminals it stops, uncommitted changes and unpushed commits. It never forces
+  on the first answer. A dirty checkout takes a second confirm whose only yes is `f`. The daemon now
+  refuses an unforced delete of a dirty checkout before it stops any session. The desktop's confirm
+  counts terminals too and shows the same git state, and its "delete the emptied worktree too" box
+  starts unticked when the checkout holds changes.
+- **Desktop worktrees and branches.** Deleting the last session in a linked worktree offers to delete
+  the checkout (Delete emptied worktree is now a shared setting). A branch switcher for the root
+  checkout (`c` on a repo, the repo menu, the palette) with fuzzy local and remote branches, create on
+  a new name, and stash / bring / discard for changes. Pull requests are polled for every worktree
+  including main, show open, draft, merged and closed, and refresh on demand. Auto-clean merged
+  worktrees now works from the desktop too.
+- **Desktop alerts and more.** Done and needs-you notifications with the configured sounds while the
+  window is in the background; a click opens the session (Windows). `kete open <file>` from a session
+  opens a file sheet in the window. `.` and `,` jump to the next and previous session needing you. A
+  version plate in the rail shows when an update is out. "Delete all N sessions" on a worktree.
+- **Terminal app board and header.** The grid header ends in an `Overview | Board` toggle (`Shift+K`
+  as before), and the board shows and flips its scope. Lane titles match the desktop. The session pane
+  header shows status, harness@profile, project / branch, context, PR, age and the last prompt, giving
+  way a piece at a time on narrow panes.
+- **Accounts in both apps.** Every session label names its profile, the default included. The desktop
+  quick prompt and start sheets start on "auto" under a failover or least-used spread and show what it
+  would pick; the terminal app's quick prompt and `n` picker do the same, and `n` now picks the account.
+  The Accounts rail and the terminal app's `Shift+U` list each account's sessions, show broken profiles
+  with their error, mark a disabled default, and give every account that needs a login its command; the
+  rail can run it in a new terminal. A Claude login whose refresh token has expired reads as expired.
+  The rail refreshes on focus. Removing a profile says its sessions won't start again.
+- **CI.** The orchestrator's inside-a-session check ignores stale parent links from reused Windows pids;
+  the upgrade probe retries a binary that is still busy being written.
+
 ## 0.46.0
 
 The desktop app catches up with the terminal app, and both get an orchestrator, account usage and
