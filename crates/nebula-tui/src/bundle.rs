@@ -218,7 +218,10 @@ fn plural(n: usize, noun: &str) -> String {
 /// replace this machine's and keys it lacks are left alone; presets merge by
 /// name, hosts by destination. Every file the import touches is read before
 /// any is written, so a file that can't be replaced safely fails the whole
-/// import with nothing changed.
+/// import with nothing changed. Each file it reads is locked first (the
+/// settings lock the TUI's and the window's saves and `kete profile` take)
+/// and stays locked until the last write, in one order: config, presets,
+/// hosts.
 pub fn import(paths: &Paths, bundle: &Value) -> Result<Report> {
     let Some(obj) = bundle.as_object().filter(|obj| obj.contains_key(MARKER)) else {
         bail!("not a kete settings bundle (it has no \"{MARKER}\" key)");
@@ -230,6 +233,12 @@ pub fn import(paths: &Paths, bundle: &Value) -> Result<Report> {
     };
     let incoming_presets = list_section(obj, PRESETS)?;
     let incoming_hosts = list_section(obj, HOSTS)?;
+
+    let lock =
+        |path: &Path| settings::lock(path).with_context(|| format!("locking {}", path.display()));
+    let _config_lock = incoming_config.map(|_| lock(&paths.config)).transpose()?;
+    let _presets_lock = incoming_presets.map(|_| lock(&paths.presets)).transpose()?;
+    let _hosts_lock = incoming_hosts.map(|_| lock(&paths.hosts)).transpose()?;
 
     let mut config = incoming_config
         .map(|_| current_object(&paths.config))
@@ -707,6 +716,45 @@ mod tests {
         assert_eq!(section_count(&bundle), 0);
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("config.json"), "{warnings:?}");
+    }
+
+    /// An import is one read-modify-write under the settings lock the TUI,
+    /// the window and `kete profile` take: a save made while it waits is
+    /// read, not overwritten.
+    #[test]
+    fn an_import_waits_for_the_settings_lock_and_keeps_that_writers_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = paths(dir.path());
+        put(&p.config, json!({"theme": "default"}));
+        put(&p.presets, json!([]));
+        let config_lock = settings::lock(&p.config).unwrap();
+        let presets_lock = settings::lock(&p.presets).unwrap();
+        let bundle = json!({
+            "nebula_bundle": 1,
+            "config": {"theme": "ocean"},
+            "agent_presets": [{"name": "review", "prefix": "Review"}],
+        });
+        let importer = {
+            let p = paths(dir.path());
+            std::thread::spawn(move || import(&p, &bundle))
+        };
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(!importer.is_finished(), "the import waits for the lock");
+        // The lock holder's save lands while the import waits.
+        put(&p.config, json!({"theme": "default", "animations": false}));
+        put(&p.presets, json!([{"name": "mine", "prefix": "Mine"}]));
+        drop(config_lock);
+        drop(presets_lock);
+        importer.join().unwrap().unwrap();
+        assert_eq!(
+            get(&p.config),
+            json!({"theme": "ocean", "animations": false})
+        );
+        assert_eq!(
+            get(&p.presets),
+            json!([{"name": "mine", "prefix": "Mine"}, {"name": "review", "prefix": "Review"}])
+        );
+        assert!(!dir.path().join("config.json.lock").exists());
     }
 
     #[test]
