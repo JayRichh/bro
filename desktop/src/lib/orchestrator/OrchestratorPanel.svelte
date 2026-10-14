@@ -61,7 +61,7 @@
         >{n.label}</span
       >
     </span>
-    <span class="ml-2 max-w-[180px] truncate border border-rule px-1 font-mono text-[11px] leading-4 text-muted">{chip(n)}</span>
+    <span class="ml-2 max-w-[220px] truncate border border-rule px-1 font-mono text-[11px] leading-4 text-muted">{chip(n)}</span>
     <span class="text-right font-mono text-[12px] text-muted">{age(n.agent?.status_changed_at ?? n.sub?.started_at ?? 0, app.now)}</span>
   </button>
 {/snippet}
@@ -78,11 +78,11 @@
         Nothing started yet. Ask it for something on the right.
       {:else if counts.length}
         {#each counts as c, i (c.status)}
-          {#if i}<span class="text-faint" aria-hidden="true"> &middot; </span>{/if}<span
+          {#if i}<span class="mx-1.5 text-faint" aria-hidden="true">&middot;</span>{/if}<span
             class={c.status === 'needs' ? 'font-medium text-ember-ink' : c.status === 'failed' ? 'text-fail' : 'text-ink'}>{c.text}</span
           >
         {/each}
-        <span class="text-faint"> in its tree</span>
+        <span class="ml-1 text-faint">in its tree</span>
       {:else}
         {rows.filter((r) => r.kind === 'session').length} sessions, all quiet
       {/if}

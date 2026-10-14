@@ -21,8 +21,9 @@ let nextNotice = 1;
 export function openOrchestrator() {
   const o = orchestratorOf(app.model);
   if (o) {
-    app.session = { Agent: o.id };
-    markSeen(app.session);
+    const s: SessionRef = { Agent: o.id };
+    app.session = s;
+    markSeen(s);
   }
   nav.go({ view: 'orchestrator' });
 }

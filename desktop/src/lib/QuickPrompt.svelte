@@ -91,6 +91,8 @@
   $effect(() => {
     const repo = nav.current.repo;
     if (repo && !picked) project = repo;
+    // On the orchestrator's view the prompt talks to it, until a repo is picked.
+    else if (!repo && !picked && nav.current.view === 'orchestrator' && orch) project = ORCH;
   });
   $effect(() => {
     if (app.model.projects.find((p) => p.id === project) || (project === ORCH && orch)) return;

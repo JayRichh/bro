@@ -2,6 +2,7 @@
 // and what the window is looking at. Where the window is lives in
 // `nav` (shell/history.svelte.ts); this file follows it.
 
+import { untrack } from 'svelte';
 import { api, type Launchables, type Model, type SessionRef } from './api';
 import { ado, type AdoContextInfo } from './ado/api';
 import { nav, type Place } from './shell/history.svelte';
@@ -194,8 +195,11 @@ export function follow(p: Place) {
     // The orchestrator view shows its session in the split's pane.
     const o = app.model.agents.find((a) => a.role === 'orchestrator' && !a.archived);
     if (o) {
-      app.session = { Agent: o.id };
-      markSeen(app.session);
+      // A plain object, never read back from `app.session`: this runs in
+      // an effect, and reading what it writes would loop.
+      const s: SessionRef = { Agent: o.id };
+      if (sessionKey(untrack(() => app.session)) !== sessionKey(s)) app.session = s;
+      markSeen(s);
     }
   } else if (p.view === 'session') {
     const s = sessionFromKey(p.item);

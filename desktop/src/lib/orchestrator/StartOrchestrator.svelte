@@ -37,10 +37,11 @@
   let modelFor = '';
   $effect(() => {
     const c = info?.choices;
-    if (modelFor === harness) return;
+    // Wait for the harness's choices (the launchables load after boot).
+    if (!c || modelFor === harness) return;
     modelFor = harness;
-    model = c ? (c.models.find((m) => m === c.model) ?? c.models[0] ?? '') : '';
-    effort = c?.effort ?? '';
+    model = c.models.find((m) => m === c.model) ?? c.models[0] ?? '';
+    effort = c.effort;
   });
   $effect(() => {
     if (efforts.length && !efforts.includes(effort)) effort = efforts.includes(info?.choices?.effort ?? '') ? info!.choices!.effort : efforts[0];
