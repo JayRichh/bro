@@ -2,7 +2,7 @@
 // words. Lane rules mirror the TUI's (`launcher::lane_of`): the most urgent
 // that applies, an open pull request only once nothing else needs you.
 
-import type { Agent, Model, PrInfo, Subagent, TerminalTab } from './api';
+import { prOpen, type Agent, type Model, type PrInfo, type Subagent, type TerminalTab } from './api';
 
 export type Lane = 'needs' | 'running' | 'unseen' | 'done' | 'pr';
 
@@ -31,8 +31,17 @@ export function laneOf(a: Agent, pr: PrInfo | undefined): Lane {
   if (a.status === 'needs_feedback') return 'needs';
   if (a.status === 'running') return 'running';
   if (a.unseen) return 'unseen';
-  if (pr) return 'pr';
+  // A merged or closed PR is history: the card is done.
+  if (prOpen(pr)) return 'pr';
   return 'done';
+}
+
+/** A pull request's kind in a word or two: `PR`, `draft PR`, `merged PR`,
+ *  `closed PR` (an older backend reports open ones only). */
+export function prWord(pr: PrInfo): string {
+  if (pr.state === 'merged') return 'merged PR';
+  if (pr.state === 'closed') return 'closed PR';
+  return pr.draft ? 'draft PR' : 'PR';
 }
 
 export function toneOf(a: Agent): Tone {

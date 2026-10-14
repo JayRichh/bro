@@ -27,6 +27,7 @@
   import OrchestratorPanel from './lib/orchestrator/OrchestratorPanel.svelte';
   import StartOrchestrator from './lib/orchestrator/StartOrchestrator.svelte';
   import ReviewSheet from './lib/orchestrator/ReviewSheet.svelte';
+  import BranchSwitch from './lib/worktrees/BranchSwitch.svelte';
   import ReviewNotices from './lib/orchestrator/ReviewNotices.svelte';
   import { onReviewOpened, openOrchestrator } from './lib/orch.svelte';
   import { opensOnOrchestrator, orchestratorOf, placeKey } from './lib/orchestrator';
@@ -272,6 +273,7 @@
 <Help />
 <StartOrchestrator />
 <ReviewSheet />
+<BranchSwitch />
 <ReviewNotices />
 
 {#if app.toast}

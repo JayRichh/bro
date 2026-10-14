@@ -7,6 +7,7 @@
 
 import type { Model } from './api';
 import { fuzzyMatch, rank } from './fuzzy';
+import { prWord } from './status';
 
 export type PaletteTarget =
   | { kind: 'repo'; id: string }
@@ -97,7 +98,7 @@ export function buildItems(m: Model, commands: PaletteCommand[]): PaletteItem[] 
       text: `${repo}/#${pr.number} ${pr.title}`,
       crumb: repo,
       label: `#${pr.number} ${pr.title}`,
-      hint: pr.draft ? 'draft PR' : 'PR',
+      hint: prWord(pr),
       tier: 3,
       stamp: 0,
       idle: false,
