@@ -265,11 +265,11 @@ export async function openEditor(worktree: string | undefined) {
       const shown = r.command;
       r = await api.openWorktree(worktree, shown);
       if (!r.opened) {
-        toast('The repo's open command changed before it ran. Open again to review it.');
+        toast("The repo's open command changed before it ran. Open again to review it.");
         return;
       }
     }
-    if (r.opened) toast(`Opened with: ${r.command}`);
+    toast(`Opened with: ${r.command}`);
   });
 }
 
