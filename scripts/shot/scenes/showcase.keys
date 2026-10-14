@@ -1,0 +1,59 @@
+# The README's terminal showcase (showcase.setup.sh): open storefront-web's tab beside ledger-api's,
+# then F10 starts the orchestrator on Claude, which fans the sprint out over both repos and opens a
+# review; then the review on its Diff tab, the grid, a quick prompt, the kanban over every project
+# and the accounts, each captured as <nn>-<name>.png.
++
+storefront
+Enter
+sleep 1
+]
+sleep 1
+F10
+sleep 1
+Enter
+sleep 32
+capture 03-orchestrator
+F10
+sleep 2
+Tab
+sleep 2
+capture 04-review
+Escape
+sleep 1
+F10
+sleep 2
+t
+sleep 2
+C-q
+Escape
+sleep 1
+j
+sleep 2
+capture 01-overview
+p
+Add a --since flag to the invoice export, with a test for an empty range
+C-n
+sleep 1
+capture 02-quick-prompt
+Escape
+sleep 1
+# look at the finished sessions, so the kanban has Done and PR open cards beside the unseen one
+j
+sleep 2
+k
+k
+h
+sleep 2
+j
+sleep 1
+K
+sleep 1
+Tab
+sleep 2
+capture 05-kanban
+K
+sleep 1
+U
+sleep 2
+capture 06-accounts
+Escape

@@ -18,7 +18,7 @@ beside the agents working on them.
 
 [**Keys**](docs/keys.md) · [**Commands**](docs/commands.md) · [**Sessions**](docs/sessions.md) · [**Configuration**](docs/configuration.md) · [**How it works**](docs/how-it-works.md) · [**Windows port**](docs/PORT.md) · [**Changelog**](CHANGELOG.md)
 
-<img src="assets/screenshot.png" alt="Project tabs with status dots across the top, a band of session cards per checkout, and the running session's terminal under them" width="100%">
+<img src="assets/showcase/01-overview.png" alt="Kete in the terminal: project tabs with status dots across the top, a band of session cards per worktree with its pull request, and the running session's terminal under them" width="100%">
 
 </div>
 
@@ -83,6 +83,40 @@ kete desktop               # or the desktop app, on the same sessions
 
 Press `p`, type a task, `Enter`. Press `Ctrl+N` in the box first to give it a worktree of its own.
 Press `q` to leave: the sessions keep running, and `kete` brings you back to them.
+
+## The terminal app
+
+One sprint, start to finish, in `kete`. <sub>Synthetic demo data: the repos, tasks, accounts and pull requests are made up.</sub>
+
+**1. The grid.** Each project is a tab that counts its sessions by colour. Each worktree is a band
+with its line counts and pull request, and the selected session's terminal sits underneath.
+
+<img src="assets/showcase/01-overview.png" alt="The ledger-api tab: a main band with a finished session and a terminal running tests, a feat/invoice-csv-export band with draft PR #212 and two sessions, a fix/webhook-retries band with ready PR #208, and the running session's transcript in the pane below" width="100%">
+
+**2. A new task.** `p` opens the quick prompt over the grid, with the project, worktree, harness, model
+and profile it will launch on, the profile's 5h and weekly use, and `Ctrl+N` for a fresh worktree.
+
+<img src="assets/showcase/02-quick-prompt.png" alt="The quick prompt over the grid with a task typed, its details row reading ledger-api, feat/invoice-csv-export, claude, opus high and the work profile at 62% and 41%, and new worktree ticked" width="100%">
+
+**3. The orchestrator.** `F10` starts one agent that runs the rest. Here it read the sprint with
+`kete ado tasks`, started a worker per task across both repos with `kete orchestrator spawn`, and
+every session it started sits as a chip across the top.
+
+<img src="assets/showcase/03-orchestrator.png" alt="The orchestrator full screen: a chip per session across the top in attention order, and its transcript reading the sprint, spawning five workers over two repos, listing them and opening a review" width="100%">
+
+**4. A review.** The orchestrator opened a review on one worker: its terminal, diff, history and
+pull request, here on the Diff tab.
+
+<img src="assets/showcase/04-review.png" alt="The review modal on the Invoice CSV export session, on its Diff tab, showing the CSV writer added to src/invoices/export.ts" width="100%">
+
+**5. The kanban.** `Shift+K` lays the sessions out in five lanes, and `Tab` widens it to every project.
+
+<img src="assets/showcase/05-kanban.png" alt="The kanban over both projects: one session needing input, three running including the orchestrator, one unseen, one done and one with a pull request open" width="100%">
+
+**6. Accounts.** `Shift+U` lists every account with its 5h and weekly use, when each resets, and
+whether it is signed in.
+
+<img src="assets/showcase/06-accounts.png" alt="The accounts overlay: work and personal Claude profiles and a codex-team Codex profile, each with 5h and weekly bars, reset times and signed in" width="100%">
 
 ## The desktop app
 

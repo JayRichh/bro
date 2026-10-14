@@ -17,7 +17,7 @@ REPO="$(cd "$HERE/../.." && pwd)"
 SCENE="${1:-${SCENE:-open-prs}}"
 COLS="${COLS:-190}"; ROWS="${ROWS:-50}"
 BIN="$REPO/target/debug/kete"
-OUT="$REPO/design-screenshots"; mkdir -p "$OUT"
+OUT="${SHOT_OUT:-$REPO/design-screenshots}"; mkdir -p "$OUT"
 ID="$$"
 RUNTIME="/tmp/nshot-$ID"                                   # short on purpose
 WORK="${TMPDIR:-/tmp}/nebula-shot/$ID"; mkdir -p "$WORK" "$RUNTIME"; chmod 700 "$RUNTIME"
@@ -56,8 +56,25 @@ sleep "${SHOT_BOOT_SECS:-4}"                                 # first paint + the
 # A keys line is a tmux key name or literal text; `click <col> <row>` / `rclick <col> <row>` (1-based
 # cells) are an SGR mouse press and release typed straight into the pane, for the targets no key reaches,
 # and `drag <col> <row> <col2> <row2>` a left press, two motion reports and the release at the far end.
+# `sleep <secs>` waits with no key sent (an unbound F12 flashes its name over the footer), and
+# `capture <name>` saves the screen as it stands as <name>.{ansi,txt,png} beside the scene's own, so
+# one run shoots a whole story from one live state (scenes/showcase.keys).
+render_png() {
+  if [ ! -x "$VENV/bin/python" ]; then
+    echo "shot: creating venv with Pillow at $VENV"
+    python3 -m venv "$VENV" && "$VENV/bin/python" -m pip -q install pillow fonttools || { echo "shot: no Pillow, PNG skipped, .ansi/.txt are there"; return 0; }
+  fi
+  "$VENV/bin/python" "$HERE/render.py" "$1.ansi" "$1.png" --cols "$COLS" --rows "$ROWS"
+}
+capture() {
+  $TMUX capture-pane -epN > "$OUT/$1.ansi"
+  $TMUX capture-pane -pN  > "$OUT/$1.txt"
+  render_png "$OUT/$1"
+}
 send() {
   case "$1" in
+    sleep\ *) sleep "${1#sleep }"; return;;
+    capture\ *) sleep 1; capture "${1#capture }"; return;;
     click\ *|rclick\ *)
       set -- $1; b=0; [ "$1" = rclick ] && b=2
       $TMUX send-keys -l "$(printf '\033[<%d;%d;%dM\033[<%d;%d;%dm' "$b" "$2" "$3" "$b" "$2" "$3")";;
@@ -78,10 +95,4 @@ $TMUX capture-pane -epN > "$OUT/$SCENE.ansi"
 $TMUX capture-pane -pN  > "$OUT/$SCENE.txt"
 send C-q; send q; send y                                      # let the TUI restore the terminal
 echo "shot: $OUT/$SCENE.txt  ($(wc -l < "$OUT/$SCENE.txt") rows)"
-
-# --- render, in a venv that has Pillow ---
-if [ ! -x "$VENV/bin/python" ]; then
-  echo "shot: creating venv with Pillow at $VENV"
-  python3 -m venv "$VENV" && "$VENV/bin/python" -m pip -q install pillow || { echo "shot: no Pillow — PNG skipped, .ansi/.txt are there"; exit 0; }
-fi
-"$VENV/bin/python" "$HERE/render.py" "$OUT/$SCENE.ansi" "$OUT/$SCENE.png" --cols "$COLS" --rows "$ROWS"
+render_png "$OUT/$SCENE"

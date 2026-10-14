@@ -72,7 +72,7 @@ Kete holds your coding agents in one place. One daemon owns every agent session 
 
 ## Evidence on Hand
 
-- Upstream nebula README, docs, and screenshot (`assets/screenshot.png`) describe the inherited workflow.
+- Upstream nebula README and docs describe the inherited workflow; the terminal showcase (`assets/showcase/`) and the desktop screenshots show Kete's own, on synthetic demo data.
 - No users, testimonials, or benchmarks yet. Do not fabricate any.
 
 ## Product Principles
