@@ -144,8 +144,21 @@ name, project or branch.
   sessions.
 
 The everyday `kete sessions`, `kete read` and `kete ask` work in the
-orchestrator too. Azure DevOps commands (`kete ado ...`) are reserved in the
-guidance for a later release.
+orchestrator too.
+
+### Azure DevOps
+
+For a repo on Azure DevOps the guidance teaches `kete ado` (see
+[Commands](commands.md#azure-devops)) and one flow: `kete ado tasks`, pick a
+task with the user, `kete ado start-task <id>` (a branch and worktree for it,
+the task linked, assigned and moved to In Progress, and a worker on it that is
+the orchestrator's child, through `OrchestratorSpawnWith` on the new worktree),
+watch the worker with `list` and `read`, `review` it for the user, then
+`kete ado pr create` from the worker's worktree (draft, co-author lines cleaned,
+a task and a reviewer unless waived). Votes and replies only when the user asks.
+Sign-in is never interactive: a missing credential is reported with "sign in
+from the desktop app or run `az login`", and the orchestrator passes that on
+rather than trying to sign in.
 
 ## Permission model
 
@@ -192,4 +205,4 @@ fresh read. Nothing is written into its chat box unasked.
 - The `orchestrator_view` setting (`auto` on narrow terminals, `always`,
   `never`) for the startup mode.
 - Optional idle-note injection for the orchestrator, behind an autonomy setting.
-- Azure DevOps commands (`kete ado ...`).
+- Azure DevOps pipelines in `kete ado`.

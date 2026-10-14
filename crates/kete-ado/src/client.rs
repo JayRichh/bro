@@ -1,7 +1,7 @@
 //! The ADO REST client: auth header, `api-version`, error classes and one
 //! `Retry-After` retry.
 
-use crate::ado::auth::{AuthError, TokenSource};
+use crate::auth::{AuthError, TokenSource};
 use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -246,7 +246,7 @@ impl AdoClient {
         &self.ids
     }
 
-    async fn credential(&self) -> Result<crate::ado::auth::Credential, AdoError> {
+    async fn credential(&self) -> Result<crate::auth::Credential, AdoError> {
         Ok(if self.silent {
             self.tokens.token_silent(&self.org_url).await?
         } else {
@@ -312,8 +312,8 @@ impl AdoClient {
             url.push_str("api-version=");
             url.push_str(API_VERSION);
         }
-        match crate::ado::base_override() {
-            Some(base) => crate::ado::rebase_url(&url, &base),
+        match crate::base_override() {
+            Some(base) => crate::rebase_url(&url, &base),
             None => url,
         }
     }
@@ -438,8 +438,8 @@ fn message_of(body: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ado::auth::fake::Fake;
-    use crate::ado::auth::{Credential, TokenSource};
+    use crate::auth::fake::Fake;
+    use crate::auth::{Credential, TokenSource};
     use httpmock::prelude::*;
     use serde_json::json;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};

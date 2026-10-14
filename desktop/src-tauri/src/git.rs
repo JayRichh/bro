@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Files above this are shown as too large rather than diffed.
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
@@ -89,59 +89,7 @@ fn git_fetch(cwd: &Path, args: &[&str]) -> Result<(), String> {
     Ok(())
 }
 
-/// Run `cmd` to the end, or kill it after `timeout` (`what timed out after
-/// N s`). Its stdout and stderr are drained as it runs, so a chatty
-/// process never stalls on a full pipe; on a timeout the readers are left
-/// to finish on their own, as a killed git's helpers may hold the pipes.
-pub(crate) fn output_within(
-    mut cmd: Command,
-    timeout: Duration,
-    what: &str,
-) -> Result<Output, String> {
-    use std::io::Read;
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("could not run {what}: {e}"))?;
-    let drain = |pipe: Option<Box<dyn Read + Send>>| {
-        std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            if let Some(mut p) = pipe {
-                let _ = p.read_to_end(&mut buf);
-            }
-            buf
-        })
-    };
-    let stdout = drain(
-        child
-            .stdout
-            .take()
-            .map(|p| Box::new(p) as Box<dyn Read + Send>),
-    );
-    let stderr = drain(
-        child
-            .stderr
-            .take()
-            .map(|p| Box::new(p) as Box<dyn Read + Send>),
-    );
-    let deadline = Instant::now() + timeout;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!("{what} timed out after {} s", timeout.as_secs()));
-            }
-            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
-            Err(e) => return Err(format!("could not wait for {what}: {e}")),
-        }
-    };
-    Ok(Output {
-        status,
-        stdout: stdout.join().unwrap_or_default(),
-        stderr: stderr.join().unwrap_or_default(),
-    })
-}
+pub(crate) use kete_ado::git::output_within;
 
 /// `git <verb> failed: <first stderr line>`.
 fn git_failure(args: &[&str], out: &Output) -> String {
@@ -1441,26 +1389,6 @@ mod tests {
         assert_eq!(split_walk("main~1"), ("main", "~1"));
         assert_eq!(split_walk("main"), ("main", ""));
         assert_eq!(split_walk("a^b"), ("a^b", ""));
-    }
-
-    #[test]
-    fn a_slow_command_is_killed_at_its_timeout() {
-        #[cfg(windows)]
-        let cmd = {
-            let mut c = Command::new("cmd");
-            c.args(["/C", "ping -n 30 127.0.0.1 >NUL"]);
-            c
-        };
-        #[cfg(not(windows))]
-        let cmd = {
-            let mut c = Command::new("sleep");
-            c.arg("30");
-            c
-        };
-        let started = Instant::now();
-        let e = output_within(cmd, Duration::from_millis(300), "the wait").unwrap_err();
-        assert_eq!(e, "the wait timed out after 0 s");
-        assert!(started.elapsed() < Duration::from_secs(10));
     }
 
     #[test]

@@ -284,6 +284,18 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: OrchestratorCommand,
     },
+    /// Azure DevOps for this repo: sprint tasks, task worktrees, pull requests.
+    ///
+    /// Org, project and repo come from the current checkout's Azure DevOps
+    /// git remote. Sign-in is never interactive: Git Credential Manager is
+    /// asked with `credential.interactive=never`, then `az account
+    /// get-access-token`. When neither has a token, sign in from the
+    /// desktop app or run `az login`.
+    #[command(after_help = ADO_EXAMPLES)]
+    Ado {
+        #[command(subcommand)]
+        command: AdoCommand,
+    },
     /// Back up, restore or locate this machine's settings.
     ///
     /// Settings live in `config.json` (the portable file an export, an
@@ -595,6 +607,178 @@ pub(crate) enum OrchestratorCommand {
         tabs: Vec<nebula_core::ReviewTabKind>,
     },
 }
+
+#[derive(Subcommand)]
+pub(crate) enum AdoCommand {
+    /// Your tasks in the team's current sprint, grouped by parent.
+    ///
+    /// The team is the one the desktop's Tasks view remembers for this
+    /// repo, else the project's default team. Offline or signed out, the
+    /// last list saved for the scope is shown and says so.
+    Tasks {
+        /// Everyone's open items in the current sprint, not only yours.
+        #[arg(long, conflicts_with = "open")]
+        all: bool,
+        /// Everything open assigned to you, in any sprint.
+        #[arg(long)]
+        open: bool,
+        /// Print JSON instead of compact text.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Start a task: a new branch and worktree, linked to it, with an agent.
+    ///
+    /// As the desktop's Start task: the branch (default `<initials>/<slug
+    /// of the title>`) is cut from the repo's Azure DevOps default branch
+    /// unless --base, linked to the task, the task assigned to you and moved
+    /// to In Progress, then an agent starts in the worktree with the task as
+    /// its prompt. Run from the orchestrator, the agent is its child.
+    StartTask {
+        /// Work item id.
+        id: u32,
+        /// Harness for the agent (default: the quick prompt's harness).
+        #[arg(long, value_name = "HARNESS")]
+        agent: Option<String>,
+        /// Make the branch and worktree only; start no agent.
+        #[arg(long, conflicts_with = "agent")]
+        no_agent: bool,
+        /// Branch name instead of the suggested one.
+        #[arg(long)]
+        branch: Option<String>,
+        /// Start point instead of the repo's default branch.
+        #[arg(long)]
+        base: Option<String>,
+        /// Leave the task's assignee as it is.
+        #[arg(long)]
+        no_assign: bool,
+        /// Leave the task's state as it is.
+        #[arg(long)]
+        no_activate: bool,
+        /// The agent's opening prompt instead of the task's text.
+        #[arg(long)]
+        prompt: Option<String>,
+        /// Model the agent launches with.
+        #[arg(long)]
+        model: Option<String>,
+        /// Reasoning effort the agent launches with.
+        #[arg(long)]
+        effort: Option<String>,
+        /// PROFILE (account) the agent runs under.
+        #[arg(long)]
+        profile: Option<String>,
+        /// Print JSON instead of compact text.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Active pull requests: yours, and those waiting on your review.
+    Prs {
+        /// Print JSON instead of compact text.
+        #[arg(long)]
+        json: bool,
+    },
+    /// One pull request (detail, policies, threads), or `pr create`.
+    #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
+    Pr {
+        /// Pull request id.
+        #[arg(required = true)]
+        id: Option<u32>,
+        /// Print JSON instead of compact text.
+        #[arg(long)]
+        json: bool,
+        #[command(subcommand)]
+        action: Option<AdoPrAction>,
+    },
+    /// Vote on a pull request.
+    Vote {
+        /// Pull request id.
+        id: u32,
+        /// approve, approve-with-suggestions, wait, reject or reset.
+        #[arg(value_parser = parse_vote)]
+        vote: i8,
+    },
+    /// Reply on a pull request's comment thread.
+    Reply {
+        /// Pull request id.
+        id: u32,
+        /// Thread id (`kete ado pr <id>` lists them).
+        thread: u32,
+        /// Reply text; multiple words need no quotes.
+        #[arg(required = true, num_args = 1..)]
+        text: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum AdoPrAction {
+    /// Push this branch and open a pull request from it.
+    ///
+    /// As the desktop's composer: AI co-author and attribution lines are
+    /// taken out of unpushed commit messages first, the PR opens as a draft
+    /// unless --publish, it needs a linked task (--task, else the branch's
+    /// own) unless --no-task and a reviewer unless --no-reviewer. An active
+    /// PR from the branch is reported, never doubled.
+    Create {
+        /// Title (default: the task's title, else the only commit subject).
+        #[arg(long)]
+        title: Option<String>,
+        /// The Summary section of the description.
+        #[arg(long)]
+        summary: Option<String>,
+        /// The Testing section of the description.
+        #[arg(long)]
+        testing: Option<String>,
+        /// Target branch (default: the repo's default branch).
+        #[arg(long)]
+        target: Option<String>,
+        /// Source branch (default: the checked-out one).
+        #[arg(long)]
+        source: Option<String>,
+        /// Work item to link (default: the task the branch was started for).
+        #[arg(long, conflicts_with = "no_task")]
+        task: Option<u32>,
+        /// Open it without a linked task.
+        #[arg(long)]
+        no_task: bool,
+        /// Reviewer by name or email; repeat for more.
+        #[arg(long = "reviewer", value_name = "WHO")]
+        reviewers: Vec<String>,
+        /// Open it without a reviewer.
+        #[arg(long, conflicts_with = "reviewers")]
+        no_reviewer: bool,
+        /// Publish at once instead of opening a draft.
+        #[arg(long)]
+        publish: bool,
+        /// Print JSON instead of compact text.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// A vote word as Azure DevOps' number.
+pub(crate) fn parse_vote(s: &str) -> Result<i8, String> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "approve" | "approved" | "10" => Ok(10),
+        "approve-with-suggestions" | "suggestions" | "5" => Ok(5),
+        "wait" | "wait-for-author" | "-5" => Ok(-5),
+        "reject" | "rejected" | "-10" => Ok(-10),
+        "reset" | "none" | "0" => Ok(0),
+        _ => Err(format!(
+            "unknown vote `{s}`: approve, approve-with-suggestions, wait, reject or reset"
+        )),
+    }
+}
+
+const ADO_EXAMPLES: &str = "\
+Examples:
+  kete ado tasks                                 your tasks in the current sprint
+  kete ado tasks --all --json
+  kete ado start-task 4211                       branch, worktree and an agent for it
+  kete ado start-task 4211 --agent codex --branch jr/fix-gst
+  kete ado prs
+  kete ado pr 812 --json                         detail, policies and threads
+  kete ado pr create --task 4211 --reviewer sam@example.com
+  kete ado vote 812 approve
+  kete ado reply 812 3 \"fixed in the latest push\"";
 
 const ADD_EXAMPLES: &str = "\
 Examples:

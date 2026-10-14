@@ -62,8 +62,36 @@ destructive or irreversible. Never approve another session's permission prompt u
 explicitly tells you to; surface it instead. Prefer `read` over `ask` when the answer is already \
 on screen, and do not interrupt a `running` session unless the user asked you to.\n\n\
 ## Azure DevOps\n\
-(Reserved: `kete ado ...` commands for work items, pull requests and pipelines arrive in a later \
-release. Until then, do not guess at them.)";
+For a repo whose git remote is on Azure DevOps, `kete ado` does what the desktop app's Tasks and \
+Pull requests views do. Run it with the repo checkout as the working directory (`cd` there, or \
+`git -C` style: org, project and repo come from that checkout's remote). Add `--json` when you \
+need exact ids.\n\
+  kete ado tasks [--all | --open] [--json]\n\
+The user's tasks in the team's current sprint, grouped by parent (`--all`: everyone's open items \
+in the sprint; `--open`: everything open assigned to them).\n\
+  kete ado start-task <id> [--agent <harness>] [--no-agent] [--branch B] [--base R] \
+[--no-assign] [--no-activate] [--prompt P] [--model M] [--effort E] [--profile P]\n\
+The desktop's Start task: a new branch (default `<initials>/<slug of the title>`) cut from the \
+repo's default branch, a worktree for it, the branch linked to the task, the task assigned to the \
+user and moved to In Progress, then an agent in the worktree with the task as its prompt. Run \
+from here, that agent is your child and shows in your list. Steps after the worktree that did not \
+happen are listed, not fatal.\n\
+  kete ado prs [--json]          the user's active PRs and the ones waiting on their review\n\
+  kete ado pr <id> [--json]      one PR: reviewers and votes, policies, comment threads\n\
+  kete ado pr create [--title T] [--summary S] [--testing T] [--target B] [--task <id> | \
+--no-task] [--reviewer <name or email>]... [--no-reviewer] [--publish]\n\
+Run in the worker's worktree: pushes its branch and opens a DRAFT PR (unless `--publish`) with \
+the desktop composer's rules: co-author and AI attribution lines are cleaned out of unpushed \
+commit messages, a linked task (the branch's own by default) and a reviewer are required unless \
+waived, and an existing PR from the branch is reported rather than doubled.\n\
+  kete ado vote <id> approve|approve-with-suggestions|wait|reject|reset\n\
+  kete ado reply <id> <thread> \"<text>\"\n\
+The everyday flow: `kete ado tasks`, pick a task with the user, `kete ado start-task <id>` (the \
+worker gets its own branch and worktree), watch it with `list`/`read`, then `kete orchestrator \
+review <worker>` for the user, and once they are happy `kete ado pr create` from the worker's \
+worktree. Voting and replying are the user's voice: only when they ask. Sign-in is never \
+interactive: if a command says Azure DevOps sign-in is needed, tell the user to sign in from the \
+desktop app or run `az login`; never try to sign in yourself.";
 
 /// Name a started orchestrator gets when the request names none.
 pub const DEFAULT_ORCHESTRATOR_NAME: &str = "orchestrator";
