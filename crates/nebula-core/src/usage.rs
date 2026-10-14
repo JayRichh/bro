@@ -257,7 +257,7 @@ impl AccountUsage {
                     }),
                     pct_text(Some(w.percent_at(now_secs)))
                 ),
-                None => format!("{default} —"),
+                None => format!("{default} \u{2014}"),
             })
             .collect();
         parts.join(" \u{b7} ")

@@ -269,7 +269,7 @@ const EDITS = [
   },
   // Test data: the issue title above it says `kete open` once renamed.
   {
-    file: 'crates/nebula-tui/src/branch_name.rs',
+    file: 'crates/nebula-core/src/branch_name.rs',
     from: '"issue-7-crash-nebula-open-on-a-pdf"',
     to: '"issue-7-crash-kete-open-on-a-pdf"',
   },

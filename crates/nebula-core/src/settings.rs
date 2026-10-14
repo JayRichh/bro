@@ -350,7 +350,7 @@ pub fn lock_with(path: &Path, wait: Duration, stale: Duration) -> io::Result<Fil
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
                 format!(
-                    "another kete is writing {} (its lock {} is held); nothing was written — try again",
+                    "another kete is writing {} (its lock {} is held); nothing was written: try again",
                     target.display(),
                     lock_path.display()
                 ),
