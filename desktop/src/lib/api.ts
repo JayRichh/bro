@@ -91,6 +91,8 @@ export interface UsageWindow {
   percent: number;
   /** Epoch seconds. */
   resets_at: number | null;
+  /** Epoch seconds it was read; 0 = unknown. */
+  read_at: number;
 }
 export type UsageSource = 'statusline' | 'transcript' | 'rollout' | 'copilot_api' | 'copilot_events' | 'screen';
 /** An account's latest plan usage, keyed by profile name or `@<harness>`. */

@@ -141,15 +141,14 @@
           >
         {/if}
         {#if n.agent && !n.agent.archived}
-          <!-- The meta column is gone in a narrow split: the context rides the name. -->
-          <span class="ml-2 hidden flex-none @max-[760px]:inline-flex"><ContextBar context={app.model.contexts?.[n.agent.id]} /></span>
+          <!-- The context rides the name, so the meta column keeps its
+               harness and profile whole. -->
+          <span class="ml-2 inline-flex flex-none"><ContextBar context={app.model.contexts?.[n.agent.id]} /></span>
         {/if}
       </span>
 
       <span class="flex min-w-0 items-center gap-2 pl-3 text-[13px] text-muted @max-[760px]:hidden"
-        ><span class="min-w-0 truncate">{meta(n)}</span>{#if n.agent && !n.agent.archived}<ContextBar
-            context={app.model.contexts?.[n.agent.id]}
-          />{/if}</span
+        ><span class="min-w-0 truncate">{meta(n)}</span></span
       >
       <span class="truncate pl-3 text-[13px] text-muted @max-[760px]:hidden">
         {#if where && !where.isMain && n.depth === 0}<span class="mr-2 font-mono text-[12px]">{where.branch}</span>{/if}{prompt ?? ''}

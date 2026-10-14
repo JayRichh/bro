@@ -77,10 +77,11 @@ if (W2) {
 // profile that needs a login, a Copilot account's monthly allowances. ----
 const H1 = 3600;
 const nowS = Math.floor(now / 1000);
-const win = (kind, percent, resets, label = null) => ({ kind, label, percent, resets_at: resets ? nowS + resets : null });
+const win = (kind, percent, resets, label = null, readAgo = 60) => ({ kind, label, percent, resets_at: resets ? nowS + resets : null, read_at: nowS - readAgo });
 const accounts = {
   '@claude': { account: '@claude', harness: 'claude', windows: [win('session', 34, 3 * H1 + 12 * 60), win('weekly', 82, 2 * 86400 + 4 * H1)], source: 'statusline', at: now - 40_000, plan: null },
   'codex-team': { account: 'codex-team', harness: 'codex', windows: [win('session', 97, 40 * 60), win('weekly', 61, 5 * 86400)], source: 'rollout', at: now - 600_000, plan: 'plus' },
+  'codex-spare': { account: 'codex-spare', harness: 'codex', windows: [win('session', 22, null, null, 4 * H1), win('weekly', 48, 3 * 86400, null, 4 * H1)], source: 'rollout', at: now - 4 * H1 * 1000, plan: 'plus' },
   'gh-work': { account: 'gh-work', harness: 'copilot', windows: [win('monthly', 41, 17 * 86400, 'premium'), win('monthly', 6, 17 * 86400, 'chat')], source: 'copilot_api', at: now - 1_800_000, plan: 'business' },
 };
 const accountRow = (key, name, harness, o = {}) => ({

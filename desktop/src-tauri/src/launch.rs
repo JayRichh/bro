@@ -310,6 +310,7 @@ mod tests {
                     label: None,
                     percent: 92.0,
                     resets_at: None,
+                    read_at: 1,
                 }],
                 source: UsageSource::Statusline,
                 at: 0,

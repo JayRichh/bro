@@ -27,9 +27,41 @@ export function pct(percent: number | null | undefined): string {
   return `${Math.round(Math.max(0, Math.min(999, percent)))}%`;
 }
 
-/** A window's percent as of `nowMs`: past its reset it is empty. */
+/** A window's nominal length in seconds (`WindowKind::nominal_secs`). */
+const NOMINAL: Record<UsageWindow['kind'], number> = {
+  session: 5 * 3600,
+  weekly: 7 * 86400,
+  model_weekly: 7 * 86400,
+  monthly: 30 * 86400,
+};
+/** How old a reading may get before it draws dim (`stale_after_secs`). */
+const STALE_AFTER: Record<UsageWindow['kind'], number> = { ...NOMINAL, session: 3 * 3600 };
+
+/** Has the window run out: past its reset, or with no reset time, its
+ *  nominal length since it was read (never read: at once). */
+export function expiredAt(w: UsageWindow, nowMs: number): boolean {
+  const now = nowMs / 1000;
+  if (w.resets_at != null && w.resets_at > 0) return w.resets_at <= now;
+  const read = w.read_at ?? 0;
+  return read <= 0 || read + NOMINAL[w.kind] <= now;
+}
+
+/** A window's percent as of `nowMs`: an expired one is empty. */
 export function percentAt(w: UsageWindow, nowMs: number): number {
-  return w.resets_at != null && w.resets_at > 0 && w.resets_at * 1000 <= nowMs ? 0 : w.percent;
+  return expiredAt(w, nowMs) ? 0 : w.percent;
+}
+
+/** What a bar shows: the percent, 0 past a known reset, unknown once a
+ *  window with no reset time has aged out (`UsageWindow::shown_at`). */
+export function shownAt(w: UsageWindow, nowMs: number): number | null {
+  if (w.resets_at != null && w.resets_at > 0) return percentAt(w, nowMs);
+  return expiredAt(w, nowMs) ? null : w.percent;
+}
+
+/** Is the reading too old to trust at a glance (drawn dim and hatched)? */
+export function staleAt(w: UsageWindow, nowMs: number): boolean {
+  const read = w.read_at ?? 0;
+  return read <= 0 || nowMs / 1000 - read > STALE_AFTER[w.kind];
 }
 
 /** Width of a bar's fill, 0-100; any use at all shows a sliver. */
@@ -97,8 +129,9 @@ export function usageTitle(row: Pick<AccountRow, 'name' | 'harness' | 'profile'>
   if (!u || !u.windows.length) return `${head}\nNo usage read yet: it shows after the account's next turn.`;
   const lines = u.windows.map((w) => {
     const name = w.label ? `${w.label} ${w.kind === 'monthly' ? 'monthly' : 'weekly'}` : { session: '5-hour', weekly: 'weekly', model_weekly: 'model weekly', monthly: 'monthly' }[w.kind];
-    const reset = w.resets_at ? `, resets ${resetsIn(w.resets_at, nowMs)}` : '';
-    return `${name}: ${pct(percentAt(w, nowMs))}${reset}`;
+    const reset = w.resets_at && w.resets_at * 1000 > nowMs ? `, resets ${resetsIn(w.resets_at, nowMs)}` : '';
+    const read = staleAt(w, nowMs) ? (w.read_at > 0 ? `, read ${ago(w.read_at * 1000, nowMs)} (stale)` : ', read time unknown') : '';
+    return `${name}: ${pct(shownAt(w, nowMs))}${reset}${read}`;
   });
   const plan = u.plan ? ` \u00b7 plan ${u.plan}` : '';
   return [head, ...lines, `From the ${sourceLabel(u.source)}${plan}, ${ago(u.at, nowMs)}`].join('\n');

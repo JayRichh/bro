@@ -10,6 +10,8 @@ import {
   pct,
   percentAt,
   resetsIn,
+  shownAt,
+  staleAt,
   tone,
   usageTitle,
   windowLabel,
@@ -20,6 +22,7 @@ const w = (kind: UsageWindow['kind'], percent: number, extra: Partial<UsageWindo
   label: null,
   percent,
   resets_at: null,
+  read_at: 1,
   ...extra,
 });
 const usage = (windows: UsageWindow[], extra: Partial<AccountUsage> = {}): AccountUsage => ({
@@ -67,6 +70,28 @@ describe('unknown values', () => {
   });
 });
 
+describe('stale and expired readings', () => {
+  const H = 3600_000;
+  it('a window with no reset ages out after its nominal length', () => {
+    const s = w('session', 50, { read_at: 1000 });
+    expect(percentAt(s, 1000_000 + 5 * H - 1)).toBe(50);
+    expect(percentAt(s, 1000_000 + 5 * H)).toBe(0);
+    expect(shownAt(s, 1000_000 + 5 * H)).toBeNull();
+    expect(shownAt(w('weekly', 9, { read_at: 0 }), 0)).toBeNull();
+    expect(shownAt(w('session', 9, { resets_at: 10, read_at: 1 }), 20_000)).toBe(0);
+  });
+  it('draws a session reading dim after three hours, a weekly one after its week', () => {
+    expect(staleAt(w('session', 1, { read_at: 1000 }), 1000_000 + 3 * H)).toBe(false);
+    expect(staleAt(w('session', 1, { read_at: 1000 }), 1000_000 + 3 * H + 1000)).toBe(true);
+    expect(staleAt(w('weekly', 1, { read_at: 1000 }), 1000_000 + 24 * H)).toBe(false);
+    expect(staleAt(w('weekly', 1, { read_at: 0 }), 0)).toBe(true);
+  });
+  it('says a stale reading is stale in the tooltip', () => {
+    const t = usageTitle({ name: 'claude', harness: 'claude', profile: false }, usage([w('session', 40, { read_at: 1000 })]), 1000_000 + 4 * H);
+    expect(t).toContain('read 4h ago (stale)');
+  });
+});
+
 describe('which two bars', () => {
   it('session then weekly', () => {
     const [a, b] = bars(usage([w('weekly', 82), w('session', 34)]));
@@ -104,7 +129,7 @@ describe('accounts', () => {
     const now = 1_000_000_000;
     const t = usageTitle(
       { name: 'claude', harness: 'claude', profile: false },
-      usage([w('session', 34, { resets_at: now / 1000 + 3 * 3600 + 12 * 60 }), w('weekly', 82)], { at: now - 180_000 }),
+      usage([w('session', 34, { resets_at: now / 1000 + 3 * 3600 + 12 * 60 }), w('weekly', 82, { read_at: now / 1000 - 180 })], { at: now - 180_000 }),
       now,
     );
     expect(t).toContain("claude: the CLI's own login");

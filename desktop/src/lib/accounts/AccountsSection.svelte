@@ -6,7 +6,7 @@
   import { api, type AccountRow } from '../api';
   import { app, focusQuickPrompt, openSettings, refreshAccounts, refreshLaunchables, toast } from '../store.svelte';
   import UsageBar from './UsageBar.svelte';
-  import { bars, liveUsage, mergeRows, percentAt, usageTitle, windowLabel } from './usage';
+  import { bars, liveUsage, mergeRows, shownAt, staleAt, usageTitle, windowLabel } from './usage';
 
   let { heading }: { heading: string } = $props();
 
@@ -117,12 +117,21 @@
           {/if}
         </div>
         <div class="mt-1 flex flex-col gap-[3px] pl-[22px]" title={usageTitle(r, u, app.now)}>
-          <UsageBar label={windowLabel(top, 0)} percent={top ? percentAt(top, app.now) : null} />
-          <UsageBar label={windowLabel(bottom, 1)} percent={bottom ? percentAt(bottom, app.now) : null} />
+          <UsageBar label={windowLabel(top, 0)} percent={top ? shownAt(top, app.now) : null} stale={!!top && staleAt(top, app.now)} />
+          <UsageBar
+            label={windowLabel(bottom, 1)}
+            percent={bottom ? shownAt(bottom, app.now) : null}
+            stale={!!bottom && staleAt(bottom, app.now)}
+          />
         </div>
         {#if loginOpen === r.key && r.loginHint}
-          <div class="mt-1.5 ml-[22px] flex items-center gap-1 border border-rule bg-surface px-1.5 py-1">
-            <code class="min-w-0 flex-1 truncate font-mono text-[11px] text-ink" title={r.loginHint}>{r.loginHint}</code>
+          <!-- The whole command, wrapped: it is what gets typed. -->
+          <div class="mt-1.5 ml-[22px] flex items-start gap-1 border border-rule bg-surface px-1.5 py-1">
+            <!-- Wraps between words only: a profile name never splits at its hyphen. -->
+            <code class="min-w-0 flex-1 font-mono text-[11px] leading-[15px] whitespace-normal text-ink"
+              >{#each r.loginHint.split(' ') as word, i (i)}{#if i > 0}{' '}{/if}<span class="whitespace-nowrap">{word}</span
+                >{/each}</code
+            >
             <button
               class="flex-none border border-rule bg-bg px-1.5 text-[11px] text-ink hover:border-rule-strong"
               onclick={() => copy(r.loginHint ?? '')}>Copy</button
