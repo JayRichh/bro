@@ -13,7 +13,7 @@ use base64::Engine;
 use nebula_core::codec::{read_frame, write_frame};
 use nebula_core::ports::WorktreePorts;
 use nebula_core::{
-    paths, Agent, ClientRequest, Entity, EntityId, Project, ServerEvent, SessionRef,
+    paths, Agent, ClientRequest, Entity, EntityId, Project, ReviewTabKind, ServerEvent, SessionRef,
     SubagentStatus, SubagentSummary, TerminalTab, Worktree, PROTOCOL_VERSION, SUBAGENTS_ENDED_KEPT,
 };
 use serde::Serialize;
@@ -87,8 +87,26 @@ pub enum PtyEvent {
 }
 
 type Pending = HashMap<u64, oneshot::Sender<Result<Option<EntityId>, String>>>;
-/// `AskSession` waiters: answered by `SessionAnswer`, not `Ack`.
+/// `AskSession` and `ReadSession` waiters: answered by `SessionAnswer` or
+/// `SessionText`, not `Ack`.
 type Answers = HashMap<u64, oneshot::Sender<Result<String, String>>>;
+
+/// The orchestrator asked for a review (`kete orchestrator review`): the
+/// daemon's `ReviewOpened` broadcast, as the window hears it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ReviewOpened {
+    /// The agent that asked (the orchestrator).
+    pub opener: String,
+    pub sessions: Vec<SessionRef>,
+    /// `terminal`, `diff`, `history`, `pr`, in the order asked; empty: all.
+    pub tabs: Vec<String>,
+}
+
+/// Where a `ReviewOpened` goes: the app emits it to the window.
+pub type ReviewSink = Box<dyn Fn(ReviewOpened) + Send + Sync>;
+
+/// How long a `ReadSession` may take (a transcript read).
+const READ_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// How long the daemon may wait for an asked session to answer.
 const ASK_TIMEOUT: Duration = Duration::from_secs(120);
@@ -113,6 +131,7 @@ pub struct Client {
     pending: Mutex<Pending>,
     answers: Mutex<Answers>,
     panes: Mutex<HashMap<SessionRef, Channel<PtyEvent>>>,
+    reviews: Mutex<Option<ReviewSink>>,
     next_req: AtomicU64,
     /// Bumped on every model change; the emitter task watches it.
     pub changed: tokio::sync::Notify,
@@ -131,6 +150,7 @@ impl Client {
             pending: Mutex::new(HashMap::new()),
             answers: Mutex::new(HashMap::new()),
             panes: Mutex::new(HashMap::new()),
+            reviews: Mutex::new(None),
             next_req: AtomicU64::new(1),
             changed: tokio::sync::Notify::new(),
             retry: tokio::sync::Notify::new(),
@@ -223,6 +243,50 @@ impl Client {
                 self.answers.lock().expect("answers lock").remove(&req_id);
                 bail!("the session did not answer in time")
             }
+        }
+    }
+
+    /// A session's recent context (`ReadSession`): its transcript when the
+    /// daemon knows it, else the cleaned terminal tail.
+    pub async fn read_session(&self, target: &str, max_lines: u32) -> Result<String> {
+        let req_id = self.req_id();
+        let (done_tx, done_rx) = oneshot::channel();
+        self.answers
+            .lock()
+            .expect("answers lock")
+            .insert(req_id, done_tx);
+        let req = ClientRequest::ReadSession {
+            req_id,
+            target: target.to_string(),
+            max_lines,
+        };
+        if let Err(e) = self.send(req) {
+            self.answers.lock().expect("answers lock").remove(&req_id);
+            return Err(e);
+        }
+        match tokio::time::timeout(READ_TIMEOUT, done_rx).await {
+            Ok(Ok(Ok(text))) => Ok(text),
+            Ok(Ok(Err(message))) => Err(anyhow!(message)),
+            Ok(Err(_)) => bail!("the daemon connection closed before it answered"),
+            Err(_) => {
+                self.answers.lock().expect("answers lock").remove(&req_id);
+                bail!("the daemon did not answer in time")
+            }
+        }
+    }
+
+    /// Hand every `ReviewOpened` to `sink` from now on.
+    pub fn on_review(&self, sink: ReviewSink) {
+        *self.reviews.lock().expect("reviews lock") = Some(sink);
+    }
+
+    /// The protocol the connected daemon speaks; 0 while not connected.
+    pub fn daemon_protocol(&self) -> u32 {
+        let m = self.model.lock().expect("model lock");
+        if m.connected {
+            m.protocol_version
+        } else {
+            0
         }
     }
 
@@ -394,6 +458,25 @@ impl Client {
                     let _ = w.send(Ok(answer));
                 }
             }
+            ServerEvent::SessionText { req_id, text, .. } => {
+                if let Some(w) = self.answers.lock().expect("answers lock").remove(&req_id) {
+                    let _ = w.send(Ok(text));
+                }
+            }
+            ServerEvent::ReviewOpened {
+                opener,
+                sessions,
+                tabs,
+            } => {
+                let review = ReviewOpened {
+                    opener: opener.0,
+                    sessions,
+                    tabs: tabs.iter().map(|t| tab_word(*t).to_string()).collect(),
+                };
+                if let Some(sink) = self.reviews.lock().expect("reviews lock").as_ref() {
+                    sink(review);
+                }
+            }
             ServerEvent::Scrollback { session, data, .. } => {
                 if let Some(p) = self.pane(&session) {
                     let _ = p.send(PtyEvent::Scrollback { data: b64(&data) });
@@ -421,6 +504,16 @@ impl Client {
             }
             _ => {}
         }
+    }
+}
+
+/// A review tab as the window names it.
+fn tab_word(t: ReviewTabKind) -> &'static str {
+    match t {
+        ReviewTabKind::Terminal => "terminal",
+        ReviewTabKind::Diff => "diff",
+        ReviewTabKind::History => "history",
+        ReviewTabKind::PullRequest => "pr",
     }
 }
 
@@ -711,6 +804,59 @@ mod tests {
             message: "no such session".into(),
         });
         assert_eq!(rx.try_recv().unwrap(), Err("no such session".into()));
+    }
+
+    #[tokio::test]
+    async fn read_session_sends_read_session_and_takes_the_session_text() {
+        let (client, mut rx) = Client::connected_for_test();
+        let c = client.clone();
+        let call = tokio::spawn(async move { c.read_session("fix-login", 80).await });
+        let req = rx.recv().await.unwrap();
+        let ClientRequest::ReadSession {
+            req_id,
+            target,
+            max_lines,
+        } = req
+        else {
+            panic!("not a ReadSession: {req:?}");
+        };
+        assert_eq!((target.as_str(), max_lines), ("fix-login", 80));
+        client.handle(ServerEvent::SessionText {
+            req_id,
+            session: SessionRef::Agent(AgentId("a".into())),
+            text: "## user\nfix the login".into(),
+        });
+        assert_eq!(call.await.unwrap().unwrap(), "## user\nfix the login");
+    }
+
+    #[test]
+    fn review_opened_reaches_the_sink_with_tab_words() {
+        let client = Client::new();
+        let got = Arc::new(Mutex::new(Vec::new()));
+        let g = got.clone();
+        client.on_review(Box::new(move |r| g.lock().unwrap().push(r)));
+        client.handle(ServerEvent::ReviewOpened {
+            opener: AgentId("orch".into()),
+            sessions: vec![SessionRef::Agent(AgentId("a".into()))],
+            tabs: vec![ReviewTabKind::Diff, ReviewTabKind::PullRequest],
+        });
+        assert_eq!(
+            got.lock().unwrap().as_slice(),
+            &[ReviewOpened {
+                opener: "orch".into(),
+                sessions: vec![SessionRef::Agent(AgentId("a".into()))],
+                tabs: vec!["diff".into(), "pr".into()],
+            }]
+        );
+    }
+
+    #[test]
+    fn daemon_protocol_is_zero_until_connected() {
+        let client = Client::new();
+        client.model.lock().unwrap().protocol_version = 54;
+        assert_eq!(client.daemon_protocol(), 0);
+        client.model.lock().unwrap().connected = true;
+        assert_eq!(client.daemon_protocol(), 54);
     }
 
     fn agent(id: &str, parent: Option<&str>) -> Agent {

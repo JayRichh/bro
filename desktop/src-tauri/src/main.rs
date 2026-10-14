@@ -10,6 +10,7 @@ mod attribution;
 mod daemon;
 mod git;
 mod launch;
+mod orchestrator;
 mod presets;
 mod profiles;
 mod projects;
@@ -742,6 +743,12 @@ fn main() {
             if cfg.cursor_enabled {
                 nebula_config::cursor_catalogue::install_cached();
             }
+            // The orchestrator's review requests reach the window as an event;
+            // the window decides when to show them (never stealing focus).
+            let reviews = handle.clone();
+            client.on_review(Box::new(move |r| {
+                let _ = reviews.emit("kete://review", r);
+            }));
             tauri::async_runtime::spawn(daemon::run(client.clone()));
             tauri::async_runtime::spawn(emit_state(handle.clone(), client.clone()));
             tauri::async_runtime::spawn(poll_prs(client.clone(), handle));
@@ -772,6 +779,10 @@ fn main() {
             sessions::rename_terminal,
             sessions::close_terminal,
             sessions::follow_up,
+            orchestrator::start_orchestrator,
+            orchestrator::set_orchestrator,
+            orchestrator::clear_orchestrator,
+            orchestrator::read_session,
             projects::suggest_branch,
             projects::create_worktree,
             projects::delete_worktree,
