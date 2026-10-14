@@ -15,10 +15,15 @@ fn tone_fg(tone: Tone, th: Theme) -> Color {
     }
 }
 
-/// `5h ▰▰▰▱▱▱▱▱▱▱ 31% in 2h 4m`, in the window's tone.
+/// `5h ▰▰▰▱▱▱▱▱▱▱ 31% in 2h 4m`, in the window's tone; dim, with the
+/// reading's age inline, once it is stale (`UsageWindow::stale_at`).
 fn bar_spans(caption: &str, w: Option<&UsageWindow>, now: i64, th: Theme) -> Vec<Span<'static>> {
-    let p = w.map(|w| w.percent_at(now));
-    let fg = p.map_or(th.dim, |p| tone_fg(usage::tone(p), th));
+    let p = w.and_then(|w| w.shown_at(now));
+    let stale = w.is_some_and(|w| w.stale_at(now));
+    let fg = match p {
+        Some(p) if !stale => tone_fg(usage::tone(p), th),
+        _ => th.dim,
+    };
     let caption = w
         .and_then(|w| w.label.clone())
         .unwrap_or_else(|| caption.to_string());
@@ -30,11 +35,19 @@ fn bar_spans(caption: &str, w: Option<&UsageWindow>, now: i64, th: Theme) -> Vec
             Style::default().fg(fg),
         ),
     ];
-    if let Some(at) = w.and_then(|w| w.resets_at) {
+    if let Some(at) = w.and_then(|w| w.resets_at).filter(|at| *at > now) {
         out.push(Span::styled(
             format!("  resets {}", usage::resets_in(at, now)),
             Style::default().fg(th.dim),
         ));
+    }
+    if let Some(w) = w.filter(|_| stale) {
+        let read = if w.read_at > 0 {
+            format!("  read {}", age(w.read_at * 1000, now * 1000))
+        } else {
+            "  read time unknown".to_string()
+        };
+        out.push(Span::styled(read, Style::default().fg(th.warn)));
     }
     out
 }

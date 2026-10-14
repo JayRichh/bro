@@ -189,7 +189,7 @@ fn render_list(
     use nebula_core::accounts::LoginState;
     use nebula_core::usage::{block_bar, pct_text};
     let cell = |w: Option<&nebula_core::usage::UsageWindow>| {
-        let p = w.map(|w| w.percent_at(now));
+        let p = w.and_then(|w| w.shown_at(now));
         format!("{} {:>4}", block_bar(p, BAR), pct_text(p))
     };
     let mut rows: Vec<(String, String, String, String, String)> = Vec::new();
@@ -366,14 +366,14 @@ mod list_tests {
                         label: None,
                         percent: 50.0,
                         resets_at: None,
-                        read_at: 0,
+                        read_at: 1,
                     },
                     UsageWindow {
                         kind: WindowKind::Weekly,
                         label: None,
                         percent: 10.0,
                         resets_at: None,
-                        read_at: 0,
+                        read_at: 1,
                     },
                 ],
                 source: UsageSource::Statusline,

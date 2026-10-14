@@ -135,6 +135,17 @@ impl UsageWindow {
         }
     }
 
+    /// What a bar shows as of `now_secs`: the percent, 0 past a known
+    /// reset, and unknown (None, drawn "—") once a window with no reset
+    /// time has aged out: nothing says what it is now.
+    pub fn shown_at(&self, now_secs: i64) -> Option<f32> {
+        match self.resets_at {
+            Some(at) if at > 0 => Some(self.percent_at(now_secs)),
+            _ if self.expired_at(now_secs) => None,
+            _ => Some(self.percent),
+        }
+    }
+
     /// Is the reading too old to trust at a glance (a bar draws it dim)?
     pub fn stale_at(&self, now_secs: i64) -> bool {
         self.read_at <= 0 || now_secs - self.read_at > self.kind.stale_after_secs()
@@ -1243,10 +1254,17 @@ mod tests {
             !w.stale_at(1000 + 86_400),
             "a weekly reading a day old is fine"
         );
+        assert_eq!(s.shown_at(1000 + 5 * 3600), None, "aged out: unknown");
+        assert_eq!(s.shown_at(1000), Some(50.0));
         // A known reset wins over the nominal length.
         let mut r = UsageWindow::new(WindowKind::Session, 50.0, Some(1000 + 10 * 3600));
         r.read_at = 1000;
         assert_eq!(r.percent_at(1000 + 6 * 3600), 50.0);
+        assert_eq!(
+            r.shown_at(1000 + 11 * 3600),
+            Some(0.0),
+            "past its reset: empty"
+        );
     }
 
     /// Spreads weigh only the session and weekly windows: a model weekly

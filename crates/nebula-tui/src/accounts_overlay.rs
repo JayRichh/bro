@@ -204,7 +204,7 @@ pub fn field_text(name: &str, reading: Option<&AccountUsage>, now: i64) -> Strin
     };
     let mut out = name.to_string();
     for w in u.bars() {
-        let p = w.map(|w| w.percent_at(now));
+        let p = w.and_then(|w| w.shown_at(now));
         out.push(' ');
         out.push_str(&usage::block_bar(p, 4));
         out.push(' ');
@@ -261,14 +261,14 @@ mod tests {
                     label: None,
                     percent: s,
                     resets_at: None,
-                    read_at: 0,
+                    read_at: 1,
                 },
                 UsageWindow {
                     kind: WindowKind::Weekly,
                     label: None,
                     percent: w,
                     resets_at: None,
-                    read_at: 0,
+                    read_at: 1,
                 },
             ],
             source: UsageSource::Statusline,

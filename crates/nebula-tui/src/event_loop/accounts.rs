@@ -106,6 +106,10 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     fn own_login(percent: f32) -> AccountUsage {
+        own_login_read(percent, nebula_core::clock::now_secs() as i64)
+    }
+
+    fn own_login_read(percent: f32, read_at: i64) -> AccountUsage {
         AccountUsage {
             account: "@claude".into(),
             harness: "claude".into(),
@@ -115,14 +119,14 @@ mod tests {
                     label: None,
                     percent,
                     resets_at: None,
-                    read_at: 0,
+                    read_at,
                 },
                 UsageWindow {
                     kind: WindowKind::Weekly,
                     label: None,
                     percent: 7.0,
                     resets_at: None,
-                    read_at: 0,
+                    read_at,
                 },
             ],
             source: UsageSource::Statusline,
@@ -213,6 +217,30 @@ mod tests {
             );
             press(&mut app, KeyCode::Esc, KeyModifiers::NONE, &mut out);
             assert!(app.modals.overlay.is_none());
+        });
+    }
+
+    /// A session reading four hours old is drawn dim with its age inline;
+    /// one past its window reads "—".
+    #[test]
+    fn a_stale_reading_shows_its_age_and_an_aged_out_one_reads_unknown() {
+        with_config_json("{}", || {
+            let now = nebula_core::clock::now_secs() as i64;
+            let mut app = App::new();
+            seed_tree(&mut app);
+            let mut out = Vec::new();
+            press(&mut app, KeyCode::Char('U'), KeyModifiers::SHIFT, &mut out);
+            on_account_usage(&mut app, vec![own_login_read(83.0, now - 4 * 3600)]);
+            let mut terminal = ratatui::Terminal::new(TestBackend::new(110, 30)).unwrap();
+            terminal.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+            let text = buffer_text(&terminal);
+            assert!(text.contains(" 83%"), "{text}");
+            assert!(text.contains("read 4h ago"), "{text}");
+            on_account_usage(&mut app, vec![own_login_read(83.0, now - 6 * 3600)]);
+            terminal.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+            let text = buffer_text(&terminal);
+            assert!(!text.contains(" 83%"), "aged out: {text}");
+            assert!(text.contains("\u{2014}"), "{text}");
         });
     }
 }
