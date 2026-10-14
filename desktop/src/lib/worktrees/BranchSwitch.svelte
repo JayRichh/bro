@@ -34,12 +34,15 @@
     void query;
     at = 0;
   });
+  // Keyed on the kind alone: arming or disarming Discard rewrites the
+  // stage, and must not move the cursor back to Stash.
+  const kind = $derived(sw.stage.kind);
   $effect(() => {
     // The question takes the keys: focus its box, Stash first.
-    if (stage.kind === 'dirty') {
+    if (kind === 'dirty') {
       choice = 0;
       tick().then(() => box?.focus());
-    } else if (stage.kind === 'pick') tick().then(() => input?.focus());
+    } else if (kind === 'pick') tick().then(() => input?.focus());
   });
 
   function go(r: Row | undefined) {
