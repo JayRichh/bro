@@ -73,7 +73,7 @@ talk to each other. The orchestrator and the usage readings need a 0.46 daemon. 
 `kete upgrade` moves the running daemon onto the new binary with every session kept (or run
 `kete reload` after installing another way). On Windows in-place restart isn't there yet: the 0.45
 daemon keeps running after the installer, and `kete kill` (which stops every session) is what moves
-you onto 0.46. Where Kete says to run `kete reload`, run `kete kill` on Windows.
+you onto 0.46. On Windows the in-app hints say `kete kill`.
 
 Going back to 0.45 works, with two things to know. The database stays on 0.46's schema, which 0.45
 opens as it is, so the index that allows one orchestrator stays. And 0.45 doesn't know a profile's

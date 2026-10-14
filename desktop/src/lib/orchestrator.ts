@@ -11,7 +11,10 @@ import { buildForest, attentionRank, walkAll, type Node, type Status } from './o
 export const ORCHESTRATOR_PROTOCOL = 54;
 
 /** What the window says when the daemon is too old for it. */
-export const RELOAD_HINT = 'The running kete daemon is older than this window. Run `kete reload`, then try again.';
+export const RELOAD_HINT =
+  typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent)
+    ? 'The running kete daemon is older than this window. Run `kete kill` (stops all sessions), then reopen kete.'
+    : 'The running kete daemon is older than this window. Run `kete reload`, then try again.';
 
 /** The session holding the orchestrator role, if one does (at most one). */
 export function orchestratorOf(m: Model): Agent | undefined {

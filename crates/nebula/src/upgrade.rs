@@ -33,6 +33,13 @@ pub(crate) const KILL_HINT: &str =
 pub(crate) const RELOAD_HINT: &str =
     "      run 'kete reload' to move it onto the new binary (sessions keep running).";
 
+/// How to get a stale daemon onto the new binary, for one-line hints:
+/// in place on unix, by a restart (which stops the sessions) on Windows.
+#[cfg(unix)]
+pub(crate) const RESTART_DAEMON: &str = "run `kete reload` (sessions keep running)";
+#[cfg(windows)]
+pub(crate) const RESTART_DAEMON: &str = "run `kete kill` (stops all sessions), then relaunch kete";
+
 /// `nebula reload`: restart the daemon in place onto the binary this
 /// command runs from.
 pub fn run_reload() -> Result<()> {

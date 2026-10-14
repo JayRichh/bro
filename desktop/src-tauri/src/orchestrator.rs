@@ -18,8 +18,12 @@ use tauri::State;
 pub const ORCHESTRATOR_PROTOCOL: u32 = 54;
 
 /// What the window says when the daemon is too old for the orchestrator.
+#[cfg(unix)]
 pub const RELOAD_HINT: &str =
     "The running kete daemon is older than this window. Run `kete reload`, then try again.";
+/// Windows daemons can't restart in place: `kete reload` refuses there.
+#[cfg(windows)]
+pub const RELOAD_HINT: &str = "The running kete daemon is older than this window. Run `kete kill` (stops all sessions), then reopen kete.";
 
 /// How many transcript lines the review sheet's History tab asks for.
 pub const HISTORY_LINES: u32 = 400;

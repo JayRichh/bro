@@ -284,7 +284,8 @@ pub fn spawn_request(
         if protocol < ORCHESTRATOR_PROTOCOL {
             bail!(
                 "the running daemon speaks protocol v{protocol}, too old to parent the agent \
-                 under the orchestrator: run `kete reload`"
+                 under the orchestrator: {}",
+                crate::upgrade::RESTART_DAEMON
             );
         }
         return Ok(ClientRequest::OrchestratorSpawnWith {

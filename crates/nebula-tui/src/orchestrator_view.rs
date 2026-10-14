@@ -45,7 +45,11 @@ pub struct OrchState {
 pub const ORCHESTRATOR_PROTOCOL: u32 = 54;
 
 /// What F10 and the card menu say to a daemon too old for provisioning.
+#[cfg(unix)]
 pub const DAEMON_TOO_OLD: &str = "the running daemon predates the orchestrator: run `kete reload` (every session keeps running), then reopen kete";
+/// Windows daemons can't restart in place: `kete reload` refuses there.
+#[cfg(windows)]
+pub const DAEMON_TOO_OLD: &str = "the running daemon predates the orchestrator: run `kete kill` (stops all sessions), then reopen kete";
 
 /// Can the daemon take the provisioning requests?
 pub fn daemon_provisions(app: &App) -> bool {

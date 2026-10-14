@@ -328,7 +328,7 @@ fn from_the_orchestrator_the_agent_is_its_child_in_the_new_worktree() {
     )
     .unwrap_err()
     .to_string();
-    assert!(e.contains("kete reload"), "{e}");
+    assert!(e.contains(crate::upgrade::RESTART_DAEMON), "{e}");
 }
 
 #[test]
