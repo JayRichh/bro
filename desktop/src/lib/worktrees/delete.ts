@@ -25,28 +25,37 @@ export async function prepareOffer(worktree: string, liveTaken: number, doomed: 
   return { offer, state, deleteEmpty: s.delete_empty_worktree };
 }
 
+/** Whether the setting may delete the checkout without asking: never
+ *  when it holds uncommitted work, or its state could not be read. */
+function silent(p: Prepared): boolean {
+  return p.offer.auto && !!p.state && !dirty(p.state);
+}
+
 /** What the confirm adds: a sentence, the checkout's state, and the box
- *  (ticked, so Enter deletes both as the terminal app's does) unless the
- *  setting already decided. */
+ *  unless the setting already decided. The box starts ticked (Enter
+ *  deletes both, as the terminal app's does) only for a clean checkout:
+ *  uncommitted work is never one Enter away from gone. */
 export function offerConfirm(p: Prepared): { line: string; detail: string[]; check?: string; checked?: boolean } {
   const b = p.offer.worktree.branch;
   const detail = [p.offer.worktree.path, ...stateLines(p.state)];
-  if (p.offer.auto) return { line: offerLine(p.offer), detail };
+  if (silent(p)) return { line: offerLine(p.offer), detail };
+  const risky = !p.state || dirty(p.state);
   return {
-    line: offerLine(p.offer),
+    line: offerLine({ ...p.offer, auto: false }),
     detail,
-    check: dirty(p.state) ? `Delete worktree ${b} from disk too, uncommitted changes and all` : `Delete worktree ${b} from disk too`,
-    checked: true,
+    check: risky ? `Delete worktree ${b} from disk too, uncommitted changes and all` : `Delete worktree ${b} from disk too`,
+    checked: !risky,
   };
 }
 
 /** After the dialog: the offer if it still holds for the model as it is
  *  now (a session started there meanwhile cancels it) and was taken. */
 export function stillOffered(p: Prepared | null, checked: boolean, liveTaken: number, doomed: string[]): WorktreeOffer | null {
-  if (!p || !(p.offer.auto || checked)) return null;
+  const auto = !!p && silent(p);
+  if (!p || !(auto || checked)) return null;
   const now = worktreeOffer(app.model, p.offer.worktree.id, liveTaken, doomed, p.deleteEmpty);
   // Went without a question, but something archived turned up there since.
-  if (now && !now.auto && !checked) return null;
+  if (now && !(now.auto && auto) && !checked) return null;
   return now;
 }
 
