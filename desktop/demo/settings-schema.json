@@ -362,6 +362,82 @@
           ]
         },
         {
+          "title": "Accounts",
+          "subtitle": null,
+          "terminal": false,
+          "rows": [
+            {
+              "target": {
+                "scope": "global",
+                "key": "account_spread"
+              },
+              "label": "Account spread",
+              "hint": "Which profile a new session takes when none is picked: manual = the harness's default; failover = the default until its 5h or weekly use reaches the threshold, then the next enabled one; least_used = the enabled one with the least use",
+              "control": {
+                "type": "choice",
+                "options": [
+                  "manual",
+                  "failover",
+                  "least_used"
+                ],
+                "labels": [
+                  "manual",
+                  "failover",
+                  "least_used"
+                ]
+              },
+              "value": "manual",
+              "default": "manual",
+              "restart": null,
+              "is_new": true
+            },
+            {
+              "target": {
+                "scope": "global",
+                "key": "account_spread_threshold"
+              },
+              "label": "Failover at",
+              "hint": "Percent of an account's 5h or weekly limit at which failover moves to the next enabled profile",
+              "control": {
+                "type": "choice",
+                "options": [
+                  "50",
+                  "70",
+                  "80",
+                  "90",
+                  "95"
+                ],
+                "labels": [
+                  "50",
+                  "70",
+                  "80",
+                  "90",
+                  "95"
+                ]
+              },
+              "value": "90",
+              "default": "90",
+              "restart": null,
+              "is_new": true
+            },
+            {
+              "target": {
+                "scope": "global",
+                "key": "usage_statusline"
+              },
+              "label": "Usage status line",
+              "hint": "Claude sessions get kete's status line, which reads plan usage and context for the accounts list (your own statusLine still runs and prints; off = only the on-screen usage notice)",
+              "control": {
+                "type": "toggle"
+              },
+              "value": true,
+              "default": true,
+              "restart": null,
+              "is_new": true
+            }
+          ]
+        },
+        {
           "title": "Terminal app",
           "subtitle": "Only the terminal app acts on these. They share its config file.",
           "terminal": true,
@@ -2657,6 +2733,19 @@
           "overridden": false
         },
         {
+          "id": "accounts",
+          "label": "Accounts and usage",
+          "hint": "Every account (profiles, and each CLI's own login) with its 5h and weekly plan usage, resets and login; Space switches a profile on or off, d makes it its harness's default",
+          "group": "GENERAL",
+          "defaults": [
+            "shift+u"
+          ],
+          "bound": [
+            "shift+u"
+          ],
+          "overridden": false
+        },
+        {
           "id": "toggle_full_screen",
           "label": "Full-screen session",
           "hint": "Give the session in the pane the whole screen, or bring it back down beside the cards, from inside the pane too, where it is never forwarded to the agent. From the cards it full-screens the one under the cursor. ^q and ^` also bring a full-screen session back down",
@@ -2751,5 +2840,6 @@
         }
       ]
     }
-  ]
+  ],
+  "problem": null
 }
