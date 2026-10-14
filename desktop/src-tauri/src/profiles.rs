@@ -102,6 +102,7 @@ fn profile_of(form: ProfileForm, registry: &[String]) -> Res<Profile> {
         env: env_of(&form.env)?,
         default: form.default,
         use_default: form.use_default,
+        disabled: false,
     })
 }
 
