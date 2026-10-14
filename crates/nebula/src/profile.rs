@@ -261,6 +261,25 @@ fn profiles_layer(config: &Path, local: &Path) -> Result<PathBuf> {
     )
 }
 
+/// Delete a PROFILE HOME — only ever a directory directly inside
+/// `<data dir>/profiles`, checked on the resolved paths.
+fn purge_home(home: &std::path::Path) -> Result<()> {
+    if !home.exists() {
+        return Ok(());
+    }
+    let root = nebula_core::paths::canonical(&profiles::profiles_root())
+        .context("resolve the profiles dir")?;
+    let target = nebula_core::paths::canonical(home).context("resolve the profile home")?;
+    if target.parent() != Some(root.as_path()) {
+        bail!(
+            "refusing to delete {}: not a profile home under {}",
+            target.display(),
+            root.display()
+        );
+    }
+    std::fs::remove_dir_all(&target).with_context(|| format!("delete {}", target.display()))
+}
+
 #[cfg(test)]
 mod layer_tests {
     use super::*;
@@ -309,23 +328,4 @@ mod layer_tests {
         assert_eq!(merged, ["work", "home"]);
         assert!(!std::fs::read_to_string(&config).unwrap().contains("home"));
     }
-}
-
-/// Delete a PROFILE HOME — only ever a directory directly inside
-/// `<data dir>/profiles`, checked on the resolved paths.
-fn purge_home(home: &std::path::Path) -> Result<()> {
-    if !home.exists() {
-        return Ok(());
-    }
-    let root = nebula_core::paths::canonical(&profiles::profiles_root())
-        .context("resolve the profiles dir")?;
-    let target = nebula_core::paths::canonical(home).context("resolve the profile home")?;
-    if target.parent() != Some(root.as_path()) {
-        bail!(
-            "refusing to delete {}: not a profile home under {}",
-            target.display(),
-            root.display()
-        );
-    }
-    std::fs::remove_dir_all(&target).with_context(|| format!("delete {}", target.display()))
 }
