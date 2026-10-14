@@ -1,7 +1,7 @@
 // The rail's version plate: this build, and a cue when a newer Kete is
 // published (src-tauri/src/update.rs, the terminal app's footer check).
-// Nothing installs from here: the cue offers `kete upgrade` and the
-// release page.
+// Nothing installs from here: the cue offers `kete upgrade` (the installer
+// again, on Windows) and the release page.
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';

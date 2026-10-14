@@ -29,7 +29,7 @@
     if (!s?.latest) return;
     const r = await ask.confirm({
       title: `Kete ${s.latest} is out`,
-      message: `This is ${s.version}. Run this in a terminal to update the terminal app, the daemon and this window, then reopen it:`,
+      message: `This is ${s.version}. To update, run this in a terminal, then reopen the window:`,
       detail: [s.command],
       confirm: 'Read the release notes',
     });

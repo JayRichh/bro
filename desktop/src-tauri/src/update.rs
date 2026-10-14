@@ -8,7 +8,8 @@
 //! A nudge, not a clock: a check at start and then on a slow beat,
 //! `NEBULA_UPDATE_CHECK_SECS` overriding the beat (`0` turns it off), and
 //! every failure is "no news". A recheck that can't ask never clears a cue
-//! an earlier one lit. Nothing here installs anything; `kete upgrade` does.
+//! an earlier one lit. Nothing here installs anything; `kete upgrade` (the
+//! installer again, on Windows) does.
 
 use serde::Serialize;
 use std::sync::Mutex;
@@ -37,8 +38,18 @@ pub struct UpdateStatus {
     pub latest: Option<String>,
     /// The release page to read about it.
     pub url: String,
-    /// What updates it.
+    /// What updates it, to run in a terminal.
     pub command: String,
+}
+
+/// `kete upgrade` where it works; on Windows, where it says to run the
+/// installer again instead, that installer, which brings this window too.
+fn upgrade_command(windows: bool) -> &'static str {
+    if windows {
+        "irm https://raw.githubusercontent.com/JayRichh/kete/main/install.ps1 | iex"
+    } else {
+        "kete upgrade"
+    }
 }
 
 fn status(latest: Option<String>) -> UpdateStatus {
@@ -50,7 +61,7 @@ fn status(latest: Option<String>) -> UpdateStatus {
         version: env!("CARGO_PKG_VERSION").to_string(),
         latest,
         url,
-        command: "kete upgrade".into(),
+        command: upgrade_command(cfg!(windows)).into(),
     }
 }
 
@@ -187,7 +198,9 @@ mod tests {
             s.url,
             "https://github.com/JayRichh/kete/releases/tag/v0.47.0"
         );
-        assert_eq!(s.command, "kete upgrade");
         assert_eq!(status(None).url, LATEST_URL);
+        // `kete upgrade` refuses on Windows and names the installer instead.
+        assert_eq!(upgrade_command(false), "kete upgrade");
+        assert!(upgrade_command(true).ends_with("install.ps1 | iex"));
     }
 }
