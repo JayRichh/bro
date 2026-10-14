@@ -48,8 +48,7 @@ export type ShortcutId =
  * Where a key counts:
  * - `anywhere`: even while typing in a field or a terminal;
  * - `fields`: while typing in a field, but not inside a terminal (whose
- *   shell owns the key: Ctrl+K is kill-line, Alt+arrows are words) or the
- *   diff editor (Monaco's own Ctrl+K chords);
+ *   shell owns the key: Ctrl+K is kill-line, Alt+arrows are words);
  * - `global`: only when no field or terminal has the keys;
  * - `row`: like `global`, acting on the focused session row or card;
  * - `overview`, `board`: the home view's own walking keys, handled by
@@ -65,10 +64,13 @@ export interface Shortcut {
   scope: Scope;
   label: string;
   group: 'General' | 'Views' | 'Sessions' | 'Overview and board';
+  /** The diff editor (Monaco) binds this chord itself: it stands down
+   *  while the focus is in one. */
+  editorOwns?: boolean;
 }
 
 export const SHORTCUTS: Shortcut[] = [
-  { id: 'palette', keys: ['ctrl+k'], scope: 'fields', label: 'Command palette', group: 'General' },
+  { id: 'palette', keys: ['ctrl+k'], scope: 'fields', label: 'Command palette', group: 'General', editorOwns: true },
   { id: 'palette_alt', keys: ['ctrl+shift+p'], scope: 'anywhere', label: 'Command palette', group: 'General' },
   { id: 'help', keys: ['?'], scope: 'global', label: 'Keyboard shortcuts', group: 'General' },
   { id: 'help_f1', keys: ['f1'], scope: 'anywhere', label: 'Keyboard shortcuts', group: 'General' },
@@ -141,7 +143,7 @@ export function inScope(scope: Scope, ctx: KeyContext): boolean {
     case 'anywhere':
       return true;
     case 'fields':
-      return !ctx.inTerminal && !ctx.inEditor;
+      return !ctx.inTerminal;
     case 'global':
       return !ctx.typing;
     case 'row':
@@ -159,7 +161,7 @@ export function shortcutFor(
   table: Shortcut[] = SHORTCUTS,
 ): Shortcut | undefined {
   const chord = chordOf(e);
-  return table.find((s) => s.keys.includes(chord) && inScope(s.scope, ctx));
+  return table.find((s) => s.keys.includes(chord) && inScope(s.scope, ctx) && !(ctx.inEditor && s.editorOwns));
 }
 
 /** A chord as the help overlay and palette print it: `Ctrl+Shift+B`. */

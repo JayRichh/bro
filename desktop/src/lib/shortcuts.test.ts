@@ -104,10 +104,13 @@ describe('chordOf and shortcutFor', () => {
 
 describe('inside the diff editor', () => {
   const editor: KeyContext = { inTerminal: false, inEditor: true, typing: true, onRow: false };
-  it('leaves Ctrl+K to Monaco and keeps Ctrl+Shift+P', () => {
-    expect(inScope('fields', editor)).toBe(false);
-    expect(inScope('anywhere', editor)).toBe(true);
-    expect(SHORTCUTS.find((s) => s.id === 'palette')?.scope).toBe('fields');
-    expect(SHORTCUTS.find((s) => s.id === 'palette_alt')?.scope).toBe('anywhere');
+  const key = (k: string, mods: Partial<KeyboardEvent> = {}) =>
+    shortcutFor({ key: k, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...mods }, editor)?.id;
+  it('leaves Ctrl+K to Monaco and keeps Ctrl+Shift+P, Back and Forward', () => {
+    expect(key('k', { ctrlKey: true })).toBeUndefined();
+    expect(key('P', { ctrlKey: true, shiftKey: true })).toBe('palette_alt');
+    expect(key('ArrowLeft', { altKey: true })).toBe('back');
+    expect(key('ArrowRight', { altKey: true })).toBe('forward');
+    expect(shortcutFor({ key: 'k', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false }, field)?.id).toBe('palette');
   });
 });
