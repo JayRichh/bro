@@ -225,9 +225,9 @@ impl Lane {
 
     pub fn title(self) -> &'static str {
         match self {
-            Lane::NeedsInput => "Needs input",
+            Lane::NeedsInput => "Needs you",
             Lane::Running => "Running",
-            Lane::Unseen => "Unseen",
+            Lane::Unseen => "Unread",
             Lane::Done => "Done",
             Lane::PrOpen => "PR open",
         }

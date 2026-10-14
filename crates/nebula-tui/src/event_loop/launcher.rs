@@ -897,7 +897,7 @@ pub(super) fn toggle_kanban(app: &mut App, out: &mut Vec<ClientRequest>) {
         kanban_move(app, 0, 0, out);
         app.chrome.flash = Some(kanban_flash(app));
     } else {
-        app.chrome.flash = Some("kanban off: a band per worktree".into());
+        app.chrome.flash = Some("overview: a band per worktree · ⇧K: board".into());
     }
     app.chrome.dirty = true;
 }
@@ -909,7 +909,7 @@ fn kanban_flash(app: &App) -> String {
     } else {
         "this project"
     };
-    format!("kanban: {scope} · h/l lanes · j/k cards · Tab: scope · ⇧K: bands")
+    format!("kanban: {scope} · h/l lanes · j/k cards · Tab: scope · ⇧K: overview")
 }
 
 /// The KANBAN's own keys, ahead of the grid's: `h`/`l` (`←`/`→`) walk the
@@ -927,24 +927,30 @@ fn kanban_action(app: &mut App, action: Action, out: &mut Vec<ClientRequest>) ->
         Action::MoveUp => kanban_move(app, 0, -1, out),
         Action::HalfPageDown => kanban_move(app, 0, HALF_PAGE * 2, out),
         Action::HalfPageUp => kanban_move(app, 0, -HALF_PAGE * 2, out),
-        Action::FocusNext => {
-            let mut cfg = crate::config::Config::load();
-            cfg.kanban_scope = if app.launcher.kanban_all {
-                "project"
-            } else {
-                "all"
-            }
-            .into();
-            if super::save_config(app, &cfg) {
-                super::apply_config(app, &cfg);
-            }
-            kanban_move(app, 0, 0, out);
-            app.chrome.flash = Some(kanban_flash(app));
-        }
+        Action::FocusNext => flip_kanban_scope(app, out),
         _ => return false,
     }
     app.chrome.dirty = true;
     true
+}
+
+/// `Tab` on the KANBAN, or a click on the scope in the header: the board
+/// between the project on screen and every project, saved as **Kanban
+/// scope**.
+pub(super) fn flip_kanban_scope(app: &mut App, out: &mut Vec<ClientRequest>) {
+    let mut cfg = crate::config::Config::load();
+    cfg.kanban_scope = if app.launcher.kanban_all {
+        "project"
+    } else {
+        "all"
+    }
+    .into();
+    if super::save_config(app, &cfg) {
+        super::apply_config(app, &cfg);
+    }
+    kanban_move(app, 0, 0, out);
+    app.chrome.flash = Some(kanban_flash(app));
+    app.chrome.dirty = true;
 }
 
 /// Move the KANBAN cursor (`launcher::kanban_step`) and land the grid's
@@ -13022,7 +13028,7 @@ mod tests {
                 "the cursor lands on the one waiting on you"
             );
             let text = screen_text(&draw_at(&mut app, 240, 40));
-            for lane in ["Needs input", "Running", "Unseen", "Done", "PR open"] {
+            for lane in ["Needs you", "Running", "Unread", "Done", "PR open"] {
                 assert!(text.contains(lane), "the {lane} lane:\n{text}");
             }
             assert!(text.contains("polish-nav"), "{text}");
@@ -13049,6 +13055,38 @@ mod tests {
             key(&mut app, KeyCode::Char('K'), KeyModifiers::SHIFT);
             assert!(!app.launcher.launcher_kanban);
             assert!(!screen_text(&draw(&mut app)).contains("PR open"));
+        });
+    }
+
+    /// The header's VIEW TOGGLE is the pointer's `⇧K`: a click on Board
+    /// lays the grid out as the board (saved, as the key saves it), the
+    /// scope beside the count flips it as `Tab` does, and a click on
+    /// Overview goes back. A click on the half already lit does nothing.
+    #[test]
+    fn the_header_toggle_switches_overview_and_board_by_click() {
+        with_default_config(|| {
+            let mut app = two_sessions();
+            draw_at(&mut app, 200, 40);
+            let (x, y) = crumb_cell(&app, HitTarget::LauncherHome(false));
+            mouse(&mut app, MouseEventKind::Down(MouseButton::Left), x, y);
+            assert!(!app.launcher.launcher_kanban, "Overview is lit already");
+
+            draw_at(&mut app, 200, 40);
+            let (x, y) = crumb_cell(&app, HitTarget::LauncherHome(true));
+            mouse(&mut app, MouseEventKind::Down(MouseButton::Left), x, y);
+            assert!(app.launcher.launcher_kanban);
+            assert!(crate::config::Config::load().kanban, "saved");
+
+            let text = screen_text(&draw_at(&mut app, 200, 40));
+            assert!(text.contains("this project ⇥"), "{text}");
+            let (x, y) = crumb_cell(&app, HitTarget::LauncherKanbanScope);
+            mouse(&mut app, MouseEventKind::Down(MouseButton::Left), x, y);
+            assert!(app.launcher.kanban_all);
+
+            draw_at(&mut app, 200, 40);
+            let (x, y) = crumb_cell(&app, HitTarget::LauncherHome(false));
+            mouse(&mut app, MouseEventKind::Down(MouseButton::Left), x, y);
+            assert!(!app.launcher.launcher_kanban);
         });
     }
 

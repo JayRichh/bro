@@ -1,6 +1,6 @@
 //! The KANBAN (`⇧K`; Settings → Appearance → **Kanban**): the LAUNCHER
 //! VIEW's grid laid out as five lanes by what each session wants from you
-//! — Needs input, Running, Unseen, Done, PR open (`launcher::Lane`) —
+//! — Needs you, Running, Unread, Done, PR open (`launcher::Lane`) —
 //! under the same PROJECT TABS header, beside the same PANE. Its cards
 //! are the grid's own session cards ([`super::draw_any_card`]), stacked
 //! down their lane, the most recently touched first; on the board across

@@ -680,7 +680,7 @@ fn draw_overlay(f: &mut Frame, app: &mut App) {
 
 /// An action's primary chord, for a footer hint. Unbound reads as `—`,
 /// which is the truth: that verb has no key right now.
-fn key_hint(app: &App, action: crate::keymap::Action) -> String {
+pub(crate) fn key_hint(app: &App, action: crate::keymap::Action) -> String {
     app.chrome
         .keymap
         .shown_first(action)

@@ -647,7 +647,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::ToggleKanban,
         id: "toggle_kanban",
         label: "Kanban board",
-        hint: "Lay the grid out as lanes by status (Needs input, Running, Unseen, Done, PR open) or back to a band per worktree. On the board h/l walk the lanes, j/k the cards, Tab flips between this project and every project",
+        hint: "Lay the grid out as lanes by status (Needs you, Running, Unread, Done, PR open) or back to a band per worktree; the Overview | Board toggle at the right of the grid's header does the same by click. On the board h/l walk the lanes, j/k the cards, Tab flips between this project and every project",
         group: "GENERAL",
         scope: Scope::Global,
         defaults: &["shift+k"],

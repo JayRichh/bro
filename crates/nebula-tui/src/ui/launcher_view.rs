@@ -725,6 +725,45 @@ fn head_count(
         .into_iter()
         .map(|s| (s, None))
         .collect();
+    let underline = |hit: &HitTarget, style: Style| {
+        if app.launcher.hover_crumb.as_ref() == Some(hit) {
+            style.add_modifier(Modifier::UNDERLINED)
+        } else {
+            style
+        }
+    };
+    let toggle: Part = view_toggle(app.launcher.launcher_kanban, th)
+        .into_iter()
+        .map(|(span, hit)| match hit {
+            Some(hit) => (
+                Span::styled(span.content, underline(&hit, span.style)),
+                Some(hit),
+            ),
+            None => (span, None),
+        })
+        .collect();
+    // On the board, which sessions it holds — this project's or every
+    // project's — and the click that flips it, as `Tab` does.
+    let scope: Part = if app.launcher.launcher_kanban {
+        let word = if app.launcher.kanban_all {
+            "all projects"
+        } else {
+            "this project"
+        };
+        let hit = HitTarget::LauncherKanbanScope;
+        vec![
+            (Span::raw(" · "), None),
+            (
+                Span::styled(
+                    format!("{word} ⇥"),
+                    underline(&hit, Style::default().fg(th.muted)),
+                ),
+                Some(hit),
+            ),
+        ]
+    } else {
+        Vec::new()
+    };
     // Once a piece has not fitted, nothing after it is tried: a narrower
     // piece slipping into the room a wider one left would swap what the
     // row says as the window narrows, rather than only take it away.
@@ -742,10 +781,60 @@ fn head_count(
             }
         }
     };
+    // The VIEW TOGGLE is kept first, so it is the last thing a narrow
+    // row gives up: it is the one way to the board a pointer can see.
+    let mut toggle = keep(toggle);
+    let scope = keep(scope);
     let mark = keep(mark);
     let badge = keep(badge);
     let words = keep(words);
-    words.into_iter().chain(badge).chain(mark).collect()
+    // The toggle's key last of all, in what the rest left: a narrow row
+    // keeps its counts over the reminder of a key the footer also names.
+    let key = Span::styled(
+        format!(
+            " {}",
+            crate::ui::key_hint(app, crate::keymap::Action::ToggleKanban)
+        ),
+        Style::default().fg(th.dim),
+    );
+    if !toggle.is_empty() && left.is_some_and(|room| key.width() <= room) {
+        toggle.push((key, None));
+    }
+    words
+        .into_iter()
+        .chain(scope)
+        .chain(badge)
+        .chain(mark)
+        .chain(toggle)
+        .collect()
+}
+
+/// The header's VIEW TOGGLE, the desktop's Overview|Board radio: the two
+/// homes side by side, the one on screen lit as a solid chip, the other a
+/// button ([`HitTarget::LauncherHome`]). [`head_count`] adds the key that
+/// flips them where there is room.
+fn view_toggle(board: bool, th: Theme) -> Vec<(Span<'static>, Option<HitTarget>)> {
+    let half = |label: &'static str, on: bool, hit: bool| {
+        let style = if on {
+            // The lit PROJECT TAB's own chip.
+            Style::default()
+                .fg(th.accent)
+                .bg(th.sel_bg)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(th.muted)
+        };
+        (
+            Span::styled(format!(" {label} "), style),
+            Some(HitTarget::LauncherHome(hit)),
+        )
+    };
+    vec![
+        (Span::raw("  "), None),
+        half("Overview", !board, false),
+        (Span::styled("│", Style::default().fg(th.edge)), None),
+        half("Board", board, true),
+    ]
 }
 
 /// The header's count of what the grid holds: `3 sessions · 2 terminals`
@@ -4568,7 +4657,12 @@ mod tests {
     fn the_header_says_how_many_cards_it_could_not_fit() {
         let app = App::new();
         let th = app.chrome.theme;
-        let mark = |hidden| row_text(&count_spans(&app, 9, hidden, 80, th));
+        let mark = |hidden| {
+            let text = row_text(&count_spans(&app, 9, hidden, 80, th));
+            text.strip_suffix(TOGGLE_ROW)
+                .unwrap_or_else(|| panic!("the toggle ends the row: {text:?}"))
+                .to_string()
+        };
 
         assert_eq!(mark(Hidden::default()), "9 sessions", "nothing is missing");
         assert_eq!(
@@ -4614,23 +4708,71 @@ mod tests {
         let th = app.chrome.theme;
         let hidden = Hidden { above: 0, below: 5 };
         let mark_w = "  ↓ 5 hidden".chars().count();
+        let toggle_w = "   Overview │ Board ".chars().count();
         for width in 0..=120usize {
             let spans = count_spans(&app, 9, hidden, width, th);
             let text = row_text(&spans);
             let used: usize = spans.iter().map(|s| s.width()).sum();
             assert!(used <= width, "{width}: {text:?} overruns");
+            let toggle = text.contains("Overview │ Board");
             let words = text.contains("9 sessions");
             let badge = text.contains("1 issue");
             let mark = text.contains("5 hidden");
-            assert_eq!(mark, width >= mark_w, "{width}: {text:?}");
+            assert_eq!(toggle, width >= toggle_w, "{width}: {text:?}");
+            assert_eq!(mark, width >= toggle_w + mark_w, "{width}: {text:?}");
             assert!(!badge || mark, "{width}: the marker went first: {text:?}");
             assert!(!words || badge, "{width}: the counts went first: {text:?}");
         }
         assert_eq!(
             row_text(&count_spans(&app, 9, hidden, 120, th)),
-            "9 sessions  1 issue  ↓ 5 hidden",
+            format!("9 sessions  1 issue  ↓ 5 hidden{TOGGLE_ROW}"),
             "a column of air more between the count and the badge"
         );
+    }
+
+    /// The VIEW TOGGLE as the row ends in it, its key included.
+    const TOGGLE_ROW: &str = "   Overview │ Board  ⇧K";
+
+    /// The VIEW TOGGLE says which home is on screen and is the button to
+    /// the other; on the board the scope sits beside the count, a button
+    /// too.
+    #[test]
+    fn the_header_toggles_overview_and_board_and_names_the_boards_scope() {
+        let mut app = App::new();
+        let th = app.chrome.theme;
+        let count = HeadCount {
+            sessions: 2,
+            terminals: 0,
+        };
+        let hits = |app: &App| -> Vec<HitTarget> {
+            head_count(app, count, Hidden::default(), 120, th)
+                .into_iter()
+                .filter_map(|(_, hit)| hit)
+                .collect()
+        };
+        assert_eq!(
+            hits(&app),
+            [
+                HitTarget::LauncherHome(false),
+                HitTarget::LauncherHome(true)
+            ]
+        );
+        let lit = |app: &App, label: &str| {
+            head_count(app, count, Hidden::default(), 120, th)
+                .into_iter()
+                .find(|(s, _)| s.content.trim() == label)
+                .is_some_and(|(s, _)| s.style.bg == Some(th.sel_bg))
+        };
+        assert!(lit(&app, "Overview") && !lit(&app, "Board"));
+
+        app.launcher.launcher_kanban = true;
+        assert!(lit(&app, "Board") && !lit(&app, "Overview"));
+        assert!(hits(&app).contains(&HitTarget::LauncherKanbanScope));
+        let text = row_text(&count_spans(&app, 2, Hidden::default(), 120, th));
+        assert!(text.starts_with("2 sessions · this project ⇥"), "{text:?}");
+        app.launcher.kanban_all = true;
+        let text = row_text(&count_spans(&app, 2, Hidden::default(), 120, th));
+        assert!(text.contains("all projects ⇥"), "{text:?}");
     }
 
     /// [`head_count`]'s spans without the buttons they carry.

@@ -150,6 +150,14 @@ pub enum HitTarget {
     /// right-click, drops the list of just those under it
     /// ([`App::launcher_tabs_more`]), and the pick opens that project.
     LauncherTabMore,
+    /// The VIEW TOGGLE at the right end of the grid's header —
+    /// `Overview│Board ⇧K`, the desktop's home radio — by the half it
+    /// names: `true` the KANBAN, `false` the bands. A click on the half
+    /// not lit switches as `⇧K` does.
+    LauncherHome(bool),
+    /// The KANBAN's scope beside it (`this project` / `all projects`): a
+    /// click flips it, as `Tab` on the board does.
+    LauncherKanbanScope,
     /// Draggable top edge of the LAUNCHER VIEW's PANE: the blank row the
     /// pane opens with, plus the grid row above it. Registered ahead of
     /// the cards so a card ending on that row never swallows the grab.
