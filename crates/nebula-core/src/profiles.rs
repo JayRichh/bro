@@ -451,11 +451,14 @@ fn clear_default(entries: &mut [Value], harness: &str) {
 }
 
 /// Read the settings object at `path` (missing = empty), let `edit` change
-/// its `profiles` list, and write it back atomically.
+/// its `profiles` list, and write it back atomically, under the settings
+/// lock the TUI's and the window's saves take. A file that is there but
+/// can't be parsed is an error, never replaced.
 fn edit_file(
     path: &Path,
     edit: impl FnOnce(&mut Vec<Value>) -> Result<(), String>,
 ) -> Result<(), String> {
+    let _lock = crate::settings::lock(path).map_err(|e| e.to_string())?;
     let mut obj = crate::settings::read_object(path)
         .map_err(|e| format!("{}: {e}", path.display()))?
         .unwrap_or_default();
@@ -848,6 +851,22 @@ mod tests {
         let obj = crate::settings::read_object(&path).unwrap().unwrap();
         let names: Vec<String> = from_settings(&obj).into_iter().map(|p| p.name).collect();
         assert_eq!(names, vec!["keep", "b"]);
+    }
+
+    #[test]
+    fn a_file_edit_reads_past_a_bom_and_never_replaces_a_broken_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, "\u{feff}{\"theme\": \"dark\"}").unwrap();
+        add_to_file(&path, &profile("a", "claude")).unwrap();
+        let saved: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved["theme"], "dark");
+
+        let broken = "\u{feff}{\"theme\": \"dark\",}";
+        std::fs::write(&path, broken).unwrap();
+        assert!(add_to_file(&path, &profile("b", "claude")).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), broken);
+        assert!(!dir.path().join("config.json.lock").exists());
     }
 
     #[test]
