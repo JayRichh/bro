@@ -781,6 +781,40 @@ pub fn apply(cfg: &mut Config, target: &Target, value: &Value) -> Result<(), Str
     }
 }
 
+/// `target` checked against the projects the daemon knows: a Project row
+/// must name one of them, and is rewritten to its repo path exactly as the
+/// daemon stores it — the key the terminal app reads (`Config::project`).
+/// A path that differs only in separators, a trailing separator or (on
+/// Windows) letter case maps to it; any other path is refused, so a stale
+/// or made-up path never lands in `projects`.
+pub fn resolve_target(target: &Target, projects: &[ProjectRef]) -> Result<Target, String> {
+    let Target::Project { path, field } = target else {
+        return Ok(target.clone());
+    };
+    let wanted = normalise(Path::new(path));
+    projects
+        .iter()
+        .find(|p| normalise(&p.path) == wanted)
+        .map(|p| Target::Project {
+            path: p.path.to_string_lossy().into_owned(),
+            field: field.clone(),
+        })
+        .ok_or_else(|| format!("{path} is not a repo kete knows"))
+}
+
+fn normalise(path: &Path) -> String {
+    let joined = path
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join("/");
+    if cfg!(windows) {
+        joined.to_lowercase()
+    } else {
+        joined
+    }
+}
+
 /// Write one row to the layers at `path` / `local`: a desktop preference
 /// into the `desktop` object, anything else through [`Config::update_in`],
 /// which writes only the keys the change touched.

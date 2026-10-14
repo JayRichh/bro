@@ -59,7 +59,12 @@ pub fn config_problem() -> Option<String> {
 
 /// Write one row.
 #[tauri::command]
-pub fn settings_set(target: Target, value: serde_json::Value) -> Res<()> {
+pub fn settings_set(
+    client: State<'_, Arc<Client>>,
+    target: Target,
+    value: serde_json::Value,
+) -> Res<()> {
+    let target = schema::resolve_target(&target, &projects(&client.snapshot()))?;
     let (path, local) = nebula_config::layer_paths();
     schema::set_in(&path, &local, &target, &value)
 }

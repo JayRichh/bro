@@ -334,3 +334,25 @@ fn reset_puts_rows_back_and_keeps_what_it_does_not_show() {
     assert_eq!(raw["desktop"]["theme"], "system");
     assert_eq!(raw["desktop"]["later"], true);
 }
+
+#[test]
+fn a_project_row_must_name_a_repo_the_daemon_knows() {
+    let projects = one_project();
+    let row = |path: &str| Target::Project {
+        path: path.into(),
+        field: "run_command".into(),
+    };
+    assert_eq!(
+        schema::resolve_target(&row("/repo/demo"), &projects).unwrap(),
+        row("/repo/demo")
+    );
+    // A trailing separator maps onto the stored key.
+    let resolved = schema::resolve_target(&row("/repo/demo/"), &projects).unwrap();
+    assert_eq!(resolved, row("/repo/demo"));
+    let err = schema::resolve_target(&row("/repo/other"), &projects).unwrap_err();
+    assert!(err.contains("not a repo kete knows"), "{err}");
+    let global = Target::Global {
+        key: "kanban".into(),
+    };
+    assert_eq!(schema::resolve_target(&global, &[]).unwrap(), global);
+}
