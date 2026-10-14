@@ -530,7 +530,7 @@ impl SettingKind {
             SettingKind::AskBeforeArchive => (2026, 10, 3),
             SettingKind::AccountSpread
             | SettingKind::AccountSpreadThreshold
-            | SettingKind::UsageStatusline => (2026, 10, 15),
+            | SettingKind::UsageStatusline => (2026, 10, 14),
             SettingKind::ConfirmDragMove => (2026, 10, 2),
             SettingKind::SourceControlGraph | SettingKind::InlineGraphics => (2026, 10, 9),
             SettingKind::DiffMode
