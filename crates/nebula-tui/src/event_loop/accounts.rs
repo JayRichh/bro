@@ -27,6 +27,7 @@ pub(crate) fn open(app: &mut App) {
     app.modals.overlay = Some(Overlay::Accounts(AccountsView::new(
         rows,
         nebula_core::paths::config_path(),
+        nebula_core::paths::config_local_path(),
     )));
     app.chrome.dirty = true;
 }

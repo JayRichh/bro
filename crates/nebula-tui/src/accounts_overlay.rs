@@ -4,7 +4,7 @@
 //! weekly; a Copilot account's monthly allowances), when the windows reset,
 //! where the numbers came from, and whether it is signed in. `Space` (or
 //! `e`) switches a profile on or off, `d` (or `*`) makes it its harness's
-//! default; both write config.json in place (`nebula_core::profiles`),
+//! default; both write the settings layer holding the profiles in place (`nebula_core::profiles`),
 //! which the config beat then reloads everywhere. A login is never run
 //! from here: an account that needs one shows the `kete profile login`
 //! command to type.
@@ -115,18 +115,21 @@ pub fn build_rows(
 pub struct AccountsView {
     pub rows: Vec<AccountRow>,
     pub cursor: usize,
-    /// The settings file edits go to.
+    /// config.json, and config.local.json beside it: edits go to the
+    /// layer whose `profiles` list is in force (`Self::on_profiles_layer`).
     pub config: PathBuf,
+    pub local: PathBuf,
     /// Drawn rect, for click-outside.
     pub area: Rect,
 }
 
 impl AccountsView {
-    pub fn new(rows: Vec<AccountRow>, config: PathBuf) -> Self {
+    pub fn new(rows: Vec<AccountRow>, config: PathBuf, local: PathBuf) -> Self {
         Self {
             rows,
             cursor: 0,
             config,
+            local,
             area: Rect::default(),
         }
     }
@@ -144,6 +147,26 @@ impl AccountsView {
         self.cursor = (self.cursor as i32 + delta).clamp(0, n - 1) as usize;
     }
 
+    /// Run a profile edit on the layer the profiles come from: a
+    /// config.local.json holding a `profiles` key replaces config.json's
+    /// list whole, so the edit goes there, under config.json's lock too (the
+    /// settings writers take that one for both layers). A local layer that
+    /// is there but unreadable is refused: there is no telling which list
+    /// is in force.
+    fn on_profiles_layer(
+        &self,
+        edit: impl FnOnce(&std::path::Path) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let held = nebula_core::settings::read_object(&self.local)
+            .map_err(|e| format!("{}: {e}: fix it, then try again", self.local.display()))?;
+        if held.is_some_and(|obj| obj.contains_key(profiles::CONFIG_KEY)) {
+            let _lock = nebula_core::settings::lock(&self.config).map_err(|e| e.to_string())?;
+            edit(&self.local)
+        } else {
+            edit(&self.config)
+        }
+    }
+
     /// Switch the selected profile on or off in the settings file. The
     /// message for the footer, or why not.
     pub fn toggle_enabled(&mut self) -> Result<String, String> {
@@ -157,7 +180,7 @@ impl AccountsView {
         };
         let name = profile.name.trim().to_string();
         let on = profile.disabled;
-        profiles::set_enabled_in_file(&self.config, &name, on)?;
+        self.on_profiles_layer(|layer| profiles::set_enabled_in_file(layer, &name, on))?;
         if let Some(Some(p)) = self.rows.get_mut(self.cursor).map(|r| r.profile.as_mut()) {
             p.disabled = !on;
         }
@@ -175,7 +198,7 @@ impl AccountsView {
             return Err(format!("{} is not a profile", row.label()));
         };
         let (name, harness) = (profile.name.trim().to_string(), row.harness.clone());
-        profiles::set_default_in_file(&self.config, &name)?;
+        self.on_profiles_layer(|layer| profiles::set_default_in_file(layer, &name))?;
         for r in &mut self.rows {
             if r.harness == harness && r.profile.is_some() {
                 r.default = r.key == name;
@@ -299,6 +322,49 @@ mod tests {
         assert_eq!(rows.len(), 1);
     }
 
+    /// A config.local.json holding `profiles` is the list in force: the
+    /// switch and the default land there, config.json is left alone.
+    #[test]
+    fn edits_go_to_the_local_layer_when_it_holds_the_profiles() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let local = dir.path().join("config.local.json");
+        std::fs::write(
+            &path,
+            r#"{"profiles":[{"name":"base","harness":"claude"}]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &local,
+            r#"{"profiles":[{"name":"work","harness":"claude"},{"name":"home","harness":"claude"}]}"#,
+        )
+        .unwrap();
+        let all = vec![profile("work", false), profile("home", false)];
+        let mut view = AccountsView::new(
+            build_rows(&all, &[], |_, _| LoginState::LoggedIn),
+            path.clone(),
+            local.clone(),
+        );
+        view.toggle_enabled().unwrap();
+        view.step(1);
+        view.set_default().unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&local).unwrap()).unwrap();
+        assert_eq!(saved["profiles"][0]["disabled"], true);
+        assert_eq!(saved["profiles"][1]["default"], true);
+        let base = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !base.contains("disabled") && !base.contains("default"),
+            "{base}"
+        );
+        assert!(
+            !dir.path().join("config.json.lock").exists(),
+            "lock released"
+        );
+        std::fs::write(&local, "{ not json").unwrap();
+        assert!(view.toggle_enabled().is_err());
+    }
+
     #[test]
     fn toggle_and_default_write_the_settings_file() {
         let dir = tempfile::tempdir().unwrap();
@@ -314,6 +380,7 @@ mod tests {
                 LoginState::LoggedIn
             }),
             path.clone(),
+            dir.path().join("config.local.json"),
         );
         view.step(1);
         assert!(view.toggle_enabled().unwrap().contains("off"));
