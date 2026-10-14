@@ -108,3 +108,24 @@ export function opensOnOrchestrator(prefStartup: string | undefined, s: Startup 
 export function placeKey(p: Place): string {
   return `${p.view}\u0000${p.repo ?? ''}\u0000${p.item ?? ''}`;
 }
+
+/** The quick prompt's "to orchestrator" target, standing in for a repo id. */
+export const ORCH_TARGET = '__orchestrator';
+
+/**
+ * Where the quick prompt points as the window moves: the repo in view
+ * until the user picks one by hand; on the orchestrator's view (no repo)
+ * the orchestrator; and once that view is left (`left`), a repo again
+ * (`fallback`: the open session's, else the first) unless the user picked
+ * the orchestrator by hand.
+ */
+export function quickPromptTarget(
+  current: string,
+  o: { repo?: string; view: string; left: boolean; picked: boolean; hasOrchestrator: boolean; fallback: string },
+): string {
+  if (o.picked) return current;
+  if (o.repo) return o.repo;
+  if (o.view === 'orchestrator' && o.hasOrchestrator) return ORCH_TARGET;
+  if (o.left && current === ORCH_TARGET) return o.fallback;
+  return current;
+}

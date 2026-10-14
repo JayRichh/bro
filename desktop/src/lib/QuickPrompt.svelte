@@ -2,7 +2,7 @@
   import { app, openSession, projectOf, sessionWorktree, toast } from './store.svelte';
   import { api, type HarnessInfo, type Preset } from './api';
   import { nav } from './shell/history.svelte';
-  import { orchestratorOf } from './orchestrator';
+  import { ORCH_TARGET, orchestratorOf, quickPromptTarget } from './orchestrator';
   import { sendToOrchestrator } from './orch.svelte';
 
   // The quick prompt: pinned under the main column. Pick where and with
@@ -14,7 +14,7 @@
   const TERMINAL = 'terminal';
   const NEW_WT = '__new';
   /** The "to orchestrator" target: the text goes to it as a follow-up turn. */
-  const ORCH = '__orchestrator';
+  const ORCH = ORCH_TARGET;
   let project = $state('');
   let worktree = $state('');
   let harness = $state('claude');
@@ -88,11 +88,15 @@
   // Follow the window (the repo in view, else the open session's) until
   // the user picks a repo by hand; that pick holds until a session starts.
   let picked = false;
+  let lastView = '';
   $effect(() => {
-    const repo = nav.current.repo;
-    if (repo && !picked) project = repo;
-    // On the orchestrator's view the prompt talks to it, until a repo is picked.
-    else if (!repo && !picked && nav.current.view === 'orchestrator' && orch) project = ORCH;
+    // On the orchestrator's view the prompt talks to it, until a repo is
+    // picked; leaving that view, the target it set goes back to a repo.
+    const view = nav.current.view;
+    const left = lastView === 'orchestrator' && view !== 'orchestrator';
+    lastView = view;
+    const fallback = projectOf(sessionWorktree(app.session)) ?? app.model.projects[0]?.id ?? '';
+    project = quickPromptTarget(project, { repo: nav.current.repo, view, left, picked, hasOrchestrator: !!orch, fallback });
   });
   $effect(() => {
     if (app.model.projects.find((p) => p.id === project) || (project === ORCH && orch)) return;

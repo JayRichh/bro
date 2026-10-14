@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import type { Agent, AgentStatus, Model } from './api';
-import { canProvision, countWords, descendantCounts, elsewhere, opensOnOrchestrator, orchestratorOf, orchestratorTree, placeKey } from './orchestrator';
+import { canProvision, countWords, descendantCounts, elsewhere, opensOnOrchestrator, ORCH_TARGET, orchestratorOf, orchestratorTree, placeKey, quickPromptTarget } from './orchestrator';
 import { repoRows } from './overview/repos';
 
 function agent(id: string, worktree: string, parent: string | null = null, status: AgentStatus = 'finished', unseen = false): Agent {
@@ -144,4 +144,16 @@ test('a startup step that waited never moves a window the user has moved since',
   expect(placeKey({ view: 'overview' })).toBe(before);
   expect(placeKey({ view: 'overview', repo: 'p1' })).not.toBe(before);
   expect(placeKey({ view: 'settings' })).not.toBe(before);
+});
+
+test('the quick prompt targets the orchestrator on its view and a repo again once the view is left', () => {
+  const base = { repo: undefined as string | undefined, view: 'orchestrator', left: false, picked: false, hasOrchestrator: true, fallback: 'p1' };
+  expect(quickPromptTarget('p1', base)).toBe(ORCH_TARGET);
+  expect(quickPromptTarget(ORCH_TARGET, { ...base, view: 'overview', left: true })).toBe('p1');
+  expect(quickPromptTarget(ORCH_TARGET, { ...base, view: 'overview', left: true, repo: 'p2' })).toBe('p2');
+  // Picked by hand: held.
+  expect(quickPromptTarget(ORCH_TARGET, { ...base, view: 'overview', left: true, picked: true })).toBe(ORCH_TARGET);
+  // A later change elsewhere keeps the target.
+  expect(quickPromptTarget('p3', { ...base, view: 'overview' })).toBe('p3');
+  expect(quickPromptTarget('p3', { ...base, hasOrchestrator: false })).toBe('p3');
 });
