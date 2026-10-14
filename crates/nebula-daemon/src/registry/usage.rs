@@ -207,10 +207,16 @@ impl Daemon {
     }
 
     /// A Claude statusLine JSON for `agent`, from `kete _statusline`.
+    /// The route takes the wrapper's `agentId` on trust (it is display
+    /// data behind the hook token), so a reading only lands for a Claude
+    /// session the daemon holds and has not archived.
     pub fn on_statusline(&self, agent_id: &AgentId, body: &Value) {
         let Ok(Some(agent)) = self.store.get_agent(agent_id) else {
             return;
         };
+        if agent.archived || agent.kind != AgentKind::Claude {
+            return;
+        }
         let now = nebula_core::clock::now_ms();
         let reading = usage::claude_statusline(body);
         let harness = harness_of(&agent);
@@ -605,6 +611,34 @@ mod tests {
         assert!(events.try_recv().is_err(), "nothing moved: nothing pushed");
         daemon.forget_context(&AgentId("a1".into()));
         assert!(daemon.session_contexts().is_empty());
+    }
+
+    /// The route trusts the `agentId` the wrapper sends, so a reading
+    /// names a session the daemon knows: one for a non-Claude session, an
+    /// archived one, or an unknown id is dropped.
+    #[test]
+    fn a_statusline_reading_for_no_current_claude_session_is_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let daemon = test_daemon();
+        daemon.set_usage_root(dir.path().to_path_buf());
+        daemon
+            .store
+            .insert_agent(&agent("cx", AgentKind::Codex, None))
+            .unwrap();
+        daemon
+            .store
+            .insert_agent(&Agent {
+                archived: true,
+                ..agent("old", AgentKind::Claude, None)
+            })
+            .unwrap();
+        let body = serde_json::json!({"rate_limits": {"five_hour": {"used_percentage": 50}}});
+        for id in ["cx", "old", "nobody"] {
+            daemon.on_statusline(&AgentId(id.into()), &body);
+        }
+        assert!(daemon.account_usage_list().is_empty());
+        assert!(usage::read_account_in(dir.path(), "@claude").is_none());
+        assert!(usage::read_account_in(dir.path(), "@codex").is_none());
     }
 
     /// A screen notice keeps the five-hour window the status line read.
