@@ -215,7 +215,7 @@ fn a_write_from_the_window_changes_one_key_and_keeps_the_rest() {
     assert_eq!(
         read(&path),
         json!({"future_key": {"a": 1}, "editor": "hx", "kanban": true,
-               "desktop": {"theme": "dark", "home": "board", "diff_mode": "side"}})
+               "desktop": {"theme": "dark", "home": "board", "diff_mode": "side", "startup": "home"}})
     );
     assert_eq!(read(&local), json!({"session_idle_timeout": "15m"}));
     assert!(set_in(&path, &local, &global("kanban"), &json!("sideways")).is_err());

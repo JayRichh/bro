@@ -44,6 +44,34 @@ pub(crate) fn open_view(app: &mut App, id: AgentId, out: &mut Vec<ClientRequest>
     app.chrome.dirty = true;
 }
 
+/// The first snapshot: open on the orchestrator's view when the
+/// `orchestrator_view` setting says so for this terminal's width.
+pub(crate) fn startup_view(app: &mut App, out: &mut Vec<ClientRequest>) {
+    // A unit test never reads the developer's own config or terminal.
+    #[cfg(not(test))]
+    let (cfg, width) = (
+        crate::config::Config::load(),
+        crossterm::terminal::size().ok().map(|(w, _)| w),
+    );
+    #[cfg(test)]
+    let (cfg, width) = (crate::config::Config::default(), None);
+    startup_view_with(app, &cfg, width, out);
+}
+
+pub(crate) fn startup_view_with(
+    app: &mut App,
+    cfg: &crate::config::Config,
+    width: Option<u16>,
+    out: &mut Vec<ClientRequest>,
+) {
+    if view::active(app) || !cfg.opens_on_orchestrator(width) {
+        return;
+    }
+    if let Some(id) = view::orchestrator(app).map(|a| a.id.clone()) {
+        open_view(app, id, out);
+    }
+}
+
 /// Back to the grid.
 fn leave_view(app: &mut App) {
     app.orch.view = false;

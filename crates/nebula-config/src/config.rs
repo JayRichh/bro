@@ -45,6 +45,16 @@ pub const WORKTREE_LAYOUTS: &[&str] = &["cards", "list", "nested", "columns"];
 
 /// What **Kanban scope** cycles through.
 pub const KANBAN_SCOPES: &[&str] = &["project", "all"];
+/// ORCHESTRATOR VIEW at startup: `auto` (only in a narrow terminal),
+/// `always` or `never`. Anything else reads as `auto`.
+pub const ORCHESTRATOR_VIEWS: &[&str] = &["auto", "always", "never"];
+/// Narrower than this, `auto` opens on the orchestrator: too narrow for the
+/// grid and a pane side by side, so the one chat is the useful screen.
+pub const ORCHESTRATOR_NARROW_COLS: u16 = 100;
+
+fn is_auto(word: &String) -> bool {
+    word.trim().is_empty() || word.trim().eq_ignore_ascii_case(ORCHESTRATOR_VIEWS[0])
+}
 
 /// What **Diff context** cycles through: the three lines git gives each
 /// side of a change, or the whole file.
@@ -418,6 +428,7 @@ pub enum SettingKind {
     WorktreeLayout,
     Kanban,
     KanbanScope,
+    OrchestratorView,
     InlineGraphics,
     ExpandAllWorktrees,
     CardIssueNumber,
@@ -532,6 +543,7 @@ impl SettingKind {
             | SettingKind::Kanban
             | SettingKind::KanbanScope
             | SettingKind::Icons => (2026, 10, 13),
+            SettingKind::OrchestratorView => (2026, 10, 14),
         }
     }
 
@@ -603,6 +615,12 @@ pub const SETTINGS_TABS: &[SettingsTab] = &[
                 kind: SettingKind::SshSyncConfig,
                 label: "Sync settings over ssh",
                 hint: "kete ssh / tunnel carry config.json and presets to the remote (config.local.json stays)",
+                group: "",
+            },
+            SettingSpec {
+                kind: SettingKind::OrchestratorView,
+                label: "Open on the orchestrator",
+                hint: "Start on the orchestrator's view (F10) when there is one: auto = only in a narrow terminal, always, or never",
                 group: "",
             },
         ]),
@@ -1186,6 +1204,11 @@ pub struct Config {
     /// default) or `all` (every project's). `Tab` on the board flips it
     /// and writes it back. Anything else reads as `project`.
     pub kanban_scope: String,
+    /// ORCHESTRATOR VIEW at startup ([`ORCHESTRATOR_VIEWS`]). Left out of a
+    /// save while it is `auto`, so a config that never touched it saves as
+    /// it did before the key existed.
+    #[serde(skip_serializing_if = "is_auto")]
+    pub orchestrator_view: String,
     /// INLINE GRAPHICS: images and Mermaid diagrams in file previews.
     /// `off` shows source/hints only; enabled values currently use the
     /// Unicode half-block renderer, which works in native terminals,
@@ -1608,6 +1631,7 @@ impl Default for Config {
             worktree_layout: WORKTREE_LAYOUTS[0].into(),
             kanban: false,
             kanban_scope: KANBAN_SCOPES[0].into(),
+            orchestrator_view: ORCHESTRATOR_VIEWS[0].into(),
             inline_graphics: crate::choices::DEFAULT_INLINE_GRAPHICS.into(),
             expand_all_worktrees: false,
             hide_card_prompt: false,
@@ -1915,6 +1939,26 @@ impl Config {
 
     /// The **Worktree layout** in force, as one of [`WORKTREE_LAYOUTS`]:
     /// the stored word when it is on the list, else the cards.
+    /// [`Self::orchestrator_view`] as one of [`ORCHESTRATOR_VIEWS`].
+    pub fn orchestrator_view_word(&self) -> &'static str {
+        let stored = self.orchestrator_view.trim();
+        ORCHESTRATOR_VIEWS
+            .iter()
+            .copied()
+            .find(|word| word.eq_ignore_ascii_case(stored))
+            .unwrap_or(ORCHESTRATOR_VIEWS[0])
+    }
+
+    /// Whether the terminal app opens on the orchestrator's view, in a
+    /// terminal `width` columns wide (None: unknown, never narrow).
+    pub fn opens_on_orchestrator(&self, width: Option<u16>) -> bool {
+        match self.orchestrator_view_word() {
+            "always" => true,
+            "never" => false,
+            _ => width.is_some_and(|w| w < ORCHESTRATOR_NARROW_COLS),
+        }
+    }
+
     pub fn worktree_layout_word(&self) -> &'static str {
         let stored = self.worktree_layout.trim();
         WORKTREE_LAYOUTS
@@ -2685,6 +2729,7 @@ impl Config {
                 }
             }
             .into(),
+            SettingKind::OrchestratorView => self.orchestrator_view_word().into(),
             SettingKind::InlineGraphics => self.inline_graphics_label().into(),
             SettingKind::ExpandAllWorktrees => on_off(self.expand_all_worktrees).into(),
             SettingKind::CardIssueNumber => on_off(self.card_issue_number).into(),
@@ -2810,6 +2855,10 @@ impl Config {
             }
             SettingKind::KanbanScope => {
                 self.kanban_scope = if self.kanban_all() { "project" } else { "all" }.into();
+            }
+            SettingKind::OrchestratorView => {
+                self.orchestrator_view =
+                    cycle_choice(self.orchestrator_view_word(), ORCHESTRATOR_VIEWS, step).into();
             }
             SettingKind::WorktreeLayout => {
                 let now = self.worktree_layout_word();
@@ -3181,6 +3230,39 @@ pub fn read_raw_key(path: &Path, local: &Path, key: &str) -> Option<serde_json::
             .flatten()
             .and_then(|mut obj| obj.remove(key))
     })
+}
+
+#[cfg(test)]
+mod orchestrator_view_tests {
+    use super::*;
+
+    #[test]
+    fn auto_is_left_out_of_a_save_and_the_other_words_are_kept() {
+        let auto = serde_json::to_value(Config::default()).unwrap();
+        assert!(auto.get("orchestrator_view").is_none());
+        let always = serde_json::to_value(Config {
+            orchestrator_view: "always".into(),
+            ..Config::default()
+        })
+        .unwrap();
+        assert_eq!(always["orchestrator_view"], "always");
+        let back: Config = serde_json::from_value(always).unwrap();
+        assert_eq!(back.orchestrator_view_word(), "always");
+    }
+
+    #[test]
+    fn auto_means_a_narrow_terminal() {
+        let cfg = |w: &str| Config {
+            orchestrator_view: w.into(),
+            ..Config::default()
+        };
+        assert!(cfg("auto").opens_on_orchestrator(Some(ORCHESTRATOR_NARROW_COLS - 1)));
+        assert!(!cfg("auto").opens_on_orchestrator(Some(ORCHESTRATOR_NARROW_COLS)));
+        assert!(!cfg("auto").opens_on_orchestrator(None));
+        assert!(cfg("ALWAYS").opens_on_orchestrator(None));
+        assert!(!cfg("never").opens_on_orchestrator(Some(40)));
+        assert_eq!(cfg("weird").orchestrator_view_word(), "auto");
+    }
 }
 
 #[cfg(test)]

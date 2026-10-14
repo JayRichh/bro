@@ -748,3 +748,41 @@ fn cards_offer_make_orchestrator_and_the_orchestrator_card_wears_the_badge() {
         assert!(grid.contains("◆ orchestrator"), "{grid}");
     });
 }
+
+/// `orchestrator_view` at startup: auto opens the view only in a narrow
+/// terminal, always opens it, never leaves the grid; none without an
+/// orchestrator.
+#[test]
+fn orchestrator_view_setting_picks_the_startup_screen() {
+    with_default_config(|| {
+        let cfg = |word: &str| crate::config::Config {
+            orchestrator_view: word.into(),
+            ..Default::default()
+        };
+        for (word, width, opens) in [
+            ("auto", Some(80), true),
+            ("auto", Some(200), false),
+            ("auto", None, false),
+            ("always", Some(200), true),
+            ("never", Some(80), false),
+            ("bogus", Some(80), true),
+        ] {
+            let mut app = app_with_orchestrator();
+            let mut out = Vec::new();
+            orchestrator::startup_view_with(&mut app, &cfg(word), width, &mut out);
+            assert_eq!(
+                crate::orchestrator_view::active(&app),
+                opens,
+                "{word} {width:?}"
+            );
+            if opens {
+                assert_eq!(pane_on(&app), Some(orch()));
+            }
+        }
+        let mut app = App::new();
+        seed_tree(&mut app);
+        let mut out = Vec::new();
+        orchestrator::startup_view_with(&mut app, &cfg("always"), Some(80), &mut out);
+        assert!(!crate::orchestrator_view::active(&app));
+    });
+}
