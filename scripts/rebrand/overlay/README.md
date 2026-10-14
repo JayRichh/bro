@@ -88,33 +88,27 @@ Press `q` to leave: the sessions keep running, and `kete` brings you back to the
 
 One sprint, start to finish, in `kete`. <sub>Synthetic demo data: the repos, tasks, accounts and pull requests are made up.</sub>
 
-**1. The grid.** Each project is a tab that counts its sessions by colour. Each worktree is a band
-with its line counts and pull request, and the selected session's terminal sits underneath.
+**1. The grid.** A tab per project, a band per worktree with its pull request, the selected session's terminal below.
 
 <img src="assets/showcase/01-overview.png" alt="The ledger-api tab: a main band with a finished session and a terminal running tests, a feat/invoice-csv-export band with draft PR #212 and two sessions, a fix/webhook-retries band with ready PR #208, and the running session's transcript in the pane below" width="100%">
 
-**2. A new task.** `p` opens the quick prompt over the grid, with the project, worktree, harness, model
-and profile it will launch on, the profile's 5h and weekly use, and `Ctrl+N` for a fresh worktree.
+**2. A new task.** `p` opens the quick prompt: project, worktree, harness, model and profile, with the account's usage.
 
-<img src="assets/showcase/02-quick-prompt.png" alt="The quick prompt over the grid with a task typed, its details row reading ledger-api, feat/invoice-csv-export, claude, opus high and the work profile at 62% and 41%, and new worktree ticked" width="100%">
+<img src="assets/showcase/02-quick-prompt.png" alt="The quick prompt over the grid with a task typed, its details row reading ledger-api, feat/invoice-csv-export, claude, opus high and the work profile at 62% of its 5h window and 41% of its week" width="100%">
 
-**3. The orchestrator.** `F10` starts one agent that runs the rest. Here it read the sprint with
-`kete ado tasks`, started a worker per task across both repos with `kete orchestrator spawn`, and
-every session it started sits as a chip across the top.
+**3. The orchestrator.** `F10` starts one agent that reads the sprint and spawns a worker per task across both repos.
 
 <img src="assets/showcase/03-orchestrator.png" alt="The orchestrator full screen: a chip per session across the top in attention order, and its transcript reading the sprint, spawning five workers over two repos, listing them and opening a review" width="100%">
 
-**4. A review.** The orchestrator opened a review on one worker: its terminal, diff, history and
-pull request, here on the Diff tab.
+**4. A review.** The orchestrator opens a worker for you to review: terminal, diff, history and pull request.
 
 <img src="assets/showcase/04-review.png" alt="The review modal on the Invoice CSV export session, on its Diff tab, showing the CSV writer added to src/invoices/export.ts" width="100%">
 
-**5. The kanban.** `Shift+K` lays the sessions out in five lanes, and `Tab` widens it to every project.
+**5. The kanban.** `Shift+K` lays every session out in five lanes, across every project with `Tab`.
 
 <img src="assets/showcase/05-kanban.png" alt="The kanban over both projects: one session needing input, three running including the orchestrator, one unseen, one done and one with a pull request open" width="100%">
 
-**6. Accounts.** `Shift+U` lists every account with its 5h and weekly use, when each resets, and
-whether it is signed in.
+**6. Accounts.** `Shift+U` shows each account's 5h and weekly use, when it resets, and whether it is signed in.
 
 <img src="assets/showcase/06-accounts.png" alt="The accounts overlay: work and personal Claude profiles and a codex-team Codex profile, each with 5h and weekly bars, reset times and signed in" width="100%">
 

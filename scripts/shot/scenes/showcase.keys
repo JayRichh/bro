@@ -32,7 +32,6 @@ sleep 2
 capture 01-overview
 p
 Add a --since flag to the invoice export, with a test for an empty range
-C-n
 sleep 1
 capture 02-quick-prompt
 Escape
