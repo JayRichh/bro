@@ -67,7 +67,7 @@ describe('delete all sessions in a checkout', () => {
     expect(listing(names.slice(0, 8))).toHaveLength(8);
     const long = listing(names);
     expect(long).toHaveLength(9);
-    expect(long[8]).toBe('… and 3 more');
+    expect(long[8]).toBe('\u2026 and 3 more');
   });
 
   it('deletes only what the confirm listed, and nothing when declined', async () => {

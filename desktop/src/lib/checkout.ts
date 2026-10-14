@@ -31,7 +31,7 @@ export function checkoutSessions(m: Model, worktree: string, showArchived: boole
 /** The confirm's listing: the first few names, then a count of the rest. */
 export function listing(names: string[], max = LISTED): string[] {
   if (names.length <= max) return names;
-  return [...names.slice(0, max), `… and ${names.length - max} more`];
+  return [...names.slice(0, max), `\u2026 and ${names.length - max} more`];
 }
 
 /** Ask, then delete every session and close every terminal in `worktree`. */
