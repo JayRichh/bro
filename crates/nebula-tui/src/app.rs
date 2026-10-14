@@ -726,7 +726,7 @@ pub enum PendingAction {
         why: String,
     },
     /// Delete a checkout and whatever is uncommitted in it. Only ever
-    /// behind the second confirm, whose only yes is `y`.
+    /// behind the second confirm, whose only yes is `f`.
     ForceDeleteWorktree(WorktreeId),
     /// A row delete that empties a linked worktree — the last card of the
     /// band going — with the checkout's fate decided in the same dialog:

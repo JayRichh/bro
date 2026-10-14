@@ -7,9 +7,10 @@
 //! confirm sends the delete unforced, which the DAEMON refuses for a
 //! checkout with uncommitted changes before it stops anything in it
 //! (`UNCOMMITTED_REFUSAL`); git refuses the rest (submodules, a race).
-//! Throwing work away takes a second dialog whose only yes is `y` — `Enter`
-//! there keeps the checkout, so a doubled `Enter` or a key repeat can never
-//! chain into a forced delete. The second dialog comes up two ways: from
+//! Throwing work away takes a second dialog whose only yes is `f`, a key
+//! the first never takes — `Enter` and `y` there keep the checkout — so a
+//! doubled answer or a key repeat can never chain into a forced delete.
+//! The second dialog comes up two ways: from
 //! the first one, when the check already found changes, or from the
 //! refusal itself, for a delete sent before the check landed or from a
 //! confirm that runs none (a card's delete folding its worktree in, the
@@ -215,7 +216,7 @@ pub fn worktree_confirm(app: &App, id: &WorktreeId, check: &Check) -> Option<Con
     })
 }
 
-/// The second confirm: the forced delete, whose only yes is `y`. `why`
+/// The second confirm: the forced delete, whose only yes is `f`. `why`
 /// is the first line — what the check found, or the refusal's own words.
 pub fn force_confirm(branch: &str, id: &WorktreeId, why: &str) -> ConfirmDialog {
     let why = why.trim().trim_end_matches('.');

@@ -22366,10 +22366,10 @@ mod orch_view;
 
 /// The DELETE CHECK's two steps: `d` on a worktree asks, `Enter` sends
 /// the delete UNFORCED; a check that found changes makes `Enter` open the
-/// forced delete's own confirm instead, where `Enter` keeps the checkout
-/// and only `y` sends `force`.
+/// forced delete's own confirm instead, where `Enter`
+/// (and `y`) keeps the checkout and only `f` sends `force`.
 #[test]
-fn a_worktree_delete_is_unforced_and_force_takes_a_second_y() {
+fn a_worktree_delete_is_unforced_and_force_takes_f() {
     with_default_config(|| {
         let w2 = WorktreeId("w2".into());
         let mut app = App::new();
@@ -22431,8 +22431,14 @@ fn a_worktree_delete_is_unforced_and_force_takes_a_second_y() {
         press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
         assert!(app.modals.overlay.is_none(), "Enter keeps it");
         assert!(out.is_empty(), "{out:?}");
-        app.modals.overlay = Some(Overlay::Confirm(again));
+        // `y`, the first confirm's yes, keeps it too: a `y`,`y` (or a held
+        // `y`) on the dirty confirm sends nothing.
+        app.modals.overlay = Some(Overlay::Confirm(again.clone()));
         press(&mut app, KeyCode::Char('y'), KeyModifiers::NONE, &mut out);
+        assert!(app.modals.overlay.is_none(), "y keeps it");
+        assert!(out.is_empty(), "{out:?}");
+        app.modals.overlay = Some(Overlay::Confirm(again));
+        press(&mut app, KeyCode::Char('f'), KeyModifiers::NONE, &mut out);
         assert!(
             matches!(
                 out.as_slice(),
@@ -22440,6 +22446,26 @@ fn a_worktree_delete_is_unforced_and_force_takes_a_second_y() {
             ),
             "{out:?}"
         );
+
+        // A held `y` from the dirty confirm: the first opens the forced
+        // delete's confirm, the repeats keep the checkout.
+        let mut app = App::new();
+        seed_emptiable_tree(&mut app);
+        run_menu_action(&mut app, MenuAction::DeleteWorktree(w2.clone()), &mut out);
+        crate::delete_check::land(
+            &mut app,
+            w2.clone(),
+            Ok(crate::delete_check::Findings {
+                changes: 1,
+                unpushed: None,
+            }),
+        );
+        let mut out = Vec::new();
+        for _ in 0..3 {
+            press(&mut app, KeyCode::Char('y'), KeyModifiers::NONE, &mut out);
+        }
+        assert!(out.is_empty(), "{out:?}");
+        assert!(app.tree.worktrees.iter().any(|w| w.id == w2));
     });
 }
 

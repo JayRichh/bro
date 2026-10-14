@@ -212,9 +212,9 @@ fn draw_confirm_overlay(f: &mut Frame, app: &mut App, confirm: crate::app::Confi
     );
     let legend = if forced {
         Line::from(vec![
-            Span::styled("[y] delete anyway", Style::default().fg(th.err)),
+            Span::styled("[f] delete anyway", Style::default().fg(th.err)),
             Span::raw("   "),
-            Span::styled("[Enter/Esc/n] keep it", Style::default().fg(th.dim)),
+            Span::styled("[Enter/y/Esc/n] keep it", Style::default().fg(th.dim)),
         ])
     } else if three_way {
         Line::from(vec![

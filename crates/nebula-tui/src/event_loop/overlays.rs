@@ -430,10 +430,20 @@ fn handle_confirm_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>
                 app.modals.overlay = None;
                 run_pending_action(app, *first, out);
             }
-            // The forced worktree delete's only yes is `y`: Enter keeps
-            // the checkout, so the Enter that answered the confirm before
-            // it — doubled, or a key repeat — never throws work away.
-            KeyCode::Enter if matches!(confirm.action, PendingAction::ForceDeleteWorktree(_)) => {
+            // The forced worktree delete's only yes is `f`, a key the
+            // confirm before it never takes: Enter and `y` keep the
+            // checkout, so the answer to that confirm — doubled, or a key
+            // repeat — never throws work away.
+            KeyCode::Char('f')
+                if matches!(confirm.action, PendingAction::ForceDeleteWorktree(_)) =>
+            {
+                let action = confirm.action.clone();
+                app.modals.overlay = None;
+                run_pending_action(app, action, out);
+            }
+            KeyCode::Enter | KeyCode::Char('y')
+                if matches!(confirm.action, PendingAction::ForceDeleteWorktree(_)) =>
+            {
                 app.modals.overlay = None;
             }
             KeyCode::Esc | KeyCode::Char('n') => {
