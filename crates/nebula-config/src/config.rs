@@ -1973,8 +1973,6 @@ impl Config {
         self.worktree_layout_word() == "columns"
     }
 
-    /// The **Worktree layout** in force, as one of [`WORKTREE_LAYOUTS`]:
-    /// the stored word when it is on the list, else the cards.
     /// [`Self::orchestrator_view`] as one of [`ORCHESTRATOR_VIEWS`].
     pub fn orchestrator_view_word(&self) -> &'static str {
         let stored = self.orchestrator_view.trim();
@@ -1995,6 +1993,8 @@ impl Config {
         }
     }
 
+    /// The **Worktree layout** in force, as one of [`WORKTREE_LAYOUTS`]:
+    /// the stored word when it is on the list, else the cards.
     pub fn worktree_layout_word(&self) -> &'static str {
         let stored = self.worktree_layout.trim();
         WORKTREE_LAYOUTS
