@@ -3170,7 +3170,7 @@ fn pane_title(app: &App, room: usize) -> Vec<PaneTab> {
             let is_main = at
                 .and_then(|at| bands.get(at.band))
                 .is_some_and(|b| b.is_main);
-            let facts = pane_facts(app, &row, is_main, crate::app::now_ms());
+            let facts = pane_facts(app, row, is_main, crate::app::now_ms());
             let spans = fact_spans(&facts, room.saturating_sub(used), th);
             if !spans.is_empty() {
                 tabs.push(PaneTab::plain(spans));
