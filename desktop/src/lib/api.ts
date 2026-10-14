@@ -82,6 +82,13 @@ export interface PrInfo {
   url: string;
   title: string;
   draft: boolean;
+  /** Absent from an older backend, which only reported open ones. */
+  state?: 'open' | 'merged' | 'closed';
+}
+
+/** A PR still taking work (drafts too); merged and closed ones are history. */
+export function prOpen(pr: PrInfo | undefined): pr is PrInfo {
+  return !!pr && (pr.state ?? 'open') === 'open';
 }
 /** One measured plan limit (`nebula_core::usage::UsageWindow`). */
 export interface UsageWindow {
@@ -122,12 +129,28 @@ export interface AccountRow {
   harness: string;
   /** False for a harness's own login, which has no profile. */
   profile: boolean;
+  /** The default in force: a launch naming no profile takes it. */
   default: boolean;
+  /** Flagged default, on or off: a flagged one that is off keeps a dim star. */
+  flaggedDefault?: boolean;
   disabled: boolean;
   useDefault: boolean;
+  /** Credentials found or not; not proof that they still work. */
   login: 'logged_in' | 'needs_login' | 'unknown';
+  /** The credentials say the login has run out. */
+  expired?: boolean;
+  /** The command that signs it in (`kete profile login work`, `claude auth login --claudeai`). */
   loginHint: string | null;
+  /** Why a profile entry cannot be used (shown, with the way to Settings). */
+  problem?: string | null;
   usage: AccountUsage | null;
+}
+/** What the quick prompt's "auto" profile runs under now (`account_pick`). */
+export interface AutoPick {
+  spread: string;
+  /** null: the CLI's own login. */
+  profile: string | null;
+  line: string;
 }
 export interface Model {
   connected: boolean;
@@ -187,7 +210,10 @@ export interface HarnessInfo {
 }
 export interface Launchables {
   harnesses: HarnessInfo[];
-  profiles: { name: string; harness: string; default: boolean }[];
+  /** Usable profiles, enabled first; `default` is the one in force. */
+  profiles: { name: string; harness: string; default: boolean; disabled?: boolean }[];
+  /** The account spread: `manual`, `failover`, `least_used`; absent from an old backend. */
+  spread?: string;
   /** The Agents tab's quick prompt harness; empty from an old backend. */
   default_harness?: string;
   /** Quick prompt starts in a new worktree (Sessions tab). */
@@ -371,6 +397,10 @@ export const api = {
   profileSetDefault: (name: string) => invoke<ProfileRow[]>('profile_set_default', { name }),
   accounts: () => invoke<AccountRow[]>('accounts_list'),
   profileSetEnabled: (name: string, enabled: boolean) => invoke<null>('profile_set_enabled', { name, enabled }),
+  /** A new terminal in `worktree` running the account's login command; its id. */
+  accountLoginRun: (worktree: string, key: string) => invoke<string>('account_login_run', { worktree, key }),
+  /** What "auto" would pick on a harness now; null: it has no profiles. */
+  accountPick: (kind: string) => invoke<AutoPick | null>('account_pick', { kind }),
   createTerminal: (worktree: string) => invoke<string>('create_terminal', { worktree }),
   addProject: (path: string) => invoke<string>('add_project', { path }),
   startRun: (worktree: string) => invoke<string>('start_run', { worktree }),

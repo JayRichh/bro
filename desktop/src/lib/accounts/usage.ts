@@ -3,7 +3,7 @@
 // The numbers come from the daemon (`nebula_core::usage`): the model's
 // `accounts` / `contexts`, and `accounts_list` for the rows.
 
-import type { AccountRow, AccountUsage, ContextUsage, UsageWindow } from '../api';
+import type { AccountRow, AccountUsage, Agent, ContextUsage, UsageWindow } from '../api';
 
 export type Tone = 'ok' | 'warn' | 'hot';
 
@@ -148,30 +148,49 @@ export function liveUsage(row: AccountRow, live: Record<string, AccountUsage>): 
   return live[row.key] ?? row.usage ?? null;
 }
 
-/** Harnesses whose own login an account row stands for. */
+/** Harnesses whose own login an account row stands for (the ones with a
+ *  known sign-in, `profiles::login_args`). */
 const TRACKED = new Set(['claude', 'codex', 'copilot']);
 
+/** The harness a session runs: a custom harness's id, else its kind. */
+export function sessionHarness(a: Pick<Agent, 'kind' | 'custom_harness'>): string {
+  return a.kind === 'custom' && a.custom_harness ? a.custom_harness : a.kind;
+}
+
+/** Harnesses with a live (unarchived) session on their own login: no profile. */
+export function ownLoginSessionHarnesses(agents: Agent[]): string[] {
+  return [...new Set(agents.filter((a) => !a.archived && !a.profile?.trim()).map(sessionHarness))];
+}
+
+/** The unarchived sessions running under an account row, in model order
+ *  (`nebula_core::accounts::sessions_by_account`). */
+export function sessionsOn(row: Pick<AccountRow, 'key'>, agents: Agent[]): Agent[] {
+  return agents.filter((a) => !a.archived && accountKey(a.profile, sessionHarness(a)) === row.key);
+}
+
 /** The rail's rows: the listed ones, plus a harness's own login that a
- *  live reading or a session brought in since the list was read (and that
- *  no profile of that harness covers). */
+ *  live reading or a session on it brought in since the list was read.
+ *  One rule with `accounts::own_login_harnesses`: an own login shows while
+ *  it is in use, whatever profiles its harness has. */
 export function mergeRows(
   listed: AccountRow[],
   live: Record<string, AccountUsage>,
-  sessionHarnesses: string[],
+  ownSessionHarnesses: string[],
 ): AccountRow[] {
   const out = [...listed];
-  const covered = new Set(listed.map((r) => r.harness));
+  const have = new Set(listed.map((r) => r.key));
   const own = new Set<string>();
   for (const key of Object.keys(live)) if (key.startsWith('@')) own.add(key.slice(1));
-  for (const h of sessionHarnesses) if (TRACKED.has(h)) own.add(h);
+  for (const h of ownSessionHarnesses) if (TRACKED.has(h)) own.add(h);
   for (const h of [...own].sort()) {
-    if (covered.has(h)) continue;
+    if (have.has(`@${h}`)) continue;
     out.push({
       key: `@${h}`,
       name: h,
       harness: h,
       profile: false,
       default: false,
+      flaggedDefault: false,
       disabled: false,
       useDefault: true,
       login: 'unknown',
@@ -180,6 +199,25 @@ export function mergeRows(
     });
   }
   return out;
+}
+
+/** What the row's login state means, said plainly: kete only looks for
+ *  the credentials, it never tries them. */
+export function loginTitle(row: Pick<AccountRow, 'login' | 'expired' | 'loginHint'>): string {
+  if (row.login === 'logged_in') return 'Signed in (credentials found; not checked against the service)';
+  if (row.login === 'needs_login') {
+    const why = row.expired ? 'Login expired: the credentials say it ran out' : 'Not signed in: no credentials found';
+    return row.loginHint ? `${why}. Sign in with: ${row.loginHint}` : why;
+  }
+  return 'Sign-in state unknown: kete knows no credentials file for this harness';
+}
+
+/** The star's words: in force, flagged but off, or not the default. */
+export function starTitle(row: Pick<AccountRow, 'name' | 'harness' | 'default' | 'flaggedDefault' | 'disabled'>): string {
+  if (row.default) return `${row.name} is the ${row.harness} default`;
+  if (row.flaggedDefault && row.disabled)
+    return `${row.name} is the ${row.harness} default (disabled): while it is off, launches naming no profile pass it over. Switch it on to use it`;
+  return `Make ${row.name} the ${row.harness} default`;
 }
 
 /** A context's tooltip. */

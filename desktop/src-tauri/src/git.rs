@@ -46,13 +46,13 @@ fn command(program: &str, cwd: &Path) -> Command {
 
 /// Runs git and hands back the whole output, success or not. Only failing
 /// to start git at all is an error here.
-fn git_raw(cwd: &Path, args: &[&str]) -> Result<Output, String> {
+pub(crate) fn git_raw(cwd: &Path, args: &[&str]) -> Result<Output, String> {
     git_command(cwd, args)
         .output()
         .map_err(|e| format!("could not run git: {e}"))
 }
 
-fn git_command(cwd: &Path, args: &[&str]) -> Command {
+pub(crate) fn git_command(cwd: &Path, args: &[&str]) -> Command {
     let mut cmd = command("git", cwd);
     cmd.args(["-c", "core.quotepath=off"])
         .args(args)
@@ -786,33 +786,136 @@ fn is_short_sha(s: &str) -> bool {
     (7..40).contains(&s.len()) && is_hex(s)
 }
 
-/// The open pull request for `branch`, asked of `gh` in the checkout.
-/// None when there is none, or no `gh`, or no network.
-pub fn open_pr(root: &Path, branch: &str) -> Option<crate::daemon::PrInfo> {
-    let out = command("gh", root)
-        .args([
-            "pr",
-            "view",
-            branch,
-            "--json",
-            "number,url,title,state,isDraft",
-        ])
-        .stdout(Stdio::piped())
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
-    if v.get("state")?.as_str()? != "OPEN" {
-        return None;
-    }
+/// How long one `gh` lookup may take before the poll gives up on it.
+const GH_TIMEOUT: Duration = Duration::from_secs(30);
+/// The fields [`pick_pr`] reads from `gh pr list`.
+const PR_FIELDS: &str = "number,url,title,state,isDraft,headRefName,headRefOid,isCrossRepository";
+
+/// `gh <args>` in `root`, stdout on success, under [`GH_TIMEOUT`]. None
+/// when there is no `gh`, no network, no sign-in, or it took too long.
+fn gh(root: &Path, args: &[&str]) -> Option<Vec<u8>> {
+    let mut cmd = command("gh", root);
+    cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let out = output_within(cmd, GH_TIMEOUT, "gh").ok()?;
+    out.status.success().then_some(out.stdout)
+}
+
+/// The pull request on `branch`, in whatever state it is in, asked of
+/// `gh` in the checkout: a few of the branch's newest, of which
+/// [`pick_pr`] takes one. None when there is none, or no `gh`, or no
+/// network.
+pub fn branch_pr(root: &Path, branch: &str) -> Option<crate::daemon::PrInfo> {
+    let out = gh(
+        root,
+        &[
+            "pr", "list", "--state", "all", "--head", branch, "--limit", "5", "--json", PR_FIELDS,
+        ],
+    )?;
+    pick_pr(&out, branch)
+}
+
+/// The pull request a branch shows, from `gh pr list --json` output: one
+/// whose head is `branch` in this repository (a fork's PR from its own
+/// `main` is not the main checkout's), an open one before any other (a
+/// branch reopened after an old merge), else the newest. `gh`'s state
+/// words become `open`, `merged` or `closed`; one it adds later reads as
+/// open, as the terminal app reads it.
+pub fn pick_pr(json: &[u8], branch: &str) -> Option<crate::daemon::PrInfo> {
+    let list: Vec<serde_json::Value> = serde_json::from_slice(json).ok()?;
+    let state = |v: &serde_json::Value| match v.get("state").and_then(|s| s.as_str()) {
+        Some("MERGED") => "merged",
+        Some("CLOSED") => "closed",
+        _ => "open",
+    };
+    let number = |v: &serde_json::Value| v.get("number").and_then(|n| n.as_u64()).unwrap_or(0);
+    let v = list
+        .iter()
+        .filter(|v| v.get("headRefName").and_then(|h| h.as_str()) == Some(branch))
+        .filter(|v| {
+            !v.get("isCrossRepository")
+                .and_then(|c| c.as_bool())
+                .unwrap_or(false)
+        })
+        .min_by_key(|v| (state(v) != "open", std::cmp::Reverse(number(v))))?;
     Some(crate::daemon::PrInfo {
         number: v.get("number")?.as_u64()?,
         url: v.get("url")?.as_str()?.to_string(),
         title: v.get("title")?.as_str().unwrap_or_default().to_string(),
         draft: v.get("isDraft").and_then(|d| d.as_bool()).unwrap_or(false),
+        state: state(v).to_string(),
+        head_sha: v
+            .get("headRefOid")
+            .and_then(|s| s.as_str())
+            .unwrap_or_default()
+            .to_string(),
     })
+}
+
+/// Whether an open pull request targets `branch` (a PR stacked on it).
+/// None when `gh` could not say, which a cleanup reads as "yes".
+pub fn has_open_pr_onto(root: &Path, branch: &str) -> Option<bool> {
+    let out = gh(
+        root,
+        &[
+            "pr", "list", "--state", "open", "--base", branch, "--limit", "1", "--json", "number",
+        ],
+    )?;
+    let list: Vec<serde_json::Value> = serde_json::from_slice(&out).ok()?;
+    Some(!list.is_empty())
+}
+
+/// What deleting a checkout would throw away, for the delete confirm.
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct CheckoutState {
+    /// Tracked files changed, staged or not.
+    pub changed: u32,
+    pub untracked: u32,
+    /// Commits on HEAD that no remote-tracking branch holds; None when the
+    /// repo has no remote, or HEAD has no commit yet.
+    pub unpushed: Option<u32>,
+}
+
+/// The checkout's [`CheckoutState`]: one `git status` and, with a remote,
+/// one `git rev-list` against every remote-tracking branch (so a branch
+/// with no upstream counts the commits only it has).
+pub fn checkout_state(root: &Path) -> Result<CheckoutState, String> {
+    let raw = git(root, &["status", "--porcelain=v1", "-z"])?;
+    let (changed, untracked) = count_status(&raw);
+    let unpushed = if git_text(root, &["remote"])?.is_empty() {
+        None
+    } else {
+        git_text(root, &["rev-list", "--count", "HEAD", "--not", "--remotes"])
+            .ok()
+            .and_then(|n| n.parse().ok())
+    };
+    Ok(CheckoutState {
+        changed,
+        untracked,
+        unpushed,
+    })
+}
+
+/// (tracked changes, untracked files) in `git status --porcelain=v1 -z`
+/// output. A rename or copy carries its old path as one more entry.
+fn count_status(raw: &[u8]) -> (u32, u32) {
+    let (mut changed, mut untracked) = (0, 0);
+    let mut entries = raw.split(|b| *b == 0);
+    while let Some(e) = entries.next() {
+        if e.len() < 3 {
+            continue;
+        }
+        match &e[..2] {
+            b"??" => untracked += 1,
+            b"!!" => {}
+            xy => {
+                changed += 1;
+                if xy[0] == b'R' || xy[0] == b'C' {
+                    entries.next();
+                }
+            }
+        }
+    }
+    (changed, untracked)
 }
 
 /// Whether `gh` is on PATH at all, so the lookups are skipped cleanly.
@@ -850,7 +953,7 @@ pub fn remote_url(root: &Path) -> Result<String, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -877,10 +980,10 @@ mod tests {
     }
 
     /// A throwaway repo under the temp dir, removed when dropped.
-    struct Repo(PathBuf);
+    pub(crate) struct Repo(pub(crate) PathBuf);
 
     impl Repo {
-        fn new(tag: &str) -> Repo {
+        pub(crate) fn new(tag: &str) -> Repo {
             static NEXT: AtomicU64 = AtomicU64::new(0);
             let dir = std::env::temp_dir().join(format!(
                 "kete-git-test-{tag}-{}-{}",
@@ -898,7 +1001,7 @@ mod tests {
             repo
         }
 
-        fn git(&self, args: &[&str]) -> String {
+        pub(crate) fn git(&self, args: &[&str]) -> String {
             let out = git_raw(&self.0, args).unwrap();
             assert!(
                 out.status.success(),
@@ -908,7 +1011,7 @@ mod tests {
             String::from_utf8_lossy(&out.stdout).trim().to_string()
         }
 
-        fn write(&self, path: &str, bytes: &[u8]) {
+        pub(crate) fn write(&self, path: &str, bytes: &[u8]) {
             let p = self.0.join(path);
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
             std::fs::write(p, bytes).unwrap();
@@ -918,7 +1021,7 @@ mod tests {
             std::fs::read_to_string(self.0.join(path)).unwrap()
         }
 
-        fn commit(&self, msg: &str) -> String {
+        pub(crate) fn commit(&self, msg: &str) -> String {
             self.git(&["add", "-A"]);
             self.git(&["commit", "-q", "-m", msg]);
             self.git(&["rev-parse", "HEAD"])
@@ -1162,7 +1265,7 @@ mod tests {
         (origin, pr)
     }
 
-    fn url(repo: &Repo) -> String {
+    pub(crate) fn url(repo: &Repo) -> String {
         format!(
             "file:///{}",
             repo.0
@@ -1451,5 +1554,78 @@ mod tests {
         assert_eq!(hunk_starts("@@ -12,3 +14,5 @@ fn x"), (12, 14));
         assert_eq!(hunk_starts("@@ -1 +1 @@"), (1, 1));
         assert_eq!(hunk_starts("@@ -0,0 +1,2 @@"), (0, 1));
+    }
+
+    #[test]
+    fn pick_pr_prefers_open_then_newest_and_skips_forks() {
+        let json = br#"[
+            {"number":9,"url":"u9","title":"fork","state":"OPEN","isDraft":false,"headRefName":"main","headRefOid":"f","isCrossRepository":true},
+            {"number":5,"url":"u5","title":"old","state":"MERGED","isDraft":false,"headRefName":"main","headRefOid":"a","isCrossRepository":false},
+            {"number":7,"url":"u7","title":"newer","state":"CLOSED","isDraft":false,"headRefName":"main","headRefOid":"b","isCrossRepository":false}
+        ]"#;
+        let pr = pick_pr(json, "main").unwrap();
+        assert_eq!(
+            (pr.number, pr.state.as_str(), pr.head_sha.as_str()),
+            (7, "closed", "b")
+        );
+
+        let json = br#"[
+            {"number":8,"url":"u8","title":"later merge","state":"MERGED","isDraft":false,"headRefName":"topic","headRefOid":"c","isCrossRepository":false},
+            {"number":3,"url":"u3","title":"reopened","state":"OPEN","isDraft":true,"headRefName":"topic","headRefOid":"d","isCrossRepository":false}
+        ]"#;
+        let pr = pick_pr(json, "topic").unwrap();
+        assert_eq!((pr.number, pr.state.as_str(), pr.draft), (3, "open", true));
+        assert!(pick_pr(json, "other").is_none());
+        assert!(pick_pr(b"[]", "topic").is_none());
+    }
+
+    #[test]
+    fn count_status_counts_tracked_and_untracked_once() {
+        assert_eq!(
+            count_status(b"R  new\0old\0 M a\0A  b\0?? c\0?? d/\0"),
+            (3, 2)
+        );
+        assert_eq!(count_status(b""), (0, 0));
+    }
+
+    #[test]
+    fn checkout_state_reports_changes_and_unpushed_commits() {
+        let origin = Repo::new("state-origin");
+        origin.write("a.txt", b"a\n");
+        origin.commit("one");
+        let repo = Repo::new("state");
+        // No remote: nothing to say about pushing.
+        repo.write("a.txt", b"a\n");
+        repo.commit("local");
+        assert_eq!(checkout_state(&repo.0).unwrap().unpushed, None);
+
+        let clone = clone_of(&origin);
+        clone.git(&["checkout", "-q", "-b", "topic", "origin/main"]);
+        assert_eq!(
+            checkout_state(&clone.0).unwrap(),
+            CheckoutState {
+                changed: 0,
+                untracked: 0,
+                unpushed: Some(0)
+            }
+        );
+        clone.write("b.txt", b"b\n");
+        clone.commit("two");
+        clone.write("a.txt", b"edited\n");
+        clone.write("new.txt", b"n\n");
+        assert_eq!(
+            checkout_state(&clone.0).unwrap(),
+            CheckoutState {
+                changed: 1,
+                untracked: 1,
+                unpushed: Some(1)
+            }
+        );
+    }
+
+    #[test]
+    fn checkout_state_of_a_missing_folder_is_an_error() {
+        let gone = std::env::temp_dir().join("kete-git-test-no-such-checkout");
+        assert!(checkout_state(&gone).is_err());
     }
 }

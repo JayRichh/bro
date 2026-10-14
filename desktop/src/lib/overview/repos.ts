@@ -13,7 +13,7 @@ export type RepoRow = {
   main: Worktree | undefined;
   /** Ports something listens on, across the repo's worktrees. */
   ports: number[];
-  /** Open PRs by worktree branch. */
+  /** Pull requests by worktree branch, in any state (`state` says which). */
   prs: { branch: string; pr: PrInfo }[];
 };
 

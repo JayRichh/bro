@@ -20,7 +20,8 @@ import {
   type ThemePref,
 } from './store.svelte';
 import { keysOf, type ShortcutId } from './shortcuts';
-import { menuFor, newWorktree, parseTarget, runRowKey, type Target } from './actions';
+import { menuFor, newWorktree, parseTarget, refreshPrs, runRowKey, type Target } from './actions';
+import { pickBranchSwitch } from './worktrees/switcher.svelte';
 import { ask, openMenu, ui, type MenuItem } from './ui/ui.svelte';
 import type { PaletteCommand } from './palette';
 import { askStartOrchestrator, openOrchestrator, orchestratorCommands } from './orch.svelte';
@@ -146,6 +147,13 @@ export function paletteCommands(): Command[] {
     cmd('help', 'Keyboard shortcuts', 'Window', () => (ui.help = true), 'help_f1', 'help keys'),
     cmd('add-repo', 'Add a repo\u2026', 'Window', () => addRepo(), undefined, 'project folder'),
     ...orchestratorCommands(),
+    // With a repo in view these come from its menu, below.
+    ...(currentRepo()
+      ? []
+      : [
+          cmd('refresh-prs', 'Refresh pull requests', 'Window', refreshPrs, undefined, 'pr github merged'),
+          cmd('switch-branch', 'Switch branch\u2026', 'Window', () => pickBranchSwitch(), 'switch_branch', 'checkout git'),
+        ]),
   ];
   const t = currentTarget();
   if (t) {

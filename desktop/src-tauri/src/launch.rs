@@ -70,6 +70,74 @@ pub fn spread_pick(
     ))
 }
 
+/// A profile as the quick prompt offers it.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ProfileInfo {
+    pub name: String,
+    pub harness: String,
+    /// The default in force (`default_for`): never a disabled one, and
+    /// only the first flagged of its harness.
+    pub default: bool,
+    /// Off: the spread and the default pass it over, but a launch may
+    /// still name it, so the quick prompt offers it, marked off.
+    pub disabled: bool,
+}
+
+/// The quick prompt's profile list: every usable profile, enabled ones
+/// first (config order within each).
+pub fn launch_profiles(all: &[nebula_core::profiles::Profile]) -> Vec<ProfileInfo> {
+    let mut out: Vec<ProfileInfo> = all
+        .iter()
+        .filter(|p| p.problem().is_none())
+        .map(|p| ProfileInfo {
+            name: p.name.trim().to_string(),
+            harness: p.harness.trim().to_string(),
+            default: nebula_core::profiles::default_for(all, &p.harness)
+                .is_some_and(|d| d.name == p.name),
+            disabled: p.disabled,
+        })
+        .collect();
+    out.sort_by_key(|p| p.disabled);
+    out
+}
+
+/// What the quick prompt's "auto" profile would run under now: the
+/// spread, its pick (None = the CLI's own login) and why.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct AutoPick {
+    pub spread: String,
+    pub profile: Option<String>,
+    pub line: String,
+}
+
+pub fn auto_pick(
+    cfg: &Config,
+    harness: &str,
+    now_secs: i64,
+    usage: impl Fn(&str) -> Option<nebula_core::usage::AccountUsage>,
+) -> Option<AutoPick> {
+    let (profile, line) = spread_pick(cfg, harness, now_secs, usage)?;
+    Some(AutoPick {
+        spread: nebula_core::accounts::Spread::parse(&cfg.account_spread)
+            .as_str()
+            .to_string(),
+        profile,
+        line,
+    })
+}
+
+/// [`auto_pick`] against the kept readings, now. None for a harness with
+/// no profiles, where auto is simply its own login.
+#[tauri::command]
+pub fn account_pick(kind: String) -> Option<AutoPick> {
+    auto_pick(
+        &Config::load(),
+        &kind,
+        nebula_core::clock::now_secs() as i64,
+        nebula_core::usage::read_account,
+    )
+}
+
 pub const TERMINAL: &str = "terminal";
 
 /// The starting prompt: the task, wrapped by the preset when one is
@@ -332,6 +400,55 @@ mod tests {
             ))
         );
         assert_eq!(spread_pick(&cfg, "codex", 0, used), None);
+        assert_eq!(
+            auto_pick(&cfg, "claude", 0, used),
+            Some(AutoPick {
+                spread: "failover".into(),
+                profile: Some("home".into()),
+                line: "claude: home (failover: work at 92%)".into(),
+            }),
+            "what the quick prompt's auto option says it will pick"
+        );
+        assert_eq!(auto_pick(&cfg, "codex", 0, used), None);
+    }
+
+    /// Off profiles are offered after the rest, never as the default; two
+    /// flagged defaults leave the first in force; a broken entry is left out.
+    #[test]
+    fn the_quick_prompt_lists_off_profiles_last_and_one_default() {
+        use nebula_core::profiles::Profile;
+        let p = |name: &str, default: bool, disabled: bool| Profile {
+            name: name.into(),
+            harness: "claude".into(),
+            env: Default::default(),
+            default,
+            use_default: false,
+            disabled,
+        };
+        let shown = |all: &[Profile]| -> Vec<(String, bool, bool)> {
+            launch_profiles(all)
+                .into_iter()
+                .map(|i| (i.name, i.default, i.disabled))
+                .collect()
+        };
+        assert_eq!(
+            shown(&[
+                p("off", false, true),
+                p("a", true, false),
+                p("b", true, false),
+                p("bad name", false, false),
+            ]),
+            [
+                ("a".into(), true, false),
+                ("b".into(), false, false),
+                ("off".into(), false, true)
+            ]
+        );
+        // A flagged default switched off is no default (`default_for`).
+        assert_eq!(
+            shown(&[p("off", true, true), p("a", false, false)]),
+            [("a".into(), false, false), ("off".into(), false, true)]
+        );
     }
 
     #[test]

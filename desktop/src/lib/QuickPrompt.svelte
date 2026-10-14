@@ -1,6 +1,7 @@
 <script lang="ts">
   import { app, openSession, projectOf, sessionWorktree, toast } from './store.svelte';
-  import { api, type HarnessInfo, type Preset } from './api';
+  import { api, type AutoPick, type HarnessInfo, type Preset } from './api';
+  import { initialProfile, profileOptions, stillOffered } from './accounts/pick';
   import { nav } from './shell/history.svelte';
   import { ORCH_TARGET, orchestratorOf, quickPromptTarget } from './orchestrator';
   import { sendToOrchestrator } from './orch.svelte';
@@ -18,7 +19,9 @@
   let project = $state('');
   let worktree = $state('');
   let harness = $state('claude');
+  /** A profile name, or '' for auto: none named, the spread chooses. */
   let profile = $state('');
+  let autoPick = $state<AutoPick | null>(null);
   let model = $state('');
   let effort = $state('');
   let preset = $state('');
@@ -37,6 +40,7 @@
       .sort((a, b) => Number(b.is_main) - Number(a.is_main) || a.sort_order - b.sort_order),
   );
   const profiles = $derived(app.launch.profiles.filter((p) => p.harness === harness));
+  const profileOpts = $derived(profileOptions(profiles, app.launch.spread, autoPick));
   const models = $derived(info?.choices?.models ?? []);
   const efforts = $derived(info?.choices?.efforts[model] ?? info?.choices?.efforts[info?.choices?.model ?? ''] ?? []);
   const orch = $derived(orchestratorOf(app.model));
@@ -105,9 +109,30 @@
   $effect(() => {
     if (worktree !== NEW_WT && !worktrees.find((w) => w.id === worktree)) worktree = worktrees[0]?.id ?? '';
   });
+  // The profile starts where initialProfile says for each harness (auto
+  // while a spread is on) and again when the list or the spread changes,
+  // and steps back there when its pick is gone.
+  let profileFor = '';
   $effect(() => {
-    const def = profiles.find((p) => p.default);
-    if (!profiles.find((p) => p.name === profile)) profile = def?.name ?? '';
+    const key = [harness, app.launch.spread ?? '', ...profiles.map((p) => `${p.name}:${p.default}:${p.disabled}`)].join('|');
+    if (profileFor !== key || !stillOffered(profile, profiles)) {
+      profileFor = key;
+      profile = initialProfile(profiles, app.launch.spread);
+    }
+  });
+  // What auto would pick, asked again on each opening (usage moves).
+  $effect(() => {
+    if (!expanded || isTerminal || !profiles.length) {
+      autoPick = null;
+      return;
+    }
+    const kind = harness;
+    api
+      .accountPick(kind)
+      .then((p) => {
+        if (kind === harness) autoPick = p;
+      })
+      .catch(() => (autoPick = null));
   });
 
   // A focus request, maybe with a preset from the rail, a repo row or a
@@ -261,11 +286,16 @@
         </select>
         {@render chevron()}
       </span>
-      <span class="relative flex max-w-44 min-w-0 items-center border-r border-rule">
+      <span class="relative flex max-w-60 min-w-0 items-center border-r border-rule">
         <span class={optLabel}>profile</span>
-        <select class={pick} bind:value={profile} disabled={isTerminal || !profiles.length} aria-label="Profile">
-          <option value="">{profiles.length ? 'none' : 'default login'}</option>
-          {#each profiles as p (p.name)}<option value={p.name}>{p.name}</option>{/each}
+        <select
+          class={pick}
+          bind:value={profile}
+          disabled={isTerminal || !profiles.length}
+          aria-label="Profile"
+          title={profileOpts.find((o) => o.value === profile)?.title}
+        >
+          {#each profileOpts as o (o.value)}<option value={o.value} title={o.title}>{o.label}</option>{/each}
         </select>
         {@render chevron()}
       </span>

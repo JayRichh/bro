@@ -10,6 +10,10 @@ import { app, focusQuickPrompt, markSeen, openDiff, openSession, projectOf, toas
 import { ask, type MenuEntry } from './ui/ui.svelte';
 import { keysOf, type ShortcutId } from './shortcuts';
 import { orchestratorMenuItems } from './orch.svelte';
+import { worktreeApi } from './worktrees/api';
+import { cardsLine, dirty, stateLines } from './worktrees/offer';
+import { deleteEmptied, offerConfirm, prepareOffer, stillOffered } from './worktrees/delete';
+import { canSwitchBranch, openBranchSwitch } from './worktrees/switcher.svelte';
 
 export type Target =
   /** `viaSub`: picked from one of its subagents' rows, so it acts on
@@ -113,25 +117,37 @@ export async function deleteAgent(id: string) {
   const a = agentOf(id);
   if (!a) return;
   const kids = descendants(m(), id);
+  // Emptying a linked worktree offers it too (worktrees/delete.ts).
+  const taken = (xs: Agent[]) => xs.filter((x) => x.worktree_id === a.worktree_id && !x.archived).length;
+  const doomed = [a, ...kids].map((x) => x.id);
+  const p = await prepareOffer(a.worktree_id, taken([a, ...kids]), doomed);
+  const o = p && offerConfirm(p);
   const r = await ask.confirm({
     title: kids.length ? `Delete thread \u00b7 ${kids.length + 1} sessions` : 'Delete session',
-    message: kids.length
-      ? `Delete "${a.name}" and everything nested under it? Their history goes too.`
-      : `Delete "${a.name}"? Its history goes too; this can't be undone.`,
-    detail: kids.length ? [a.name, ...kids.map((k) => k.name)] : undefined,
+    message:
+      (kids.length
+        ? `Delete "${a.name}" and everything nested under it? Their history goes too.`
+        : `Delete "${a.name}"? Its history goes too; this can't be undone.`) + (o ? ` ${o.line}` : ''),
+    detail: kids.length || o ? [...(kids.length ? [a.name, ...kids.map((k) => k.name)] : []), ...(o?.detail ?? [])] : undefined,
     confirm: 'Delete',
     danger: true,
+    check: o?.check,
+    checked: o?.checked,
   });
   if (!r.ok) return;
   // Sessions spawned while the dialog was up go too: recount now.
   const now = agentOf(id);
   if (!now) return;
   const gone = descendants(m(), id);
+  const wt = stillOffered(p, r.checked, taken([now, ...gone]), [now, ...gone].map((x) => x.id));
   if (app.session && 'Agent' in app.session && [now, ...gone].some((x) => x.id === (app.session as { Agent: string }).Agent))
     app.session = null;
+  let done = false;
   await attempt('Could not delete', async () => {
     for (const x of [...gone].reverse().concat(now)) await api.deleteAgent(x.id);
+    done = true;
   });
+  if (done) await attempt('Could not delete the worktree', async () => deleteEmptied(wt));
 }
 
 export async function restartAgent(id: string) {
@@ -197,16 +213,32 @@ export async function renameTerminal(id: string) {
 export async function closeTerminal(id: string) {
   const t = terminalOf(id);
   if (!t) return;
-  if (t.alive) {
+  // Its worktree's last card: the confirm offers the worktree too.
+  const p = await prepareOffer(t.worktree_id, 1, [id]);
+  const o = p && offerConfirm(p);
+  let checked = false;
+  if (t.alive || o) {
     const r = await ask.confirm({
       title: 'Close terminal',
-      message: `Close "${t.run_command ? 'run' : t.name}"? Its shell and anything running in it are killed.`,
+      message:
+        (t.alive ? `Close "${t.run_command ? 'run' : t.name}"? Its shell and anything running in it are killed.` : `Close "${t.name}"?`) +
+        (o ? ` ${o.line}` : ''),
+      detail: o?.detail,
       confirm: 'Close',
       danger: true,
+      check: o?.check,
+      checked: o?.checked,
     });
     if (!r.ok) return;
+    checked = r.checked;
   }
-  await attempt('Could not close', () => api.closeTerminal(id));
+  const wt = stillOffered(p, checked, 1, [id]);
+  let done = false;
+  await attempt('Could not close', async () => {
+    await api.closeTerminal(id);
+    done = true;
+  });
+  if (done) await attempt('Could not delete the worktree', async () => deleteEmptied(wt));
 }
 
 // ---- worktrees and repos ----
@@ -237,13 +269,19 @@ export async function deleteWorktree(id: string) {
   const w = worktreeOf(id);
   if (!w || w.is_main) return;
   const live = m().agents.filter((a) => a.worktree_id === id && !a.archived).length;
+  const terms = m().terminals.filter((t) => t.worktree_id === id).length;
+  // What a non-forced delete would refuse over, so Force is an informed pick.
+  const state = await worktreeApi.checkoutState(id).catch(() => null);
+  const cards = cardsLine(live, terms);
   const r = await ask.confirm({
     title: 'Delete worktree',
     message: `Delete the worktree on ${w.branch}? Its folder is removed; the branch stays.`,
-    detail: [w.path, ...(live ? [`${live} session${live === 1 ? '' : 's'} in it`] : [])],
+    detail: [w.path, ...(cards ? [cards] : []), ...stateLines(state)],
     confirm: 'Delete',
     danger: true,
-    check: 'Force: delete even with uncommitted changes',
+    check: dirty(state)
+      ? 'Force: delete with its uncommitted changes (without this, git refuses)'
+      : 'Force: delete even with uncommitted changes',
   });
   if (r.ok) await attempt('Could not delete the worktree', () => api.deleteWorktree(id, r.checked));
 }
@@ -271,6 +309,14 @@ export async function openEditor(worktree: string | undefined) {
     }
     toast(`Opened with: ${r.command}`);
   });
+}
+
+/** Ask every checkout's pull request again now. */
+export function refreshPrs() {
+  worktreeApi
+    .refreshPrs()
+    .then(() => toast('Asking for pull requests\u2026'))
+    .catch((e) => toast(`Could not refresh: ${e}`));
 }
 
 export async function openRemote(worktree: string | undefined) {
@@ -402,8 +448,10 @@ export function projectMenu(project: string): MenuEntry[] {
   const out: MenuEntry[] = [
     item('New session here', () => focusQuickPrompt({ project })),
     item('New worktree\u2026', () => newWorktree(project), 'new_worktree'),
+    ...(canSwitchBranch(project) ? [item('Switch branch\u2026', () => openBranchSwitch(project), 'switch_branch')] : []),
     item('Open in editor', () => openEditor(main?.id)),
     item('Open remote in browser', () => openRemote(main?.id)),
+    item('Refresh pull requests', refreshPrs),
     'sep',
     item('Rename\u2026', () => renameProject(project)),
     item('Locate folder\u2026', () => locateProject(project)),
@@ -459,6 +507,12 @@ export function runRowKey(id: ShortcutId, t: Target): boolean {
     new_terminal: () => newTerminal(wt),
     open_editor: () => openEditor(wt),
     open_remote: () => openRemote(wt),
+    // The row's repo: only its root checkout switches.
+    switch_branch: () => {
+      const p = m().worktrees.find((w) => w.id === wt)?.project_id;
+      if (p && canSwitchBranch(p)) openBranchSwitch(p);
+      else toast('Switch branch is for repos without an Azure DevOps remote: their branches live in the ADO views.');
+    },
   });
   const f = table[id];
   if (!f) return false;

@@ -9,6 +9,7 @@
   import { startOrchestrator } from '../orch.svelte';
   import { canProvision, orchestratorOf, RELOAD_HINT } from '../orchestrator';
   import type { HarnessInfo } from '../api';
+  import { initialProfile, profileOptions, stillOffered } from '../accounts/pick';
 
   let { inline = false }: { inline?: boolean } = $props();
 
@@ -24,6 +25,7 @@
   const models = $derived(info?.choices?.models ?? []);
   const efforts = $derived(info?.choices?.efforts[model] ?? info?.choices?.efforts[info?.choices?.model ?? ''] ?? []);
   const profiles = $derived(app.launch.profiles.filter((p) => p.harness === harness));
+  const profileOpts = $derived(profileOptions(profiles, app.launch.spread, null));
   const ok = $derived(canProvision(app.model));
   const existing = $derived(orchestratorOf(app.model));
   const open = $derived(inline || ui.startOrchestrator);
@@ -46,8 +48,14 @@
   $effect(() => {
     if (efforts.length && !efforts.includes(effort)) effort = efforts.includes(info?.choices?.effort ?? '') ? info!.choices!.effort : efforts[0];
   });
+  // As the quick prompt: auto while a spread is on, else the default.
+  let profileFor = '';
   $effect(() => {
-    if (!profiles.find((p) => p.name === profile)) profile = profiles.find((p) => p.default)?.name ?? '';
+    const key = [harness, app.launch.spread ?? '', ...profiles.map((p) => `${p.name}:${p.default}:${p.disabled}`)].join('|');
+    if (profileFor !== key || !stillOffered(profile, profiles)) {
+      profileFor = key;
+      profile = initialProfile(profiles, app.launch.spread);
+    }
   });
   $effect(() => {
     if (open && !inline) tick().then(() => box?.querySelector<HTMLElement>('select')?.focus());
@@ -96,8 +104,7 @@
     <label class="flex flex-col gap-1">
       <span class={label}>Profile</span>
       <select class={field} bind:value={profile} disabled={!profiles.length} aria-label="Profile">
-        <option value="">{profiles.length ? 'none' : 'default login'}</option>
-        {#each profiles as p (p.name)}<option value={p.name}>{p.name}</option>{/each}
+        {#each profileOpts as o (o.value)}<option value={o.value} title={o.title}>{o.label}</option>{/each}
       </select>
     </label>
     <label class="flex flex-col gap-1">

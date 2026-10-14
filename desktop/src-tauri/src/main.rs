@@ -7,10 +7,12 @@
 
 mod accounts;
 mod ado;
+mod branches;
 mod daemon;
 mod git;
 mod launch;
 mod orchestrator;
+mod pr_poll;
 mod presets;
 mod profiles;
 mod projects;
@@ -19,11 +21,10 @@ mod settings;
 
 use ado::client::CmdError;
 use ado::prs::{self, PrCtx, PrCtxExt};
-use ado::{AdoContext, AdoState, AdoStateExt};
+use ado::{AdoState, AdoStateExt};
 use daemon::{Client, Model, PtyEvent};
 use nebula_core::{AgentId, ClientRequest, EntityId, SessionRef, WorktreeId};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -384,16 +385,9 @@ fn open_url(app: tauri::AppHandle, url: String) -> Res<()> {
 }
 
 #[derive(Serialize)]
-struct ProfileInfo {
-    name: String,
-    harness: String,
-    default: bool,
-}
-
-#[derive(Serialize)]
 struct Launchables {
     harnesses: Vec<settings::HarnessInfo>,
-    profiles: Vec<ProfileInfo>,
+    profiles: Vec<launch::ProfileInfo>,
     /// The harness the quick prompt starts on: the Agents tab's Quick
     /// prompt Agent, stepped past one switched off since.
     default_harness: String,
@@ -403,6 +397,9 @@ struct Launchables {
     follow: bool,
     /// Archive asks first (Sessions tab, Confirm on archive).
     ask_before_archive: bool,
+    /// The ACCOUNT SPREAD (`manual`, `failover`, `least_used`): off
+    /// `manual`, the quick prompt starts on "auto" so the spread chooses.
+    spread: String,
 }
 
 /// What the quick prompt offers: the harnesses the TUI's New session
@@ -412,16 +409,10 @@ fn launchables() -> Launchables {
     let cfg = nebula_config::Config::load();
     let harnesses = settings::offered(&cfg);
     let default_harness = cfg.quick_prompt_kind().as_str().to_string();
-    let profiles = nebula_core::profiles::load()
-        .into_iter()
-        .filter(|p| !p.disabled)
-        .map(|p| ProfileInfo {
-            name: p.name,
-            harness: p.harness,
-            default: p.default,
-        })
-        .collect();
+    let profiles = launch::launch_profiles(&nebula_core::profiles::load());
+    let spread = nebula_core::accounts::Spread::parse(&cfg.account_spread);
     Launchables {
+        spread: spread.as_str().into(),
         harnesses,
         profiles,
         default_harness,
@@ -632,74 +623,6 @@ async fn session_ask(
     client.ask(&agent, question).await.map_err(err)
 }
 
-/// The open ADO pull request from `branch`, for the PR open lane. Its
-/// client is silent: the poll never opens a sign-in window, and finds a
-/// token once a user-initiated command has signed in. A sign-in failure
-/// pauses the org's poll until a command works for it again.
-async fn ado_open_pr(ado: &AdoState, ctx: AdoContext, branch: &str) -> Option<daemon::PrInfo> {
-    let org = ctx.remote.org_url.clone();
-    if ado.is_paused(&org) {
-        return None;
-    }
-    let res = async {
-        let ctx = PrCtx::new(ctx).await?;
-        prs::for_source(&ctx.ado.client, &ctx.repo_id, branch).await
-    }
-    .await;
-    match res {
-        Ok(list) => list.into_iter().next().map(|p| daemon::PrInfo {
-            number: p.id.into(),
-            url: p.url,
-            title: p.title,
-            draft: p.is_draft,
-        }),
-        Err(e) => {
-            if prs::is_auth_error(&e) {
-                ado.pause(&org);
-            }
-            None
-        }
-    }
-}
-
-/// Ask for each worktree's open pull request, now and then, for the PR
-/// open lane: Azure DevOps for ADO remotes, `gh` for the rest. Only
-/// checkouts with agent sessions are asked.
-async fn poll_prs(client: Arc<Client>, app: tauri::AppHandle) {
-    let ado = app.state::<AdoState>();
-    let have_gh = tauri::async_runtime::spawn_blocking(git::have_gh)
-        .await
-        .unwrap_or(false);
-    loop {
-        let model = client.snapshot();
-        let wanted: Vec<(String, PathBuf, String)> = model
-            .worktrees
-            .iter()
-            .filter(|w| !w.is_main && model.agents.iter().any(|a| a.worktree_id == w.id))
-            .map(|w| (w.id.0.clone(), w.path.clone(), w.branch.clone()))
-            .collect();
-        let mut out = HashMap::new();
-        for (id, path, branch) in wanted {
-            // Several ADO remotes and none of them origin reads as none.
-            let pr = match ado.silent_context(&path).await.ok().flatten() {
-                Some(ctx) => ado_open_pr(&ado, ctx, &branch).await,
-                None if have_gh => {
-                    tauri::async_runtime::spawn_blocking(move || git::open_pr(&path, &branch))
-                        .await
-                        .ok()
-                        .flatten()
-                }
-                None => None,
-            };
-            if let Some(pr) = pr {
-                out.insert(id, pr);
-            }
-        }
-        client.set_prs(out);
-        tokio::time::sleep(Duration::from_secs(90)).await;
-    }
-}
-
 /// Push the model to the window whenever it changes, at most every 50 ms.
 async fn emit_state(app: tauri::AppHandle, client: Arc<Client>) {
     loop {
@@ -721,6 +644,8 @@ fn main() {
         // One token source, one ado.json store and one set of clients for
         // every ADO command and the PR poll.
         .manage(AdoState::system())
+        .manage(pr_poll::PrRefresh::default())
+        .manage(branches::Switching::default())
         .setup(move |app| {
             let handle = app.handle().clone();
             // The Agents tab's model lists, as the TUI's: Claude Code's own
@@ -739,13 +664,20 @@ fn main() {
             }));
             tauri::async_runtime::spawn(daemon::run(client.clone()));
             tauri::async_runtime::spawn(emit_state(handle.clone(), client.clone()));
-            tauri::async_runtime::spawn(poll_prs(client.clone(), handle));
+            tauri::async_runtime::spawn(pr_poll::poll_prs(client.clone(), handle));
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.set_title("kete");
             }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            // Worktrees, branches and pull requests
+            pr_poll::refresh_prs,
+            branches::worktree_settings,
+            branches::checkout_state,
+            branches::branch_list,
+            branches::branch_fetch,
+            branches::branch_switch,
             get_state,
             retry_connect,
             attach,
@@ -780,6 +712,7 @@ fn main() {
             projects::open_worktree,
             projects::open_remote,
             launch::quick_launch,
+            launch::account_pick,
             presets::presets_list,
             presets::preset_save,
             presets::preset_delete,
@@ -791,6 +724,7 @@ fn main() {
             profiles::profile_set_default,
             accounts::accounts_list,
             accounts::profile_set_enabled,
+            accounts::account_login_run,
             settings::settings_schema,
             settings::settings_set,
             settings::settings_reset,

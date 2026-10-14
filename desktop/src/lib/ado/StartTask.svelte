@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { app, openSession, toast } from '../store.svelte';
+  import { initialProfile, profileOptions } from '../accounts/pick';
   import { branchProblem, suggestBranch, tasksApi, type StartedTask, type WorkItem } from './tasks-api';
   import { errKind, errText, type ErrKind } from './errors';
   import SignInAgain from './SignInAgain.svelte';
@@ -36,8 +37,10 @@
   const harnesses = $derived(app.launch.harnesses);
   const preferred = app.launch.profiles.find((p) => p.default);
   let harness = $state(preferred?.harness ?? app.launch.harnesses[0]?.id ?? 'claude');
-  let profile = $state(preferred?.name ?? '');
+  // svelte-ignore state_referenced_locally
+  let profile = $state(initialProfile(app.launch.profiles.filter((p) => p.harness === harness), app.launch.spread));
   const profiles = $derived(app.launch.profiles.filter((p) => p.harness === harness));
+  const profileOpts = $derived(profileOptions(profiles, app.launch.spread, null));
   let prompt = $state('');
   let promptState = $state<'loading' | 'ready' | 'failed'>('loading');
   let promptError = $state('');
@@ -83,9 +86,12 @@
   let touched = $state(false);
   let confirmDiscard = $state(false);
 
-  /** The harness's default profile, else none. */
+  /** Auto while a spread is on, else the harness's default profile, else auto. */
   function pickHarness(h: string) {
-    profile = app.launch.profiles.find((p) => p.harness === h && p.default)?.name ?? '';
+    profile = initialProfile(
+      app.launch.profiles.filter((p) => p.harness === h),
+      app.launch.spread,
+    );
   }
 
   async function submit(e: SubmitEvent) {
@@ -267,8 +273,7 @@
                   <span class={label}>Profile</span>
                   <span class="relative flex">
                     <select class={pick} bind:value={profile} disabled={busy || !profiles.length}>
-                      <option value="">{profiles.length ? 'No profile' : 'Default login'}</option>
-                      {#each profiles as p (p.name)}<option value={p.name}>{p.name}</option>{/each}
+                      {#each profileOpts as o (o.value)}<option value={o.value} title={o.title}>{o.label}</option>{/each}
                     </select>
                     {@render chevron()}
                   </span>

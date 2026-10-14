@@ -6,6 +6,7 @@
   import RunButton from './RunButton.svelte';
   import { projectMenu } from '../actions';
   import { openMenu } from '../ui/ui.svelte';
+  import { prWord } from '../status';
 
   let { row }: { row: RepoRow } = $props();
 
@@ -49,10 +50,14 @@
       {#if row.prs.length}
         {#each row.prs as p (p.pr.number)}
           <button
-            class="{label} border-0 bg-transparent p-0 text-ink hover:underline hover:underline-offset-4"
-            title="{p.pr.title} ({p.branch})"
+            class="{label} border-0 bg-transparent p-0 hover:underline hover:underline-offset-4 {p.pr.state === 'merged'
+              ? 'text-merged'
+              : p.pr.state === 'closed'
+                ? 'text-muted line-through'
+                : 'text-ink'}"
+            title="{p.pr.title} ({p.branch}, {prWord(p.pr)})"
             onclick={() => api.openUrl(p.pr.url).catch((e) => toast(String(e)))}
-            >{p.pr.draft ? 'draft ' : ''}PR #{p.pr.number}</button
+            >{prWord(p.pr).replace(/PR$/, '')}PR #{p.pr.number}</button
           >
         {/each}
       {:else}
@@ -61,7 +66,7 @@
     </span>
     <button
       class="grid size-6 flex-none place-items-center self-center border border-transparent bg-transparent p-0 text-muted hover:border-rule hover:text-ink"
-      title="Repo actions: new worktree, open, rename, locate, remove (or right-click)"
+      title="Repo actions: new worktree, switch branch, open, refresh pull requests, rename, locate, remove (or right-click)"
       aria-label="{row.name} actions"
       aria-haspopup="menu"
       data-target="project:{row.project.id}"

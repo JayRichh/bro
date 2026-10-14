@@ -635,8 +635,9 @@
               stroke-width="1.3"
             /></svg
           >
-          <!-- In a narrow pane only the mode in use keeps its word. -->
-          <span class={on ? '' : 'hidden @min-[860px]:inline'}>{m.label}</span>
+          <!-- In a narrow pane only the mode in use keeps its word, and in a very
+               narrow one none does, so the close button stays in view. -->
+          <span class={on ? 'hidden @min-[560px]:inline' : 'hidden @min-[860px]:inline'}>{m.label}</span>
         </button>
       {/each}
     </div>

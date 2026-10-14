@@ -40,6 +40,8 @@ export type DialogSpec =
       danger?: boolean;
       /** An opt-in box (force a delete). */
       check?: string;
+      /** The box starts ticked. */
+      checked?: boolean;
       resolve: (v: { ok: boolean; checked: boolean }) => void;
     }
   | {
@@ -58,6 +60,8 @@ export const ui = $state({
   review: null as ReviewSheet | null,
   /** The Start orchestrator form. */
   startOrchestrator: false,
+  /** The branch switcher (worktrees/BranchSwitch.svelte). */
+  branchSwitch: false,
 });
 
 export type ReviewTab = 'terminal' | 'diff' | 'history' | 'pr';
@@ -91,7 +95,7 @@ function settle<T>(make: (resolve: (v: T) => void) => DialogSpec): Promise<T> {
 export const ask = {
   prompt: (o: { title: string; note?: string; fields: Field[]; confirm?: string }) =>
     settle<Record<string, string> | null>((resolve) => ({ kind: 'prompt', confirm: 'Save', ...o, resolve })),
-  confirm: (o: { title: string; message: string; detail?: string[]; confirm: string; danger?: boolean; check?: string }) =>
+  confirm: (o: { title: string; message: string; detail?: string[]; confirm: string; danger?: boolean; check?: string; checked?: boolean }) =>
     settle<{ ok: boolean; checked: boolean }>((resolve) => ({ kind: 'confirm', ...o, resolve })),
   pick: (o: { title: string; items: { id: string; label: string; hint?: string }[] }) =>
     settle<string | null>((resolve) => ({ kind: 'pick', ...o, resolve })),
@@ -99,5 +103,5 @@ export const ask = {
 
 /** Is any layer up (so page keys stand down)? */
 export function layerOpen(): boolean {
-  return !!(ui.menu || ui.dialog || ui.palette || ui.help || ui.review || ui.startOrchestrator);
+  return !!(ui.menu || ui.dialog || ui.palette || ui.help || ui.review || ui.startOrchestrator || ui.branchSwitch);
 }

@@ -58,8 +58,9 @@ pub struct Profile {
     #[serde(default, skip_serializing_if = "is_false")]
     pub use_default: bool,
     /// Switched off in the accounts list: never picked for a launch that
-    /// names no profile (no default, no spread), and left out of the
-    /// pickers. A session already running under it keeps it.
+    /// names no profile (no default, no spread). A launch that names it
+    /// still runs under it (the desktop's quick prompt lists it, marked
+    /// off). A session already running under it keeps it.
     #[serde(default, skip_serializing_if = "is_false")]
     pub disabled: bool,
 }
@@ -314,9 +315,15 @@ pub fn login_hint(profile: &Profile) -> Option<String> {
 /// A disabled default is no default: a launch naming no profile runs on
 /// the CLI's own login, as when none is flagged.
 pub fn default_for<'a>(all: &'a [Profile], harness: &str) -> Option<&'a Profile> {
+    flagged_default(all, harness).filter(|p| !p.disabled)
+}
+
+/// The profile flagged default for `harness`, switched off or not: what a
+/// list draws the star on (dimmed, "default (disabled)", when it is off
+/// and so [`default_for`] passes it over).
+pub fn flagged_default<'a>(all: &'a [Profile], harness: &str) -> Option<&'a Profile> {
     all.iter()
         .find(|p| p.default && p.harness.trim() == harness.trim() && p.problem().is_none())
-        .filter(|p| !p.disabled)
 }
 
 /// Every usable, enabled profile for `harness`, in config order: what a
