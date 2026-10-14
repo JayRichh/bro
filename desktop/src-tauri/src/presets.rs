@@ -107,11 +107,19 @@ pub fn save_at(
     if let Some(problem) = presets::name_problem(&preset, &others) {
         return Err(problem);
     }
+    let mut renamed = None;
     match at {
-        Some(i) => list[i] = preset,
+        Some(i) => {
+            if list[i].name != preset.name {
+                renamed = Some((list[i].name.clone(), preset.name.clone()));
+            }
+            list[i] = preset;
+        }
         None => list.push(preset),
     }
-    presets::save_to(store, &list).map_err(|e| format!("Could not save the presets: {e}"))?;
+    let renamed = renamed.as_ref().map(|(o, n)| (o.as_str(), n.as_str()));
+    presets::save_to_renamed(store, &list, renamed)
+        .map_err(|e| format!("Could not save the presets: {e}"))?;
     Ok(list_at(cfg, store))
 }
 
@@ -250,6 +258,14 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&store).unwrap()).unwrap();
         assert_eq!(saved[0]["pinned"], true);
         assert_eq!(saved[1]["name"], "future");
+
+        // A rename keeps them too.
+        save_at(&cfg, &store, Some("a"), row("b", "claude")).unwrap();
+        let saved: Vec<Value> =
+            serde_json::from_str(&std::fs::read_to_string(&store).unwrap()).unwrap();
+        assert_eq!(saved[0]["name"], "b");
+        assert_eq!(saved[0]["pinned"], true);
+        assert_eq!(saved.len(), 2);
     }
 
     #[test]

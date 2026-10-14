@@ -798,8 +798,12 @@ pub(crate) fn save_agent_preset_editor(app: &mut App, mut editor: AgentPresetEdi
             return;
         }
     };
+    let mut renamed = None;
     let index = match editor.editing {
         Some(index) if index < presets.len() => {
+            if presets[index].name != preset.name {
+                renamed = Some((presets[index].name.clone(), preset.name.clone()));
+            }
             presets[index] = preset;
             index
         }
@@ -808,7 +812,11 @@ pub(crate) fn save_agent_preset_editor(app: &mut App, mut editor: AgentPresetEdi
             presets.len() - 1
         }
     };
-    if let Err(err) = crate::agent_presets::save(&presets) {
+    let saved = match &renamed {
+        Some((old, new)) => crate::agent_presets::save_renamed(&presets, (old, new)),
+        None => crate::agent_presets::save(&presets),
+    };
+    if let Err(err) = saved {
         app.chrome.flash = Some(format!("could not save agent presets: {err}"));
     }
     reopen_presets_list(app, editor.worktree, editor.quick, index);

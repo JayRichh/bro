@@ -98,6 +98,12 @@ pub fn save(presets: &[AgentPreset]) -> std::io::Result<()> {
     save_to(&store_path(), presets)
 }
 
+/// [`save`] after an edit renamed one preset `(old, new)`: the renamed
+/// entry keeps the fields its stored entry had under the old name.
+pub fn save_renamed(presets: &[AgentPreset], renamed: (&str, &str)) -> std::io::Result<()> {
+    save_to_renamed(&store_path(), presets, Some(renamed))
+}
+
 /// `<data dir>/agent_presets.json`, or this thread's test override.
 pub fn store_path() -> PathBuf {
     #[cfg(any(test, feature = "test-support"))]
@@ -124,6 +130,17 @@ pub fn entry_name(entry: &Value) -> Option<&str> {
 /// name) had that this build doesn't know, and every stored entry this build
 /// can't read goes after them unless a preset now holds its name.
 pub fn save_to(store: &Path, presets: &[AgentPreset]) -> std::io::Result<()> {
+    save_to_renamed(store, presets, None)
+}
+
+/// [`save_to`], with one preset renamed `(old, new)` by the edit: its
+/// stored entry is found under the old name, so the fields this build
+/// doesn't know ride across the rename.
+pub fn save_to_renamed(
+    store: &Path,
+    presets: &[AgentPreset],
+    renamed: Option<(&str, &str)>,
+) -> std::io::Result<()> {
     let stored = nebula_core::settings::read_array(store)
         .ok()
         .flatten()
@@ -140,7 +157,11 @@ pub fn save_to(store: &Path, presets: &[AgentPreset]) -> std::io::Result<()> {
         else {
             unreachable!("a preset serializes to a JSON object");
         };
-        let mut entry = named(&preset.name)
+        let lookup = match renamed {
+            Some((old, new)) if new.eq_ignore_ascii_case(&preset.name) => old,
+            _ => preset.name.as_str(),
+        };
+        let mut entry = named(lookup)
             .and_then(Value::as_object)
             .cloned()
             .unwrap_or_default();
@@ -276,6 +297,24 @@ mod tests {
         assert_eq!(saved[0]["prefix"], "Be strict.");
         assert_eq!(saved[2]["kind"], "antigravity");
         assert_eq!(load_from(&path).len(), 2);
+    }
+
+    #[test]
+    fn a_rename_carries_the_fields_this_build_does_not_know() {
+        let (_dir, path) = store();
+        std::fs::write(
+            &path,
+            r#"[{"name": "reviewer", "kind": "codex", "pinned": true}]"#,
+        )
+        .unwrap();
+        let mut presets = load_from(&path);
+        presets[0].name = "strict reviewer".into();
+        save_to_renamed(&path, &presets, Some(("reviewer", "strict reviewer"))).unwrap();
+        let saved: Vec<Value> =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0]["name"], "strict reviewer");
+        assert_eq!(saved[0]["pinned"], true);
     }
 
     #[test]
