@@ -4,7 +4,8 @@
   // needs a login shows the command to run in a terminal.
   import { onMount } from 'svelte';
   import { api, type ProfileForm, type ProfileRow } from '../api';
-  import { refreshLaunchables, toast } from '../store.svelte';
+  import { app, refreshLaunchables, toast } from '../store.svelte';
+  import { removeWarning } from '../accounts/pick';
   import { ask } from '../ui/ui.svelte';
 
   let rows = $state<ProfileRow[]>([]);
@@ -53,7 +54,7 @@
   async function remove(r: ProfileRow) {
     const ok = await ask.confirm({
       title: 'Remove profile',
-      message: `Remove the profile "${r.name}"? Its sessions keep their name but launch on the default login.`,
+      message: removeWarning(r.name, app.model.agents),
       detail: r.home ? [`Its home stays at ${r.home} (kete profile remove --purge ${r.name} deletes it)`] : undefined,
       confirm: 'Remove',
       danger: true,
@@ -108,8 +109,8 @@
     <button class={btn} onclick={() => edit(null)}>Add profile</button>
   </div>
   <p class="m-0 mt-2 max-w-[68ch] text-[13px] text-muted">
-    A profile is another account for a harness: its own login in its own home, or the CLI's default login. The quick prompt picks one per launch; the
-    flagged default is used when none is picked.
+    A profile is another account for a harness: its own login in its own home, or the CLI's default login. The quick prompt picks one per launch; on
+    auto, the flagged default is used, or the account spread chooses (Settings, Sessions).
   </p>
 
   {#if notice}

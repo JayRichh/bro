@@ -32,8 +32,8 @@ JSON
 # --- accounts: signed in, with 5h and weekly readings taken just now ---
 P="$WORK/data/profiles"
 mkdir -p "$P/.usage" "$P/work/claude" "$P/personal/claude" "$P/codex-team/codex"
-echo '{}' > "$P/work/claude/.credentials.json"
-echo '{}' > "$P/personal/claude/.credentials.json"
+echo '{"claudeAiOauth":{}}' > "$P/work/claude/.credentials.json"
+echo '{"claudeAiOauth":{}}' > "$P/personal/claude/.credentials.json"
 echo '{}' > "$P/codex-team/codex/auth.json"
 usage() { # name harness 5h% 5h-reset-secs wk% wk-reset-secs plan source
   cat > "$P/.usage/$1.json" <<JSON

@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import type { AccountRow, AccountUsage, UsageWindow } from '../api';
+import type { AccountRow, AccountUsage, Agent, UsageWindow } from '../api';
 import {
   accountKey,
   bars,
   contextTitle,
   fillWidth,
   liveUsage,
+  loginTitle,
   mergeRows,
+  ownLoginSessionHarnesses,
   pct,
+  sessionsOn,
+  starTitle,
   percentAt,
   resetsIn,
   shownAt,
@@ -137,13 +141,43 @@ describe('accounts', () => {
     expect(t).toContain('weekly: 82%');
     expect(t).toContain('From the Claude status line, 3m ago');
   });
-  it('a harness own login joins the rail once a reading or session brings it, unless a profile covers it', () => {
+  it('a harness own login joins the rail while a reading or a session on it says it is in use', () => {
     const work = { key: 'work', name: 'work', harness: 'claude', profile: true } as AccountRow;
     const rows = mergeRows([work], { '@claude': usage([]), '@codex': usage([], { account: '@codex' }) }, ['copilot', 'aider']);
-    expect(rows.map((r) => r.key)).toEqual(['work', '@codex', '@copilot']);
-    expect(rows[1].name).toBe('codex');
-    expect(rows[1].profile).toBe(false);
+    expect(rows.map((r) => r.key)).toEqual(['work', '@claude', '@codex', '@copilot']);
+    expect(rows[2].name).toBe('codex');
+    expect(rows[2].profile).toBe(false);
+    const listed = { key: '@claude', name: 'claude', harness: 'claude', profile: false } as AccountRow;
+    expect(mergeRows([listed], { '@claude': usage([]) }, ['claude']).length).toBe(1);
     expect(mergeRows([], {}, []).length).toBe(0);
+  });
+  it('sessions count against their profile, or their harness own login', () => {
+    const a = (id: string, profile: string | null, extra: Partial<Agent> = {}) =>
+      ({ id, name: id, kind: 'claude', custom_harness: null, profile, archived: false, ...extra }) as Agent;
+    const agents = [
+      a('s1', 'work'),
+      a('s2', null),
+      a('s3', 'work', { archived: true }),
+      a('s4', null, { kind: 'custom', custom_harness: 'aider' }),
+      a('s5', ' ', { kind: 'codex' }),
+    ];
+    expect(sessionsOn({ key: 'work' }, agents).map((x) => x.id)).toEqual(['s1']);
+    expect(sessionsOn({ key: '@claude' }, agents).map((x) => x.id)).toEqual(['s2']);
+    expect(sessionsOn({ key: '@aider' }, agents).map((x) => x.id)).toEqual(['s4']);
+    expect(ownLoginSessionHarnesses(agents)).toEqual(['claude', 'aider', 'codex']);
+  });
+  it('the login words say credentials were found, not that they work', () => {
+    expect(loginTitle({ login: 'logged_in', expired: false, loginHint: null })).toContain('credentials found');
+    expect(loginTitle({ login: 'needs_login', expired: true, loginHint: 'kete profile login work' })).toBe(
+      'Login expired: the credentials say it ran out. Sign in with: kete profile login work',
+    );
+    expect(loginTitle({ login: 'needs_login', loginHint: null })).toBe('Not signed in: no credentials found');
+  });
+  it('a switched-off default keeps its star, marked disabled', () => {
+    const r = { name: 'work', harness: 'claude', default: false, flaggedDefault: true, disabled: true };
+    expect(starTitle(r)).toContain('work is the claude default (disabled)');
+    expect(starTitle({ ...r, disabled: false, flaggedDefault: false })).toBe('Make work the claude default');
+    expect(starTitle({ ...r, default: true, disabled: false })).toBe('work is the claude default');
   });
   it('resets read as time left', () => {
     expect(resetsIn(100 + 2 * 86400 + 4 * 3600, 100_000)).toBe('in 2d 4h');

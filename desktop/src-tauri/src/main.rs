@@ -384,16 +384,9 @@ fn open_url(app: tauri::AppHandle, url: String) -> Res<()> {
 }
 
 #[derive(Serialize)]
-struct ProfileInfo {
-    name: String,
-    harness: String,
-    default: bool,
-}
-
-#[derive(Serialize)]
 struct Launchables {
     harnesses: Vec<settings::HarnessInfo>,
-    profiles: Vec<ProfileInfo>,
+    profiles: Vec<launch::ProfileInfo>,
     /// The harness the quick prompt starts on: the Agents tab's Quick
     /// prompt Agent, stepped past one switched off since.
     default_harness: String,
@@ -403,6 +396,9 @@ struct Launchables {
     follow: bool,
     /// Archive asks first (Sessions tab, Confirm on archive).
     ask_before_archive: bool,
+    /// The ACCOUNT SPREAD (`manual`, `failover`, `least_used`): off
+    /// `manual`, the quick prompt starts on "auto" so the spread chooses.
+    spread: String,
 }
 
 /// What the quick prompt offers: the harnesses the TUI's New session
@@ -412,16 +408,10 @@ fn launchables() -> Launchables {
     let cfg = nebula_config::Config::load();
     let harnesses = settings::offered(&cfg);
     let default_harness = cfg.quick_prompt_kind().as_str().to_string();
-    let profiles = nebula_core::profiles::load()
-        .into_iter()
-        .filter(|p| !p.disabled)
-        .map(|p| ProfileInfo {
-            name: p.name,
-            harness: p.harness,
-            default: p.default,
-        })
-        .collect();
+    let profiles = launch::launch_profiles(&nebula_core::profiles::load());
+    let spread = nebula_core::accounts::Spread::parse(&cfg.account_spread);
     Launchables {
+        spread: spread.as_str().into(),
         harnesses,
         profiles,
         default_harness,
@@ -780,6 +770,7 @@ fn main() {
             projects::open_worktree,
             projects::open_remote,
             launch::quick_launch,
+            launch::account_pick,
             presets::presets_list,
             presets::preset_save,
             presets::preset_delete,
@@ -791,6 +782,7 @@ fn main() {
             profiles::profile_set_default,
             accounts::accounts_list,
             accounts::profile_set_enabled,
+            accounts::account_login_run,
             settings::settings_schema,
             settings::settings_set,
             settings::settings_reset,
