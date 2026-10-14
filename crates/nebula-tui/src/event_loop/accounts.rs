@@ -24,11 +24,8 @@ fn rows(app: &mut App) -> Vec<crate::accounts_overlay::AccountRow> {
 /// `⇧U`: open the overlay.
 pub(crate) fn open(app: &mut App) {
     let rows = rows(app);
-    app.modals.overlay = Some(Overlay::Accounts(AccountsView::new(
-        rows,
-        nebula_core::paths::config_path(),
-        nebula_core::paths::config_local_path(),
-    )));
+    let (config, local) = crate::config::Config::layer_paths();
+    app.modals.overlay = Some(Overlay::Accounts(AccountsView::new(rows, config, local)));
     app.chrome.dirty = true;
 }
 
@@ -258,6 +255,23 @@ mod tests {
                 let mut terminal = ratatui::Terminal::new(TestBackend::new(60, h)).unwrap();
                 terminal.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
             }
+        });
+    }
+
+    /// The overlay edits the layers the test override (or a real override)
+    /// routes to, never the data dir's config.json behind its back.
+    #[test]
+    fn the_overlay_edits_the_routed_config_layers() {
+        with_config_json("{}", || {
+            let mut app = App::new();
+            let mut out = Vec::new();
+            press(&mut app, KeyCode::Char('U'), KeyModifiers::SHIFT, &mut out);
+            let Some(Overlay::Accounts(view)) = &app.modals.overlay else {
+                panic!("closed");
+            };
+            let (config, local) = crate::config::Config::layer_paths();
+            assert_eq!((&view.config, &view.local), (&config, &local));
+            assert_ne!(view.config, nebula_core::paths::config_path());
         });
     }
 }
