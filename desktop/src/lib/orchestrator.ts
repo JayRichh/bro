@@ -3,7 +3,8 @@
 // wants you, and what wants you elsewhere. Pure, so the rules are tested
 // without a window; the view and the commands sit on top.
 
-import type { Agent, Model } from './api';
+import type { Agent, Model, Startup } from './api';
+import type { Place } from './shell/history.svelte';
 import { buildForest, attentionRank, walkAll, type Node, type Status } from './overview/tree';
 
 /** The first daemon protocol that can start, pin and unpin an orchestrator. */
@@ -92,4 +93,18 @@ export function countWords(c: Partial<Record<Status, number>>): { status: Status
     running: () => 'running',
   };
   return ATTENTION.filter((s) => c[s]).map((s) => ({ status: s, text: `${c[s]} ${word[s]!(c[s]!)}` }));
+}
+
+/**
+ * Whether the window opens on the orchestrator: the saved Startup pref
+ * unless the command line picks a view or session for this run, or the
+ * command line's `--view orchestrator`.
+ */
+export function opensOnOrchestrator(prefStartup: string | undefined, s: Startup | null): boolean {
+  return (prefStartup === 'orchestrator' && !s?.view && !s?.session) || s?.view === 'orchestrator';
+}
+
+/** A place as one string: a startup step that waited for the daemon compares it, and moves nothing once the user has gone somewhere else. */
+export function placeKey(p: Place): string {
+  return `${p.view}\u0000${p.repo ?? ''}\u0000${p.item ?? ''}`;
 }

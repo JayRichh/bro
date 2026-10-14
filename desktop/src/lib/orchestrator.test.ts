@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import type { Agent, AgentStatus, Model } from './api';
-import { canProvision, countWords, descendantCounts, elsewhere, orchestratorOf, orchestratorTree } from './orchestrator';
+import { canProvision, countWords, descendantCounts, elsewhere, opensOnOrchestrator, orchestratorOf, orchestratorTree, placeKey } from './orchestrator';
 import { repoRows } from './overview/repos';
 
 function agent(id: string, worktree: string, parent: string | null = null, status: AgentStatus = 'finished', unseen = false): Agent {
@@ -127,4 +127,21 @@ test('a parent in the same repo but archived (hidden) is no cross-repo cue', () 
   m.agents.push({ ...agent('old', 'wp', null), archived: true }, agent('kid', 'wp', 'old'));
   const payments = repoRows(m).find((r) => r.project.id === 'pp')!;
   expect(payments.forest.find((n) => n.id === 'kid')?.from).toBeUndefined();
+});
+
+test('the window opens on the orchestrator from the saved pref unless the command line picks somewhere', () => {
+  const s = (view: string | null, session: string | null = null) => ({ view, session, theme: null, diff_mode: null });
+  expect(opensOnOrchestrator('orchestrator', null)).toBe(true);
+  expect(opensOnOrchestrator('orchestrator', s(null))).toBe(true);
+  expect(opensOnOrchestrator('orchestrator', s('board'))).toBe(false);
+  expect(opensOnOrchestrator('orchestrator', s(null, 'api'))).toBe(false);
+  expect(opensOnOrchestrator('home', s('orchestrator'))).toBe(true);
+  expect(opensOnOrchestrator(undefined, null)).toBe(false);
+});
+
+test('a startup step that waited never moves a window the user has moved since', () => {
+  const before = placeKey({ view: 'overview' });
+  expect(placeKey({ view: 'overview' })).toBe(before);
+  expect(placeKey({ view: 'overview', repo: 'p1' })).not.toBe(before);
+  expect(placeKey({ view: 'settings' })).not.toBe(before);
 });

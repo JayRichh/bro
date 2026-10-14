@@ -29,7 +29,7 @@
   import ReviewSheet from './lib/orchestrator/ReviewSheet.svelte';
   import ReviewNotices from './lib/orchestrator/ReviewNotices.svelte';
   import { onReviewOpened, openOrchestrator } from './lib/orch.svelte';
-  import { orchestratorOf } from './lib/orchestrator';
+  import { opensOnOrchestrator, orchestratorOf, placeKey } from './lib/orchestrator';
 
   const media = window.matchMedia('(prefers-color-scheme: dark)');
   let osDark = $state(media.matches);
@@ -126,23 +126,28 @@
     // run only and is never written back.
     const prefs = await loadDesktopPrefs();
     const s = await api.startup().catch(() => null);
-    // Open on the orchestrator (Desktop tab) unless the command line picks
-    // a view or session for this run.
-    if ((prefs?.startup === 'orchestrator' && !s?.view && !s?.session) || s?.view === 'orchestrator') {
-      for (let i = 0; i < 100 && !app.model.connected; i++) await new Promise((r) => setTimeout(r, 100));
-      openOrchestrator();
-    }
-    if (!s) return;
-    if (s.theme === 'light' || s.theme === 'dark' || s.theme === 'system') app.themePref = s.theme;
-    if (isDiffMode(s.diff_mode)) app.diffMode = s.diff_mode;
-    if (s.view === 'board') {
+    // Flags that need no daemon apply at once.
+    if (s?.theme === 'light' || s?.theme === 'dark' || s?.theme === 'system') app.themePref = s.theme;
+    if (isDiffMode(s?.diff_mode)) app.diffMode = s.diff_mode;
+    if (s?.view === 'board') {
       app.home = 'board';
       nav.replace({ view: 'board' });
     }
-    if (s.session || s.view === 'session' || s.view === 'diff') {
-      // Wait for the daemon's snapshot before resolving names.
-      for (let i = 0; i < 100 && !app.model.connected; i++) await new Promise((r) => setTimeout(r, 100));
+    // The rest waits for the daemon, then moves the window only if the
+    // user has not gone somewhere in the meantime.
+    const orchestrator = opensOnOrchestrator(prefs?.startup, s);
+    const session = !orchestrator && !!s && (!!s.session || s.view === 'session' || s.view === 'diff');
+    if (!orchestrator && !session) return;
+    const before = placeKey(nav.current);
+    for (let i = 0; i < 100 && !app.model.connected; i++) await new Promise((r) => setTimeout(r, 100));
+    if (placeKey(nav.current) !== before) return;
+    // Open on the orchestrator (Desktop tab) unless the command line picks
+    // a view or session for this run.
+    if (orchestrator) return openOrchestrator();
+    if (s && session) {
+      // Let the daemon's snapshot settle before resolving names.
       await new Promise((r) => setTimeout(r, 300));
+      if (placeKey(nav.current) !== before) return;
       const m = app.model;
       const want = s.session?.toLowerCase();
       const agent = want ? m.agents.find((a) => a.id.toLowerCase() === want || a.name.toLowerCase() === want) : undefined;
@@ -150,7 +155,7 @@
       if (agent) openSession({ Agent: agent.id });
       else if (term) openSession({ Terminal: term.id });
     }
-    if (s.view === 'diff') openDiff(sessionWorktree(app.session));
+    if (s?.view === 'diff') openDiff(sessionWorktree(app.session));
   }
 
   onMount(() => {
