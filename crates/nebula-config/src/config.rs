@@ -52,7 +52,7 @@ pub const ORCHESTRATOR_VIEWS: &[&str] = &["auto", "always", "never"];
 /// grid and a pane side by side, so the one chat is the useful screen.
 pub const ORCHESTRATOR_NARROW_COLS: u16 = 100;
 
-fn is_auto(word: &String) -> bool {
+fn is_auto(word: &str) -> bool {
     word.trim().is_empty() || word.trim().eq_ignore_ascii_case(ORCHESTRATOR_VIEWS[0])
 }
 
