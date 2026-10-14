@@ -90,10 +90,10 @@
       aria-selected={sel}
       tabindex="0"
       data-row
-      data-target={n.agent ? `agent:${n.agent.id}` : n.sub ? `agent:${n.sub.parent_agent}` : undefined}
+      data-target={n.agent ? `agent:${n.agent.id}` : n.sub ? `subagent:${n.sub.parent_agent}` : undefined}
       class="{ROW} {sel ? 'bg-surface' : 'hover:bg-surface'} {n.agent?.archived ? 'opacity-60' : ''}"
       onclick={() => openNode(n)}
-      oncontextmenu={(e) => menu(e, { kind: 'agent', id: n.agent?.id ?? n.sub?.parent_agent ?? '' })}
+      oncontextmenu={(e) => menu(e, { kind: 'agent', id: n.agent?.id ?? n.sub?.parent_agent ?? '', viaSub: !n.agent && !!n.sub })}
       onkeydown={(e) => onRowKey(e, n, expanded, hasKids)}
     >
       {#if needs}

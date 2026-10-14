@@ -11,14 +11,16 @@ import { ask, type MenuEntry } from './ui/ui.svelte';
 import { keysOf, type ShortcutId } from './shortcuts';
 
 export type Target =
-  | { kind: 'agent'; id: string }
+  /** `viaSub`: picked from one of its subagents' rows, so it acts on
+   *  this, the parent session, and says so. */
+  | { kind: 'agent'; id: string; viaSub?: boolean }
   | { kind: 'terminal'; id: string }
   | { kind: 'worktree'; id: string }
   | { kind: 'project'; id: string };
 
 /** A target as a string, for `data-session` attributes. */
 export function targetKey(t: Target): string {
-  return `${t.kind}:${t.id}`;
+  return `${t.kind === 'agent' && t.viaSub ? 'subagent' : t.kind}:${t.id}`;
 }
 export function parseTarget(k: string | null | undefined): Target | null {
   if (!k) return null;
@@ -26,6 +28,7 @@ export function parseTarget(k: string | null | undefined): Target | null {
   const kind = k.slice(0, i);
   const id = k.slice(i + 1);
   if (kind === 'agent' || kind === 'terminal' || kind === 'worktree' || kind === 'project') return { kind, id };
+  if (kind === 'subagent') return { kind: 'agent', id, viaSub: true };
   return null;
 }
 
@@ -66,29 +69,43 @@ export async function renameAgent(id: string) {
   if (v && v.name.trim() && v.name.trim() !== a.name) await attempt('Could not rename', () => api.renameAgent(id, v.name));
 }
 
-export async function archiveAgent(id: string) {
+/** Archive a session and the thread nested under it. `viaSub`: asked
+ *  from a subagent's row, which acts on its parent, so it always confirms
+ *  and says it is the parent going. */
+export async function archiveAgent(id: string, viaSub = false) {
   const a = agentOf(id);
   if (!a || a.archived) return;
   const kids = descendants(m(), id).filter((k) => !k.archived);
-  if (kids.length || app.launch.ask_before_archive !== false) {
+  if (viaSub || kids.length || app.launch.ask_before_archive !== false) {
     const r = await ask.confirm({
       title: kids.length ? `Archive thread \u00b7 ${kids.length + 1} sessions` : 'Archive session',
-      message: kids.length
-        ? `Archive "${a.name}" and everything nested under it? U brings them back.`
-        : `Archive "${a.name}"? Its agent stops; U brings it back.`,
+      message:
+        (viaSub ? `This archives the parent session, not the subagent. ` : '') +
+        (kids.length
+          ? `Archive "${a.name}" and everything nested under it? U brings them back.`
+          : `Archive "${a.name}"? Its agent stops; U brings it back.`),
       detail: kids.length ? [a.name, ...kids.map((k) => k.name)] : undefined,
       confirm: 'Archive',
     });
     if (!r.ok) return;
   }
+  // The model may have moved while the dialog was up: act on it as it is now.
+  const now = agentOf(id);
+  if (!now || now.archived) return;
+  const thread = descendants(m(), id).filter((k) => !k.archived);
   await attempt('Could not archive', async () => {
-    for (const x of [a, ...kids]) await api.archiveAgent(x.id);
+    for (const x of [now, ...thread]) await api.archiveAgent(x.id);
   });
 }
 
+/** Bring back an archived session and the thread archived with it. */
 export async function unarchiveAgent(id: string) {
   const a = agentOf(id);
-  if (a?.archived) await attempt('Could not unarchive', () => api.unarchiveAgent(id));
+  if (!a?.archived) return;
+  const thread = descendants(m(), id).filter((k) => k.archived);
+  await attempt('Could not unarchive', async () => {
+    for (const x of [a, ...thread]) await api.unarchiveAgent(x.id);
+  });
 }
 
 export async function deleteAgent(id: string) {
@@ -105,18 +122,24 @@ export async function deleteAgent(id: string) {
     danger: true,
   });
   if (!r.ok) return;
-  if (app.session && 'Agent' in app.session && [a, ...kids].some((x) => x.id === (app.session as { Agent: string }).Agent))
+  // Sessions spawned while the dialog was up go too: recount now.
+  const now = agentOf(id);
+  if (!now) return;
+  const gone = descendants(m(), id);
+  if (app.session && 'Agent' in app.session && [now, ...gone].some((x) => x.id === (app.session as { Agent: string }).Agent))
     app.session = null;
   await attempt('Could not delete', async () => {
-    for (const x of [...kids].reverse().concat(a)) await api.deleteAgent(x.id);
+    for (const x of [...gone].reverse().concat(now)) await api.deleteAgent(x.id);
   });
 }
 
 export async function restartAgent(id: string) {
   const a = agentOf(id);
   if (!a || a.archived) return;
-  await attempt('Could not restart', () => api.restartAgent(id));
-  toast(`Restarting ${a.name}.`);
+  await attempt('Could not restart', async () => {
+    await api.restartAgent(id);
+    toast(`Restarting ${a.name}.`);
+  });
 }
 
 export async function moveAgent(id: string) {
@@ -226,7 +249,22 @@ export async function deleteWorktree(id: string) {
 
 export async function openEditor(worktree: string | undefined) {
   if (!worktree) return;
-  await attempt('Could not open', async () => toast(`Opened with: ${await api.openWorktree(worktree)}`));
+  await attempt('Could not open', async () => {
+    let r = await api.openWorktree(worktree);
+    if (!r.opened) {
+      // From the repo's .kete.json, not the user's setting: anyone who can
+      // push wrote it. Show it once per repo and command before it runs.
+      const ok = await ask.confirm({
+        title: 'Run the repo\'s open command?',
+        message: 'This command comes from the repo\'s .kete.json, not your settings. Run it? You won\'t be asked again for this repo unless it changes.',
+        detail: [r.command],
+        confirm: 'Run',
+      });
+      if (!ok.ok) return;
+      r = await api.openWorktree(worktree, true);
+    }
+    if (r.opened) toast(`Opened with: ${r.command}`);
+  });
 }
 
 export async function openRemote(worktree: string | undefined) {
@@ -313,16 +351,20 @@ function worktreeItems(w: Worktree | undefined): MenuEntry[] {
   return out;
 }
 
-export function agentMenu(a: Agent): MenuEntry[] {
+export function agentMenu(a: Agent, viaSub = false): MenuEntry[] {
   const w = worktreeOf(a.worktree_id);
+  // From a subagent's row every verb is the parent's: say so up top.
+  const head: MenuEntry[] = viaSub ? [{ heading: `Parent session: ${a.name}` }] : [];
   if (a.archived)
     return [
+      ...head,
       item('Unarchive', () => unarchiveAgent(a.id), 'unarchive'),
       item('Duplicate', () => duplicateAgent(a.id), 'duplicate'),
       'sep',
       item('Delete\u2026', () => deleteAgent(a.id), 'delete', true),
     ];
   const out: MenuEntry[] = [
+    ...head,
     item('Open', () => openSession({ Agent: a.id })),
     item('Follow-up prompt\u2026', () => followUp(a.id), 'follow_up'),
     item('Restart agent', () => restartAgent(a.id), 'restart'),
@@ -331,7 +373,7 @@ export function agentMenu(a: Agent): MenuEntry[] {
     item('Rename\u2026', () => renameAgent(a.id), 'rename'),
   ];
   if (a.unseen) out.push(item('Mark seen', () => seeAgent(a.id)));
-  out.push(item('Archive', () => archiveAgent(a.id), 'archive'), item('Delete\u2026', () => deleteAgent(a.id), 'delete', true));
+  out.push(item(viaSub ? 'Archive parent session\u2026' : 'Archive', () => archiveAgent(a.id, viaSub), 'archive'), item('Delete\u2026', () => deleteAgent(a.id), 'delete', true));
   return [...out, 'sep', ...worktreeItems(w)];
 }
 
@@ -374,7 +416,7 @@ export function menuFor(t: Target): MenuEntry[] {
   switch (t.kind) {
     case 'agent': {
       const a = agentOf(t.id);
-      return a ? agentMenu(a) : [];
+      return a ? agentMenu(a, t.viaSub) : [];
     }
     case 'terminal': {
       const x = terminalOf(t.id);
@@ -395,7 +437,7 @@ export function runRowKey(id: ShortcutId, t: Target): boolean {
   const table: Partial<Record<ShortcutId, () => unknown>> = a
     ? {
         rename: () => renameAgent(a.id),
-        archive: () => archiveAgent(a.id),
+        archive: () => archiveAgent(a.id, t.kind === 'agent' && t.viaSub),
         unarchive: () => unarchiveAgent(a.id),
         delete: () => deleteAgent(a.id),
         restart: () => restartAgent(a.id),
