@@ -38,7 +38,8 @@
     phase = 'booting';
     note = '';
     term.reset();
-    fit.fit();
+    // A hidden pane has no size to fit to; it fits once shown.
+    if (host.offsetWidth) fit.fit();
     lastSize = { cols: term.cols, rows: term.rows };
     const ch = new Channel<PtyEvent>();
     ch.onmessage = (ev) => {
@@ -78,10 +79,19 @@
     }
   }
 
-  function refit() {
-    if (!term || !fit || !host.offsetWidth) return;
+  // Another client on the same session (the terminal app, the review
+  // sheet) can resize its PTY meanwhile. When this pane is shown again or
+  // takes focus it asserts its own size, even when that is unchanged here.
+  let hidden = false;
+  function refit(force = false) {
+    if (!term || !fit || !host.offsetWidth) {
+      hidden = true;
+      return;
+    }
+    if (hidden) force = true;
+    hidden = false;
     fit.fit();
-    if (attached && (term.cols !== lastSize.cols || term.rows !== lastSize.rows)) {
+    if (attached && (force || term.cols !== lastSize.cols || term.rows !== lastSize.rows)) {
       lastSize = { cols: term.cols, rows: term.rows };
       api.resize(attached, term.cols, term.rows).catch(() => {});
     }
@@ -152,9 +162,10 @@
     let pending: ReturnType<typeof setTimeout> | undefined;
     ro = new ResizeObserver(() => {
       clearTimeout(pending);
-      pending = setTimeout(refit, 40);
+      pending = setTimeout(() => refit(), 40);
     });
     ro.observe(host);
+    host.addEventListener('focusin', () => refit(true));
     await attach(session);
   });
 

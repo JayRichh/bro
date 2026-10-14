@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, projectOf, saveDesktopPref, sessionWorktree } from './store.svelte';
+  import { app, closeDiff, projectOf, saveDesktopPref, sessionWorktree } from './store.svelte';
   import { nav } from './shell/history.svelte';
   import { isDiffMode, type DiffMode } from './diff-api';
   import { placeOf } from './status';
@@ -32,6 +32,13 @@
   function onKey(e: KeyboardEvent) {
     if (!active) return;
     const t = e.target as HTMLElement;
+    // Esc leaves the diff even from inside the editor (the global key skips
+    // typing targets), unless a Monaco widget (find, hover) wants it first.
+    if (e.key === 'Escape' && !e.defaultPrevented && t.closest('.monaco-editor') && !t.closest('.find-widget, .monaco-hover, .suggest-widget')) {
+      e.preventDefault();
+      closeDiff();
+      return;
+    }
     if (t.closest('input, textarea, select, .monaco-editor, .xterm')) return;
     if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
     if (e.key === 's') setMode('side');
@@ -55,5 +62,15 @@
         <option value={w.id}>{placeOf(app.model, w.id).project} / {w.branch}</option>
       {/each}
     </select>
+  {/snippet}
+  {#snippet trail()}
+    <button
+      class="ml-1 grid size-7 flex-none place-items-center border border-rule bg-transparent text-ink hover:border-rule-strong"
+      onclick={closeDiff}
+      title="Close the diff (Esc)"
+      aria-label="Close the diff"
+    >
+      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.4" /></svg>
+    </button>
   {/snippet}
 </DiffPane>

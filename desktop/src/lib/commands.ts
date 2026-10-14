@@ -7,6 +7,7 @@ import { nav } from './shell/history.svelte';
 import {
   app,
   focusQuickPrompt,
+  closeDiff,
   goHome,
   openDiff,
   openSession,
@@ -90,6 +91,7 @@ export function runShortcut(id: ShortcutId): boolean {
     orchestrator_f10: orchestratorKey,
     close_split: () => {
       if (!split() && nav.current.view !== 'settings') return false;
+      if (nav.current.view === 'diff') return closeDiff();
       goHome(nav.current.repo);
     },
     toggle_archived: toggleArchived,

@@ -193,6 +193,13 @@ export function openDiffRange(worktree: string, range: DiffRange) {
   nav.go({ view: 'diff', repo: projectOf(worktree), item: diffItem(worktree, range) });
 }
 
+/** Leave the Diff view for wherever it was opened from (the orchestrator,
+ *  a session), or home when it was the first place. */
+export function closeDiff() {
+  if (nav.canBack) nav.back();
+  else goHome(nav.current.repo);
+}
+
 /** Back to the overview (or the board), closing any split. */
 export function goHome(repo?: string) {
   nav.go({ view: app.home, repo });

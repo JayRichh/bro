@@ -243,10 +243,10 @@
           style="width: {rightWidth}"
         >
           {#if sessionEverOpened}
-            <div class="absolute inset-0 {view === 'session' || orchView ? 'visible' : 'invisible'}"><Session /></div>
+            <div class="absolute inset-0 {view === 'session' || orchView ? 'z-10' : 'hidden'}"><Session /></div>
           {/if}
           {#if diffEverOpened}
-            <div class="absolute inset-0 {view === 'diff' ? 'visible' : 'invisible'}"><Diff /></div>
+            <div class="absolute inset-0 {view === 'diff' ? 'z-10' : 'hidden'}"><Diff /></div>
           {/if}
         </div>
       {/if}

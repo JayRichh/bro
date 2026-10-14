@@ -8,6 +8,7 @@
   - `keys`: answer the view's keys (j/k, F7) from anywhere in the window,
     not only when focus is inside the pane.
   - `lead`: a snippet drawn at the left of the toolbar.
+  - `trail`: a snippet drawn at the right end of the toolbar (a close button).
 -->
 <script lang="ts">
   import { onDestroy, onMount, tick, type Snippet } from 'svelte';
@@ -24,12 +25,14 @@
     mode = $bindable('side'),
     keys = false,
     lead,
+    trail,
   }: {
     worktree: string | null;
     range?: DiffRange | null;
     mode?: DiffMode;
     keys?: boolean;
     lead?: Snippet;
+    trail?: Snippet;
   } = $props();
 
   /** `absent`: the status says this side has no file, so why. */
@@ -647,6 +650,7 @@
         ><path d="M13.5 8A5.5 5.5 0 1 1 11.8 4M13.5 2v3h-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg
       >
     </button>
+    {@render trail?.()}
   </div>
   {#if offline}
     <div class="flex h-7 flex-none items-center gap-2 border-b border-rule px-3 font-mono text-[12px] text-muted" role="status">
@@ -762,8 +766,8 @@
       </ul>
     {/if}
     <div class="relative min-h-0 min-w-0">
-      <div class="absolute inset-0 {mode === 'replacement' ? 'invisible' : ''}" bind:this={diffHost}></div>
-      <div class="absolute inset-0 {mode === 'replacement' ? '' : 'invisible'}" bind:this={repHost}></div>
+      <div class="absolute inset-0 {mode === 'replacement' ? 'hidden' : ''}" bind:this={diffHost}></div>
+      <div class="absolute inset-0 {mode === 'replacement' ? '' : 'hidden'}" bind:this={repHost}></div>
       {#if problem}
         <div class="absolute inset-0 overflow-y-auto bg-bg px-6 pt-6">
           <h2 class="m-0 truncate font-mono text-[13px] font-normal text-muted" title={problem.path}>{problem.path}</h2>
