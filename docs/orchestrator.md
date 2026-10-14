@@ -164,32 +164,37 @@ rather than trying to sign in.
 
 ## Permission model
 
-The socket is same-user only, but orchestrator commands are privileged: they can
-message other agents and open review UI in every client. Every orchestrator
-request carries the caller's `NEBULA_AGENT_ID`, and the daemon checks the caller
-exists, is not archived, and holds the `orchestrator` role in its database.
-Prompt text is never trusted.
+The socket is same-user only, and that is the real boundary: any process
+running as you can talk to the daemon. On top of it, orchestrator commands get
+extra checks, because they can message other agents and open review UI in every
+client. Every orchestrator request carries the caller's `NEBULA_AGENT_ID`, and
+the daemon checks the caller exists, is not archived, and holds the
+`orchestrator` role in its database. Prompt text is never trusted.
 
-Granting the role is guarded too:
+Granting the role is checked too:
 
 - `CreateAgent` can no longer create an orchestrator; only `StartOrchestrator`
   and `SetOrchestrator` grant the role.
 - Those requests, and `ClearOrchestrator`, are refused when the client process
   runs inside a live agent session (the daemon walks the process table from the
-  client's pid up to a session's PTY child), so a worker cannot mint or become
-  the orchestrator through its own shell. A kete terminal tab is your own shell
-  and may. Provisioning is serialized, so two starts cannot both win.
+  client's pid up to a session's PTY child). That stops a worker's own shell
+  from minting or taking the role by accident or on a prompt's say-so.
 - The orchestrator verbs trust the caller id the client sends, so the same
   process check backs them: a verb whose client runs inside a *different*
   agent's session than the orchestrator it names (a worker that set
   `NEBULA_AGENT_ID` to the orchestrator's id) is refused.
-- A partial unique index on the role makes a second orchestrator row impossible
-  from any path.
+- Provisioning is serialized, so two starts cannot both win, and a partial
+  unique index on the role makes a second orchestrator row impossible from any
+  path.
 
-These checks are **defence in depth**, not a sealed boundary: the socket is
-same-user, a process the OS reports no pid for passes, and a same-user process
-outside every session (your own shell) is trusted, as it could drive any session
-anyway.
+These checks are **defence in depth**, not a sealed boundary. Known gaps:
+
+- Terminal tabs are exempt. A process inside a kete terminal tab counts as your
+  own shell and passes. Anything with socket access can open a terminal tab
+  and send it input, and a command run that way gets the same pass.
+- A client the OS reports no pid for passes.
+- A same-user process outside every session (your own shell, or anything else
+  running as you) is trusted, as it could drive any session anyway.
 
 The orchestrator does not approve permission prompts for other agents. Its loop
 is tell-then-ask: report that a session is waiting and offer to open it in
