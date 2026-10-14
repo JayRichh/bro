@@ -785,7 +785,9 @@ mod tests {
         #[cfg(target_os = "macos")]
         assert_eq!(
             resolve_sound("Glass", false, true),
-            Some(Sound::File(Path::new(MACOS_SOUNDS_DIR).join("Glass.aiff")))
+            Some(Sound::File(
+                Path::new(nebula_config::MACOS_SOUNDS_DIR).join("Glass.aiff")
+            ))
         );
     }
 
@@ -835,7 +837,9 @@ mod tests {
         #[cfg(target_os = "macos")]
         assert_eq!(
             resolve_sound("Sosumi", false, true),
-            Some(Sound::File(Path::new(MACOS_SOUNDS_DIR).join("Sosumi.aiff")))
+            Some(Sound::File(
+                Path::new(nebula_config::MACOS_SOUNDS_DIR).join("Sosumi.aiff")
+            ))
         );
     }
 

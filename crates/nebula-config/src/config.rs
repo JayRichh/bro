@@ -99,7 +99,7 @@ pub const SOUNDS: &[&str] = &[
 ];
 
 /// Where the macOS system sounds live; `<name>.aiff` inside it.
-const MACOS_SOUNDS_DIR: &str = "/System/Library/Sounds";
+pub const MACOS_SOUNDS_DIR: &str = "/System/Library/Sounds";
 
 pub use nebula_core::harness::DEFAULT_CHOICE;
 
