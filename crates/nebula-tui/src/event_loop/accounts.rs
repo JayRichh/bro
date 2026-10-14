@@ -9,8 +9,7 @@ use crate::accounts_overlay::{build_rows, AccountsView};
 /// daemon is too old to push one.
 fn readings(app: &mut App) -> Vec<nebula_core::usage::AccountUsage> {
     if !app.launcher.usage_pushed {
-        app.launcher.account_usage =
-            nebula_core::usage::read_all_in(&nebula_core::profiles::profiles_root());
+        app.launcher.account_usage = crate::accounts_overlay::kept_readings();
     }
     app.launcher.account_usage.clone()
 }
@@ -19,7 +18,7 @@ fn rows(app: &mut App) -> Vec<crate::accounts_overlay::AccountRow> {
     let profiles = crate::config::Config::load().profiles;
     app.launcher.profiles = profiles.clone();
     let usage = readings(app);
-    build_rows(&profiles, &usage, nebula_core::accounts::login_state)
+    build_rows(&profiles, &usage, crate::accounts_overlay::login_lookup)
 }
 
 /// `⇧U`: open the overlay.

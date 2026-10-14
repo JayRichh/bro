@@ -258,8 +258,7 @@ pub(crate) fn draft_of_return(back: &QuickReturn) -> Option<QuickDraft> {
 /// read back from them too.
 pub(crate) fn refresh_profiles(app: &mut App) {
     if !app.launcher.usage_pushed {
-        app.launcher.account_usage =
-            nebula_core::usage::read_all_in(&nebula_core::profiles::profiles_root());
+        app.launcher.account_usage = crate::accounts_overlay::kept_readings();
     }
     app.launcher.profiles = crate::config::Config::load().profiles;
 }

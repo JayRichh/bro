@@ -58,6 +58,25 @@ impl AccountRow {
 
 /// The rows for `all` profiles and the `usage` readings: profiles in
 /// config order, then each own-login account that has a reading.
+/// The kept readings on disk (`<profiles>/.usage`), for a daemon too old
+/// to push them. Unit tests never read the machine's real data dir: a
+/// reading Jay's own sessions left there would change what they draw.
+pub fn kept_readings() -> Vec<nebula_core::usage::AccountUsage> {
+    if cfg!(test) {
+        return Vec::new();
+    }
+    nebula_core::usage::read_all_in(&profiles::profiles_root())
+}
+
+/// [`nebula_core::accounts::login_state`], except under unit tests, which
+/// never look at the machine's real logins.
+pub fn login_lookup(profile: Option<&Profile>, harness: &str) -> LoginState {
+    if cfg!(test) {
+        return LoginState::Unknown;
+    }
+    nebula_core::accounts::login_state(profile, harness)
+}
+
 pub fn build_rows(
     all: &[Profile],
     usage: &[AccountUsage],
