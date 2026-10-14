@@ -69,8 +69,7 @@ pub fn compact_line(json: &Value) -> String {
 
 /// The statusLine command of a settings file, unless it is kete's own.
 fn command_in(path: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(path).ok()?;
-    let v: Value = serde_json::from_str(&text).ok()?;
+    let v = nebula_core::settings::read_object(path).ok()??;
     let line = v.get("statusLine")?;
     if line
         .get("type")
@@ -301,6 +300,20 @@ mod tests {
             "ctx 8%",
             "API billing: no plan windows"
         );
+    }
+
+    /// A settings file saved by Notepad (a byte order mark first) still
+    /// gives up its statusLine.
+    #[test]
+    fn a_settings_file_with_a_bom_is_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(
+            &path,
+            "\u{feff}{\"statusLine\": {\"type\": \"command\", \"command\": \"my-line\"}}",
+        )
+        .unwrap();
+        assert_eq!(command_in(&path).as_deref(), Some("my-line"));
     }
 
     #[test]
