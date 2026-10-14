@@ -112,6 +112,38 @@ pub struct ReviewOpened {
 /// Where a `ReviewOpened` goes: the app emits it to the window.
 pub type ReviewSink = Box<dyn Fn(ReviewOpened) + Send + Sync>;
 
+/// Which way a session just turned, for the done / needs-you alerts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Turn {
+    /// Running or needs-feedback into finished: the DONE SOUND's edge.
+    Done,
+    /// Anything else into needs-feedback: the FEEDBACK SOUND's edge.
+    NeedsYou,
+}
+
+/// The edge a status change makes, as the TUI's `handle_status_event`
+/// reads it: a re-stamp of the same status, and every other move, is none.
+pub fn turn(before: nebula_core::AgentStatus, after: nebula_core::AgentStatus) -> Option<Turn> {
+    use nebula_core::AgentStatus::{Finished, NeedsFeedback, Running};
+    match (before, after) {
+        (Running | NeedsFeedback, Finished) => Some(Turn::Done),
+        (b, NeedsFeedback) if b != NeedsFeedback => Some(Turn::NeedsYou),
+        _ => None,
+    }
+}
+
+/// What the daemon says that the window acts on outside the model: a
+/// session turning (alerts) and `kete open` from inside a session.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Notice {
+    Turned { agent: String, turn: Turn },
+    FilesOpened { root: PathBuf, paths: Vec<PathBuf> },
+}
+
+/// Where notices go: the app's alerts and file viewer.
+pub type NoticeSink = Box<dyn Fn(Notice) + Send + Sync>;
+
 /// How long a `ReadSession` may take (a transcript read).
 const READ_TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -139,6 +171,7 @@ pub struct Client {
     answers: Mutex<Answers>,
     panes: Mutex<HashMap<SessionRef, Channel<PtyEvent>>>,
     reviews: Mutex<Option<ReviewSink>>,
+    notices: Mutex<Option<NoticeSink>>,
     next_req: AtomicU64,
     /// Bumped on every model change; the emitter task watches it.
     pub changed: tokio::sync::Notify,
@@ -158,6 +191,7 @@ impl Client {
             answers: Mutex::new(HashMap::new()),
             panes: Mutex::new(HashMap::new()),
             reviews: Mutex::new(None),
+            notices: Mutex::new(None),
             next_req: AtomicU64::new(1),
             changed: tokio::sync::Notify::new(),
             retry: tokio::sync::Notify::new(),
@@ -285,6 +319,17 @@ impl Client {
     /// Hand every `ReviewOpened` to `sink` from now on.
     pub fn on_review(&self, sink: ReviewSink) {
         *self.reviews.lock().expect("reviews lock") = Some(sink);
+    }
+
+    /// Hand every [`Notice`] to `sink` from now on.
+    pub fn on_notice(&self, sink: NoticeSink) {
+        *self.notices.lock().expect("notices lock") = Some(sink);
+    }
+
+    fn notice(&self, n: Notice) {
+        if let Some(sink) = self.notices.lock().expect("notices lock").as_ref() {
+            sink(n);
+        }
     }
 
     /// The protocol the connected daemon speaks; 0 while not connected.
@@ -428,13 +473,29 @@ impl Client {
                 unseen,
             } => {
                 let mut m = self.model.lock().expect("model lock");
+                let mut turned = None;
                 if let Some(a) = m.agents.iter_mut().find(|a| a.id == agent) {
+                    // Read before the write: the 50 ms state push can fold
+                    // a flap, and a reconnect's Snapshot never alerts.
+                    turned = turn(a.status, status);
                     a.status = status;
                     a.status_changed_at = changed_at;
                     a.unseen = unseen;
                 }
                 drop(m);
                 self.touch();
+                if let Some(turn) = turned {
+                    self.notice(Notice::Turned {
+                        agent: agent.0,
+                        turn,
+                    });
+                }
+            }
+            // `kete open` in a session: the user asked to see these files.
+            ServerEvent::FilesOpened { root, paths, .. } => {
+                if !paths.is_empty() {
+                    self.notice(Notice::FilesOpened { root, paths });
+                }
             }
             ServerEvent::SubagentChanged { sub } => {
                 let mut m = self.model.lock().expect("model lock");
@@ -870,6 +931,85 @@ mod tests {
                 sessions: vec![SessionRef::Agent(AgentId("a".into()))],
                 tabs: vec!["diff".into(), "pr".into()],
             }]
+        );
+    }
+
+    /// The TUI's edges: into finished from running or needs-feedback is
+    /// done, into needs-feedback from anything else is needs-you, and a
+    /// re-stamp or any other move is nothing.
+    #[test]
+    fn turns_are_the_tuis_edges() {
+        use AgentStatus::*;
+        assert_eq!(turn(Running, Finished), Some(Turn::Done));
+        assert_eq!(turn(NeedsFeedback, Finished), Some(Turn::Done));
+        assert_eq!(turn(Fresh, Finished), None, "never ran a turn here");
+        assert_eq!(turn(Finished, Finished), None, "a re-stamp");
+        assert_eq!(turn(Running, NeedsFeedback), Some(Turn::NeedsYou));
+        assert_eq!(turn(Finished, NeedsFeedback), Some(Turn::NeedsYou));
+        assert_eq!(turn(NeedsFeedback, NeedsFeedback), None);
+        assert_eq!(turn(NeedsFeedback, Running), None);
+    }
+
+    /// Status changes reach the notice sink as turns, read against the
+    /// mirrored status before it is overwritten; a Snapshot never does,
+    /// and `kete open` arrives as the files with their checkout.
+    #[test]
+    fn turns_and_opened_files_reach_the_notice_sink() {
+        let client = Client::new();
+        let got = Arc::new(Mutex::new(Vec::new()));
+        let g = got.clone();
+        client.on_notice(Box::new(move |n| g.lock().unwrap().push(n)));
+        client.handle(ServerEvent::Snapshot {
+            projects: Vec::new(),
+            worktrees: Vec::new(),
+            agents: vec![agent("a", None)],
+            terminals: Vec::new(),
+            links: Vec::new(),
+            pr_seen: Vec::new(),
+            ui_state: None,
+            subagents: Vec::new(),
+        });
+        let status = |s: AgentStatus| ServerEvent::StatusChanged {
+            agent: AgentId("a".into()),
+            status: s,
+            changed_at: 1,
+            unseen: false,
+        };
+        client.handle(status(AgentStatus::NeedsFeedback));
+        client.handle(status(AgentStatus::NeedsFeedback));
+        client.handle(status(AgentStatus::Finished));
+        client.handle(ServerEvent::StatusChanged {
+            agent: AgentId("gone".into()),
+            status: AgentStatus::NeedsFeedback,
+            changed_at: 1,
+            unseen: false,
+        });
+        client.handle(ServerEvent::FilesOpened {
+            agent: AgentId("a".into()),
+            root: PathBuf::from("/w"),
+            paths: vec![PathBuf::from("/w/README.md")],
+        });
+        client.handle(ServerEvent::FilesOpened {
+            agent: AgentId("a".into()),
+            root: PathBuf::from("/w"),
+            paths: Vec::new(),
+        });
+        assert_eq!(
+            got.lock().unwrap().as_slice(),
+            &[
+                Notice::Turned {
+                    agent: "a".into(),
+                    turn: Turn::NeedsYou
+                },
+                Notice::Turned {
+                    agent: "a".into(),
+                    turn: Turn::Done
+                },
+                Notice::FilesOpened {
+                    root: PathBuf::from("/w"),
+                    paths: vec![PathBuf::from("/w/README.md")],
+                },
+            ]
         );
     }
 

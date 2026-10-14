@@ -20,18 +20,17 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// Rows that only mean something to the terminal app — its search, file
-/// editor, sounds, grid layout, card chrome, colours and quick-prompt
-/// focus. (Preset text, Confirm on archive, Follow new session and the
-/// quick prompt's New worktree are the window's too: its presets editor,
-/// archive and quick prompt read them.) The window shows them under a
-/// "Terminal app" group in their tab,
+/// editor, grid layout, card chrome, colours and quick-prompt focus.
+/// (Preset text, Confirm on archive, Follow new session and the quick
+/// prompt's New worktree are the window's too: its presets editor,
+/// archive and quick prompt read them; so are the done and feedback
+/// sounds, which ring with its notifications.) The window shows them
+/// under a "Terminal app" group in their tab,
 /// still editable, since they are the same file.
 pub const TERMINAL_ONLY: &[SettingKind] = &[
     SettingKind::PaletteEnterAttaches,
     SettingKind::Editor,
     SettingKind::CloseFinderOnOpen,
-    SettingKind::DoneSound,
-    SettingKind::FeedbackSound,
     SettingKind::DeleteEmptyWorktree,
     SettingKind::AutoCleanupMerged,
     SettingKind::ShowAllWorktrees,

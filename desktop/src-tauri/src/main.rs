@@ -7,7 +7,9 @@
 
 mod accounts;
 mod ado;
+mod alerts;
 mod daemon;
+mod files;
 mod git;
 mod launch;
 mod orchestrator;
@@ -16,6 +18,7 @@ mod profiles;
 mod projects;
 mod sessions;
 mod settings;
+mod update;
 
 use ado::client::CmdError;
 use ado::prs::{self, PrCtx, PrCtxExt};
@@ -700,6 +703,70 @@ async fn poll_prs(client: Arc<Client>, app: tauri::AppHandle) {
     }
 }
 
+/// The main window has the user's eyes: alerts stand down.
+fn window_focused(app: &tauri::AppHandle) -> bool {
+    app.get_webview_window("main")
+        .and_then(|w| w.is_focused().ok())
+        .unwrap_or(false)
+}
+
+/// What the daemon says outside the model: a session's turn gathers into
+/// the alert batch (posted [`alerts::DEBOUNCE`] after it opens, unless the
+/// window has come forward by then), and `kete open` raises the file sheet.
+fn on_notice(
+    app: tauri::AppHandle,
+    client: std::sync::Weak<Client>,
+) -> impl Fn(daemon::Notice) + Send + Sync {
+    let batch = Arc::new(std::sync::Mutex::new(alerts::Batch::default()));
+    move |notice| match notice {
+        daemon::Notice::Turned { agent, turn } => {
+            if window_focused(&app) {
+                return;
+            }
+            let Some(client) = client.upgrade() else {
+                return;
+            };
+            let Some(alert) = alerts::alert_for(&client.snapshot(), &agent, turn) else {
+                return;
+            };
+            if !batch.lock().expect("alert batch").push(alert) {
+                return;
+            }
+            let (app, batch) = (app.clone(), batch.clone());
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(alerts::DEBOUNCE).await;
+                let gathered = batch.lock().expect("alert batch").take();
+                if window_focused(&app) {
+                    return;
+                }
+                let identifier = app.config().identifier.clone();
+                let click = app.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    alerts::post(
+                        &gathered,
+                        &identifier,
+                        Box::new(move |agent| bring_up(&click, agent)),
+                    );
+                });
+            });
+        }
+        daemon::Notice::FilesOpened { root, paths } => {
+            app.state::<files::OpenedFiles>().allow(&paths);
+            let _ = app.emit("kete://files-opened", files::opened(&root, &paths));
+        }
+    }
+}
+
+/// A notification clicked: the window comes forward on that session.
+fn bring_up(app: &tauri::AppHandle, agent: String) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+    let _ = app.emit("kete://open-session", agent);
+}
+
 /// Push the model to the window whenever it changes, at most every 50 ms.
 async fn emit_state(app: tauri::AppHandle, client: Arc<Client>) {
     loop {
@@ -721,6 +788,8 @@ fn main() {
         // One token source, one ado.json store and one set of clients for
         // every ADO command and the PR poll.
         .manage(AdoState::system())
+        .manage(files::OpenedFiles::default())
+        .manage(update::UpdateState::default())
         .setup(move |app| {
             let handle = app.handle().clone();
             // The Agents tab's model lists, as the TUI's: Claude Code's own
@@ -737,6 +806,9 @@ fn main() {
             client.on_review(Box::new(move |r| {
                 let _ = reviews.emit("kete://review", r);
             }));
+            // Done / needs-you alerts and `kete open`.
+            client.on_notice(Box::new(on_notice(handle.clone(), Arc::downgrade(&client))));
+            tauri::async_runtime::spawn(update::run(handle.clone()));
             tauri::async_runtime::spawn(daemon::run(client.clone()));
             tauri::async_runtime::spawn(emit_state(handle.clone(), client.clone()));
             tauri::async_runtime::spawn(poll_prs(client.clone(), handle));
@@ -804,6 +876,9 @@ fn main() {
             diff_hunks,
             diff_apply_hunk,
             open_url,
+            files::opened_file_read,
+            files::opened_file_open,
+            update::update_status,
             launchables,
             startup,
             ado_prs,

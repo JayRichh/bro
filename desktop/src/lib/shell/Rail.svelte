@@ -8,6 +8,7 @@
   import { toneOf } from '../status';
   import Status from '../Status.svelte';
   import AccountsSection from '../accounts/AccountsSection.svelte';
+  import VersionPlate from './VersionPlate.svelte';
 
   const rows = $derived(repoRows(app.model));
   const orch = $derived(orchestratorOf(app.model));
@@ -162,6 +163,8 @@
 
     <AccountsSection {heading} />
   </nav>
+
+  <VersionPlate />
 
   <div class="flex h-10 flex-none items-center border-t border-rule px-2">
     <button
