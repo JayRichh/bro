@@ -5,6 +5,7 @@
   import { tick } from 'svelte';
   import { ui } from './ui.svelte';
   import { rank } from '../fuzzy';
+  import { firstFocus } from './focus';
 
   let values = $state<Record<string, string>>({});
   let checked = $state(false);
@@ -23,7 +24,7 @@
     query = '';
     at = 0;
     tick().then(() => {
-      const first = box?.querySelector<HTMLElement>('input, textarea, [data-autofocus]');
+      const first = box ? firstFocus(box) : null;
       first?.focus();
       if (first instanceof HTMLInputElement) first.select();
     });
