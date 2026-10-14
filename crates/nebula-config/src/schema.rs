@@ -197,6 +197,10 @@ pub struct Tab {
 #[derive(Debug, Clone, Serialize)]
 pub struct Schema {
     pub tabs: Vec<Tab>,
+    /// Why the settings files can't be written now (one that can't be
+    /// parsed): the rows then show defaults, not what is stored, so the
+    /// window shows this instead of them. None when both files read.
+    pub problem: Option<String>,
 }
 
 /// A project the daemon knows, for the Project tab.
@@ -734,7 +738,10 @@ pub fn export(cfg: &Config, prefs: &DesktopPrefs, projects: &[ProjectRef]) -> Sc
             hotkeys: keys,
         });
     }
-    Schema { tabs }
+    Schema {
+        tabs,
+        problem: None,
+    }
 }
 
 /// Apply a write to `cfg` (every target but the window's own).

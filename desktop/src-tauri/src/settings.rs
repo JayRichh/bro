@@ -29,11 +29,32 @@ fn projects(model: &Model) -> Vec<ProjectRef> {
 /// Every tab and row, with the values stored now.
 #[tauri::command]
 pub fn settings_schema(client: State<'_, Arc<Client>>) -> schema::Schema {
-    schema::export(
-        &Config::load(),
-        &DesktopPrefs::load(),
-        &projects(&client.snapshot()),
-    )
+    let (path, local) = nebula_config::layer_paths();
+    schema_at(&path, &local, &projects(&client.snapshot()))
+}
+
+/// The schema of the layers at `path` / `local`, with why they can't be
+/// written, if they can't.
+pub fn schema_at(
+    path: &std::path::Path,
+    local: &std::path::Path,
+    projects: &[ProjectRef],
+) -> schema::Schema {
+    let mut out = schema::export(
+        &Config::load_at(path, local),
+        &DesktopPrefs::load_at(path, local),
+        projects,
+    );
+    out.problem = nebula_config::write_blocker(path, local);
+    out
+}
+
+/// Why the settings files can't be written (one that can't be parsed),
+/// for the window to say at startup; None when they read.
+#[tauri::command]
+pub fn config_problem() -> Option<String> {
+    let (path, local) = nebula_config::layer_paths();
+    nebula_config::write_blocker(&path, &local)
 }
 
 /// Write one row.
@@ -169,6 +190,28 @@ mod tests {
         std::fs::write(&path, json.to_string()).unwrap();
         let cfg = Config::load_at(&path, &dir.path().join("config.local.json"));
         (dir, cfg)
+    }
+
+    #[test]
+    fn a_settings_file_that_cannot_be_parsed_is_named_and_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let local = dir.path().join("config.local.json");
+        let broken = "\u{feff}{\"theme\": \"rose\",}";
+        std::fs::write(&path, broken).unwrap();
+        let out = schema_at(&path, &local, &[]);
+        assert!(out.problem.as_deref().unwrap().contains("can't be parsed"));
+        let target = Target::Global {
+            key: "kanban".into(),
+        };
+        let err = schema::set_in(&path, &local, &target, &serde_json::json!(true)).unwrap_err();
+        assert!(err.contains("nothing was written"), "{err}");
+        assert!(schema::reset_in(&path, &local).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), broken);
+
+        std::fs::write(&path, "\u{feff}{\"kanban\": false}").unwrap();
+        assert_eq!(schema_at(&path, &local, &[]).problem, None);
+        schema::set_in(&path, &local, &target, &serde_json::json!(true)).unwrap();
     }
 
     #[test]

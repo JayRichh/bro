@@ -89,3 +89,14 @@ export function matches(text: string, ...fields: string[]): boolean {
   if (!q) return true;
   return fields.some((f) => f.toLowerCase().includes(q));
 }
+
+/** A counter for overlapping loads: each load takes a ticket, and only the
+ *  newest ticket's answer is applied, so a slow early read never lands over
+ *  a later one. */
+export function sequence() {
+  let last = 0;
+  return {
+    next: () => ++last,
+    isLatest: (ticket: number) => ticket === last,
+  };
+}

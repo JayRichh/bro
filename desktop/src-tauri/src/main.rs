@@ -794,6 +794,7 @@ fn main() {
             settings::settings_set,
             settings::settings_reset,
             settings::desktop_prefs,
+            settings::config_problem,
             settings::run_commands,
             diff_files,
             diff_pair,

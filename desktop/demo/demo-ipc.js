@@ -235,6 +235,7 @@ const handlers = {
   },
   settings_reset: () => null,
   desktop_prefs: () => ({ theme: 'system', diff_mode: 'side', home: 'overview' }),
+  config_problem: () => null,
   run_commands: () => ({ w1: 'dotnet watch run', w2: 'dotnet watch run' }),
   start_run: () => 't9',
   stop_run: () => null,

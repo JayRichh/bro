@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chordLabel, hotkeyGroups, matches, segmented, targetKey } from './settings';
+import { chordLabel, hotkeyGroups, matches, segmented, sequence, targetKey } from './settings';
 import type { HotkeyRow, SettingRow } from '../api';
 
 const row = (labels: string[]): SettingRow => ({
@@ -56,5 +56,15 @@ describe('settings helpers', () => {
     expect(matches('idle', 'Idle session timeout')).toBe(true);
     expect(matches('', 'anything')).toBe(true);
     expect(matches('zzz', 'Theme', 'hint')).toBe(false);
+  });
+});
+
+describe('sequence', () => {
+  it('applies only the newest of overlapping loads', () => {
+    const seq = sequence();
+    const first = seq.next();
+    const second = seq.next();
+    expect(seq.isLatest(first)).toBe(false);
+    expect(seq.isLatest(second)).toBe(true);
   });
 });

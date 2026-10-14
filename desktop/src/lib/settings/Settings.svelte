@@ -15,7 +15,7 @@
   import { app, refreshLaunchables, refreshRunCommands, toast } from '../store.svelte';
   import { isDiffMode } from '../diff-api';
   import { nav } from '../shell/history.svelte';
-  import { chordLabel, hotkeyGroups, matches, segmented, targetKey } from './settings';
+  import { chordLabel, hotkeyGroups, matches, segmented, sequence, targetKey } from './settings';
   import Presets from './Presets.svelte';
   import Profiles from './Profiles.svelte';
 
@@ -50,12 +50,19 @@
     hotkeyGroups((tab?.hotkeys ?? []).filter((h) => matches(filter, h.label, h.hint, h.group, ...h.bound))),
   );
 
+  const loads = sequence();
+  /** The settings files can't be parsed: the rows would show defaults. */
+  const blocked = $derived(schema?.problem ?? null);
+
   async function load() {
+    const ticket = loads.next();
     try {
-      schema = await api.settingsSchema();
+      const next = await api.settingsSchema();
+      if (!loads.isLatest(ticket)) return;
+      schema = next;
       error = null;
     } catch (e) {
-      error = String(e);
+      if (loads.isLatest(ticket)) error = String(e);
     }
   }
 
@@ -89,7 +96,7 @@
     if (t.scope === 'project' && t.field === 'run_command') refreshRunCommands();
   }
 
-  async function write(row: SettingRow, value: boolean | string) {
+  async function write(row: SettingRow, value: boolean | string, el?: HTMLInputElement) {
     if (value === row.value) return;
     const key = targetKey(row.target);
     const before = row.value;
@@ -100,6 +107,8 @@
       after(row, value);
     } catch (e) {
       row.value = before;
+      // A refused text edit must not stay in the box looking saved.
+      if (el) el.value = String(before);
       toast(String(e));
     } finally {
       delete pending[key];
@@ -109,7 +118,7 @@
   }
 
   function commitText(row: SettingRow, el: HTMLInputElement) {
-    if (el.value.trim() !== String(row.value).trim()) write(row, el.value);
+    if (el.value.trim() !== String(row.value).trim()) write(row, el.value, el);
   }
 
   async function reset() {
@@ -236,10 +245,21 @@
       </label>
       <button
         class="h-7 border border-rule bg-transparent px-2.5 text-[13px] text-ink enabled:hover:border-rule-strong disabled:text-faint"
-        disabled={!schema || resetting}
+        disabled={!schema || resetting || !!blocked}
         onclick={() => (confirmReset = true)}>Reset to defaults</button
       >
     </div>
+    {#if blocked}
+      <div class="mt-4 flex items-start gap-3 border border-fail bg-surface px-3 py-2 text-[13px] text-ink" role="alert">
+        <span class="mt-1.5 size-1.5 flex-none bg-fail" aria-hidden="true"></span>
+        <span class="min-w-0 flex-1">
+          <span class="font-medium text-fail">The settings file can't be parsed.</span>
+          Nothing here is saved until it is fixed, and the rows are hidden because they would show defaults, not your settings.
+          <span class="mt-1 block font-mono text-[12px] break-all text-muted">{blocked}</span>
+        </span>
+        <button class="h-7 flex-none border border-rule bg-transparent px-2.5 text-[13px] text-ink hover:border-rule-strong" onclick={load}>Check again</button>
+      </div>
+    {/if}
     {#if confirmReset}
       <div class="mt-4 flex items-center gap-3 border border-rule-strong bg-surface px-3 py-2 text-[13px] text-ink" role="alertdialog" aria-label="Reset settings">
         <span class="min-w-0 flex-1">
@@ -298,6 +318,8 @@
           <Presets />
         {:else if tabId === 'profiles'}
           <Profiles />
+        {:else if blocked}
+          <p class="m-0 px-6 pt-6 text-[13px] text-muted">Fix the file named above (or remove it to start from defaults), then Check again.</p>
         {:else}
         <div class="max-w-[920px]">
           {#if tab?.note}

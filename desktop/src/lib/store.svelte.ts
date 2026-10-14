@@ -93,6 +93,10 @@ export function setHome(h: Home, repo?: string) {
 
 /** Read the saved preferences (before any command-line override). */
 export async function loadDesktopPrefs() {
+  api
+    .configProblem()
+    .then((p) => p && toast(`Settings are read-only until config.json is fixed: ${p}`))
+    .catch(() => {});
   const p = await api.desktopPrefs().catch(() => null);
   if (!p) return;
   if (p.theme === 'system' || p.theme === 'light' || p.theme === 'dark') app.themePref = p.theme;

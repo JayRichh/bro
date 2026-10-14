@@ -245,6 +245,8 @@ export interface SettingsTab {
 }
 export interface SettingsSchema {
   tabs: SettingsTab[];
+  /** Why the settings files can't be written now (one can't be parsed). */
+  problem: string | null;
 }
 export interface DesktopPrefs {
   theme: string;
@@ -319,6 +321,8 @@ export const api = {
   settingsSet: (target: SettingTarget, value: boolean | string) => invoke<void>('settings_set', { target, value }),
   settingsReset: () => invoke<void>('settings_reset'),
   desktopPrefs: () => invoke<DesktopPrefs>('desktop_prefs'),
+  /** Why config.json can't be written (it can't be parsed); null: fine. */
+  configProblem: () => invoke<string | null>('config_problem'),
   diffFiles: (worktree: string) => invoke<DiffFile[]>('diff_files', { worktree }),
   diffPair: (worktree: string, file: DiffFile) => invoke<DiffPair>('diff_pair', { worktree, file }),
   openUrl: (url: string) => invoke<void>('open_url', { url }),
