@@ -4048,6 +4048,9 @@ pub struct LauncherState {
     /// the TUI — so the box's profile field and the cards read it without
     /// a file read per frame.
     pub profiles: Vec<nebula_core::profiles::Profile>,
+    /// The ACCOUNT SPREAD the config sets, mirrored beside `profiles`:
+    /// whether a launch's profile field offers "auto".
+    pub spread: nebula_core::accounts::Policy,
     /// Every ACCOUNT's latest plan usage (`nebula_core::usage`): pushed
     /// by a 55+ daemon (`ServerEvent::AccountUsage`), else read from the
     /// kept files as a box opens (`quick_prompt::refresh_profiles`).

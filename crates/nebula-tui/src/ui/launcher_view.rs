@@ -3486,10 +3486,25 @@ impl Details {
             None => crate::quick_prompt::target_branch(app, launch)
                 .unwrap_or_else(|| "(worktree gone)".into()),
         };
-        let profile = (!launch.profile_choices(&app.launcher.profiles).is_empty()).then(|| {
-            let name = launch.profile.clone().unwrap_or_else(|| "none".into());
-            let key =
-                nebula_core::usage::account_key(launch.profile.as_deref(), launch.harness_id());
+        let (profiles, policy) = (&app.launcher.profiles, app.launcher.spread);
+        let harness_id = launch.harness_id();
+        let profile = (!launch.profile_choices(profiles, policy).is_empty()).then(|| {
+            let name = crate::quick_prompt::profile_choice_label(
+                launch.profile.as_deref(),
+                profiles,
+                harness_id,
+                policy,
+                &app.launcher.account_usage,
+            );
+            // The bars are the account Enter lands on: "auto"'s pick.
+            let on = crate::quick_prompt::resolved_profile(
+                launch.profile.as_deref(),
+                profiles,
+                harness_id,
+                policy,
+                &app.launcher.account_usage,
+            );
+            let key = nebula_core::usage::account_key(on.as_deref(), harness_id);
             let reading = app.launcher.account_usage.iter().find(|u| u.account == key);
             let now = nebula_core::clock::now_secs() as i64;
             (
