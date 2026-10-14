@@ -44,7 +44,7 @@ fn parse_https(rest: &str) -> Option<AdoRemote> {
         // org / project / _git / repo
         match segs.as_slice() {
             [org, project, git, repo] if git == "_git" => {
-                Some(build(host.clone(), org, project, repo, dev_url(org)))
+                build(host.clone(), org, project, repo, dev_url(org))
             }
             _ => None,
         }
@@ -57,13 +57,9 @@ fn parse_https(rest: &str) -> Option<AdoRemote> {
             .filter(|s| !s.eq_ignore_ascii_case("DefaultCollection"))
             .collect();
         match segs.as_slice() {
-            [project, git, repo] if git.as_str() == "_git" => Some(build(
-                host.clone(),
-                org,
-                project,
-                repo,
-                format!("https://{host}"),
-            )),
+            [project, git, repo] if git.as_str() == "_git" => {
+                build(host.clone(), org, project, repo, format!("https://{host}"))
+            }
             _ => None,
         }
     } else {
@@ -88,17 +84,11 @@ fn parse_ssh(url: &str) -> Option<AdoRemote> {
     match segs.as_slice() {
         [v3, org, project, repo] if v3 == "v3" => {
             if host == "ssh.dev.azure.com" {
-                Some(build(
-                    "dev.azure.com".into(),
-                    org,
-                    project,
-                    repo,
-                    dev_url(org),
-                ))
+                build("dev.azure.com".into(), org, project, repo, dev_url(org))
             } else {
                 let h = format!("{org}.visualstudio.com");
                 let u = format!("https://{h}");
-                Some(build(h, org, project, repo, u))
+                build(h, org, project, repo, u)
             }
         }
         _ => None,
@@ -109,14 +99,60 @@ fn dev_url(org: &str) -> String {
     format!("https://dev.azure.com/{org}")
 }
 
-fn build(host: String, org: &str, project: &str, repo: &str, org_url: String) -> AdoRemote {
-    AdoRemote {
+fn build(host: String, org: &str, project: &str, repo: &str, org_url: String) -> Option<AdoRemote> {
+    let repo = repo.trim_end_matches(".git");
+    if !org_ok(org) || !name_ok(project) || !name_ok(repo) {
+        return None;
+    }
+    Some(AdoRemote {
         host,
         org: org.to_string(),
         project: project.to_string(),
-        repo: repo.trim_end_matches(".git").to_string(),
+        repo: repo.to_string(),
         org_url,
-    }
+    })
+}
+
+/// An organization name as ADO allows it: letters, digits, hyphens (dots
+/// and underscores let through for old collections). It goes into the org
+/// URL and from there into the `git credential` stdin, so nothing else.
+fn org_ok(org: &str) -> bool {
+    !org.is_empty()
+        && org
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_'))
+}
+
+/// A project or repo name: ADO allows spaces and non-ASCII letters, but no
+/// control characters and none of `\ / : * ? " < > | ; # $ { } , + = [ ]`.
+/// Refusing those also keeps a decoded name from breaking a REST path or
+/// the line-based credential protocol (CR, LF, `=`).
+fn name_ok(name: &str) -> bool {
+    !name.is_empty()
+        && name.chars().all(|c| {
+            !c.is_control()
+                && !matches!(
+                    c,
+                    '\\' | '/'
+                        | ':'
+                        | '*'
+                        | '?'
+                        | '"'
+                        | '<'
+                        | '>'
+                        | '|'
+                        | ';'
+                        | '#'
+                        | '$'
+                        | '{'
+                        | '}'
+                        | ','
+                        | '+'
+                        | '='
+                        | '['
+                        | ']'
+                )
+        })
 }
 
 /// Split a path into percent-decoded, non-empty segments, ignoring any
@@ -175,5 +211,33 @@ mod tests {
     fn non_ado_remotes_are_none() {
         assert!(parse_remote("https://github.com/JayRichh/kete.git").is_none());
         assert!(parse_remote("").is_none());
+    }
+
+    /// Decoded segments go into REST paths and, for the org, the
+    /// `git credential` stdin: a remote smuggling a line break, an `=` or
+    /// a path character through percent-encoding is not an ADO remote.
+    #[test]
+    fn segments_that_could_break_a_request_or_the_credential_protocol_are_refused() {
+        for url in [
+            "https://dev.azure.com/tnt%0Ahost=evil/Platform/_git/api",
+            "https://dev.azure.com/tnt%3Dx/Platform/_git/api",
+            "https://dev.azure.com/t%20nt/Platform/_git/api",
+            "https://dev.azure.com/tnt/Plat%0D%0Aform/_git/api",
+            "https://dev.azure.com/tnt/Platform/_git/a%00pi",
+            "https://dev.azure.com/tnt/Plat%2Fform/_git/api",
+            "https://dev.azure.com/tnt/Platform/_git/a%3Dpi",
+            "https://dev.azure.com/tnt/Plat%5Cform/_git/api",
+            "git@ssh.dev.azure.com:v3/tnt/Platform/a%0Api",
+        ] {
+            assert!(parse_remote(url).is_none(), "{url}");
+        }
+        // ADO allows spaces, dots, hyphens and non-ASCII letters in
+        // project and repo names.
+        let ok =
+            parse_remote("https://dev.azure.com/my-org/My%20Proj.v2/_git/Caf%C3%A9_web-1").unwrap();
+        assert_eq!(
+            (ok.org.as_str(), ok.project.as_str(), ok.repo.as_str()),
+            ("my-org", "My Proj.v2", "Café_web-1")
+        );
     }
 }
