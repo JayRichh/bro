@@ -16,6 +16,7 @@
 
 use serde::Deserialize;
 
+use crate::entities::{Agent, AgentKind};
 use crate::profiles::{self, Profile};
 use crate::usage::AccountUsage;
 
@@ -43,6 +44,15 @@ impl Spread {
             "failover" => Spread::Failover,
             "least_used" | "least-used" => Spread::LeastUsed,
             _ => Spread::Manual,
+        }
+    }
+
+    /// As config.json spells it ([`SPREADS`]).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Spread::Manual => SPREADS[0],
+            Spread::Failover => SPREADS[1],
+            Spread::LeastUsed => SPREADS[2],
         }
     }
 }
@@ -238,10 +248,13 @@ pub fn pick<'a>(
     }
 }
 
-/// Whether an account has a login, as far as its files say. Only the
-/// existence of a credentials file (and, for Claude on macOS, where the
-/// keychain holds it, the account entry in `.claude.json`) is looked at:
-/// nothing in them is read out.
+/// Whether an account has a login, as far as its files say: credentials
+/// were found, not that they still work. The existence of a credentials
+/// file (and, for Claude on macOS, where the keychain holds it, the
+/// account entry in `.claude.json`) is what counts; Claude's
+/// `.credentials.json` is also checked for its subscription entry and that
+/// entry's refresh-token expiry ([`LoginCheck::expired`]). No token or
+/// other secret is ever read out or kept.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LoginState {
@@ -289,41 +302,194 @@ fn login_dir(
     })
 }
 
+/// [`LoginState`] with why: `expired` when the credentials are there but
+/// say their login has run out (Claude's refresh token past its
+/// `refreshTokenExpiresAt`), which reads as [`LoginState::NeedsLogin`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LoginCheck {
+    pub state: LoginState,
+    pub expired: bool,
+}
+
+/// What Claude's `.credentials.json` says about its subscription login.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClaudeCredentials {
+    /// No file.
+    Missing,
+    /// A `claudeAiOauth` entry, its refresh token still good (or with no
+    /// expiry written).
+    Present,
+    /// A `claudeAiOauth` entry whose refresh token has expired.
+    Expired,
+    /// The file holds no subscription login (only MCP servers' tokens).
+    NoLogin,
+}
+
+/// Only these two fields are taken from the file: serde passes over every
+/// token in it without keeping one.
+#[derive(Deserialize)]
+struct CredentialsFile {
+    #[serde(rename = "claudeAiOauth", default)]
+    oauth: Option<OauthEntry>,
+}
+
+#[derive(Deserialize)]
+struct OauthEntry {
+    /// Milliseconds since the epoch.
+    #[serde(rename = "refreshTokenExpiresAt", default)]
+    refresh_expires_at: Option<i64>,
+}
+
+fn claude_credentials(path: &std::path::Path, now_ms: i64) -> ClaudeCredentials {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return ClaudeCredentials::Missing;
+    };
+    match serde_json::from_str::<CredentialsFile>(&text) {
+        Ok(CredentialsFile { oauth: None }) => ClaudeCredentials::NoLogin,
+        Ok(CredentialsFile {
+            oauth: Some(OauthEntry {
+                refresh_expires_at: Some(at),
+            }),
+        }) if at > 0 && at <= now_ms => ClaudeCredentials::Expired,
+        Ok(_) => ClaudeCredentials::Present,
+        // A shape this build does not know: the file's being there counts,
+        // as it always did.
+        Err(_) => ClaudeCredentials::Present,
+    }
+}
+
 /// [`LoginState`] of `profile` (None = the harness's own default login).
 pub fn login_state_in(
     profile: Option<&Profile>,
     harness: &str,
     root: &std::path::Path,
 ) -> LoginState {
+    login_check_in(profile, harness, root, crate::clock::now_ms()).state
+}
+
+/// [`login_state_in`], with whether the credentials found have expired.
+pub fn login_check_in(
+    profile: Option<&Profile>,
+    harness: &str,
+    root: &std::path::Path,
+    now_ms: i64,
+) -> LoginCheck {
     let Some(dir) = login_dir(profile, harness, root) else {
-        return LoginState::Unknown;
+        return LoginCheck {
+            state: LoginState::Unknown,
+            expired: false,
+        };
     };
+    let mut expired = false;
     let found = match harness.trim() {
         "claude" => {
-            dir.join(".credentials.json").is_file() || {
-                // `.claude.json` sits in the config dir for a moved one,
-                // beside `~/.claude` for the default.
-                let json = if profile.is_some_and(|p| !p.use_default)
-                    || crate::env::non_empty(crate::env::CLAUDE_CONFIG_DIR).is_some()
-                {
-                    dir.join(".claude.json")
-                } else {
-                    dir.with_file_name(".claude.json")
-                };
-                std::fs::read_to_string(json)
-                    .ok()
-                    .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-                    .is_some_and(|v| v.get("oauthAccount").is_some_and(|a| a.is_object()))
-            }
+            let creds = claude_credentials(&dir.join(".credentials.json"), now_ms);
+            expired = creds == ClaudeCredentials::Expired;
+            creds == ClaudeCredentials::Present
+                || (!expired && {
+                    // `.claude.json` sits in the config dir for a moved one,
+                    // beside `~/.claude` for the default.
+                    let json = if profile.is_some_and(|p| !p.use_default)
+                        || crate::env::non_empty(crate::env::CLAUDE_CONFIG_DIR).is_some()
+                    {
+                        dir.join(".claude.json")
+                    } else {
+                        dir.with_file_name(".claude.json")
+                    };
+                    std::fs::read_to_string(json)
+                        .ok()
+                        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+                        .is_some_and(|v| v.get("oauthAccount").is_some_and(|a| a.is_object()))
+                })
         }
         "codex" => dir.join("auth.json").is_file(),
         _ => dir.join("hosts.yml").is_file(),
     };
-    if found {
-        LoginState::LoggedIn
-    } else {
-        LoginState::NeedsLogin
+    LoginCheck {
+        state: if found {
+            LoginState::LoggedIn
+        } else {
+            LoginState::NeedsLogin
+        },
+        expired,
     }
+}
+
+/// [`login_check_in`] under the profiles root, now.
+pub fn login_check(profile: Option<&Profile>, harness: &str) -> LoginCheck {
+    login_check_in(
+        profile,
+        harness,
+        &profiles::profiles_root(),
+        crate::clock::now_ms(),
+    )
+}
+
+/// The command that signs an account in, for the user to run: `kete
+/// profile login <name>` for a profile (an adopted login too: it runs the
+/// CLI's sign-in under the profile's environment), the CLI's own sign-in
+/// (`claude auth login --claudeai`) for a harness's own login. None for a
+/// harness kete knows no sign-in for.
+pub fn login_command(profile: Option<&Profile>, harness: &str) -> Option<String> {
+    let args = profiles::login_args(harness)?;
+    Some(match profile {
+        Some(p) => format!("kete profile login {}", p.name.trim()),
+        None => format!("{} {}", harness.trim(), args.join(" ")),
+    })
+}
+
+/// The harness a session runs: a custom harness's id, else its kind.
+pub fn session_harness(agent: &Agent) -> String {
+    match (&agent.kind, agent.custom_harness.as_deref()) {
+        (AgentKind::Custom, Some(id)) => id.to_string(),
+        (kind, _) => kind.as_str().to_string(),
+    }
+}
+
+/// The account a session counts against: its profile's name, or its
+/// harness's own login (`@claude`) — the key usage readings are kept
+/// under ([`crate::usage::account_key`]).
+pub fn session_account(agent: &Agent) -> String {
+    crate::usage::account_key(agent.profile.as_deref(), &session_harness(agent))
+}
+
+/// Every unarchived session by the account it runs under, in the order
+/// given: what an accounts list counts per row.
+pub fn sessions_by_account<'a>(
+    agents: impl IntoIterator<Item = &'a Agent>,
+) -> std::collections::BTreeMap<String, Vec<&'a Agent>> {
+    let mut out: std::collections::BTreeMap<String, Vec<&'a Agent>> = Default::default();
+    for agent in agents.into_iter().filter(|a| !a.archived) {
+        out.entry(session_account(agent)).or_default().push(agent);
+    }
+    out
+}
+
+/// The harnesses whose own login an accounts list shows a row for, sorted:
+/// each one in use — a reading kept under `@<harness>`, or an unarchived
+/// session of a harness with a known sign-in running with no profile —
+/// whatever profiles that harness has. A profile adopting the default
+/// login (`use_default`) keeps its own row: its sessions and readings go
+/// under its name, not `@<harness>`.
+pub fn own_login_harnesses<'a>(
+    reading_keys: impl IntoIterator<Item = &'a str>,
+    agents: impl IntoIterator<Item = &'a Agent>,
+) -> Vec<String> {
+    let mut out: Vec<String> = reading_keys
+        .into_iter()
+        .filter_map(crate::usage::default_login_harness)
+        .map(str::to_string)
+        .chain(
+            agents
+                .into_iter()
+                .filter(|a| !a.archived && a.profile.as_deref().is_none_or(|p| p.trim().is_empty()))
+                .map(session_harness)
+                .filter(|h| profiles::login_args(h).is_some()),
+        )
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// [`login_state_in`] under the profiles root.
@@ -539,6 +705,136 @@ mod tests {
             LoginState::LoggedIn
         );
         assert_eq!(login_state_in(None, "aider", root), LoginState::Unknown);
+    }
+
+    /// Claude's `.credentials.json`: a subscription entry counts, MCP
+    /// servers' tokens alone do not, and a refresh token past its expiry
+    /// reads as needing a login, marked expired. A file of a shape this
+    /// build does not know still counts by being there.
+    #[test]
+    fn claude_credentials_count_by_their_subscription_entry_and_its_expiry() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let work = profile("work", false);
+        let claude = root.join("work").join("claude");
+        std::fs::create_dir_all(&claude).unwrap();
+        let creds = claude.join(".credentials.json");
+        let check = |now: i64| login_check_in(Some(&work), "claude", root, now);
+        std::fs::write(&creds, r#"{"mcpOAuth":{"x":{"accessToken":"t"}}}"#).unwrap();
+        assert_eq!(
+            check(0),
+            LoginCheck {
+                state: LoginState::NeedsLogin,
+                expired: false
+            },
+            "MCP tokens are not a login"
+        );
+        std::fs::write(
+            &creds,
+            r#"{"claudeAiOauth":{"accessToken":"t","expiresAt":10,"refreshTokenExpiresAt":5000}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            check(100).state,
+            LoginState::LoggedIn,
+            "an access token past expiresAt is refreshed: still signed in"
+        );
+        assert_eq!(
+            check(5000),
+            LoginCheck {
+                state: LoginState::NeedsLogin,
+                expired: true
+            }
+        );
+        // An expired login is not rescued by `.claude.json`'s account entry.
+        std::fs::write(claude.join(".claude.json"), r#"{"oauthAccount":{}}"#).unwrap();
+        assert!(check(6000).expired);
+        assert_eq!(check(6000).state, LoginState::NeedsLogin);
+        std::fs::write(&creds, r#"{"claudeAiOauth":{}}"#).unwrap();
+        assert_eq!(
+            check(i64::MAX).state,
+            LoginState::LoggedIn,
+            "no expiry written"
+        );
+        std::fs::write(&creds, "not json").unwrap();
+        assert_eq!(check(0).state, LoginState::LoggedIn);
+    }
+
+    #[test]
+    fn every_account_with_a_known_sign_in_has_a_login_command() {
+        let mut adopted = profile("main", false);
+        adopted.use_default = true;
+        assert_eq!(
+            login_command(Some(&adopted), "claude").as_deref(),
+            Some("kete profile login main"),
+            "an adopted login signs in through kete too"
+        );
+        assert_eq!(
+            login_command(None, "claude").as_deref(),
+            Some("claude auth login --claudeai")
+        );
+        assert_eq!(login_command(None, "codex").as_deref(), Some("codex login"));
+        assert_eq!(login_command(None, "aider"), None);
+    }
+
+    fn agent(id: &str, kind: AgentKind, profile: Option<&str>, archived: bool) -> Agent {
+        Agent {
+            id: crate::AgentId(id.into()),
+            worktree_id: crate::WorktreeId("w".into()),
+            name: id.into(),
+            status: crate::AgentStatus::Fresh,
+            archived,
+            archived_at: 0,
+            unseen: false,
+            status_changed_at: 0,
+            kind,
+            custom_harness: None,
+            model: None,
+            effort: None,
+            session_id: None,
+            cloud_session_id: None,
+            issue_url: None,
+            role: crate::entities::AgentRole::Worker,
+            sort_order: 0,
+            alive: false,
+            recent_prompts: Vec::new(),
+            profile: profile.map(str::to_string),
+            parent: None,
+        }
+    }
+
+    #[test]
+    fn sessions_group_by_their_account_and_archived_ones_drop_out() {
+        let agents = [
+            agent("a", AgentKind::Claude, Some("work"), false),
+            agent("b", AgentKind::Claude, None, false),
+            agent("c", AgentKind::Claude, Some("work"), false),
+            agent("d", AgentKind::Claude, Some("work"), true),
+            agent("e", AgentKind::Codex, Some(" "), false),
+        ];
+        let by = sessions_by_account(&agents);
+        let ids = |key: &str| -> Vec<&str> { by[key].iter().map(|a| a.id.0.as_str()).collect() };
+        assert_eq!(ids("work"), ["a", "c"]);
+        assert_eq!(ids("@claude"), ["b"]);
+        assert_eq!(ids("@codex"), ["e"], "a blank profile is none");
+        assert_eq!(by.len(), 3);
+    }
+
+    #[test]
+    fn an_own_login_row_shows_while_that_login_is_in_use() {
+        let agents = [
+            agent("a", AgentKind::Claude, Some("work"), false),
+            agent("b", AgentKind::Codex, None, false),
+            agent("c", AgentKind::Copilot, None, true),
+            agent("d", AgentKind::Cursor, None, false),
+        ];
+        assert_eq!(
+            own_login_harnesses(["work", "@claude", "@claude"], &agents),
+            ["claude", "codex"],
+            "a reading, or a live session with no profile; not an archived \
+             one, nor a harness kete knows no sign-in for"
+        );
+        assert!(own_login_harnesses([], &agents[..1]).is_empty());
     }
 
     #[test]
