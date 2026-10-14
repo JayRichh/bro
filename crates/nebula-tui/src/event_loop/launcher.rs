@@ -2822,6 +2822,8 @@ fn open_model_picker(app: &mut App, back: QuickReturn) {
             cloud: back.launch.cloud,
             pr,
             quick: Some(Box::new(back)),
+            // The box keeps its own account (`with_profile_of`).
+            profile: None,
         },
     );
     if let Some(menu) = build_submenu(&row) {
@@ -10977,6 +10979,31 @@ mod tests {
     /// box was up to come back to. A DRAFT parked by an earlier box hands
     /// its text back into the picked box, and only its text: the harness
     /// was chosen a moment ago, on purpose.
+    #[test]
+    fn n_picks_the_account_with_the_harness() {
+        let json = r#"{"profiles": [
+            {"name": "main", "harness": "claude", "default": true},
+            {"name": "max2", "harness": "claude"}
+        ]}"#;
+        with_config_json(json, || {
+            let mut app = two_sessions();
+            draw(&mut app);
+            key(&mut app, KeyCode::Char('n'), KeyModifiers::NONE);
+            let Some(Overlay::Menu(menu)) = &mut app.modals.overlay else {
+                panic!("{:?}", app.modals.overlay);
+            };
+            menu.hover = menu
+                .items
+                .iter()
+                .position(|i| i.label == "Claude · max2")
+                .expect("an account row for max2");
+            key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+            let (picked, _) = launch(&app);
+            assert_eq!(picked.kind, nebula_core::AgentKind::Claude);
+            assert_eq!(picked.profile.as_deref(), Some("max2"), "the box is on it");
+        });
+    }
+
     #[test]
     fn n_picks_the_harness_first_and_opens_the_box_on_it() {
         with_default_config(|| {

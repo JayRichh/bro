@@ -151,10 +151,70 @@ pub(crate) fn kind_rows(
                     cloud,
                     pr: pr.cloned(),
                     quick: quick.map(|back| Box::new(back.clone())),
+                    profile: None,
                 },
             )
         })
         .collect()
+}
+
+/// The harness rows with the ACCOUNTS each can launch on: a harness with
+/// PROFILES says on its own row which account it takes —
+/// `Claude · main ▰▰▱▱ 21% ▰▱▱▱ 3%`, or `Claude · auto → max2 …` under an
+/// ACCOUNT SPREAD, which names none and leaves the pick to the DAEMON —
+/// and gets a row under it for each other account (switched-off ones
+/// last, marked off), so the account is chosen with the harness. The
+/// usage bars are the ones the QUICK PROMPT's field shows. A harness
+/// without profiles keeps its one row as it was.
+pub(crate) fn with_account_rows(
+    items: Vec<MenuItem>,
+    profiles: &[nebula_core::profiles::Profile],
+    policy: nebula_core::accounts::Policy,
+    readings: &[nebula_core::usage::AccountUsage],
+    now_secs: i64,
+) -> Vec<MenuItem> {
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        let MenuAction::NewAgentOfKind { kind, custom, .. } = &item.action else {
+            out.push(item);
+            continue;
+        };
+        let harness = custom.clone().unwrap_or_else(|| kind.as_str().to_string());
+        let choices = crate::quick_prompt::profile_choices_in(profiles, &harness, policy);
+        if choices.is_empty() {
+            out.push(item);
+            continue;
+        }
+        for choice in choices {
+            let name = crate::quick_prompt::profile_choice_label(
+                choice.as_deref(),
+                profiles,
+                &harness,
+                policy,
+                readings,
+            );
+            let on = crate::quick_prompt::resolved_profile(
+                choice.as_deref(),
+                profiles,
+                &harness,
+                policy,
+                readings,
+            );
+            let key = nebula_core::usage::account_key(on.as_deref(), &harness);
+            let reading = readings.iter().find(|u| u.account == key);
+            let mut row = item.clone();
+            row.label = format!(
+                "{} · {}",
+                item.label,
+                crate::accounts_overlay::field_text(&name, reading, now_secs)
+            );
+            if let MenuAction::NewAgentOfKind { profile, .. } = &mut row.action {
+                *profile = choice;
+            }
+            out.push(row);
+        }
+    }
+    out
 }
 
 /// The label a picker row shows: the registry entry's label for a known
@@ -185,24 +245,38 @@ pub(crate) fn open_kind_picker(app: &mut App, picker: KindPicker) {
         quick,
         hover,
     } = picker;
-    let hover = hover
-        .or_else(|| {
-            cfg.remembered_kind()
-                .map(|kind| HarnessRow { kind, custom: None })
-        })
-        .and_then(|wanted| {
-            rows.iter().position(|row| {
-                row.kind == wanted.kind && row.custom.as_deref() == wanted.custom.as_deref()
-            })
-        })
-        .unwrap_or(0);
-    let items = kind_rows(
+    let mut items = kind_rows(
         &rows,
         &worktree,
         pr.as_ref(),
         quick.as_deref(),
         harness_label,
     );
+    // A picker no box is up behind — `n`'s, whose pick opens the box, a
+    // PR SESSION's, a row menu's — offers each account too; the QUICK
+    // PROMPT's own `Tab` picker keeps the box's account (`^A`).
+    if quick.as_ref().is_none_or(|back| !back.from_box) {
+        crate::quick_prompt::refresh_profiles(app);
+        items = with_account_rows(
+            items,
+            &app.launcher.profiles,
+            app.launcher.spread,
+            &app.launcher.account_usage,
+            nebula_core::clock::now_secs() as i64,
+        );
+    }
+    let hover = hover
+        .or_else(|| {
+            cfg.remembered_kind()
+                .map(|kind| HarnessRow { kind, custom: None })
+        })
+        .and_then(|wanted| {
+            items.iter().position(|item| {
+                matches!(&item.action, MenuAction::NewAgentOfKind { kind, custom, .. }
+                    if *kind == wanted.kind && custom.as_deref() == wanted.custom.as_deref())
+            })
+        })
+        .unwrap_or(0);
     app.modals.overlay = Some(Overlay::Menu(ContextMenu {
         title: Some(title),
         items,
@@ -293,6 +367,71 @@ mod tests {
         menu.items.iter().map(|item| item.label.as_str()).collect()
     }
 
+    fn row_profile(item: &MenuItem) -> Option<String> {
+        match &item.action {
+            MenuAction::NewAgentOfKind { profile, .. } => profile.clone(),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// `n` picks the account with the harness: the harness's own row
+    /// takes the default (named, so the label never moves), a row under
+    /// it each other account, the switched-off one last; a model picked
+    /// from an account's row keeps that account. A harness with no
+    /// profiles keeps its one row.
+    #[test]
+    fn the_new_session_picker_offers_each_account() {
+        let json = r#"{"profiles": [
+            {"name": "main", "harness": "claude", "default": true},
+            {"name": "old", "harness": "claude", "disabled": true},
+            {"name": "max2", "harness": "claude"}
+        ]}"#;
+        pinned(json, || {
+            let mut app = App::new();
+            open_kind_picker(&mut app, KindPicker::new_session(WorktreeId("w1".into())));
+            let Some(Overlay::Menu(menu)) = &app.modals.overlay else {
+                panic!("{:?}", app.modals.overlay);
+            };
+            assert_eq!(
+                labels(menu)[..4],
+                [
+                    "Claude · main",
+                    "Claude · max2",
+                    "Claude · old (off)",
+                    "Codex"
+                ]
+            );
+            let profiles: Vec<_> = menu.items[..4].iter().map(row_profile).collect();
+            assert_eq!(
+                profiles,
+                [
+                    Some("main".to_string()),
+                    Some("max2".to_string()),
+                    Some("old".to_string()),
+                    None
+                ]
+            );
+            let models = crate::event_loop::build_submenu(&menu.items[1]).expect("models");
+            assert!(models
+                .items
+                .iter()
+                .all(|item| row_profile(item).as_deref() == Some("max2")));
+        });
+
+        // Under an ACCOUNT SPREAD the harness's row is "auto", naming none.
+        let json = r#"{"account_spread": "least_used",
+            "profiles": [{"name": "main", "harness": "claude", "default": true}]}"#;
+        pinned(json, || {
+            let mut app = App::new();
+            open_kind_picker(&mut app, KindPicker::new_session(WorktreeId("w1".into())));
+            let Some(Overlay::Menu(menu)) = &app.modals.overlay else {
+                panic!("{:?}", app.modals.overlay);
+            };
+            assert_eq!(labels(menu)[..2], ["Claude · auto → main", "Claude · main"]);
+            assert_eq!(row_profile(&menu.items[0]), None);
+        });
+    }
+
     /// Every row is the same launch context under a different harness, so
     /// a submenu drilled from any row keeps that context — including the
     /// custom registry id.
@@ -327,6 +466,7 @@ mod tests {
                         cloud: false,
                         pr: Some(pr),
                         quick: None,
+                        profile: None,
                     } if worktree.as_str() == "w1"
                         && *kind == expected.kind
                         && custom.as_deref() == expected.custom.as_deref()

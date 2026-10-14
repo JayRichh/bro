@@ -307,6 +307,10 @@ pub enum MenuAction {
         /// session. Rides through the MODEL / EFFORT submenus like
         /// `pr`, and is what an abandoned picker restores.
         quick: Option<Box<crate::quick_prompt::QuickReturn>>,
+        /// The PROFILE (account) the session runs on, from the NEW SESSION
+        /// PICKER's account rows; None sends none, and the DAEMON's ACCOUNT
+        /// SPREAD picks. Carried through the MODEL / EFFORT submenus.
+        profile: Option<String>,
     },
     /// Shell terminal in the worktree's directory; created immediately with
     /// a default name (no prompt), renameable later.

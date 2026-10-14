@@ -732,6 +732,7 @@ pub(crate) fn build_submenu(item: &MenuItem) -> Option<ContextMenu> {
         cloud,
         pr,
         quick,
+        profile,
         ..
     } = &item.action
     else {
@@ -789,6 +790,7 @@ pub(crate) fn build_submenu(item: &MenuItem) -> Option<ContextMenu> {
                     cloud: *cloud,
                     pr: pr.clone(),
                     quick: quick.clone(),
+                    profile: profile.clone(),
                 },
             )
         })

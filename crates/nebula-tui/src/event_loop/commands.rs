@@ -636,6 +636,7 @@ pub(crate) fn run_menu_action(app: &mut App, action: MenuAction, out: &mut Vec<C
             cloud,
             pr,
             quick,
+            profile,
         } => {
             // Opened from the QUICK PROMPT: the pick rewrites that box's
             // launch and hands it straight back — no session is created
@@ -666,7 +667,9 @@ pub(crate) fn run_menu_action(app: &mut App, action: MenuAction, out: &mut Vec<C
                     crate::quick_prompt::reopen(app, launch, &back.text);
                 } else {
                     // No box was up (`n`'s NEW SESSION PICKER): the pick
-                    // OPENS one, on the spec just chosen.
+                    // OPENS one, on the spec just chosen — and on the
+                    // account row picked (`agent_picker::with_account_rows`).
+                    let launch = crate::quick_prompt::QuickLaunch { profile, ..launch };
                     crate::quick_prompt::open_picked_box(app, launch);
                 }
                 return;
@@ -721,6 +724,7 @@ pub(crate) fn run_menu_action(app: &mut App, action: MenuAction, out: &mut Vec<C
                 AgentLaunchDraft {
                     custom: custom.clone(),
                     pr,
+                    profile,
                     ..AgentLaunchDraft::new(worktree, kind, model, effort)
                 },
                 out,
