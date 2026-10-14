@@ -24,6 +24,12 @@
   import Branches from './lib/ado/Branches.svelte';
   import Prs from './lib/ado/Prs.svelte';
   import Settings from './lib/settings/Settings.svelte';
+  import OrchestratorPanel from './lib/orchestrator/OrchestratorPanel.svelte';
+  import StartOrchestrator from './lib/orchestrator/StartOrchestrator.svelte';
+  import ReviewSheet from './lib/orchestrator/ReviewSheet.svelte';
+  import ReviewNotices from './lib/orchestrator/ReviewNotices.svelte';
+  import { onReviewOpened, openOrchestrator } from './lib/orch.svelte';
+  import { orchestratorOf } from './lib/orchestrator';
 
   const media = window.matchMedia('(prefers-color-scheme: dark)');
   let osDark = $state(media.matches);
@@ -45,7 +51,18 @@
   $effect(() => follow(nav.current));
 
   const view = $derived(nav.current.view);
-  const split = $derived(view === 'session' || view === 'diff');
+  const orch = $derived(orchestratorOf(app.model));
+  // The orchestrator view is a split too: its tree on the left, its own
+  // session in the shared pane on the right (one pane per session, so the
+  // terminal is never attached twice).
+  const orchView = $derived(view === 'orchestrator');
+  const split = $derived(view === 'session' || view === 'diff' || (orchView && !!orch));
+  // The orchestrator view keeps the chat primary: a wider right side.
+  const rightWidth = $derived(app.splitWidth ? `${app.splitWidth}px` : orchView ? '62%' : '56%');
+  // An orchestrator started (or pinned) while its view is up: show it.
+  $effect(() => {
+    if (orchView && orch && !(app.session && 'Agent' in app.session && app.session.Agent === orch.id)) app.session = { Agent: orch.id };
+  });
   const adoView = $derived(view === 'tasks' || view === 'branches' || view === 'prs');
   const ADO_TITLE: Record<string, string> = { tasks: 'Tasks', branches: 'Branches', prs: 'Pull requests' };
 
@@ -61,7 +78,7 @@
   let sessionEverOpened = $state(false);
   let diffEverOpened = $state(false);
   $effect(() => {
-    if (view === 'session') sessionEverOpened = true;
+    if (view === 'session' || (orchView && orch)) sessionEverOpened = true;
     if (view === 'diff') diffEverOpened = true;
   });
 
@@ -107,8 +124,14 @@
   async function applyStartup() {
     // Saved preferences first; the command line overrides them for this
     // run only and is never written back.
-    await loadDesktopPrefs();
+    const prefs = await loadDesktopPrefs();
     const s = await api.startup().catch(() => null);
+    // Open on the orchestrator (Desktop tab) unless the command line picks
+    // a view or session for this run.
+    if ((prefs?.startup === 'orchestrator' && !s?.view && !s?.session) || s?.view === 'orchestrator') {
+      for (let i = 0; i < 100 && !app.model.connected; i++) await new Promise((r) => setTimeout(r, 100));
+      openOrchestrator();
+    }
     if (!s) return;
     if (s.theme === 'light' || s.theme === 'dark' || s.theme === 'system') app.themePref = s.theme;
     if (isDiffMode(s.diff_mode)) app.diffMode = s.diff_mode;
@@ -131,6 +154,7 @@
   }
 
   onMount(() => {
+    api.onReview(onReviewOpened).catch(() => {});
     boot();
     applyStartup();
   });
@@ -145,7 +169,7 @@
       <Breadcrumb />
       <span class="flex-1"></span>
       <AttentionStrip />
-      {#if app.home === 'overview' && !adoView && view !== 'settings'}
+      {#if app.home === 'overview' && !adoView && view !== 'settings' && !orchView}
         <button
           class="h-6 flex-none border px-2 text-[12px] {app.showArchived ? 'border-ink bg-ink text-bg' : 'border-rule bg-transparent text-muted hover:text-ink'}"
           aria-pressed={app.showArchived}
@@ -176,6 +200,8 @@
         <Prs />
       {:else if view === 'settings'}
         <Settings />
+      {:else if orchView && !orch}
+        <StartOrchestrator inline />
       {:else if adoView}
         <section class="min-w-0 flex-1 px-6 pt-6">
           <h1 class="m-0 text-[28px] font-semibold tracking-tight text-ink">{ADO_TITLE[view]}</h1>
@@ -185,7 +211,9 @@
         </section>
       {:else}
         <div class="relative min-w-0 flex-1">
-          {#if app.home === 'board'}
+          {#if orchView}
+            <OrchestratorPanel />
+          {:else if app.home === 'board'}
             <Board active={!split} />
           {:else}
             <Overview active={!split} />
@@ -207,10 +235,10 @@
         {/if}
         <div
           class="relative min-w-0 flex-none {split ? '' : 'hidden'}"
-          style="width: {app.splitWidth ? `${app.splitWidth}px` : '56%'}"
+          style="width: {rightWidth}"
         >
           {#if sessionEverOpened}
-            <div class="absolute inset-0 {view === 'session' ? 'visible' : 'invisible'}"><Session /></div>
+            <div class="absolute inset-0 {view === 'session' || orchView ? 'visible' : 'invisible'}"><Session /></div>
           {/if}
           {#if diffEverOpened}
             <div class="absolute inset-0 {view === 'diff' ? 'visible' : 'invisible'}"><Diff /></div>
@@ -237,6 +265,9 @@
 <Dialog />
 <Palette />
 <Help />
+<StartOrchestrator />
+<ReviewSheet />
+<ReviewNotices />
 
 {#if app.toast}
   <div

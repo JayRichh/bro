@@ -15,6 +15,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 nebula-core = { path = "../../crates/nebula-core" }
 nebula-config = { path = "../../crates/nebula-config" }
+kete-ado = { path = "../../crates/kete-ado" }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
@@ -23,12 +24,10 @@ tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "
 anyhow = "1"
 base64 = "0.22"
 async-trait = "0.1"
-futures-util = "0.3"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
 
 [dev-dependencies]
-httpmock = "0.7"
+kete-ado = { path = "../../crates/kete-ado", features = ["test-support"] }
 tempfile = "3"

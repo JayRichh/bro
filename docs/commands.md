@@ -24,6 +24,7 @@ kete sessions             list every session across every project     (agents ru
 kete read <session>       read recent context from another session    (agents run this)
 kete ask <session> <q>    ask another session and print its answer    (agents run this)
 kete orchestrator <cmd>   start the one orchestrator; its own verbs   (see Orchestrator)
+kete ado <cmd>            Azure DevOps tasks, task worktrees, PRs     (see Azure DevOps)
 kete config <cmd>         back up, restore or locate this machine's settings
 kete profile <cmd>        several accounts per harness: add, sign in, list, remove
 kete setup terminal       install a Nerd Font and add a "Kete" Windows Terminal profile
@@ -109,6 +110,44 @@ kete orchestrator clear   # unpin it; the session keeps running as a worker.
 kete orchestrator list|read|send|spawn|review
                           # the orchestrator session's own verbs, refused for every other caller.
                           # See docs/orchestrator.md.
+```
+
+## Azure DevOps
+
+Run in a checkout whose git remote is on Azure DevOps: org, project and repo
+come from that remote, the team from the desktop's Tasks view (else the
+project's default team). Sign-in is never interactive: Git Credential Manager
+with `credential.interactive=never`, then `az account get-access-token`. When
+neither has a token the command says to sign in from the desktop app or run
+`az login`.
+
+From anywhere else, name the repo: `--project <kete project>` (its name or
+id) goes on any `kete ado` command, before or after the verb, and acts in that
+project's main checkout; add `--worktree <branch>` for one of its worktrees
+(`pr create` pushes that checkout's branch). The orchestrator, whose own
+workspace has no remote, always passes it.
+
+```sh
+kete ado --project ledger-api tasks
+kete ado --project ledger-api --worktree jari/gst-rounding pr create --task 4211
+kete ado tasks [--all | --open] [--json]
+                          # your tasks in the current sprint, by parent (--all: everyone's
+                          # open items in it; --open: everything open assigned to you)
+kete ado start-task <id> [--agent H] [--no-agent] [--branch B] [--base R]
+                         [--no-assign] [--no-activate] [--prompt P] [--model M] [--effort E]
+                         [--profile P] [--json]
+                          # the desktop's Start task: <initials>/<slug> branch from the
+                          # repo's default branch, a worktree, the task linked, assigned and
+                          # In Progress, an agent on it (the orchestrator's child when run there)
+kete ado prs [--json]     # your active PRs, and those waiting on your review
+kete ado pr <id> [--json] # one PR: reviewers and votes, policies, comment threads
+kete ado pr create [--title T] [--summary S] [--testing T] [--target B] [--source B]
+                   [--task <id> | --no-task] [--reviewer WHO]... [--no-reviewer] [--publish]
+                          # push this branch and open a draft PR with the composer's rules:
+                          # co-author lines cleaned from unpushed commits, a task and a
+                          # reviewer unless waived, an existing PR reported, not doubled
+kete ado vote <id> approve|approve-with-suggestions|wait|reject|reset
+kete ado reply <id> <thread> <text>
 ```
 
 ## Settings

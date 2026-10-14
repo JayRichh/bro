@@ -9,6 +9,7 @@ import { api, type Agent, type Model, type TerminalTab, type Worktree } from './
 import { app, focusQuickPrompt, markSeen, openDiff, openSession, projectOf, toast } from './store.svelte';
 import { ask, type MenuEntry } from './ui/ui.svelte';
 import { keysOf, type ShortcutId } from './shortcuts';
+import { orchestratorMenuItems } from './orch.svelte';
 
 export type Target =
   /** `viaSub`: picked from one of its subagents' rows, so it acts on
@@ -373,6 +374,7 @@ export function agentMenu(a: Agent, viaSub = false): MenuEntry[] {
     item('Rename\u2026', () => renameAgent(a.id), 'rename'),
   ];
   if (a.unseen) out.push(item('Mark seen', () => seeAgent(a.id)));
+  out.push(...orchestratorMenuItems(a));
   out.push(item(viaSub ? 'Archive parent session\u2026' : 'Archive', () => archiveAgent(a.id, viaSub), 'archive'), item('Delete\u2026', () => deleteAgent(a.id), 'delete', true));
   return [...out, 'sep', ...worktreeItems(w)];
 }

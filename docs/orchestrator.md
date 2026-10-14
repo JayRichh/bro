@@ -77,6 +77,35 @@ three quarters of a second, so a keystroke meant for something else never
 drops you into a worker. Closing a review puts the pane back on what it showed,
 or empties it if it showed nothing.
 
+## In the desktop window
+
+The orchestrator is pinned at the top of the rail, above the repos, with its
+live state (or how many of its sessions need you). With none yet, the rail
+reads **Start orchestrator**: a form with harness, profile, model and effort,
+each starting on the Agents tab's defaults. `0` (or `F10` outside a shell),
+the palette (**Open orchestrator**, **Start orchestrator**, **Unpin
+orchestrator**) and a session's right-click menu (**Make orchestrator**,
+**Unpin orchestrator**, **Review**) reach the same places. A daemon older than
+protocol 54 is never sent these requests: the window says to run `kete reload`.
+
+- **The view** is a split: on the left, every session the orchestrator started
+  in any repo, as one tree with a repo / branch chip per row, the counts of
+  what in that tree needs you, and below it what wants you elsewhere; on the
+  right, the orchestrator's own session, so the chat stays primary. A click on
+  a row opens the review sheet. The quick prompt under it sends to the
+  orchestrator as a follow-up (its target reads **Orchestrator**), until you
+  pick a repo.
+- **The overview** keeps each session in its own repo, and a session started
+  from another repo says so: a `from ◆ Orchestrator` chip that opens the
+  orchestrator. The orchestrator's row and session header wear the badge.
+- **Reviews** the orchestrator asks for arrive as a notice, *Orchestrator wants
+  you to review X*, that never takes the focus; **Open** shows the review
+  sheet with Terminal, Diff, History and PR tabs (the Azure DevOps review when
+  the repo lives there, else the GitHub link). `[`/`]` walk the sessions, `Esc`
+  closes.
+- **Open on** (Settings, Desktop tab) starts the window on the orchestrator;
+  `--view orchestrator` does it for one run.
+
 ## Agent-facing commands
 
 The orchestrator's guidance is injected by role on every cold start: the
@@ -115,8 +144,22 @@ name, project or branch.
   sessions.
 
 The everyday `kete sessions`, `kete read` and `kete ask` work in the
-orchestrator too. Azure DevOps commands (`kete ado ...`) are reserved in the
-guidance for a later release.
+orchestrator too.
+
+### Azure DevOps
+
+For a repo on Azure DevOps the guidance teaches `kete ado` (see
+[Commands](commands.md#azure-devops)) and one flow, naming the repo with
+`--project` because its own workspace has no remote: `kete ado --project P
+tasks`, pick a task with the user, `kete ado --project P start-task <id>` (a branch and worktree for it,
+the task linked, assigned and moved to In Progress, and a worker on it that is
+the orchestrator's child, through `OrchestratorSpawnWith` on the new worktree),
+watch the worker with `list` and `read`, `review` it for the user, then
+`kete ado --project P --worktree <its branch> pr create` (draft, co-author lines cleaned,
+a task and a reviewer unless waived). Votes and replies only when the user asks.
+Sign-in is never interactive: a missing credential is reported with "sign in
+from the desktop app or run `az login`", and the orchestrator passes that on
+rather than trying to sign in.
 
 ## Permission model
 
@@ -163,4 +206,4 @@ fresh read. Nothing is written into its chat box unasked.
 - The `orchestrator_view` setting (`auto` on narrow terminals, `always`,
   `never`) for the startup mode.
 - Optional idle-note injection for the orchestrator, behind an autonomy setting.
-- Azure DevOps commands (`kete ado ...`).
+- Azure DevOps pipelines in `kete ado`.

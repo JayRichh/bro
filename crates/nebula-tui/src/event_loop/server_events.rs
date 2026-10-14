@@ -86,6 +86,10 @@ fn handle_snapshot_event(app: &mut App, event: ServerEvent, out: &mut Vec<Client
             if first_snapshot && (session_restored || app.launcher_grid()) {
                 preview_selected_now(app, out);
             }
+            // `orchestrator_view`: auto (a narrow terminal), always, never.
+            if first_snapshot {
+                super::orchestrator::startup_view(app, out);
+            }
             app.chrome.dirty = true;
         }
         _ => unreachable!("server event dispatcher passed the wrong event variant"),

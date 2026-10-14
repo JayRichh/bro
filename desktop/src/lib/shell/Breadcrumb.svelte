@@ -12,6 +12,7 @@
     branches: 'Branches',
     prs: 'Pull requests',
     settings: 'Settings',
+    orchestrator: 'Orchestrator',
   };
 
   const crumbs = $derived.by((): Crumb[] => {

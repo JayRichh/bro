@@ -17,6 +17,8 @@ pub const THEMES: &[&str] = &["system", "light", "dark"];
 pub const DIFF_MODES: &[&str] = &["side", "inline", "replacement"];
 /// What the main column shows with no view open.
 pub const HOMES: &[&str] = &["overview", "board"];
+/// What the window opens on: its home view, or the orchestrator.
+pub const STARTUPS: &[&str] = &["home", "orchestrator"];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -28,6 +30,8 @@ pub struct DesktopPrefs {
     /// run, by repo path: the same command doesn't ask again.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub approved_open: BTreeMap<String, Vec<String>>,
+    /// What the window opens on (`home` or `orchestrator`).
+    pub startup: String,
     /// Keys a newer window wrote, kept through a save.
     #[serde(flatten)]
     pub other: BTreeMap<String, serde_json::Value>,
@@ -40,6 +44,7 @@ impl Default for DesktopPrefs {
             diff_mode: DIFF_MODES[0].into(),
             home: HOMES[0].into(),
             approved_open: BTreeMap::new(),
+            startup: STARTUPS[0].into(),
             other: BTreeMap::new(),
         }
     }
@@ -51,6 +56,7 @@ pub fn choices(key: &str) -> Option<&'static [&'static str]> {
         "theme" => Some(THEMES),
         "diff_mode" => Some(DIFF_MODES),
         "home" => Some(HOMES),
+        "startup" => Some(STARTUPS),
         _ => None,
     }
 }
@@ -70,7 +76,7 @@ impl DesktopPrefs {
             .and_then(|value| serde_json::from_value(value).ok())
             .unwrap_or_default();
         let fallback = DesktopPrefs::default();
-        for key in ["theme", "diff_mode", "home"] {
+        for key in ["theme", "diff_mode", "home", "startup"] {
             let ok = choices(key).is_some_and(|list| list.contains(&prefs.get(key)));
             if !ok {
                 prefs.set_unchecked(key, fallback.get(key));
@@ -89,6 +95,7 @@ impl DesktopPrefs {
             "theme" => &self.theme,
             "diff_mode" => &self.diff_mode,
             "home" => &self.home,
+            "startup" => &self.startup,
             _ => "",
         }
     }
@@ -98,6 +105,7 @@ impl DesktopPrefs {
             "theme" => self.theme = value.into(),
             "diff_mode" => self.diff_mode = value.into(),
             "home" => self.home = value.into(),
+            "startup" => self.startup = value.into(),
             _ => {}
         }
     }
@@ -200,5 +208,18 @@ mod tests {
         assert_eq!(saved["desktop"]["theme"], "dark");
         assert_eq!(saved["desktop"]["future"], 3);
         assert!(DesktopPrefs::update_in(&path, &local, |p| p.set("theme", "neon")).is_err());
+    }
+
+    #[test]
+    fn startup_opens_home_or_the_orchestrator() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let local = dir.path().join("config.local.json");
+        assert_eq!(DesktopPrefs::load_at(&path, &local).startup, "home");
+        DesktopPrefs::update_in(&path, &local, |p| p.set("startup", "orchestrator")).unwrap();
+        assert_eq!(DesktopPrefs::load_at(&path, &local).startup, "orchestrator");
+        std::fs::write(&path, r#"{"desktop": {"startup": "sideways"}}"#).unwrap();
+        assert_eq!(DesktopPrefs::load_at(&path, &local).startup, "home");
+        assert!(DesktopPrefs::update_in(&path, &local, |p| p.set("startup", "x")).is_err());
     }
 }

@@ -2,6 +2,8 @@
   import { app, openSession, projectOf, sessionWorktree, toast } from './store.svelte';
   import { api, type HarnessInfo, type Preset } from './api';
   import { nav } from './shell/history.svelte';
+  import { orchestratorOf } from './orchestrator';
+  import { sendToOrchestrator } from './orch.svelte';
 
   // The quick prompt: pinned under the main column. Pick where and with
   // what, type the task, Enter starts it (Shift+Enter for a new line). P
@@ -11,6 +13,8 @@
   // Settings defaults, as the terminal app's quick prompt does.
   const TERMINAL = 'terminal';
   const NEW_WT = '__new';
+  /** The "to orchestrator" target: the text goes to it as a follow-up turn. */
+  const ORCH = '__orchestrator';
   let project = $state('');
   let worktree = $state('');
   let harness = $state('claude');
@@ -35,8 +39,10 @@
   const profiles = $derived(app.launch.profiles.filter((p) => p.harness === harness));
   const models = $derived(info?.choices?.models ?? []);
   const efforts = $derived(info?.choices?.efforts[model] ?? info?.choices?.efforts[info?.choices?.model ?? ''] ?? []);
-  const isTerminal = $derived(harness === TERMINAL);
-  const expanded = $derived(focused || !!prompt.trim());
+  const orch = $derived(orchestratorOf(app.model));
+  const toOrch = $derived(project === ORCH);
+  const isTerminal = $derived(harness === TERMINAL && !toOrch);
+  const expanded = $derived((focused || !!prompt.trim()) && !toOrch);
   const usablePresets = $derived(presets.filter((p) => p.usable !== false));
 
   function loadPresets() {
@@ -77,7 +83,7 @@
     if (efforts.length && !efforts.includes(effort)) effort = efforts.includes(info?.choices?.effort ?? '') ? info!.choices!.effort : efforts[0];
   });
 
-  const ready = $derived(app.model.connected && !!worktree && !busy);
+  const ready = $derived(app.model.connected && !busy && (toOrch ? !!orch && !!prompt.trim() : !!worktree));
 
   // Follow the window (the repo in view, else the open session's) until
   // the user picks a repo by hand; that pick holds until a session starts.
@@ -85,9 +91,11 @@
   $effect(() => {
     const repo = nav.current.repo;
     if (repo && !picked) project = repo;
+    // On the orchestrator's view the prompt talks to it, until a repo is picked.
+    else if (!repo && !picked && nav.current.view === 'orchestrator' && orch) project = ORCH;
   });
   $effect(() => {
-    if (app.model.projects.find((p) => p.id === project)) return;
+    if (app.model.projects.find((p) => p.id === project) || (project === ORCH && orch)) return;
     project = projectOf(sessionWorktree(app.session)) ?? app.model.projects[0]?.id ?? '';
   });
   $effect(() => {
@@ -144,6 +152,17 @@
 
   async function submit() {
     if (!ready) return;
+    if (toOrch) {
+      busy = true;
+      const sent = await sendToOrchestrator(prompt);
+      busy = false;
+      if (sent) {
+        toast(`Sent to ${orch?.name ?? 'the orchestrator'}.`);
+        prompt = '';
+        queueMicrotask(grow);
+      }
+      return;
+    }
     busy = true;
     try {
       const c = info?.choices;
@@ -268,19 +287,20 @@
   <div class="flex min-h-11 items-stretch">
     <span class="relative flex max-w-40 min-w-0 border-r border-rule">
       <select class={pick} bind:value={project} onchange={() => (picked = true)} aria-label="Repo">
+        {#if orch}<option value={ORCH}>&#9670; Orchestrator</option>{/if}
         {#each app.model.projects as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
       </select>
       {@render chevron()}
     </span>
     <span class="relative flex max-w-44 min-w-0 border-r border-rule">
-      <select class="{pick} font-mono text-[12px]" bind:value={worktree} aria-label="Worktree">
+      <select class="{pick} font-mono text-[12px]" bind:value={worktree} aria-label="Worktree" disabled={toOrch}>
         {#each worktrees as w (w.id)}<option value={w.id}>{w.branch}</option>{/each}
         <option value={NEW_WT}>+ new worktree</option>
       </select>
       {@render chevron()}
     </span>
     <span class="relative flex max-w-32 min-w-0 border-r border-rule">
-      <select class={pick} bind:value={harness} aria-label="Harness">
+      <select class={pick} bind:value={harness} aria-label="Harness" disabled={toOrch}>
         {#each harnesses as h (h.id)}<option value={h.id}>{h.label}</option>{/each}
         <option value={TERMINAL}>Terminal</option>
       </select>
@@ -295,7 +315,9 @@
       onkeydown={onKey}
       disabled={isTerminal}
       aria-label="Prompt"
-      placeholder={isTerminal
+      placeholder={toOrch
+        ? `Tell ${orch?.name ?? 'the orchestrator'} what you want. Enter sends it as a follow-up.`
+        : isTerminal
         ? 'Opens a shell in this worktree. Enter to start.'
         : preset
           ? `Task for ${preset} (optional). Enter to start.`
@@ -304,7 +326,7 @@
     <button
       type="submit"
       class="flex-none border-0 border-l border-rule-strong bg-ink px-4 text-[13px] font-medium text-bg enabled:hover:bg-surface enabled:hover:text-ink disabled:bg-transparent disabled:text-faint"
-      disabled={!ready}>{busy ? 'Starting\u2026' : 'Start'}</button
+      disabled={!ready}>{busy ? (toOrch ? 'Sending\u2026' : 'Starting\u2026') : toOrch ? 'Send' : 'Start'}</button
     >
   </div>
 </form>

@@ -11,8 +11,8 @@ use crate::desktop::DesktopPrefs;
 use crate::{
     agent_kind_names, choices, effort_choices_in, model_choices_in, Config, HarnessField,
     SettingKind, SettingSpec, TabBody, AGENTS_HEAD, DEFAULT_CHOICE, DIFF_CONTEXTS, EDITORS,
-    INLINE_GRAPHICS, KANBAN_SCOPES, PRESET_TEXTS, PROJECT_FILE_CHOICE, SESSION_IDLE_TIMEOUTS,
-    SETTINGS_TABS, SOUNDS, WORKTREE_LAYOUTS,
+    INLINE_GRAPHICS, KANBAN_SCOPES, ORCHESTRATOR_VIEWS, PRESET_TEXTS, PROJECT_FILE_CHOICE,
+    SESSION_IDLE_TIMEOUTS, SETTINGS_TABS, SOUNDS, WORKTREE_LAYOUTS,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -49,6 +49,7 @@ pub const TERMINAL_ONLY: &[SettingKind] = &[
     SettingKind::WorktreeLayout,
     SettingKind::Kanban,
     SettingKind::KanbanScope,
+    SettingKind::OrchestratorView,
     SettingKind::InlineGraphics,
     SettingKind::ExpandAllWorktrees,
     SettingKind::CardIssueNumber,
@@ -98,6 +99,7 @@ impl SettingKind {
             SettingKind::WorktreeLayout => "worktree_layout",
             SettingKind::Kanban => "kanban",
             SettingKind::KanbanScope => "kanban_scope",
+            SettingKind::OrchestratorView => "orchestrator_view",
             SettingKind::InlineGraphics => "inline_graphics",
             SettingKind::ExpandAllWorktrees => "expand_all_worktrees",
             SettingKind::CardIssueNumber => "card_issue_number",
@@ -262,6 +264,7 @@ fn choice_options(cfg: &Config, kind: SettingKind) -> Option<Vec<String>> {
         SettingKind::SessionPane => (strs(choices::PANE_SIDES), String::new()),
         SettingKind::WorktreeLayout => (strs(WORKTREE_LAYOUTS), String::new()),
         SettingKind::KanbanScope => (strs(KANBAN_SCOPES), String::new()),
+        SettingKind::OrchestratorView => (strs(ORCHESTRATOR_VIEWS), String::new()),
         SettingKind::InlineGraphics => (strs(INLINE_GRAPHICS), String::new()),
         SettingKind::DiffMode => (
             choices::DiffMode::ALL
@@ -368,6 +371,7 @@ pub fn set_value(cfg: &mut Config, kind: SettingKind, value: &Value) -> Result<(
         SettingKind::SessionPane => cfg.session_pane = word,
         SettingKind::WorktreeLayout => cfg.worktree_layout = word,
         SettingKind::KanbanScope => cfg.kanban_scope = word,
+        SettingKind::OrchestratorView => cfg.orchestrator_view = word,
         SettingKind::InlineGraphics => cfg.inline_graphics = word,
         SettingKind::DiffMode => cfg.diff_mode = word,
         SettingKind::DiffContext => cfg.diff_context = word,
@@ -660,6 +664,7 @@ fn desktop_tab(prefs: &DesktopPrefs) -> Tab {
             rows: vec![
                 row("theme", "Theme", "Follow the system's light or dark mode, or pin one (Ctrl+Shift+L cycles; --theme overrides for one run)", &["System", "Light", "Dark"]),
                 row("home", "Home view", "What the main column shows with nothing open: the overview of repos, or the board of lanes (Shift+K switches)", &["Overview", "Board"]),
+                row("startup", "Open on", "What the window shows when it opens: its home view, or the orchestrator (its start form when there is none yet)", &["Home view", "Orchestrator"]),
                 row("diff_mode", "Diff layout", "How the Diff view lays out a repo that has no layout saved yet (--diff overrides for one run)", &["Side by side", "Inline", "Replacement"]),
             ],
         }],

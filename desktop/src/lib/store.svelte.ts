@@ -2,6 +2,7 @@
 // and what the window is looking at. Where the window is lives in
 // `nav` (shell/history.svelte.ts); this file follows it.
 
+import { untrack } from 'svelte';
 import { api, type Launchables, type Model, type SessionRef } from './api';
 import { ado, type AdoContextInfo } from './ado/api';
 import { nav, type Place } from './shell/history.svelte';
@@ -98,13 +99,14 @@ export async function loadDesktopPrefs() {
     .then((p) => p && toast(`Settings are read-only until config.json is fixed: ${p}`))
     .catch(() => {});
   const p = await api.desktopPrefs().catch(() => null);
-  if (!p) return;
+  if (!p) return null;
   if (p.theme === 'system' || p.theme === 'light' || p.theme === 'dark') app.themePref = p.theme;
   if (isDiffMode(p.diff_mode)) app.diffMode = p.diff_mode;
   if (p.home === 'overview' || p.home === 'board') {
     app.home = p.home;
     if (nav.current.view === 'overview' || nav.current.view === 'board') nav.replace({ ...nav.current, view: p.home });
   }
+  return p;
 }
 
 /** Ask which worktrees have a run command (after a settings change too). */
@@ -193,7 +195,17 @@ export function revealRepo(repo: string) {
 /** Make the window's selection follow a place reached by back or forward. */
 export function follow(p: Place) {
   if (p.view === 'overview' || p.view === 'board') app.home = p.view;
-  if (p.view === 'session') {
+  if (p.view === 'orchestrator') {
+    // The orchestrator view shows its session in the split's pane.
+    const o = app.model.agents.find((a) => a.role === 'orchestrator' && !a.archived);
+    if (o) {
+      // A plain object, never read back from `app.session`: this runs in
+      // an effect, and reading what it writes would loop.
+      const s: SessionRef = { Agent: o.id };
+      if (sessionKey(untrack(() => app.session)) !== sessionKey(s)) app.session = s;
+      markSeen(s);
+    }
+  } else if (p.view === 'session') {
     const s = sessionFromKey(p.item);
     if (s) app.session = s;
     // Back or forward onto a session shows it again: it is seen.
@@ -277,7 +289,7 @@ function take(m: Model) {
 /** Mark the session on screen seen when it reads unread and the window has focus. */
 export function seeOpenSession() {
   const s = app.session;
-  if (nav.current.view !== 'session' || !s || !('Agent' in s)) return;
+  if ((nav.current.view !== 'session' && nav.current.view !== 'orchestrator') || !s || !('Agent' in s)) return;
   if (typeof document !== 'undefined' && !document.hasFocus()) return;
   if (app.model.agents.find((a) => a.id === s.Agent)?.unseen) markSeen(s);
 }

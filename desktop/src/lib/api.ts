@@ -252,6 +252,8 @@ export interface DesktopPrefs {
   theme: string;
   diff_mode: string;
   home: string;
+  /** `home` or `orchestrator`: what the window opens on. */
+  startup?: string;
 }
 export interface Startup {
   view: string | null;
@@ -331,7 +333,28 @@ export const api = {
   openUrl: (url: string) => invoke<void>('open_url', { url }),
   launchables: () => invoke<Launchables>('launchables'),
   startup: () => invoke<Startup>('startup'),
+  // The orchestrator
+  startOrchestrator: (spec: StartOrchestrator) => invoke<string>('start_orchestrator', { spec }),
+  setOrchestrator: (agent: string) => invoke<void>('set_orchestrator', { agent }),
+  clearOrchestrator: () => invoke<void>('clear_orchestrator'),
+  readSession: (agent: string) => invoke<string>('read_session', { agent }),
+  onReview: (f: (r: ReviewOpened) => void) => listen<ReviewOpened>('kete://review', (e) => f(e.payload)),
 };
+
+export interface StartOrchestrator {
+  kind: string;
+  profile?: string | null;
+  model?: string | null;
+  effort?: string | null;
+  replace?: boolean;
+}
+/** `kete orchestrator review`, as the daemon broadcasts it. */
+export interface ReviewOpened {
+  opener: string;
+  sessions: SessionRef[];
+  /** `terminal`, `diff`, `history`, `pr`; empty: all. */
+  tabs: string[];
+}
 
 export { Channel };
 

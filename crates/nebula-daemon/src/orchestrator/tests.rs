@@ -253,7 +253,15 @@ fn the_guidance_covers_attention_order_the_verbs_and_the_ado_hook() {
         "subagents",
         "Tell, then ask",
         "Azure DevOps",
-        "kete ado",
+        "--project P tasks",
+        "--worktree",
+        "kete ado start-task",
+        "kete ado prs",
+        "kete ado pr <id>",
+        "kete ado pr create",
+        "kete ado vote",
+        "kete ado reply",
+        "az login",
     ] {
         assert!(
             CLAUDE_ORCHESTRATOR_GUIDANCE.contains(needle),

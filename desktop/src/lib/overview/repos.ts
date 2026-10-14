@@ -28,13 +28,16 @@ export function repoRows(m: Model, opts: { archived?: boolean } = {}): RepoRow[]
     const wids = new Set(worktrees.map((w) => w.id));
     const agents = m.agents.filter((a) => wids.has(a.worktree_id) && (opts.archived || !a.archived));
     const ids = new Set(agents.map((a) => a.id));
+    // Sessions in other repos, so a session started from one (by the
+    // orchestrator, say) says where it came from.
+    const outside = new Map(m.agents.filter((a) => !wids.has(a.worktree_id)).map((a) => [a.id, a]));
     const subs = m.subagents.filter((s) => ids.has(s.parent_agent));
     const ports = [...new Set(m.ports.filter((p) => wids.has(p.worktree)).flatMap((p) => p.live))].sort((a, b) => a - b);
     const prs = worktrees.flatMap((w) => (m.prs[w.id] ? [{ branch: w.branch, pr: m.prs[w.id] }] : []));
     return {
       project,
       name: project.name,
-      forest: buildForest(agents, subs),
+      forest: buildForest(agents, subs, outside),
       terminals: m.terminals.filter((t) => wids.has(t.worktree_id)).sort((a, b) => a.sort_order - b.sort_order),
       worktrees,
       main: worktrees.find((w) => w.is_main) ?? worktrees[0],

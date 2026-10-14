@@ -23,6 +23,8 @@ export type ShortcutId =
   | 'go_home'
   | 'go_session'
   | 'go_diff'
+  | 'orchestrator'
+  | 'orchestrator_f10'
   | 'close_split'
   | 'toggle_archived'
   | 'new_worktree'
@@ -90,6 +92,9 @@ export const SHORTCUTS: Shortcut[] = [
   { id: 'go_home', keys: ['1'], scope: 'global', label: 'Home', group: 'Views' },
   { id: 'go_session', keys: ['2'], scope: 'global', label: 'Session', group: 'Views' },
   { id: 'go_diff', keys: ['3'], scope: 'global', label: 'Diff', group: 'Views' },
+  // F10 as in the terminal app, but never inside a shell (htop and mc quit on it).
+  { id: 'orchestrator', keys: ['0'], scope: 'global', label: 'Orchestrator (start one when there is none)', group: 'Views' },
+  { id: 'orchestrator_f10', keys: ['f10'], scope: 'fields', label: 'Orchestrator (start one when there is none)', group: 'Views' },
   { id: 'close_split', keys: ['escape'], scope: 'global', label: 'Close the split or Settings', group: 'Views' },
   { id: 'toggle_archived', keys: ['shift+a'], scope: 'global', label: 'Show or hide archived sessions', group: 'Views' },
 

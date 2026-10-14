@@ -54,7 +54,14 @@ export const ui = $state({
   dialog: null as DialogSpec | null,
   palette: false,
   help: false,
+  /** The review sheet (the orchestrator asked, or a session's Review). */
+  review: null as ReviewSheet | null,
+  /** The Start orchestrator form. */
+  startOrchestrator: false,
 });
+
+export type ReviewTab = 'terminal' | 'diff' | 'history' | 'pr';
+export type ReviewSheet = { sessions: string[]; at: number; tab: ReviewTab };
 
 /** Open a context menu at the pointer (or under an element). */
 export function openMenu(items: MenuEntry[], at: { x: number; y: number } | HTMLElement, label = 'Actions') {
@@ -92,5 +99,5 @@ export const ask = {
 
 /** Is any layer up (so page keys stand down)? */
 export function layerOpen(): boolean {
-  return !!(ui.menu || ui.dialog || ui.palette || ui.help);
+  return !!(ui.menu || ui.dialog || ui.palette || ui.help || ui.review || ui.startOrchestrator);
 }

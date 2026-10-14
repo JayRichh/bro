@@ -3,6 +3,7 @@
   import { toneOf, terminalTone, harnessLabel, placeOf, age, lastPrompt } from './status';
   import Status from './Status.svelte';
   import Terminal from './Terminal.svelte';
+  import OrchBadge from './orchestrator/OrchBadge.svelte';
   import { agentMenu, terminalMenu } from './actions';
   import { openMenu } from './ui/ui.svelte';
 
@@ -36,6 +37,7 @@
         <span class="min-w-0 truncate text-[15px] font-semibold {tone === 'needs' ? 'text-ember-ink' : 'text-ink'}"
           >{agent?.name ?? terminal?.name}</span
         >
+        {#if agent?.role === 'orchestrator'}<OrchBadge />{/if}
         <Status {tone} />
         <span class="flex-1"></span>
         <button class={tool} onclick={() => openDiff(wt)} title="Diff this worktree (Ctrl+Shift+D)">Diff</button>

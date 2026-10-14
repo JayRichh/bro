@@ -9,6 +9,8 @@
   import { flatten, type Node } from './tree';
   import { menuFor, type Target } from '../actions';
   import { openMenu } from '../ui/ui.svelte';
+  import OrchBadge from '../orchestrator/OrchBadge.svelte';
+  import { openOrchestrator } from '../orch.svelte';
 
   let { repo, forest, terminals }: { repo: string; forest: Node[]; terminals: TerminalTab[] } = $props();
 
@@ -130,6 +132,20 @@
             >
           {/if}
         </span>
+        {#if n.agent?.role === 'orchestrator'}<span class="ml-2"><OrchBadge /></span>{/if}
+        {#if n.from}
+          {@const from = n.from}
+          <button
+            class="ml-2 inline-flex max-w-[45%] flex-none items-center gap-1 truncate border border-rule bg-transparent px-1 font-mono text-[11px] leading-4 text-muted hover:border-rule-strong hover:text-ink"
+            title="Started by {from.name}, in another repo. Open it."
+            onclick={(e) => {
+              e.stopPropagation();
+              if (from.role === 'orchestrator') openOrchestrator();
+              else openSession({ Agent: from.id });
+            }}
+            >from {#if from.role === 'orchestrator'}<span aria-hidden="true">&#9670;</span> Orchestrator{:else}{from.name}{/if}</button
+          >
+        {/if}
         {#if hidden}
           <button
             class="ml-2 flex-none border-0 bg-transparent p-0 font-mono text-[12px] text-muted hover:text-ink hover:underline hover:underline-offset-4"

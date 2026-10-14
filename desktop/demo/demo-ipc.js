@@ -11,7 +11,10 @@
 // tab=<id> (desktop, general, sessions, appearance, agents, project,
 // experimental, hotkeys, presets, profiles); view=menu (a row's context
 // menu), view=palette (q=<query>), view=help, view=quick (the quick prompt
-// expanded). The settings rows are the real schema, exported
+// expanded); view=orchestrator (the orchestrator view), view=start-orchestrator
+// (its start form), view=review (a ReviewOpened notice opened into the review
+// sheet; tab=terminal|diff|history|pr), view=overview-cue (sessions the
+// orchestrator started, in their repos). The settings rows are the real schema, exported
 // by `cargo test -- --ignored write_demo_settings` in src-tauri.
 
 const q = new URLSearchParams(location.search);
@@ -52,7 +55,9 @@ const model = {
 
 // Wave 2 shots (menu, palette, help, quick) want a fuller overview: a
 // session per state, a nested one, a terminal and a PR.
-const W2 = ['menu', 'palette', 'help', 'quick', 'selftest'].includes(q.get('view'));
+const ORCH_VIEWS = ['orchestrator', 'start-orchestrator', 'review', 'overview-cue'];
+const ORCH = ORCH_VIEWS.includes(q.get('view'));
+const W2 = ['menu', 'palette', 'help', 'quick', 'selftest'].includes(q.get('view')) || ORCH;
 if (W2) {
   const a = (id, worktree_id, name, status, extra = {}) => ({
     id, worktree_id, name, status, archived: false, unseen: false, status_changed_at: now - 60_000,
@@ -69,6 +74,61 @@ if (W2) {
   model.terminals.push({ id: 't1', worktree_id: 'w3', name: 'shell', sort_order: 0, alive: true, run_command: null });
   model.prs = { w2: { number: 418, url: 'https://dev.azure.com/demo-org/Platform/_git/ledger-api/pullrequest/418', title: 'Round GST per invoice', draft: true } };
 }
+
+// The orchestrator shots: a protocol-54 daemon, the orchestrator in its own
+// workspace, and sessions it started in both repos (one of them nested).
+if (ORCH) {
+  model.protocol_version = 54;
+  model.projects.unshift({ id: 'po', name: 'orchestrator', repo_path: 'C:\\demo\\kete\\orchestrator', sort_order: -1 });
+  model.worktrees.unshift({ id: 'wo', project_id: 'po', path: 'C:\\demo\\kete\\orchestrator', branch: 'main', is_main: true, sort_order: 0 });
+  if (q.get('view') !== 'start-orchestrator') {
+    model.agents.unshift({
+      id: 'o1', worktree_id: 'wo', name: 'orchestrator', status: 'finished', archived: false, unseen: false,
+      status_changed_at: now - 45_000, kind: 'claude', custom_harness: null, model: 'opus', effort: 'high', profile: 'work',
+      alive: true, recent_prompts: [{ text: 'Get GST rounding and the cart badge to review today', submitted_at: now - 1_800_000 }],
+      role: 'orchestrator', sort_order: -1, parent: null,
+    });
+    for (const a of model.agents) if (a.id === 'a1' || a.id === 'a3') a.parent = 'o1';
+  }
+}
+const ORCH_SCREEN = [
+  '\x1b[1m> Get GST rounding and the cart badge to review today\x1b[0m',
+  '',
+  '\x1b[2m$ kete ado --project ledger-api tasks\x1b[0m',
+  '  4211  Task  Round GST per invoice, not per line        Active',
+  '  4212  Task  Ledger reconciliation test for GST totals  New',
+  '  4231  Task  Back off refund webhook retries            Active',
+  '',
+  '\x1b[2m$ kete ado --project ledger-api start-task 4211 --agent claude\x1b[0m',
+  '  worktree jari/gst-rounding ready, agent gst-rounding started',
+  '\x1b[2m$ kete orchestrator spawn --project storefront-web --worktree jari/cart-badge --kind codex "Show the item count on the cart icon"\x1b[0m',
+  '  started cart-badge',
+  '',
+  'Both are under way. \x1b[1mgst-rounding\x1b[0m spun up \x1b[1mledger-recon-test\x1b[0m for the',
+  'reconciliation test; \x1b[1mcart-badge\x1b[0m finished its first pass and is unread.',
+  '',
+  '\x1b[2m$ kete orchestrator review cart-badge --tab diff\x1b[0m',
+  '  opened a review of cart-badge for you',
+  '',
+  'cart-badge is ready for you to look at. refund-backoff (not mine) is',
+  'waiting on a permission prompt; want me to read it?',
+  '',
+  '\x1b[1m>\x1b[0m ',
+].join('\r\n');
+const CHILD_SCREEN = [
+  '\x1b[1m> Show the item count on the cart icon\x1b[0m',
+  '',
+  '  Edited src/components/CartIcon.tsx (+18 -3)',
+  '  Edited src/components/CartIcon.test.tsx (+42)',
+  '  Ran npm test -- CartIcon   \x1b[32m6 passed\x1b[0m',
+  '',
+  'The badge shows the count, caps at 99+, and is announced to screen readers.',
+  '',
+  '\x1b[1m>\x1b[0m ',
+].join('\r\n');
+const b64 = (t) => btoa(unescape(encodeURIComponent(t)));
+const callbacks = {};
+const listeners = {};
 
 // ---- Tasks (synthetic sprint) ----
 const sprints = [
@@ -195,7 +255,29 @@ const sameTarget = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 const handlers = {
   get_state: () => model,
-  'plugin:event|listen': () => 1,
+  'plugin:event|listen': ({ event, handler }) => ((listeners[event] = handler), handler),
+  attach: ({ session, onEvent }) => {
+    const text = session.Agent === 'o1' ? ORCH_SCREEN : CHILD_SCREEN;
+    setTimeout(() => callbacks[onEvent.id]?.({ index: 0, message: { kind: 'scrollback', data: b64(text) } }), 60);
+    return null;
+  },
+  detach: () => null,
+  resize: () => null,
+  input: () => null,
+  mark_seen: () => null,
+  follow_up: () => null,
+  read_session: () => '## user\nShow the item count on the cart icon\n\n## assistant\nEdited CartIcon.tsx and its test. The badge caps at 99+ and has an aria-label.\n',
+  start_orchestrator: () => 'o1',
+  set_orchestrator: () => null,
+  clear_orchestrator: () => null,
+  diff_files: () => [
+    { path: 'src/components/CartIcon.tsx', from: null, status: 'M', added: 18, removed: 3 },
+    { path: 'src/components/CartIcon.test.tsx', from: null, status: 'A', added: 42, removed: 0 },
+  ],
+  diff_pair: ({ file }) =>
+    file.status === 'A'
+      ? { original: '', modified: "import { render } from '@testing-library/react';\n\ntest('caps at 99+', () => {\n  // ...\n});\n", note: null }
+      : { original: 'export function CartIcon() {\n  return <Icon name="cart" />;\n}\n', modified: 'export function CartIcon({ count }: { count: number }) {\n  const label = count > 99 ? "99+" : String(count);\n  return (\n    <span aria-label={`Cart, ${count} items`}>\n      <Icon name="cart" />\n      {count > 0 && <b>{label}</b>}\n    </span>\n  );\n}\n', note: null },
   'plugin:event|unlisten': () => null,
   'plugin:window|set_theme': () => null,
   launchables: () => ({
@@ -261,7 +343,11 @@ const handlers = {
 let cb = 0;
 window.__TAURI_INTERNALS__ = {
   metadata: { currentWindow: { label: 'main' }, currentWebview: { windowLabel: 'main', label: 'main' } },
-  transformCallback: () => ++cb,
+  transformCallback: (fn) => {
+    const id = ++cb;
+    callbacks[id] = fn;
+    return id;
+  },
   unregisterCallback: () => {},
   convertFileSrc: (p) => p,
   invoke: async (cmd, args) => {
@@ -361,6 +447,25 @@ window.addEventListener('load', async () => {
     box.dispatchEvent(new Event('input', { bubbles: true }));
     return;
   }
+  if (view === 'orchestrator' || view === 'review') {
+    (await until(byText('aside nav button span', 'Orchestrator'))).closest('button').click();
+    if (view === 'review') {
+      await wait(400);
+      // The daemon's ReviewOpened, as kete orchestrator review sends it.
+      const id = listeners['kete://review'];
+      callbacks[id]?.({ event: 'kete://review', id: 1, payload: { opener: 'o1', sessions: [{ Agent: 'a3' }], tabs: [] } });
+      if (q.get('notice')) return;
+      (await until(byText('button', 'Open'))).click();
+      const tab = q.get('tab');
+      if (tab) (await until(byText('[role="tab"]', tab === 'pr' ? 'PR' : tab[0].toUpperCase() + tab.slice(1)))).click();
+    }
+    return;
+  }
+  if (view === 'start-orchestrator') {
+    (await until(byText('aside nav button span', 'Start orchestrator'))).closest('button').click();
+    return;
+  }
+  if (view === 'overview-cue') return;
   const label = view === 'tasks' ? 'Tasks' : 'Branches';
   (await until(byText('aside nav button', label))).click();
   if (view === 'tasks') {
