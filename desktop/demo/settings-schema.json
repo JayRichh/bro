@@ -61,6 +61,29 @@
             {
               "target": {
                 "scope": "desktop",
+                "key": "startup"
+              },
+              "label": "Open on",
+              "hint": "What the window shows when it opens: its home view, or the orchestrator (its start form when there is none yet)",
+              "control": {
+                "type": "choice",
+                "options": [
+                  "home",
+                  "orchestrator"
+                ],
+                "labels": [
+                  "Home view",
+                  "Orchestrator"
+                ]
+              },
+              "value": "home",
+              "default": "home",
+              "restart": null,
+              "is_new": false
+            },
+            {
+              "target": {
+                "scope": "desktop",
                 "key": "diff_mode"
               },
               "label": "Diff layout",
@@ -194,6 +217,31 @@
               "default": true,
               "restart": null,
               "is_new": false
+            },
+            {
+              "target": {
+                "scope": "global",
+                "key": "orchestrator_view"
+              },
+              "label": "Open on the orchestrator",
+              "hint": "Start on the orchestrator's view (F10) when there is one: auto = only in a narrow terminal, always, or never",
+              "control": {
+                "type": "choice",
+                "options": [
+                  "auto",
+                  "always",
+                  "never"
+                ],
+                "labels": [
+                  "auto",
+                  "always",
+                  "never"
+                ]
+              },
+              "value": "auto",
+              "default": "auto",
+              "restart": null,
+              "is_new": true
             }
           ]
         }
