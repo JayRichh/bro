@@ -431,7 +431,7 @@ fn launchables() -> Launchables {
     }
 }
 
-/// Command-line options: `--view board|session|diff`, `--session <name or
+/// Command-line options: `--view board|session|diff|orchestrator`, `--session <name or
 /// id>`, `--theme light|dark|system`. They pick what the window opens on.
 #[derive(Serialize, Default)]
 struct Startup {

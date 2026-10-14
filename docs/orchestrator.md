@@ -156,8 +156,8 @@ the task linked, assigned and moved to In Progress, and a worker on it that is
 the orchestrator's child, through `OrchestratorSpawnWith` on the new worktree),
 watch the worker with `list` and `read`, `review` it for the user, then
 `kete ado --project P --worktree <its branch> pr create` (draft, co-author lines cleaned,
-a task and a reviewer unless waived; `--worktree` is required with `--project`, and the
-default branch is never pushed). Votes and replies only when the user asks.
+a task and a reviewer unless waived; with `--project`, `--worktree` or `--source <branch>`
+is required, and the default branch is never pushed). Votes and replies only when the user asks.
 Sign-in is never interactive: a missing credential is reported with "sign in
 from the desktop app or run `az login`", and the orchestrator passes that on
 rather than trying to sign in.

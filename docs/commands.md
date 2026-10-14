@@ -101,7 +101,8 @@ kete ask <session> "<question>" [--timeout S] [--no-wait]
                           # send a labelled question into another local agent, wait for that turn
                           # to finish, and print the answer. A busy target is queued until idle by
                           # default; --no-wait fails fast instead.
-kete orchestrator start [--kind K] [--profile P] [--project X] [--replace]
+kete orchestrator start [--kind K] [--model M] [--effort E] [--profile P] [--project X]
+                        [--name N] [--replace]
                           # start the machine's one orchestrator (F10 in kete does the same),
                           # in its own workspace under the data dir unless --project names one.
 kete orchestrator status [--json]
@@ -181,7 +182,8 @@ kete profile login <name> [-- <args>]
                                 # claude auth login --claudeai, codex login, copilot login
 kete profile list             # accounts: 5h and weekly usage bars, defaults, login state
 kete profile default <name>   # launches that pick no profile take it
-kete profile enable <name>    # disable <name>: never picked unless named
+kete profile enable <name>    # pickable again by launches that name no profile
+kete profile disable <name>   # never picked unless named
 kete profile remove <name> [--purge]
                                 # drop it; --purge deletes its home (and the login) too
 ```
