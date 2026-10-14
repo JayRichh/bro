@@ -4275,11 +4275,11 @@ mod tests {
             let mut off = with_empty_band();
             off.launcher.show_all_worktrees = false;
             let screen = screen_text(&draw_tall(&mut off));
-            assert!(!screen.contains("idle"), "{screen}");
+            assert!(!screen.contains("↳ idle"), "{screen}");
 
             let mut app = with_empty_band();
             let screen = screen_text(&draw_tall(&mut app));
-            assert!(screen.contains("idle"), "{screen}");
+            assert!(screen.contains("↳ idle"), "{screen}");
             assert!(
                 screen.contains(
                     "nothing running · p: new session · t: terminal · d: delete worktree"
@@ -5329,7 +5329,7 @@ mod tests {
             keys(&mut app, &[KeyCode::Esc, KeyCode::Char('j')]);
             let text = buffer_text(&draw(&mut app));
             assert!(
-                text.contains("polish-nav  ↳ feat"),
+                text.contains("polish-nav  running  claude  ↳ demo / feat"),
                 "the pane names the cursor's card and its checkout: {text}"
             );
             assert_eq!(
@@ -5356,7 +5356,7 @@ mod tests {
             key(&mut app, KeyCode::Char('k'), KeyModifiers::NONE);
             let text = buffer_text(&draw(&mut app));
             assert!(
-                text.contains("agent-1  ⌂ main"),
+                text.contains("agent-1  idle  claude  ⌂ demo / main"),
                 "the band above takes the pane: {text}"
             );
         });

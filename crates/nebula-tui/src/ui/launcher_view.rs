@@ -2698,18 +2698,13 @@ fn harness_line(a: &nebula_core::Agent, cfg: &mut Option<crate::config::Config>)
     } else {
         a.kind.as_str().to_string()
     };
-    // The PROFILE a session runs on, when it is not the one its harness
-    // would take anyway: `claude@max2 opus`. A session on the default
-    // account (or on none) reads as it always did.
-    if let Some(profile) = a.profile.as_deref() {
-        let cfg = cfg.get_or_insert_with(crate::config::Config::load);
-        let harness = a.custom_harness.as_deref().unwrap_or(a.kind.as_str());
-        let default = nebula_core::profiles::default_for(&cfg.profiles, harness)
-            .is_some_and(|d| d.name.trim() == profile);
-        if !default {
-            out.push('@');
-            out.push_str(profile);
-        }
+    // The PROFILE a session runs on, whenever it has one: `claude@max2
+    // opus`. The default account is named too, so the label never flips
+    // when the default moves to another account — only a session on the
+    // CLI's own login (no profile) reads as the bare harness.
+    if let Some(profile) = a.profile.as_deref().filter(|p| !p.trim().is_empty()) {
+        out.push('@');
+        out.push_str(profile.trim());
     }
     if let Some(model) = a.model.as_deref().filter(|m| !m.is_empty()) {
         out.push(' ');
@@ -3008,6 +3003,143 @@ pub(super) fn pane_frame(
     }
 }
 
+/// The word a session's state goes by beside its STATUS DOT — the
+/// desktop's words, so state never rests on color alone.
+fn status_word(status: nebula_core::AgentStatus, unseen: bool) -> &'static str {
+    use nebula_core::AgentStatus as S;
+    match status {
+        S::NeedsFeedback => "needs you",
+        S::Running => "running",
+        S::Finished | S::Terminated | S::Disconnected if unseen => "unread",
+        S::Finished => "done",
+        S::Terminated | S::Disconnected => "stopped",
+        S::Fresh => "idle",
+    }
+}
+
+/// What a session's PANE header says after its name — the desktop
+/// session header's row of facts.
+#[derive(Debug, Clone, PartialEq)]
+struct PaneFacts {
+    status: (&'static str, Color),
+    /// `claude@max2 opus high`: [`runs_on_line`].
+    runs_on: String,
+    /// `⌂ ` or `↳ `, and `project / branch`, in the checkout's SCOPE COLOR.
+    place: (&'static str, String, Color),
+    /// `ctx 42% ⟳2`, in its tone.
+    ctx: Option<(String, Color)>,
+    /// `#12 ready`, in the pull request's own colors.
+    pr: Option<(String, Color)>,
+    /// How long ago the status last changed: `3m`.
+    age: Option<String>,
+    prompt: Option<String>,
+}
+
+fn pane_facts(app: &App, row: &LauncherRow, is_main: bool, now_ms: i64) -> PaneFacts {
+    let th = app.chrome.theme;
+    let a = &row.agent;
+    let ctx = app.launcher.session_contexts.get(&a.id).and_then(|c| {
+        let label = crate::accounts_overlay::context_label(c)?;
+        let fg = match nebula_core::usage::tone(c.percent?) {
+            nebula_core::usage::Tone::Ok => th.muted,
+            nebula_core::usage::Tone::Warn => th.warn,
+            nebula_core::usage::Tone::Hot => th.err,
+        };
+        Some((label, fg))
+    });
+    let pr = row.pr.as_ref().map(|pr| {
+        let look = crate::pr_row::look(pr.standing, pr.trouble, th);
+        (format!("#{} {}", pr.number, pr.badge()), look.badge)
+    });
+    let age = (a.status_changed_at > 0).then(|| {
+        crate::hosts::ago_label(now_ms - a.status_changed_at)
+            .trim_end_matches(" ago")
+            .to_string()
+    });
+    let (glyph, scope) = if is_main {
+        ("⌂ ", th.root)
+    } else {
+        ("↳ ", th.worktree)
+    };
+    PaneFacts {
+        status: (
+            status_word(a.status, a.unseen),
+            crate::ui::rows::status_color(Some(a.status), a.unseen, th),
+        ),
+        runs_on: runs_on_line(a, &mut None),
+        place: (glyph, format!("{} / {}", row.project, row.branch), scope),
+        ctx,
+        pr,
+        age: age.filter(|s| !s.is_empty()),
+        prompt: crate::launcher::last_prompt(a)
+            .map(|p| p.split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|p| !p.is_empty()),
+    }
+}
+
+/// The last prompt takes what the facts leave only from this many
+/// columns up: a few letters of it say nothing.
+const PROMPT_MIN: usize = 12;
+
+/// [`PaneFacts`] laid out in `room` columns, most telling first: the
+/// status word, what it runs on, where, its context, its pull request,
+/// its age — each whole or not at all, and once one has not fitted
+/// nothing after it is tried, so a narrowing pane only takes words away
+/// — then the last prompt, cut to whatever is left.
+fn fact_spans(facts: &PaneFacts, room: usize, th: Theme) -> Vec<Span<'static>> {
+    const GAP: &str = "  ";
+    let dim = Style::default().fg(th.dim);
+    let mut pieces: Vec<Vec<Span<'static>>> = vec![
+        vec![Span::styled(
+            facts.status.0,
+            Style::default().fg(facts.status.1),
+        )],
+        vec![Span::styled(
+            facts.runs_on.clone(),
+            Style::default().fg(th.muted),
+        )],
+        vec![
+            Span::styled(facts.place.0, Style::default().fg(facts.place.2)),
+            Span::styled(facts.place.1.clone(), Style::default().fg(facts.place.2)),
+        ],
+    ];
+    if let Some((label, fg)) = &facts.ctx {
+        pieces.push(vec![Span::styled(label.clone(), Style::default().fg(*fg))]);
+    }
+    if let Some((label, fg)) = &facts.pr {
+        pieces.push(vec![Span::styled(label.clone(), Style::default().fg(*fg))]);
+    }
+    if let Some(age) = &facts.age {
+        pieces.push(vec![Span::styled(age.clone(), dim)]);
+    }
+    let mut out: Vec<Span<'static>> = Vec::new();
+    let mut left = room;
+    for piece in pieces {
+        if piece.iter().all(|s| s.content.is_empty()) {
+            continue;
+        }
+        let w = GAP.len() + piece.iter().map(Span::width).sum::<usize>();
+        if w > left {
+            return out;
+        }
+        left -= w;
+        out.push(Span::raw(GAP));
+        out.extend(piece);
+    }
+    if let Some(prompt) = &facts.prompt {
+        let room = left.saturating_sub(GAP.len() + "› ".len());
+        if room >= PROMPT_MIN {
+            out.push(Span::raw(GAP));
+            out.push(Span::styled("› ", dim));
+            out.push(Span::styled(
+                truncate(prompt, room),
+                Style::default().fg(th.muted),
+            ));
+        }
+    }
+    out
+}
+
 /// The pane's title, laid out left to right in `room` columns: the card
 /// the cursor is on — its STATUS DOT and name for a session, the
 /// SESSIONS PANEL's `❯`/`▶` and name for a terminal — in the accent,
@@ -3026,10 +3158,24 @@ fn pane_title(app: &App, room: usize) -> Vec<PaneTab> {
     match card {
         Some(crate::launcher::Card::Session(row)) => {
             let a = &row.agent;
+            let name = truncate(&a.name, name_room);
+            let used = 2 + name.chars().count();
             tabs.push(PaneTab::plain(vec![
                 status_dot(Some(a.status), a.unseen, th),
-                Span::styled(truncate(&a.name, name_room), lit),
+                Span::styled(name, lit),
             ]));
+            // A session's header says what the desktop's does, as far as
+            // the row allows ([`fact_spans`]); the checkout is one of the
+            // facts, so the block below is the terminal's.
+            let is_main = at
+                .and_then(|at| bands.get(at.band))
+                .is_some_and(|b| b.is_main);
+            let facts = pane_facts(app, &row, is_main, crate::app::now_ms());
+            let spans = fact_spans(&facts, room.saturating_sub(used), th);
+            if !spans.is_empty() {
+                tabs.push(PaneTab::plain(spans));
+            }
+            return tabs;
         }
         Some(crate::launcher::Card::Terminal(t)) => {
             let glyph = if t.run_command.is_some() {
@@ -3176,34 +3322,23 @@ pub(super) fn crumb_frame(f: &mut Frame, app: &mut App, area: Rect) -> Rect {
                 truncate(&a.name, usize::from(r.width / 2).max(8)),
                 Style::default().fg(th.text).add_modifier(Modifier::BOLD),
             ));
+            // The pane header's facts, in what the crumb leaves: the
+            // state, what it runs on and where, its context, pull
+            // request, age and last prompt, as far as the row allows.
+            let used: usize = spans.iter().map(Span::width).sum();
+            let is_main = app
+                .tree
+                .worktrees
+                .iter()
+                .any(|w| w.id == a.worktree_id && w.is_main);
+            let facts = pane_facts(app, row, is_main, crate::app::now_ms());
+            spans.extend(fact_spans(
+                &facts,
+                usize::from(r.width).saturating_sub(used),
+                th,
+            ));
         }
         f.render_widget(Paragraph::new(Line::from(spans)), r);
-        if let Some(row) = &row {
-            let a = &row.agent;
-            let mut right = vec![Span::styled(
-                harness_line(a, &mut None),
-                Style::default().fg(th.muted),
-            )];
-            if let Some(effort) = a.effort.as_deref().filter(|e| !e.is_empty()) {
-                right.push(Span::styled(
-                    format!(" {effort}"),
-                    Style::default().fg(th.dim),
-                ));
-            }
-            right.push(Span::styled(" · ", Style::default().fg(th.dim)));
-            right.push(Span::styled(
-                format!(
-                    "{} / {}",
-                    truncate(&row.project, 20),
-                    truncate(&row.branch, 24)
-                ),
-                Style::default().fg(th.dim),
-            ));
-            f.render_widget(
-                Paragraph::new(Line::from(right)).alignment(ratatui::layout::Alignment::Right),
-                r,
-            );
-        }
     }
     let focused = app.nav.focus == Focus::Terminal;
     draw_rule(f, area, 2, if focused { th.accent } else { th.edge });
@@ -4732,6 +4867,72 @@ mod tests {
 
     /// The VIEW TOGGLE as the row ends in it, its key included.
     const TOGGLE_ROW: &str = "   Overview │ Board  ⇧K";
+
+    /// A session on a profile names it, the default one too: the label
+    /// never changes because the default moved. No profile, no `@`.
+    #[test]
+    fn the_harness_line_always_names_the_profile() {
+        let mut app = a_tree();
+        let a = &mut app.tree.agents[0];
+        a.model = Some("opus".into());
+        assert_eq!(harness_line(a, &mut None), "claude opus");
+        a.profile = Some("main".into());
+        assert_eq!(harness_line(a, &mut None), "claude@main opus");
+        a.effort = Some("high".into());
+        assert_eq!(runs_on_line(a, &mut None), "claude@main opus high");
+    }
+
+    #[test]
+    fn the_status_word_is_the_desktops() {
+        use nebula_core::AgentStatus as S;
+        assert_eq!(status_word(S::NeedsFeedback, false), "needs you");
+        assert_eq!(status_word(S::Running, true), "running");
+        assert_eq!(status_word(S::Finished, true), "unread");
+        assert_eq!(status_word(S::Finished, false), "done");
+        assert_eq!(status_word(S::Terminated, false), "stopped");
+        assert_eq!(status_word(S::Fresh, false), "idle");
+    }
+
+    /// The pane header's facts give way whole, the least telling first,
+    /// and never overrun; the last prompt only takes room the rest left.
+    #[test]
+    fn the_pane_facts_give_way_a_piece_at_a_time() {
+        let th = App::new().chrome.theme;
+        let facts = PaneFacts {
+            status: ("running", th.warn),
+            runs_on: "claude@max2 opus".into(),
+            place: ("↳ ", "api / feat".into(), th.worktree),
+            ctx: Some(("ctx 42%".into(), th.muted)),
+            pr: Some(("#12 ready".into(), th.accent)),
+            age: Some("3m".into()),
+            prompt: Some("fix the login redirect loop on expired sessions".into()),
+        };
+        let text = |room| -> String {
+            let spans = fact_spans(&facts, room, th);
+            let used: usize = spans.iter().map(Span::width).sum();
+            assert!(used <= room, "{room}: overruns");
+            spans.iter().map(|s| s.content.as_ref()).collect()
+        };
+        assert_eq!(
+            text(200),
+            "  running  claude@max2 opus  ↳ api / feat  ctx 42%  #12 ready  3m  › fix the login redirect loop on expired sessions"
+        );
+        assert_eq!(
+            text(64),
+            "  running  claude@max2 opus  ↳ api / feat  ctx 42%  #12 ready"
+        );
+        assert_eq!(text(30), "  running  claude@max2 opus");
+        assert_eq!(text(8), "");
+        for room in 0..200 {
+            let t = text(room);
+            let has = |s: &str| t.contains(s);
+            assert!(!has("claude") || has("running"), "{room}: {t}");
+            assert!(!has("api / feat") || has("claude"), "{room}: {t}");
+            assert!(!has("ctx") || has("api / feat"), "{room}: {t}");
+            assert!(!has("#12") || has("ctx"), "{room}: {t}");
+            assert!(!has("› ") || has("3m"), "{room}: {t}");
+        }
+    }
 
     /// The VIEW TOGGLE says which home is on screen and is the button to
     /// the other; on the board the scope sits beside the count, a button
