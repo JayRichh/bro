@@ -80,8 +80,8 @@
   }
 
   // Another client on the same session (the terminal app, the review
-  // sheet) can resize its PTY meanwhile. When this pane is shown again or
-  // takes focus it asserts its own size, even when that is unchanged here.
+  // sheet) can resize its PTY meanwhile. When this pane is shown again it
+  // asserts its own size, even when that is unchanged here.
   let hidden = false;
   function refit(force = false) {
     if (!term || !fit || !host.offsetWidth) {
@@ -165,7 +165,6 @@
       pending = setTimeout(() => refit(), 40);
     });
     ro.observe(host);
-    host.addEventListener('focusin', () => refit(true));
     await attach(session);
   });
 

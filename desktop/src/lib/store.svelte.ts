@@ -196,8 +196,11 @@ export function openDiffRange(worktree: string, range: DiffRange) {
 /** Leave the Diff view for wherever it was opened from (the orchestrator,
  *  a session), or home when it was the first place. */
 export function closeDiff() {
-  if (nav.canBack) nav.back();
-  else goHome(nav.current.repo);
+  const repo = nav.current.repo;
+  // Past every diff place (a worktree picked, a range opened) to the view
+  // the diff was opened from.
+  while (nav.canBack && nav.current.view === 'diff') nav.back();
+  if (nav.current.view === 'diff') goHome(repo);
 }
 
 /** Back to the overview (or the board), closing any split. */
