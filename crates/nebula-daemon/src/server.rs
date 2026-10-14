@@ -1550,14 +1550,21 @@ mod tests {
     use crate::hooks::HookEnv;
     use crate::store::Store;
 
+    /// A daemon on an in-memory store whose usage readings live under a
+    /// path of its own (absent, so it reads as no readings), never the
+    /// real profiles root: a subscription's first look reads them.
     fn test_daemon() -> Arc<Daemon> {
-        Daemon::new(
+        let daemon = Daemon::new(
             Arc::new(Store::open_in_memory().unwrap()),
             HookEnv {
                 port: 0,
                 token: String::new(),
             },
-        )
+        );
+        daemon.set_usage_root(
+            std::env::temp_dir().join(format!("kete-server-test-usage-{}", std::process::id())),
+        );
+        daemon
     }
 
     #[tokio::test]
