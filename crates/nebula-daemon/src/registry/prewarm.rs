@@ -29,6 +29,13 @@ impl Daemon {
         else {
             return Ok(());
         };
+        // A spare boots on the PROFILE a create naming none resolves to
+        // now (the harness's default, or the ACCOUNT SPREAD's pick), and
+        // only a create on that same account adopts it (`take_prewarmed`).
+        let profile = match resolve_harness(kind, None) {
+            Ok(harness) => resolve_profile_name(&harness, None).unwrap_or(None),
+            Err(_) => None,
+        };
         let stale = {
             // One warm slot per key; keep a live, young one with the same
             // spec, replace a dead, wrong-spec, or aging one (recycling
@@ -36,8 +43,7 @@ impl Daemon {
             let mut pool = self.prewarmed.lock();
             if let Some(entry) = pool.get(&(worktree_id.clone(), kind)) {
                 if self.is_alive(&SessionRef::Agent(entry.agent_id.clone()))
-                    && entry.model == model
-                    && entry.effort == effort
+                    && entry.fits(model.as_deref(), effort.as_deref(), profile.as_deref())
                     && entry.spawned_at.elapsed() < PREWARM_RECYCLE_AGE
                 {
                     return Ok(());
@@ -54,13 +60,6 @@ impl Daemon {
             tracing::debug!(kind = kind.as_str(), "prewarm skipped: CLI not installed");
             return Ok(());
         }
-        // A spare boots on its harness's default PROFILE — what a create
-        // naming none resolves to — and only a create on that same account
-        // adopts it (`take_prewarmed`).
-        let profile = match resolve_harness(kind, None) {
-            Ok(harness) => resolve_profile_name(&harness, None).unwrap_or(None),
-            Err(_) => None,
-        };
         let agent = Agent {
             parent: None,
             profile: profile.clone(),
@@ -121,10 +120,7 @@ impl Daemon {
         if !self.is_alive(&SessionRef::Agent(entry.agent_id.clone())) {
             return None;
         }
-        if entry.model.as_deref() != model
-            || entry.effort.as_deref() != effort
-            || entry.profile.as_deref() != profile
-        {
+        if !entry.fits(model, effort, profile) {
             self.kill_session(&SessionRef::Agent(entry.agent_id));
             return None;
         }

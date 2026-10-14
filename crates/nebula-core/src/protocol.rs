@@ -36,6 +36,12 @@ pub fn protocol_compatible_with(peer_version: u32) -> bool {
 /// and [`ServerEvent::SessionContexts`]. Both are pushed unasked, so the
 /// daemon sends them only to a peer that said it speaks this or later:
 /// an older one would fail to decode an unknown variant mid-stream.
+///
+/// The enums inside them travel by variant name, and a peer refuses a
+/// name it has never seen: a new `usage::WindowKind` or
+/// `usage::UsageSource` variant (or a new field on their structs) needs a
+/// protocol bump and its own gate here, sending the new shape only to
+/// peers that said the new version.
 pub const USAGE_EVENTS_PROTOCOL: u32 = 55;
 
 impl ServerEvent {
@@ -1035,6 +1041,7 @@ mod tests {
                     label: None,
                     percent: 21.5,
                     resets_at: Some(1_791_891_379),
+                    read_at: 0,
                 }],
                 source: UsageSource::Statusline,
                 at: 9,

@@ -136,6 +136,17 @@ struct PrewarmEntry {
     buffered_hooks: Vec<(HookEvent, Option<String>)>,
 }
 
+impl PrewarmEntry {
+    /// Would a create with this spec adopt the spare? The model, effort
+    /// and PROFILE must all match: a spread that now picks another account
+    /// makes the spare useless, so the keep-check replaces it once.
+    fn fits(&self, model: Option<&str>, effort: Option<&str>, profile: Option<&str>) -> bool {
+        self.model.as_deref() == model
+            && self.effort.as_deref() == effort
+            && self.profile.as_deref() == profile
+    }
+}
+
 /// A relocation waiting on its agent's turn end (`Daemon::pending_moves`).
 #[derive(Debug, Clone)]
 struct PendingMove {
@@ -4760,6 +4771,25 @@ pub(crate) mod tests {
         );
         daemon.reap_prewarmed();
         assert!(daemon.prewarmed.lock().is_empty());
+    }
+
+    #[test]
+    fn a_spare_fits_only_a_create_on_its_own_account() {
+        let entry = PrewarmEntry {
+            profile: Some("work".into()),
+            agent_id: AgentId("warm".into()),
+            spawned_at: Instant::now(),
+            model: Some("opus".into()),
+            effort: None,
+            buffered_hooks: Vec::new(),
+        };
+        assert!(entry.fits(Some("opus"), None, Some("work")));
+        assert!(
+            !entry.fits(Some("opus"), None, Some("home")),
+            "the spread moved on"
+        );
+        assert!(!entry.fits(Some("opus"), None, None));
+        assert!(!entry.fits(None, None, Some("work")));
     }
 
     /// Switching `prewarm_agents` off drains the pool on the next sweep. A

@@ -33,7 +33,8 @@ use serde_json::Value;
 
 use crate::ids::AgentId;
 
-/// Which limit a window measures.
+/// Which limit a window measures. On the wire by name: a new variant needs
+/// a protocol gate (`protocol::USAGE_EVENTS_PROTOCOL`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WindowKind {
@@ -57,9 +58,36 @@ impl WindowKind {
             WindowKind::Monthly => "mo",
         }
     }
+
+    /// The window's nominal length in seconds: how long a reading with no
+    /// reset time can still be true.
+    pub fn nominal_secs(self) -> i64 {
+        match self {
+            WindowKind::Session => 5 * 3600,
+            WindowKind::Weekly | WindowKind::ModelWeekly => 7 * 86_400,
+            WindowKind::Monthly => 30 * 86_400,
+        }
+    }
+
+    /// How old a reading may get before a bar draws it as stale: a few
+    /// hours for the session window, the window's own length otherwise.
+    pub fn stale_after_secs(self) -> i64 {
+        match self {
+            WindowKind::Session => 3 * 3600,
+            kind => kind.nominal_secs(),
+        }
+    }
+
+    /// Does a spread weigh this window? Only the session (5h) and weekly
+    /// limits, as documented: a model weekly or a monthly allowance never
+    /// moves a launch to another account.
+    pub fn spread_counts(self) -> bool {
+        matches!(self, WindowKind::Session | WindowKind::Weekly)
+    }
 }
 
-/// One measured limit.
+/// One measured limit. Positional on the wire (rmp arrays): fields are
+/// only ever appended.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UsageWindow {
     pub kind: WindowKind,
@@ -70,6 +98,11 @@ pub struct UsageWindow {
     pub percent: f32,
     /// Epoch seconds it resets at, when the source says.
     pub resets_at: Option<i64>,
+    /// Epoch seconds this window was read; 0 = unknown (a reading kept by
+    /// an older build), which counts as long expired when there is no
+    /// reset time either.
+    #[serde(default)]
+    pub read_at: i64,
 }
 
 impl UsageWindow {
@@ -79,19 +112,37 @@ impl UsageWindow {
             label: None,
             percent: percent.max(0.0),
             resets_at,
+            read_at: 0,
         }
     }
 
-    /// The percent as of `now_secs`: a window past its reset is empty.
-    pub fn percent_at(&self, now_secs: i64) -> f32 {
+    /// Has the window run out as of `now_secs`? Past its reset time; or,
+    /// with no reset time, once its nominal length has passed since it
+    /// was read (never read: at once).
+    pub fn expired_at(&self, now_secs: i64) -> bool {
         match self.resets_at {
-            Some(at) if at > 0 && at <= now_secs => 0.0,
-            _ => self.percent,
+            Some(at) if at > 0 => at <= now_secs,
+            _ => self.read_at <= 0 || self.read_at + self.kind.nominal_secs() <= now_secs,
         }
+    }
+
+    /// The percent as of `now_secs`: an expired window is empty.
+    pub fn percent_at(&self, now_secs: i64) -> f32 {
+        if self.expired_at(now_secs) {
+            0.0
+        } else {
+            self.percent
+        }
+    }
+
+    /// Is the reading too old to trust at a glance (a bar draws it dim)?
+    pub fn stale_at(&self, now_secs: i64) -> bool {
+        self.read_at <= 0 || now_secs - self.read_at > self.kind.stale_after_secs()
     }
 }
 
-/// Where a reading came from.
+/// Where a reading came from. On the wire by name: a new variant needs a
+/// protocol gate (`protocol::USAGE_EVENTS_PROTOCOL`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UsageSource {
@@ -142,10 +193,22 @@ impl AccountUsage {
         self.windows.iter().find(|w| w.kind == kind)
     }
 
-    /// The most used window as of `now_secs`: what a spread compares.
+    /// Stamp every window not yet stamped as read at `now_secs`.
+    pub fn stamp(&mut self, now_secs: i64) {
+        for w in &mut self.windows {
+            if w.read_at <= 0 {
+                w.read_at = now_secs;
+            }
+        }
+    }
+
+    /// The most used session (5h) or weekly window as of `now_secs`: what
+    /// a spread compares. Expired windows count as empty; None when the
+    /// account has neither.
     pub fn worst_at(&self, now_secs: i64) -> Option<f32> {
         self.windows
             .iter()
+            .filter(|w| w.kind.spread_counts())
             .map(|w| w.percent_at(now_secs))
             .fold(None, |acc: Option<f32>, p| {
                 Some(acc.map_or(p, |a| a.max(p)))
@@ -764,6 +827,17 @@ pub fn find_codex_rollout(codex_home: &Path, session_id: &str) -> Option<PathBuf
     found
 }
 
+/// Is `path` the rollout of Codex session `session_id`
+/// (`rollout-…-<session_id>.jsonl`)?
+pub fn is_codex_rollout_for(path: &Path, session_id: &str) -> bool {
+    let suffix = format!("-{}.jsonl", session_id.trim());
+    !session_id.trim().is_empty()
+        && path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with("rollout-") && n.ends_with(&suffix))
+}
+
 /// A Copilot session's event log under `copilot_home`.
 pub fn copilot_events_path(copilot_home: &Path, session_id: &str) -> PathBuf {
     copilot_home
@@ -828,6 +902,7 @@ pub fn window_from_legacy(name: &str, percent: f32, resets_at: Option<i64>) -> U
         label,
         percent,
         resets_at,
+        read_at: 0,
     }
 }
 
@@ -853,6 +928,14 @@ pub fn read_account_in(root: &Path, key: &str) -> Option<AccountUsage> {
     } else {
         stored.windows
     };
+    // A window kept with no read time of its own (an older build, a
+    // legacy screen reading) is as old as the file's `at`.
+    let mut windows = windows;
+    for w in &mut windows {
+        if w.read_at <= 0 {
+            w.read_at = stored.at / 1000;
+        }
+    }
     Some(AccountUsage {
         account: key.to_string(),
         harness,
@@ -1137,7 +1220,70 @@ mod tests {
         assert_eq!(a.window(WindowKind::Session).unwrap().percent, 21.0);
         assert_eq!(a.window(WindowKind::Weekly).unwrap().percent, 91.0);
         assert_eq!(a.at, 2);
-        assert_eq!(a.worst_at(0), Some(91.0));
+        a.stamp(10);
+        assert_eq!(a.worst_at(10), Some(91.0));
+    }
+
+    /// A window with no reset time ages out after its nominal length
+    /// since it was read; one never stamped counts as expired; stale
+    /// marks come sooner for the session window.
+    #[test]
+    fn a_window_without_a_reset_expires_after_its_nominal_length() {
+        let mut w = UsageWindow::new(WindowKind::Weekly, 91.0, None);
+        assert!(w.expired_at(0), "never read: expired");
+        w.read_at = 1000;
+        assert_eq!(w.percent_at(1000 + 7 * 86_400 - 1), 91.0);
+        assert_eq!(w.percent_at(1000 + 7 * 86_400), 0.0);
+        let mut s = UsageWindow::new(WindowKind::Session, 50.0, None);
+        s.read_at = 1000;
+        assert!(!s.stale_at(1000 + 3 * 3600));
+        assert!(s.stale_at(1000 + 3 * 3600 + 1));
+        assert_eq!(s.percent_at(1000 + 5 * 3600), 0.0);
+        assert!(
+            !w.stale_at(1000 + 86_400),
+            "a weekly reading a day old is fine"
+        );
+        // A known reset wins over the nominal length.
+        let mut r = UsageWindow::new(WindowKind::Session, 50.0, Some(1000 + 10 * 3600));
+        r.read_at = 1000;
+        assert_eq!(r.percent_at(1000 + 6 * 3600), 50.0);
+    }
+
+    /// Spreads weigh only the session and weekly windows: a model weekly
+    /// at 100% never moves a launch.
+    #[test]
+    fn worst_at_weighs_only_session_and_weekly() {
+        let mut u = AccountUsage {
+            account: "w".into(),
+            harness: "claude".into(),
+            windows: vec![
+                UsageWindow::new(WindowKind::Session, 10.0, None),
+                window_from_legacy("Opus weekly", 100.0, None),
+                UsageWindow::new(WindowKind::Monthly, 99.0, None),
+            ],
+            source: UsageSource::Screen,
+            at: 0,
+            plan: None,
+        };
+        u.stamp(5);
+        assert_eq!(u.worst_at(5), Some(10.0));
+        u.windows.remove(0);
+        assert_eq!(u.worst_at(5), None);
+    }
+
+    /// A legacy file's windows are as old as its `at`: a two-week-old
+    /// screen reading no longer counts.
+    #[test]
+    fn a_legacy_file_is_aged_by_its_at() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut old =
+            crate::profiles::Usage::parse("You've used 91% of your weekly limit").unwrap();
+        old.at = 1_000_000; // ms
+        crate::profiles::write_usage_in(dir.path(), "@claude", &old).unwrap();
+        let back = read_account_in(dir.path(), "@claude").unwrap();
+        assert_eq!(back.windows[0].read_at, 1000);
+        assert_eq!(back.worst_at(1000 + 14 * 86_400), Some(0.0));
+        assert_eq!(back.worst_at(1001), Some(91.0));
     }
 
     #[test]
@@ -1173,6 +1319,7 @@ mod tests {
             harness: "copilot".into(),
             windows: vec![UsageWindow {
                 label: Some("chat".into()),
+                read_at: 1,
                 ..UsageWindow::new(WindowKind::Monthly, 10.0, None)
             }],
             source: UsageSource::CopilotApi,
@@ -1197,5 +1344,14 @@ mod tests {
         std::fs::write(day.join("rollout-2026-10-14T00-02-43-zzz.jsonl"), "").unwrap();
         assert_eq!(find_codex_rollout(dir.path(), "abc-123"), Some(path));
         assert_eq!(find_codex_rollout(dir.path(), "nope"), None);
+        assert!(is_codex_rollout_for(
+            &day.join("rollout-2026-10-14T00-02-43-abc-123.jsonl"),
+            "abc-123"
+        ));
+        assert!(!is_codex_rollout_for(
+            &day.join("rollout-2026-10-14T00-02-43-abc-123.jsonl"),
+            "other"
+        ));
+        assert!(!is_codex_rollout_for(&day.join("rollout-x-.jsonl"), ""));
     }
 }

@@ -34,10 +34,11 @@ pub fn run_statusline() -> anyhow::Result<()> {
         }
     }
     let json: Value = serde_json::from_slice(&payload).unwrap_or(Value::Null);
-    let line = match user_statusline(&json) {
-        Some(command) => run_user_line(&command, &payload).unwrap_or_default(),
-        None => compact_line(&json),
-    };
+    // The user's own line when it prints one; kete's compact line when
+    // they have none, or theirs fails or overruns.
+    let line = user_statusline(&json)
+        .and_then(|command| run_user_line(&command, &payload))
+        .unwrap_or_else(|| compact_line(&json));
     let mut out = std::io::stdout().lock();
     let _ = out.write_all(line.as_bytes());
     let _ = out.flush();
@@ -83,57 +84,136 @@ fn command_in(path: &Path) -> Option<String> {
     (!cmd.is_empty() && !cmd.contains(" _statusline")).then(|| cmd.to_string())
 }
 
-/// The user's own statusLine, in Claude's precedence below the local
-/// file kete wrote: the project's shared settings, then the user's.
+/// The user's own statusLine. Kete's comes in through `--settings`, which
+/// outranks every settings file, so the one Claude would otherwise have
+/// drawn is looked up in Claude's own order: the project's local
+/// settings, its shared settings, then the user's. Only the project
+/// directory Claude names: a `cwd` deeper in the tree is not where its
+/// settings live.
 fn user_statusline(json: &Value) -> Option<String> {
-    let project = json
-        .pointer("/workspace/project_dir")
-        .or_else(|| json.get("cwd"))
-        .and_then(Value::as_str)
-        .map(PathBuf::from);
+    let project = project_dir(json);
     let user_dir = env::non_empty(env::CLAUDE_CONFIG_DIR)
         .map(PathBuf::from)
         .or_else(|| env::home_dir().map(|h| h.join(".claude")));
     statusline_from(project.as_deref(), user_dir.as_deref())
 }
 
+/// `workspace.project_dir`, and nothing else.
+fn project_dir(json: &Value) -> Option<PathBuf> {
+    json.pointer("/workspace/project_dir")
+        .and_then(Value::as_str)
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from)
+}
+
 fn statusline_from(project: Option<&Path>, user_dir: Option<&Path>) -> Option<String> {
     project
-        .and_then(|p| command_in(&p.join(".claude").join("settings.json")))
+        .and_then(|p| command_in(&p.join(".claude").join("settings.local.json")))
+        .or_else(|| project.and_then(|p| command_in(&p.join(".claude").join("settings.json"))))
         .or_else(|| user_dir.and_then(|d| command_in(&d.join("settings.json"))))
 }
 
 /// Run the user's statusLine with `payload` on its stdin: its stdout, or
-/// None on failure or past [`USER_LINE_TIMEOUT`].
+/// None when it fails, prints nothing, or overruns [`USER_LINE_TIMEOUT`].
+/// Output is read in chunks with a deadline, so a command that leaves a
+/// background child holding stdout open cannot hang the status line: once
+/// the command itself exits, what it printed within [`DRAIN_AFTER_EXIT`]
+/// is the line. An overrun kills the whole process tree.
 fn run_user_line(command: &str, payload: &[u8]) -> Option<String> {
     let mut cmd = shell_command(command);
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
     let mut child = cmd.spawn().ok()?;
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(payload);
     }
     let mut stdout = child.stdout.take()?;
-    let reader = std::thread::spawn(move || {
-        let mut out = Vec::new();
-        let _ = stdout.read_to_end(&mut out);
-        out
+    let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        loop {
+            match stdout.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if tx.send(buf[..n].to_vec()).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
     });
     let started = Instant::now();
+    let mut out = Vec::new();
+    let mut exited_at: Option<Instant> = None;
     loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if started.elapsed() > USER_LINE_TIMEOUT => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
+        if exited_at.is_none() {
+            match child.try_wait() {
+                Ok(Some(_)) => exited_at = Some(Instant::now()),
+                Ok(None) => {}
+                Err(_) => {
+                    kill_tree(&mut child);
+                    return None;
+                }
             }
-            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
-            Err(_) => return None,
+        }
+        if let Some(at) = exited_at {
+            if at.elapsed() >= DRAIN_AFTER_EXIT {
+                break;
+            }
+        } else if started.elapsed() >= USER_LINE_TIMEOUT {
+            kill_tree(&mut child);
+            return None;
+        }
+        match rx.recv_timeout(Duration::from_millis(20)) {
+            Ok(chunk) => out.extend(chunk),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            // The pipe closed: everything is in.
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                if exited_at.is_some() {
+                    break;
+                }
+                if child.try_wait().ok().flatten().is_some() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
         }
     }
-    String::from_utf8(reader.join().ok()?).ok()
+    let text = String::from_utf8(out).ok()?;
+    (!text.trim().is_empty()).then_some(text)
+}
+
+/// How long output may keep arriving after the command itself exited.
+const DRAIN_AFTER_EXIT: Duration = Duration::from_millis(200);
+
+/// Kill `child` and everything it started: its process group on unix,
+/// `taskkill /T` on Windows.
+fn kill_tree(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        let _ = Command::new("kill")
+            .args(["-KILL", "--", &format!("-{}", child.id())])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(windows)]
+    {
+        let mut kill = Command::new("taskkill");
+        kill.args(["/T", "/F", "/PID", &child.id().to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        nebula_core::platform::no_window(&mut kill);
+        let _ = kill.status();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// The shell Claude itself runs a statusLine under: `sh -c` on unix; Git
@@ -259,6 +339,50 @@ mod tests {
             Some("user-line"),
             "kete's own never chains to itself"
         );
+        // The project's local settings come first (`--settings` outranks
+        // them, so this is the line Claude would have drawn).
+        std::fs::write(
+            project.join(".claude").join("settings.local.json"),
+            r#"{"statusLine": {"type": "command", "command": "local-line"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            statusline_from(Some(&project), Some(&user)).as_deref(),
+            Some("local-line")
+        );
+    }
+
+    #[test]
+    fn only_the_project_dir_names_the_project() {
+        assert_eq!(
+            project_dir(&serde_json::json!({"cwd": "/somewhere/deeper"})),
+            None
+        );
+        assert_eq!(
+            project_dir(&serde_json::json!({"cwd": "/p/sub", "workspace": {"project_dir": "/p"}})),
+            Some(PathBuf::from("/p"))
+        );
+    }
+
+    #[test]
+    fn a_line_whose_background_child_holds_stdout_still_returns() {
+        #[cfg(windows)]
+        if git_bash().is_none() {
+            return;
+        }
+        let started = Instant::now();
+        let out = run_user_line("(sleep 30 &) ; echo quick", b"").unwrap_or_default();
+        assert!(out.contains("quick"), "{out:?}");
+        assert!(
+            started.elapsed() < Duration::from_secs(4),
+            "{:?}",
+            started.elapsed()
+        );
+        // A line that never ends is cut off, and the caller falls back.
+        let started = Instant::now();
+        assert_eq!(run_user_line("sleep 30", b""), None);
+        assert!(started.elapsed() < USER_LINE_TIMEOUT + Duration::from_secs(3));
+        assert_eq!(run_user_line("true", b""), None, "an empty line falls back");
     }
 
     #[test]

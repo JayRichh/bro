@@ -156,6 +156,12 @@ async fn serve(opts: DaemonOpts) -> Result<()> {
 
     let daemon = registry::Daemon::new(store, hook_env);
 
+    // Kete's statusLine settings (`--settings` on Claude spawns): this
+    // binary's path, rewritten at each start so it is never stale.
+    if let Err(e) = hooks::installer::write_statusline_settings(&paths::data_dir()) {
+        tracing::warn!(error = %e, "writing the statusLine settings failed");
+    }
+
     if let Some(carry) = carry {
         // Before the sessions move out: whose subagents can keep running.
         let live = carry.agents();

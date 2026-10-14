@@ -43,6 +43,18 @@ pub(crate) struct UsageBook {
     copilot_polled: HashMap<String, Instant>,
 }
 
+/// The same windows with the same numbers, read times aside: a new read
+/// time alone is no news (it rides the next push, a minute on at most).
+fn same_values(a: &[usage::UsageWindow], b: &[usage::UsageWindow]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(x, y)| {
+            x.kind == y.kind
+                && x.label == y.label
+                && x.percent == y.percent
+                && x.resets_at == y.resets_at
+        })
+}
+
 /// Did a context reading change enough to send?
 fn context_changed(old: Option<&ContextUsage>, new: &ContextUsage) -> bool {
     let Some(old) = old else {
@@ -121,13 +133,17 @@ impl Daemon {
 
     /// Fold a reading into its account; kept on disk and pushed when the
     /// windows changed (or the last push is a minute old).
-    pub(crate) fn record_account(&self, reading: AccountUsage) {
+    pub(crate) fn record_account(&self, mut reading: AccountUsage) {
+        // Each window remembers when it was read: one with no reset time
+        // ages out from there (`UsageWindow::expired_at`).
+        reading.stamp(reading.at / 1000);
         let changed = self.with_usage(|book| {
             let merged = match book.accounts.get(&reading.account) {
                 Some(old) => {
                     let mut next = old.clone();
                     next.merge(reading.clone());
-                    let moved = next.windows != old.windows || next.at - old.at >= RESEND_MS;
+                    let moved =
+                        !same_values(&next.windows, &old.windows) || next.at - old.at >= RESEND_MS;
                     if !moved {
                         return None;
                     }
@@ -288,7 +304,9 @@ impl Daemon {
                     book.scans
                         .get(agent_id)
                         .map(|s| s.path.clone())
-                        .filter(|p| p.exists())
+                        // A cached path is this session's only while the
+                        // row still holds its id (a fresh start changes it).
+                        .filter(|p| usage::is_codex_rollout_for(p, sid) && p.exists())
                 });
                 let Some(path) = known.or_else(|| usage::find_codex_rollout(&home, sid)) else {
                     return;
@@ -569,6 +587,7 @@ mod tests {
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].account, "@claude");
         assert_eq!(list[0].windows[0].percent, 12.0);
+        assert!(list[0].windows[0].read_at > 0, "stamped as read");
         assert!(
             usage::read_account_in(dir.path(), "@claude").is_some(),
             "kept on disk"

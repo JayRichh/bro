@@ -376,12 +376,14 @@ mod tests {
                             label: None,
                             percent: *s,
                             resets_at: None,
+                            read_at: 1,
                         },
                         UsageWindow {
                             kind: WindowKind::Weekly,
                             label: None,
                             percent: *w,
                             resets_at: Some(1000),
+                            read_at: 1,
                         },
                     ],
                     source: UsageSource::Statusline,
@@ -459,6 +461,18 @@ mod tests {
         let u = usage(&[("main", 0.0, 99.0)]);
         let p = pick(&all, "claude", policy(Spread::Failover), 2000, &u);
         assert_eq!(p.profile.unwrap().name, "main");
+    }
+
+    /// A reading with no reset time that has aged past its window no longer
+    /// holds an account back: failover comes back to the default.
+    #[test]
+    fn failover_forgets_an_expired_reading() {
+        let all = vec![profile("main", true), profile("b", false)];
+        let u = usage(&[("main", 99.0, 99.0)]);
+        let p = pick(&all, "claude", policy(Spread::Failover), 1 + 5 * 3600, &u);
+        assert_eq!(p.profile.unwrap().name, "main");
+        let p = pick(&all, "claude", policy(Spread::Failover), 2, &u);
+        assert_eq!(p.profile.unwrap().name, "b", "fresh: still over");
     }
 
     #[test]

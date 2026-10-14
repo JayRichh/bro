@@ -98,13 +98,21 @@ holds up a launch.
 | Codex | the rollout's `token_count` events: primary (5h) and secondary (weekly) limits | the last request's input over `model_context_window`; `compacted` lines |
 | Copilot | `gh api copilot_internal/user` under the profile's `GH_CONFIG_DIR`, every 15 minutes: premium requests and chat, monthly. A plan without an allowance reads `—`, not 100% | the session's `events.jsonl` `session.usage_record` |
 
-Claude's numbers come through a STATUS LINE kete installs in the worktree's
-`.claude/settings.local.json` (`kete _statusline`): it hands the JSON to the daemon, then runs your
-own statusLine from the project's `.claude/settings.json` or your user settings and prints its
-output, or, when you have none, a compact `ctx 34% · 5h 21% · wk 3%`. A statusLine of your own in
-`settings.local.json` is left alone (that worktree then reports through the transcript and the
-on-screen notice only). Settings → Sessions → **Usage status line** turns it off. Claude's
-on-screen notice (`You've used 91% of your weekly limit`) is still read as a last source.
+Claude's numbers come through a STATUS LINE kete passes to each Claude session it starts, as
+`--settings <data dir>/claude-statusline.json` (a file kete owns and rewrites at every daemon start,
+so it always names the current `kete` binary). Nothing is written into your repositories, and a
+plain `claude` run outside kete keeps Claude's own footer. The status line (`kete _statusline`)
+hands Claude's JSON to the daemon, then runs the statusLine Claude would have drawn without it (the
+project's `.claude/settings.local.json`, then `.claude/settings.json`, then your user settings) and
+prints its output. When you have none, or yours fails or runs past 5 seconds, it prints a compact
+`ctx 34% · 5h 21% · wk 3%`. Settings → Sessions → **Usage status line** turns it off for sessions
+started after the change. Claude's on-screen notice (`You've used 91% of your weekly limit`) is
+still read as a last source.
+
+A window with a reset time counts as empty once that time passes. One without (the on-screen notice,
+a reading an older kete kept) counts as empty once its nominal length (5 hours, 7 days, 30 days) has
+passed since it was read, and the apps draw a reading dim once it is older than a few hours (session)
+or its window (weekly, monthly).
 
 The latest reading per account is kept in `<data dir>/profiles/.usage/<account>.json`; older kete
 builds still read its `percent` and `window`.
@@ -115,7 +123,7 @@ Settings → Sessions → Accounts → **Account spread** (`account_spread`) dec
 launch that names none, from the desktop window, the TUI, `kete spawn` and the orchestrator alike:
 
 - **manual** (the default): the harness's default profile, else none. One Claude subscription marked default is all most setups need.
-- **failover**: the default until its 5h or weekly use reaches **Failover at** (`account_spread_threshold`, 90% unless set), then the next enabled profile of that harness under it; when every one is over, the least used.
+- **failover**: the default until its 5h or weekly use (only those two windows; a model weekly or monthly allowance never counts) reaches **Failover at** (`account_spread_threshold`, 90% unless set), then the next enabled profile of that harness under it; when every one is over, the least used.
 - **least_used**: the enabled profile with the least use. An account with no reading yet counts as unused.
 
 A window past its reset time counts as empty. The apps say which account a launch took and why
