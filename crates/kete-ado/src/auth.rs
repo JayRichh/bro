@@ -121,7 +121,7 @@ pub struct TokenSource {
     cache: Mutex<HashMap<String, Cached>>,
     /// One fetch at a time per org, so only one sign-in prompt can appear.
     fetching: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     fixed: Option<Credential>,
 }
 
@@ -138,7 +138,7 @@ impl TokenSource {
             tenant_sink: None,
             cache: Mutex::new(HashMap::new()),
             fetching: Mutex::new(HashMap::new()),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             fixed: None,
         }
     }
@@ -170,11 +170,11 @@ impl TokenSource {
         if source != Some(Source::Gcm) {
             return;
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         if self.fixed.is_some() {
             return;
         }
-        if crate::ado::base_override().is_some() {
+        if crate::base_override().is_some() {
             return;
         }
         let _ = self
@@ -198,12 +198,12 @@ impl TokenSource {
     /// org's cached credential so the next request uses the new sign-in.
     /// Opens a browser; waits up to [`SIGN_IN_TIMEOUT`].
     pub async fn sign_in(&self, org_url: &str) -> Result<(), AuthError> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         if self.fixed.is_some() {
             self.invalidate(org_url);
             return Ok(());
         }
-        if crate::ado::base_override().is_some() {
+        if crate::base_override().is_some() {
             self.invalidate(org_url);
             return Ok(());
         }
@@ -238,7 +238,7 @@ impl TokenSource {
     }
 
     /// Where the org's cached credential came from, if one is cached.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn source_of(&self, org_url: &str) -> Option<Source> {
         self.cache.lock().unwrap().get(org_url).map(|(_, _, s)| *s)
     }
@@ -266,7 +266,7 @@ impl TokenSource {
     }
 
     /// A source that always hands back `cred`, for client tests.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn fixed(cred: Credential) -> Self {
         Self {
             fixed: Some(cred),
@@ -307,13 +307,13 @@ impl TokenSource {
     }
 
     async fn token_with(&self, org_url: &str, silent: bool) -> Result<Credential, AuthError> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         if let Some(c) = &self.fixed {
             return Ok(c.clone());
         }
         // A local mock server (debug builds) gets a dummy token; real
         // sign-in never runs.
-        if crate::ado::base_override().is_some() {
+        if crate::base_override().is_some() {
             return Ok(Credential::Bearer("kete-mock".into()));
         }
         if let Some(c) = self.cached(org_url) {
@@ -568,8 +568,8 @@ fn no_git_credential(stderr: &str) -> bool {
 }
 
 /// A canned [`Runner`] for tests here and in the client.
-#[cfg(test)]
-pub(crate) mod fake {
+#[cfg(any(test, feature = "test-support"))]
+pub mod fake {
     use super::*;
     use std::collections::HashMap;
 
@@ -578,27 +578,27 @@ pub(crate) mod fake {
     type Calls = Vec<(String, Vec<String>, Option<String>, Vec<(String, String)>)>;
 
     #[derive(Clone, Default)]
-    pub(crate) struct Fake {
+    pub struct Fake {
         canned: Arc<Mutex<Canned>>,
         calls: Arc<Mutex<Calls>>,
     }
 
     impl Fake {
-        pub(crate) fn new() -> Self {
+        pub fn new() -> Self {
             Self::default()
         }
-        pub(crate) fn on(self, program: &str, stdout: &str) -> Self {
+        pub fn on(self, program: &str, stdout: &str) -> Self {
             self.canned
                 .lock()
                 .unwrap()
                 .insert(program.into(), Ok(stdout.into()));
             self
         }
-        pub(crate) fn fail(self, program: &str, e: AuthError) -> Self {
+        pub fn fail(self, program: &str, e: AuthError) -> Self {
             self.canned.lock().unwrap().insert(program.into(), Err(e));
             self
         }
-        pub(crate) fn last_args(&self, program: &str) -> Vec<String> {
+        pub fn last_args(&self, program: &str) -> Vec<String> {
             self.calls
                 .lock()
                 .unwrap()
@@ -609,7 +609,7 @@ pub(crate) mod fake {
                 .unwrap_or_default()
         }
         /// The env of the last call of `program`.
-        pub(crate) fn last_env(&self, program: &str) -> Vec<(String, String)> {
+        pub fn last_env(&self, program: &str) -> Vec<(String, String)> {
             self.calls
                 .lock()
                 .unwrap()
@@ -620,7 +620,7 @@ pub(crate) mod fake {
                 .unwrap_or_default()
         }
         /// Calls of `program` whose args include `arg`.
-        pub(crate) fn count(&self, program: &str, arg: &str) -> usize {
+        pub fn count(&self, program: &str, arg: &str) -> usize {
             self.calls
                 .lock()
                 .unwrap()
@@ -629,7 +629,7 @@ pub(crate) mod fake {
                 .count()
         }
         /// The stdin of the last call of `program` with `arg`.
-        pub(crate) fn stdin_of(&self, program: &str, arg: &str) -> Option<String> {
+        pub fn stdin_of(&self, program: &str, arg: &str) -> Option<String> {
             self.calls
                 .lock()
                 .unwrap()
@@ -670,7 +670,7 @@ pub(crate) mod fake {
     }
 
     /// A JWT-shaped token with the given claims.
-    pub(crate) fn jwt(claims: serde_json::Value) -> String {
+    pub fn jwt(claims: serde_json::Value) -> String {
         format!(
             "eyJhbGciOiJub25lIn0.{}.sig",
             URL_SAFE_NO_PAD.encode(claims.to_string())

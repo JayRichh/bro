@@ -6,7 +6,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod ado;
-mod attribution;
 mod daemon;
 mod git;
 mod launch;
@@ -17,8 +16,8 @@ mod sessions;
 mod settings;
 
 use ado::client::CmdError;
-use ado::prs::{self, PrCtx};
-use ado::{AdoContext, AdoState};
+use ado::prs::{self, PrCtx, PrCtxExt};
+use ado::{AdoContext, AdoState, AdoStateExt};
 use daemon::{Client, Model, PtyEvent};
 use nebula_core::{AgentId, ClientRequest, EntityId, SessionRef, WorktreeId};
 use serde::{Deserialize, Serialize};
@@ -126,22 +125,8 @@ fn default_agent_name(model: &Model) -> String {
     format!("agent-{}", n + 1)
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NewAgent {
-    /// Empty when the worktree does not exist yet (Start task fills it).
-    #[serde(default)]
-    worktree: String,
-    kind: String,
-    profile: Option<String>,
-    prompt: Option<String>,
-    /// A model picked for this one launch; None takes the Agents tab's.
-    #[serde(default)]
-    model: Option<String>,
-    /// An effort picked for this one launch; None takes the Agents tab's.
-    #[serde(default)]
-    effort: Option<String>,
-}
+/// An agent to start (`create_agent`, Start task), shared with `kete ado`.
+pub(crate) use kete_ado::NewAgent;
 
 #[tauri::command]
 async fn create_agent(client: State<'_, Arc<Client>>, spec: NewAgent) -> Res<String> {
