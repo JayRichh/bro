@@ -467,12 +467,21 @@ fn tui_accounts_overlay_shows_the_own_login_with_its_bars() {
     let mut tui = TuiHarness::spawn_with_setup(&[], |data| {
         let dir = data.join("profiles").join(".usage");
         std::fs::create_dir_all(&dir).unwrap();
+        // Read a minute ago: fresh, so both bars draw their numbers.
+        let read = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            - 60;
         std::fs::write(
             dir.join("@claude.json"),
-            r#"{"percent": 41, "window": "weekly", "at": 0, "harness": "claude",
-                "windows": [{"kind": "session", "label": null, "percent": 21.0, "resets_at": null},
-                            {"kind": "weekly", "label": null, "percent": 41.0, "resets_at": null}],
-                "source": "statusline", "plan": null}"#,
+            format!(
+                r#"{{"percent": 41, "window": "weekly", "at": {}, "harness": "claude",
+                "windows": [{{"kind": "session", "label": null, "percent": 21.0, "resets_at": null, "read_at": {read}}},
+                            {{"kind": "weekly", "label": null, "percent": 41.0, "resets_at": null, "read_at": {read}}}],
+                "source": "statusline", "plan": null}}"#,
+                read * 1000
+            ),
         )
         .unwrap();
     });

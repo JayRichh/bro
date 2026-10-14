@@ -36,6 +36,11 @@ impl TestEnv {
         Self { tmp, runtime_dir }
     }
 
+    /// The data dir every daemon and CLI run of this env uses.
+    fn data_dir(&self) -> PathBuf {
+        self.tmp.path().join("data")
+    }
+
     fn sock(&self) -> PathBuf {
         self.runtime_dir.join("daemon.sock")
     }
@@ -3339,8 +3344,14 @@ async fn create_agent_runs_the_shells_own_claude_and_archive_clears_its_job() {
     // The function ran, with the CLI's argv, in place of any binary.
     let job_pid = read_pidfile(&dir.join("job.pid")).await;
     let routed = std::fs::read_to_string(dir.join("routed")).unwrap();
+    // Kete's statusLine settings ride first (`--settings`), then the
+    // system prompt.
+    let settings = format!(
+        "--settings {} ",
+        env.data_dir().join("claude-statusline.json").display()
+    );
     assert!(
-        routed.starts_with("routed --append-system-prompt "),
+        routed.starts_with(&format!("routed {settings}--append-system-prompt ")),
         "{routed:?}"
     );
     assert!(pid_alive(job_pid), "the agent's job should be up");
@@ -3424,8 +3435,12 @@ async fn create_agent_survives_rc_autostart_that_execs_on_tty_stdin() {
     .await
     .expect("the rc-defined claude function should run");
     let ran = std::fs::read_to_string(&marker).unwrap();
+    let settings = format!(
+        "--settings {} ",
+        env.data_dir().join("claude-statusline.json").display()
+    );
     assert!(
-        ran.starts_with("claude tty --append-system-prompt "),
+        ran.starts_with(&format!("claude tty {settings}--append-system-prompt ")),
         "{ran:?}"
     );
     assert!(
