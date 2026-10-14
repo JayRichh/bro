@@ -250,6 +250,8 @@ export interface DesktopPrefs {
   theme: string;
   diff_mode: string;
   home: string;
+  /** `home` or `orchestrator`: what the window opens on. */
+  startup?: string;
 }
 export interface Startup {
   view: string | null;

@@ -94,13 +94,14 @@ export function setHome(h: Home, repo?: string) {
 /** Read the saved preferences (before any command-line override). */
 export async function loadDesktopPrefs() {
   const p = await api.desktopPrefs().catch(() => null);
-  if (!p) return;
+  if (!p) return null;
   if (p.theme === 'system' || p.theme === 'light' || p.theme === 'dark') app.themePref = p.theme;
   if (isDiffMode(p.diff_mode)) app.diffMode = p.diff_mode;
   if (p.home === 'overview' || p.home === 'board') {
     app.home = p.home;
     if (nav.current.view === 'overview' || nav.current.view === 'board') nav.replace({ ...nav.current, view: p.home });
   }
+  return p;
 }
 
 /** Ask which worktrees have a run command (after a settings change too). */
