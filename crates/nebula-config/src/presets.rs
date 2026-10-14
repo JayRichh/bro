@@ -8,8 +8,11 @@
 //!
 //! A plain JSON list in the DATA DIR beside `config.json`, in list order.
 //! A missing or malformed file reads as empty — like the SSH HOSTS FILE it
-//! is a convenience store, never load-bearing. Writes go through a temp
-//! file + rename so a crash mid-write cannot truncate the list. The list is
+//! is a convenience store, never load-bearing — but a malformed one is
+//! never written over: a save refuses it, so a hand edit gone wrong can be
+//! fixed instead of lost. Saves take the settings lock (`<file>.lock`) the
+//! other kete writers take, and go through a temp file + rename so a crash
+//! mid-write cannot truncate the list. The list is
 //! read entry by entry, and a save keeps what this build can't read — a
 //! preset for a harness a newer nebula added, a field it has no name for —
 //! so an older nebula sharing the file never deletes a newer one's presets.
@@ -136,15 +139,61 @@ pub fn save_to(store: &Path, presets: &[AgentPreset]) -> std::io::Result<()> {
 /// [`save_to`], with one preset renamed `(old, new)` by the edit: its
 /// stored entry is found under the old name, so the fields this build
 /// doesn't know ride across the rename.
+///
+/// Takes the settings lock on the store for the read and the write. A file
+/// that exists but no longer reads as a list is refused, never replaced.
 pub fn save_to_renamed(
     store: &Path,
     presets: &[AgentPreset],
     renamed: Option<(&str, &str)>,
 ) -> std::io::Result<()> {
-    let stored = nebula_core::settings::read_array(store)
-        .ok()
-        .flatten()
-        .unwrap_or_default();
+    let _lock = nebula_core::settings::lock(store)?;
+    write_locked(store, presets, renamed)
+}
+
+/// Edit the list as the file holds it now: lock the store, read it, let
+/// `edit` change it (returning the `(old, new)` names of a rename, if it
+/// made one), then save, all under the one lock. So a preset another app
+/// saved since this one last read the list survives. An unreadable file is
+/// refused before `edit` runs.
+pub fn edit_at(
+    store: &Path,
+    edit: impl FnOnce(&mut Vec<AgentPreset>) -> Result<Option<(String, String)>, String>,
+) -> Result<(), String> {
+    let saving = |err: std::io::Error| format!("Could not save the presets: {err}");
+    let _lock = nebula_core::settings::lock(store).map_err(saving)?;
+    stored_entries(store).map_err(saving)?;
+    let mut list = load_from(store);
+    let renamed = edit(&mut list)?;
+    let renamed = renamed.as_ref().map(|(o, n)| (o.as_str(), n.as_str()));
+    write_locked(store, &list, renamed).map_err(saving)
+}
+
+/// The raw entries the store holds; a missing file is an empty list, and
+/// one that is there but unreadable is an error naming the file.
+fn stored_entries(store: &Path) -> std::io::Result<Vec<Value>> {
+    nebula_core::settings::read_array(store)
+        .map(Option::unwrap_or_default)
+        .map_err(|err| {
+            let name = store.file_name().map_or_else(
+                || store.display().to_string(),
+                |n| n.to_string_lossy().into(),
+            );
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("{name} is {err}: fix or remove it before saving presets"),
+            )
+        })
+}
+
+/// The write behind [`save_to_renamed`] and [`edit_at`]; the caller holds
+/// the lock.
+fn write_locked(
+    store: &Path,
+    presets: &[AgentPreset],
+    renamed: Option<(&str, &str)>,
+) -> std::io::Result<()> {
+    let stored = stored_entries(store)?;
     let named = |name: &str| {
         stored
             .iter()
@@ -389,5 +438,72 @@ mod tests {
             assert_eq!(store_path(), path);
             assert_eq!(load().len(), 1);
         });
+    }
+    /// A file that is there but no longer reads as a list (a hand edit gone
+    /// wrong) is never replaced by a save: the save fails and the bytes stay.
+    #[test]
+    fn a_save_refuses_to_overwrite_an_unreadable_file() {
+        let (_dir, path) = store();
+        std::fs::write(&path, "[{\"name\": \"a\",,]").unwrap();
+        let err = save_to(&path, &[preset("b", AgentKind::Claude)]).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "[{\"name\": \"a\",,]"
+        );
+        let err = edit_at(&path, |list| {
+            list.push(preset("b", AgentKind::Claude));
+            Ok(None)
+        })
+        .unwrap_err();
+        assert!(err.contains("agent_presets.json"), "{err}");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "[{\"name\": \"a\",,]"
+        );
+    }
+
+    /// Notepad's byte order mark is not damage: the list reads and saves.
+    #[test]
+    fn a_bom_file_reads_and_saves() {
+        let (_dir, path) = store();
+        std::fs::write(&path, "\u{feff}[{\"name\": \"a\", \"kind\": \"claude\"}]").unwrap();
+        assert_eq!(load_from(&path).len(), 1);
+        edit_at(&path, |list| {
+            list.push(preset("b", AgentKind::Codex));
+            Ok(None)
+        })
+        .unwrap();
+        let names: Vec<_> = load_from(&path).into_iter().map(|p| p.name).collect();
+        assert_eq!(names, ["a", "b"]);
+    }
+
+    /// A save waits for a writer holding the lock, and an edit works on the
+    /// list as the file holds it under the lock, so a preset another app
+    /// added meanwhile survives.
+    #[test]
+    fn saves_take_the_lock_and_edits_reread_under_it() {
+        let (_dir, path) = store();
+        save_to(&path, &[preset("a", AgentKind::Claude)]).unwrap();
+        let held = nebula_core::settings::lock(&path).unwrap();
+        let writer = {
+            let path = path.clone();
+            std::thread::spawn(move || {
+                edit_at(&path, |list| {
+                    list.push(preset("mine", AgentKind::Codex));
+                    Ok(None)
+                })
+            })
+        };
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(!writer.is_finished(), "the edit waits for the holder");
+        // The holder adds a preset while the edit waits.
+        let mut list = load_from(&path);
+        list.push(preset("theirs", AgentKind::Claude));
+        nebula_core::settings::write_json(&path, &serde_json::to_value(&list).unwrap()).unwrap();
+        drop(held);
+        writer.join().unwrap().unwrap();
+        let names: Vec<_> = load_from(&path).into_iter().map(|p| p.name).collect();
+        assert_eq!(names, ["a", "theirs", "mine"]);
     }
 }

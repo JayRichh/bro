@@ -89,48 +89,48 @@ pub fn save_at(
     row: PresetRow,
 ) -> Res<Vec<PresetRow>> {
     let preset = preset_of(cfg, row)?;
-    let mut list = presets::load_from(store);
-    let at = match original {
-        Some(name) => Some(
-            list.iter()
-                .position(|p| p.name.eq_ignore_ascii_case(name.trim()))
-                .ok_or_else(|| format!("No preset named \"{}\" any more.", name.trim()))?,
-        ),
-        None => None,
-    };
-    let others: Vec<AgentPreset> = list
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| Some(*i) != at)
-        .map(|(_, p)| p.clone())
-        .collect();
-    if let Some(problem) = presets::name_problem(&preset, &others) {
-        return Err(problem);
-    }
-    let mut renamed = None;
-    match at {
-        Some(i) => {
-            if list[i].name != preset.name {
-                renamed = Some((list[i].name.clone(), preset.name.clone()));
-            }
-            list[i] = preset;
+    presets::edit_at(store, |list| {
+        let at = match original {
+            Some(name) => Some(
+                list.iter()
+                    .position(|p| p.name.eq_ignore_ascii_case(name.trim()))
+                    .ok_or_else(|| format!("No preset named \"{}\" any more.", name.trim()))?,
+            ),
+            None => None,
+        };
+        let others: Vec<AgentPreset> = list
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| Some(*i) != at)
+            .map(|(_, p)| p.clone())
+            .collect();
+        if let Some(problem) = presets::name_problem(&preset, &others) {
+            return Err(problem);
         }
-        None => list.push(preset),
-    }
-    let renamed = renamed.as_ref().map(|(o, n)| (o.as_str(), n.as_str()));
-    presets::save_to_renamed(store, &list, renamed)
-        .map_err(|e| format!("Could not save the presets: {e}"))?;
+        let mut renamed = None;
+        match at {
+            Some(i) => {
+                if list[i].name != preset.name {
+                    renamed = Some((list[i].name.clone(), preset.name.clone()));
+                }
+                list[i] = preset;
+            }
+            None => list.push(preset),
+        }
+        Ok(renamed)
+    })?;
     Ok(list_at(cfg, store))
 }
 
 pub fn delete_at(cfg: &Config, store: &Path, name: &str) -> Res<Vec<PresetRow>> {
-    let mut list = presets::load_from(store);
-    let before = list.len();
-    list.retain(|p| !p.name.eq_ignore_ascii_case(name.trim()));
-    if list.len() == before {
-        return Err(format!("No preset named \"{}\".", name.trim()));
-    }
-    presets::save_to(store, &list).map_err(|e| format!("Could not save the presets: {e}"))?;
+    presets::edit_at(store, |list| {
+        let before = list.len();
+        list.retain(|p| !p.name.eq_ignore_ascii_case(name.trim()));
+        if list.len() == before {
+            return Err(format!("No preset named \"{}\".", name.trim()));
+        }
+        Ok(None)
+    })?;
     Ok(list_at(cfg, store))
 }
 
@@ -280,5 +280,18 @@ mod tests {
             "PRE\n\ndo it\n\nPOST"
         );
         assert!(compose_at(&store, "gone", "x").is_err());
+    }
+
+    /// A presets file that no longer parses is left alone: the save and
+    /// the delete both fail with a message naming it.
+    #[test]
+    fn an_unreadable_presets_file_is_refused_not_replaced() {
+        let (_d, cfg, store) = setup();
+        std::fs::write(&store, "{ broken").unwrap();
+        let err = save_at(&cfg, &store, None, row("a", "claude")).unwrap_err();
+        assert!(err.contains("agent_presets.json"), "{err}");
+        let err = delete_at(&cfg, &store, "a").unwrap_err();
+        assert!(err.contains("agent_presets.json"), "{err}");
+        assert_eq!(std::fs::read_to_string(&store).unwrap(), "{ broken");
     }
 }
