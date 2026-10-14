@@ -120,7 +120,10 @@ pub(crate) fn row_lines(
 pub(super) fn draw(f: &mut Frame, app: &mut App, mut view: AccountsView) {
     let th = app.chrome.theme;
     let now = nebula_core::clock::now_ms();
-    let height = (view.rows.len() as u16 * 5 + 4).clamp(8, f.area().height.saturating_sub(2));
+    // Floor of 8 rows, but never taller than the terminal allows (a
+    // plain clamp panics once the ceiling drops under the floor).
+    let ceiling = f.area().height.saturating_sub(2);
+    let height = (view.rows.len() as u16 * 5 + 4).max(8).min(ceiling);
     let area = centered_rect(f.area(), 76, height);
     let inner = render_modal_frame(f, area, " Accounts ", th);
     let mut lines = Vec::new();

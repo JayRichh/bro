@@ -244,4 +244,20 @@ mod tests {
             assert!(text.contains("\u{2014}"), "{text}");
         });
     }
+    /// A terminal shorter than the overlay's minimum still draws: the
+    /// height clamp never has its floor above its ceiling.
+    #[test]
+    fn the_overlay_draws_in_a_tiny_terminal() {
+        with_config_json("{}", || {
+            let mut app = App::new();
+            seed_tree(&mut app);
+            let mut out = Vec::new();
+            press(&mut app, KeyCode::Char('U'), KeyModifiers::SHIFT, &mut out);
+            on_account_usage(&mut app, vec![own_login(40.0)]);
+            for h in [1u16, 2, 5, 9, 10] {
+                let mut terminal = ratatui::Terminal::new(TestBackend::new(60, h)).unwrap();
+                terminal.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+            }
+        });
+    }
 }
