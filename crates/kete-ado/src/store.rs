@@ -1,13 +1,21 @@
 //! `ado.json`: per-repo ADO state (branch to task links, recent reviewers,
 //! team, a small cache, UI bits) and each org's tenant. Never holds a
 //! token.
+//!
+//! The desktop window and `kete ado` each keep an `AdoStore` on the same
+//! file, so every write is a read-modify-write under the settings lock
+//! (`ado.json.lock`, as `nebula_core::settings::lock` takes for the other
+//! settings files): the file is read again, the change applied to that
+//! copy, and the result written through a temp file of this writer's own.
+//! Reads pick up another writer's change when the file's modified time or
+//! length moved since this store last saw it.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::SystemTime;
 
 /// Most cache entries kept per repo.
 pub const CACHE_MAX: usize = 500;
@@ -66,6 +74,9 @@ pub struct StoreData {
 pub struct AdoStore {
     path: PathBuf,
     data: Mutex<StoreData>,
+    /// The file's modified time and length when this store last read or
+    /// wrote it, so a read knows when another writer has changed it.
+    seen: Mutex<Option<Stamp>>,
     /// The last failed load or write, for a command to surface.
     last_error: Mutex<Option<String>>,
     /// Set when a corrupt file could not be backed up: the store then
@@ -108,9 +119,11 @@ impl AdoStore {
                 StoreData::default()
             }
         };
+        let seen = stamp(&path);
         Self {
             path,
             data: Mutex::new(data),
+            seen: Mutex::new(seen),
             last_error: Mutex::new(hold.clone()),
             hold,
         }
@@ -150,7 +163,8 @@ impl AdoStore {
     /// Read the repo's state without writing, and without adding an entry
     /// for a repo the store has never seen.
     pub fn read_repo<R>(&self, key: &RepoKey, f: impl FnOnce(&RepoState) -> R) -> R {
-        let data = self.data.lock().unwrap_or_else(|p| p.into_inner());
+        let mut data = self.data.lock().unwrap_or_else(|p| p.into_inner());
+        self.refresh(&mut data);
         match data.repos.get(&key.to_string()) {
             Some(state) => f(state),
             None => f(&RepoState::default()),
@@ -159,7 +173,8 @@ impl AdoStore {
 
     /// Every org's remembered tenant, by org URL.
     pub fn tenants(&self) -> std::collections::HashMap<String, String> {
-        let data = self.data.lock().unwrap_or_else(|p| p.into_inner());
+        let mut data = self.data.lock().unwrap_or_else(|p| p.into_inner());
+        self.refresh(&mut data);
         data.tenants
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
@@ -182,21 +197,67 @@ impl AdoStore {
         self.mutate_data(|d| f(d.repos.entry(key.to_string()).or_default()))
     }
 
+    /// Take another writer's change into `data` when the file moved since
+    /// this store last saw it. A file that is missing, unreadable or does
+    /// not parse leaves memory as it is.
+    fn refresh(&self, data: &mut StoreData) {
+        if self.hold.is_some() {
+            return;
+        }
+        let mut seen = self.seen.lock().unwrap_or_else(|p| p.into_inner());
+        let now = stamp(&self.path);
+        if now.is_none() || now == *seen {
+            return;
+        }
+        if let Disk::Data(fresh, at) = read_disk(&self.path) {
+            *data = fresh;
+            *seen = at;
+        }
+    }
+
+    /// Under the file lock: read the file again, apply `f` to that copy,
+    /// write it. Anything that stops the write keeps the change in memory
+    /// and is recorded for [`take_last_error`](Self::take_last_error).
     fn mutate_data<R>(&self, f: impl FnOnce(&mut StoreData) -> R) -> (R, std::io::Result<()>) {
         let mut data = self.data.lock().unwrap_or_else(|p| p.into_inner());
-        let out = f(&mut data);
-        let res = match &self.hold {
-            Some(why) => Err(std::io::Error::other(why.clone())),
-            None => write_atomic(&self.path, &data),
+        let (out, res) = match &self.hold {
+            Some(why) => (f(&mut data), Err(why.clone())),
+            None => self.locked_write(&mut data, f),
         };
-        if let Err(e) = &res {
-            *self.last_error.lock().unwrap_or_else(|p| p.into_inner()) = Some(match &self.hold {
-                Some(why) => why.clone(),
-                None => format!(
-                    "Could not save {}: {e}. The change is kept until Kete closes.",
-                    self.path.display()
-                ),
-            });
+        let res = res.map_err(|why| {
+            *self.last_error.lock().unwrap_or_else(|p| p.into_inner()) = Some(why.clone());
+            std::io::Error::other(why)
+        });
+        (out, res)
+    }
+
+    fn locked_write<R>(
+        &self,
+        data: &mut StoreData,
+        f: impl FnOnce(&mut StoreData) -> R,
+    ) -> (R, Result<(), String>) {
+        let unsaved = |e: &dyn fmt::Display| {
+            format!(
+                "Could not save {}: {e}. The change is kept until Kete closes.",
+                self.path.display()
+            )
+        };
+        let _lock = match nebula_core::settings::lock(&self.path) {
+            Ok(lock) => lock,
+            Err(e) => return (f(data), Err(unsaved(&e))),
+        };
+        match read_disk(&self.path) {
+            Disk::Data(fresh, _) => *data = fresh,
+            Disk::Missing => {}
+            Disk::Unreadable(why) => return (f(data), Err(unsaved(&why))),
+        }
+        let out = f(data);
+        let res = serde_json::to_vec_pretty(&*data)
+            .map_err(std::io::Error::other)
+            .and_then(|bytes| nebula_core::settings::write_atomic(&self.path, &bytes))
+            .map_err(|e| unsaved(&e));
+        if res.is_ok() {
+            *self.seen.lock().unwrap_or_else(|p| p.into_inner()) = stamp(&self.path);
         }
         (out, res)
     }
@@ -242,30 +303,39 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// `ado.json` plus `suffix`, e.g. `ado.json.tmp`.
+/// `ado.json` plus `suffix`, e.g. `ado.json.bad`.
 fn sibling(path: &Path, suffix: &str) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(suffix);
     path.with_file_name(name)
 }
 
-/// Write to `ado.json.tmp`, then rename over `ado.json`.
-fn write_atomic(path: &Path, data: &StoreData) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
+/// A file's modified time and length: what tells a reader it changed.
+type Stamp = (SystemTime, u64);
+
+fn stamp(path: &Path) -> Option<Stamp> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.modified().ok()?, meta.len()))
+}
+
+/// The file as it is on disk now.
+enum Disk {
+    Missing,
+    Data(StoreData, Option<Stamp>),
+    /// There but not readable or not JSON: never written over.
+    Unreadable(String),
+}
+
+fn read_disk(path: &Path) -> Disk {
+    let at = stamp(path);
+    match std::fs::read(path) {
+        Ok(bytes) => match serde_json::from_slice(&bytes) {
+            Ok(data) => Disk::Data(data, at),
+            Err(e) => Disk::Unreadable(format!("{} does not parse ({e})", path.display())),
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Disk::Missing,
+        Err(e) => Disk::Unreadable(format!("{} could not be read ({e})", path.display())),
     }
-    let tmp = sibling(path, ".tmp");
-    let bytes = serde_json::to_vec_pretty(data).map_err(std::io::Error::other)?;
-    let written = (|| {
-        let mut file = std::fs::File::create(&tmp)?;
-        file.write_all(&bytes)?;
-        file.sync_all()
-    })();
-    written
-        .and_then(|()| std::fs::rename(&tmp, path))
-        .inspect_err(|_| {
-            let _ = std::fs::remove_file(&tmp);
-        })
 }
 
 #[cfg(test)]
@@ -436,7 +506,108 @@ mod tests {
         s.with_repo(&key(), |r| r.team = Some("a".into()));
         s.with_repo(&key(), |r| r.team = Some("b".into()));
         assert!(path.exists());
-        assert!(!dir.join("ado.json.tmp").exists());
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n != "ado.json")
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The desktop window and `kete ado` each hold an `AdoStore` on the
+    /// same file: neither's stale copy may overwrite the other's write.
+    #[test]
+    fn two_writers_on_one_file_keep_each_others_changes() {
+        let dir = temp_dir();
+        let path = dir.join("ado.json");
+        let desktop = AdoStore::open(&path);
+        let cli = AdoStore::open(&path);
+        desktop.with_repo(&key(), |r| {
+            r.branch_tasks.insert("jari/gst".into(), 4211);
+        });
+        cli.set_tenant("https://dev.azure.com/tnt", "t-1");
+        cli.with_repo(&other_key(), |r| r.team = Some("Web".into()));
+        desktop.with_repo(&key(), |r| r.team = Some("Platform".into()));
+        let again = AdoStore::open(&path);
+        assert_eq!(
+            again.read_repo(&key(), |r| r.branch_tasks.get("jari/gst").copied()),
+            Some(4211)
+        );
+        assert_eq!(
+            again.read_repo(&key(), |r| r.team.clone()).as_deref(),
+            Some("Platform")
+        );
+        assert_eq!(
+            again.read_repo(&other_key(), |r| r.team.clone()).as_deref(),
+            Some("Web")
+        );
+        assert_eq!(
+            again
+                .tenants()
+                .get("https://dev.azure.com/tnt")
+                .map(String::as_str),
+            Some("t-1")
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn two_writers_racing_lose_nothing() {
+        let dir = temp_dir();
+        let path = dir.join("ado.json");
+        let a = std::sync::Arc::new(AdoStore::open(&path));
+        let b = std::sync::Arc::new(AdoStore::open(&path));
+        let run = |s: std::sync::Arc<AdoStore>, prefix: &'static str| {
+            std::thread::spawn(move || {
+                for i in 0..20 {
+                    s.try_with_repo(&key(), |r| {
+                        r.branch_tasks.insert(format!("{prefix}/{i}"), i);
+                    })
+                    .unwrap();
+                }
+            })
+        };
+        let (ta, tb) = (run(a, "a"), run(b, "b"));
+        ta.join().unwrap();
+        tb.join().unwrap();
+        let again = AdoStore::open(&path);
+        assert_eq!(again.read_repo(&key(), |r| r.branch_tasks.len()), 40);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A reader sees what another process wrote since it opened the file.
+    #[test]
+    fn a_read_picks_up_another_writers_change() {
+        let dir = temp_dir();
+        let path = dir.join("ado.json");
+        let desktop = AdoStore::open(&path);
+        assert!(desktop.read_repo(&key(), |r| r.team.is_none()));
+        let cli = AdoStore::open(&path);
+        cli.with_repo(&key(), |r| r.team = Some("Platform".into()));
+        cli.set_tenant("https://dev.azure.com/tnt", "t-1");
+        assert_eq!(
+            desktop.read_repo(&key(), |r| r.team.clone()).as_deref(),
+            Some("Platform")
+        );
+        assert!(desktop.tenants().contains_key("https://dev.azure.com/tnt"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A file another writer left unparseable is not replaced by a write.
+    #[test]
+    fn a_write_never_replaces_a_file_gone_bad_since_open() {
+        let dir = temp_dir();
+        let path = dir.join("ado.json");
+        let s = AdoStore::open(&path);
+        s.with_repo(&key(), |r| r.team = Some("a".into()));
+        std::fs::write(&path, "{ not json").unwrap();
+        assert!(s
+            .try_with_repo(&key(), |r| r.team = Some("b".into()))
+            .is_err());
+        assert!(s.take_last_error().is_some());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ not json");
         let _ = std::fs::remove_dir_all(dir);
     }
 
