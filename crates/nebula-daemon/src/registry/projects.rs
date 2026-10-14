@@ -1,5 +1,10 @@
 use super::*;
 
+/// What a delete that is not forced says when it keeps a checkout for its
+/// uncommitted changes. Clients match these words (the TUI offers the
+/// forced delete on them), so they stay put.
+pub const UNCOMMITTED_REFUSAL: &str = "has uncommitted changes";
+
 impl Daemon {
     // ---- projects ----
 
@@ -469,6 +474,23 @@ impl Daemon {
             .store_blocking(move |store| store.get_project(&project_lookup))
             .await?
             .context("project not found")?;
+
+        // A delete that is not forced keeps uncommitted work, and is
+        // refused before anything in the checkout is stopped: git would
+        // refuse the same delete below, but only after its sessions were
+        // killed. A checkout git can't read here is left to the remove,
+        // which copes with one that is already gone.
+        if !force && worktree.path.exists() {
+            if let Ok(status) = git::status_porcelain(&worktree.path).await {
+                let changes = status.lines().filter(|l| !l.trim().is_empty()).count();
+                if changes > 0 {
+                    bail!(
+                        "worktree '{}' {UNCOMMITTED_REFUSAL} ({changes}): kept, nothing in it stopped",
+                        worktree.branch
+                    );
+                }
+            }
+        }
 
         // Kill sessions living in this worktree.
         let (_, _, agents, terminals) = self.store_blocking(|store| store.load_tree()).await?;

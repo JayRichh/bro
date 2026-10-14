@@ -4437,6 +4437,41 @@ pub(crate) mod tests {
         assert_eq!(listed.len(), 1, "one git checkout: {listed:#?}");
     }
 
+    /// A delete that is not forced keeps a checkout with uncommitted work
+    /// — refused in words a client can match, the row and the files left
+    /// as they were — and the forced one takes it.
+    #[tokio::test]
+    async fn an_unforced_delete_keeps_a_dirty_checkout_and_force_takes_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = nebula_core::paths::canonical(tmp.path()).unwrap();
+        let repo = init_repo(&root);
+        let wt = root.join("repo-worktrees").join("feat");
+        git_in(
+            &repo,
+            &["worktree", "add", &wt.to_string_lossy(), "-b", "feat"],
+        );
+        std::fs::write(wt.join("notes.txt"), "unsaved").unwrap();
+        let daemon = test_daemon();
+        project_at(&daemon, &repo);
+        seed_worktree(&daemon, "p", "feat", &wt.to_string_lossy(), false);
+
+        let err = daemon
+            .delete_worktree(&WorktreeId("feat".into()), false)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains(super::projects::UNCOMMITTED_REFUSAL), "{err}");
+        assert!(wt.join("notes.txt").exists(), "the work is still there");
+        let (_, worktrees, _, _) = daemon.store.load_tree().unwrap();
+        assert!(worktrees.iter().any(|w| w.id.as_str() == "feat"));
+
+        daemon
+            .delete_worktree(&WorktreeId("feat".into()), true)
+            .await
+            .unwrap();
+        assert!(!wt.exists(), "force takes it");
+    }
+
     /// The delete hook runs after the checkout is gone and the row is
     /// dropped, sees the deleted path, and its failure is a broadcast
     /// warning: the request still succeeds and the row stays gone.

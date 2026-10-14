@@ -238,7 +238,30 @@ fn launcher_grid_footer_hint(app: &App, th: Theme) -> FooterHint {
             ]),
         };
     }
-    let text = if app.launcher.show_archived {
+    // The KANBAN's own keys first: its lanes, its scope, the way back to
+    // the bands — the board is the grid's other home, and its footer
+    // says how to leave it as plainly as the bands' says how to reach it.
+    let text = if app.launcher.launcher_kanban {
+        let scope = if app.launcher.kanban_all {
+            "this project"
+        } else {
+            "all projects"
+        };
+        format!(
+            "{}{}: lanes  {}{}: cards  {}: {scope}  {}: open  {}: new session  {}: overview  {}: jump  {}: help  {}: quit",
+            k(Action::FocusLeft),
+            k(Action::FocusRight),
+            k(Action::MoveDown),
+            k(Action::MoveUp),
+            k(Action::FocusNext),
+            k(Action::Activate),
+            k(Action::QuickPrompt),
+            k(Action::ToggleKanban),
+            k(Action::Palette),
+            k(Action::Help),
+            k(Action::Quit),
+        )
+    } else if app.launcher.show_archived {
         format!(
             "{move_keys}: move  {}: unarchive  {}: delete  {}: back to live sessions  {}: jump  {}: help  {}: quit",
             k(Action::Unarchive),
@@ -250,7 +273,7 @@ fn launcher_grid_footer_hint(app: &App, th: Theme) -> FooterHint {
         )
     } else {
         format!(
-            "{move_keys}: move  {}: open  {}: new session  {}{}: project tabs  {}: terminals  {}: archive  {}: archived  {}: diff  {}: jump  {}: settings  {}: help  {}: quit",
+            "{move_keys}: move  {}: open  {}: new session  {}{}: project tabs  {}: terminals  {}: archive  {}: archived  {}: board  {}: diff  {}: jump  {}: settings  {}: help  {}: quit",
             k(Action::Activate),
             k(Action::QuickPrompt),
             k(Action::PrevProjectTab),
@@ -258,6 +281,7 @@ fn launcher_grid_footer_hint(app: &App, th: Theme) -> FooterHint {
             k(Action::PaneTabs),
             k(Action::Archive),
             k(Action::ToggleArchived),
+            k(Action::ToggleKanban),
             k(Action::GitDiff),
             k(Action::Palette),
             k(Action::Settings),

@@ -150,6 +150,14 @@ pub enum HitTarget {
     /// right-click, drops the list of just those under it
     /// ([`App::launcher_tabs_more`]), and the pick opens that project.
     LauncherTabMore,
+    /// The VIEW TOGGLE at the right end of the grid's header —
+    /// `Overview│Board ⇧K`, the desktop's home radio — by the half it
+    /// names: `true` the KANBAN, `false` the bands. A click on the half
+    /// not lit switches as `⇧K` does.
+    LauncherHome(bool),
+    /// The KANBAN's scope beside it (`this project` / `all projects`): a
+    /// click flips it, as `Tab` on the board does.
+    LauncherKanbanScope,
     /// Draggable top edge of the LAUNCHER VIEW's PANE: the blank row the
     /// pane opens with, plus the grid row above it. Registered ahead of
     /// the cards so a card ending on that row never swallows the grab.
@@ -299,6 +307,10 @@ pub enum MenuAction {
         /// session. Rides through the MODEL / EFFORT submenus like
         /// `pr`, and is what an abandoned picker restores.
         quick: Option<Box<crate::quick_prompt::QuickReturn>>,
+        /// The PROFILE (account) the session runs on, from the NEW SESSION
+        /// PICKER's account rows; None sends none, and the DAEMON's ACCOUNT
+        /// SPREAD picks. Carried through the MODEL / EFFORT submenus.
+        profile: Option<String>,
     },
     /// Shell terminal in the worktree's directory; created immediately with
     /// a default name (no prompt), renameable later.
@@ -703,7 +715,19 @@ pub enum PendingAction {
         worktree: WorktreeId,
     },
     CloseTerminal(TerminalId),
+    /// Delete a checkout, unforced: the DAEMON keeps one with
+    /// uncommitted changes (`delete_check`).
     DeleteWorktree(WorktreeId),
+    /// The DELETE CHECK found uncommitted changes (`why` says how many):
+    /// answering opens the forced delete's own confirm instead of
+    /// sending anything.
+    AskForceDeleteWorktree {
+        worktree: WorktreeId,
+        why: String,
+    },
+    /// Delete a checkout and whatever is uncommitted in it. Only ever
+    /// behind the second confirm, whose only yes is `f`.
+    ForceDeleteWorktree(WorktreeId),
     /// A row delete that empties a linked worktree — the last card of the
     /// band going — with the checkout's fate decided in the same dialog:
     /// `Enter`/`y` runs `first` (the row's own delete) and then deletes
@@ -2338,6 +2362,9 @@ pub struct WorktreeRollback {
     pub worktree: Worktree,
     /// Its agents, each with the index it held in `tree.agents`.
     pub agents: Vec<(usize, Agent)>,
+    /// One of several sent at once (`Shift+D`): a refusal says so in the
+    /// footer rather than opening the forced delete's confirm.
+    pub bulk: bool,
 }
 
 /// The rows a launch into a WORKTREE that does not exist yet puts up the
@@ -4025,6 +4052,9 @@ pub struct LauncherState {
     /// the TUI — so the box's profile field and the cards read it without
     /// a file read per frame.
     pub profiles: Vec<nebula_core::profiles::Profile>,
+    /// The ACCOUNT SPREAD the config sets, mirrored beside `profiles`:
+    /// whether a launch's profile field offers "auto".
+    pub spread: nebula_core::accounts::Policy,
     /// Every ACCOUNT's latest plan usage (`nebula_core::usage`): pushed
     /// by a 55+ daemon (`ServerEvent::AccountUsage`), else read from the
     /// kept files as a box opens (`quick_prompt::refresh_profiles`).

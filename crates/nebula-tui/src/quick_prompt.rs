@@ -260,7 +260,84 @@ pub(crate) fn refresh_profiles(app: &mut App) {
     if !app.launcher.usage_pushed {
         app.launcher.account_usage = crate::accounts_overlay::kept_readings();
     }
-    app.launcher.profiles = crate::config::Config::load().profiles;
+    let cfg = crate::config::Config::load();
+    app.launcher.spread = spread_policy(&cfg);
+    app.launcher.profiles = cfg.profiles;
+}
+
+/// What a launch's profile field or picker offers for `harness`, in
+/// order: "auto" (None: no profile sent, the DAEMON's ACCOUNT SPREAD
+/// picks) under a spread that is not `manual`, or "none" (None: the
+/// CLI's own login) under `manual` while no default stands for it; then
+/// each enabled PROFILE in config order; then the switched-off ones,
+/// which a launch naming them still runs on. Empty for a harness with no
+/// profiles, which keeps the field off the box.
+pub fn profile_choices_in(
+    profiles: &[nebula_core::profiles::Profile],
+    harness: &str,
+    policy: nebula_core::accounts::Policy,
+) -> Vec<Option<String>> {
+    let usable = nebula_core::profiles::for_harness(profiles, harness);
+    if usable.is_empty() {
+        return Vec::new();
+    }
+    let lead = (policy.spread != nebula_core::accounts::Spread::Manual
+        || nebula_core::profiles::default_for(profiles, harness).is_none())
+    .then_some(None);
+    let name = |p: &&nebula_core::profiles::Profile| Some(p.name.trim().to_string());
+    lead.into_iter()
+        .chain(usable.iter().filter(|p| !p.disabled).map(name))
+        .chain(usable.iter().filter(|p| p.disabled).map(name))
+        .collect()
+}
+
+/// The account a choice launches on: the named profile, or — for None —
+/// the ACCOUNT SPREAD's pick now against `readings` (under `manual`, the
+/// default; with none, the CLI's own login: None). The readings are the
+/// app's own, so a frame never reads the usage files.
+pub fn resolved_profile(
+    choice: Option<&str>,
+    profiles: &[nebula_core::profiles::Profile],
+    harness: &str,
+    policy: nebula_core::accounts::Policy,
+    readings: &[nebula_core::usage::AccountUsage],
+) -> Option<String> {
+    match choice {
+        Some(name) => Some(name.to_string()),
+        None => nebula_core::accounts::pick(
+            profiles,
+            harness,
+            policy,
+            nebula_core::clock::now_secs() as i64,
+            |key| readings.iter().find(|u| u.account == key).cloned(),
+        )
+        .profile
+        .map(|p| p.name.trim().to_string()),
+    }
+}
+
+/// How a profile choice reads: `auto → max2` (what the spread would pick
+/// now), `none`, `work`, or `old (off)` for a switched-off profile.
+pub fn profile_choice_label(
+    choice: Option<&str>,
+    profiles: &[nebula_core::profiles::Profile],
+    harness: &str,
+    policy: nebula_core::accounts::Policy,
+    readings: &[nebula_core::usage::AccountUsage],
+) -> String {
+    match choice {
+        None if policy.spread != nebula_core::accounts::Spread::Manual => {
+            match resolved_profile(None, profiles, harness, policy, readings) {
+                Some(name) => format!("auto → {name}"),
+                None => "auto → own login".into(),
+            }
+        }
+        None => "none".into(),
+        Some(name) if profiles.iter().any(|p| p.name.trim() == name && p.disabled) => {
+            format!("{name} (off)")
+        }
+        Some(name) => name.to_string(),
+    }
 }
 
 /// The ACCOUNT SPREAD the config sets (Settings → Sessions → Accounts).
@@ -277,13 +354,14 @@ pub(crate) fn spread_policy(cfg: &Config) -> nebula_core::accounts::Policy {
 pub(crate) fn cycle_box_profile(app: &mut App) {
     refresh_profiles(app);
     let profiles = app.launcher.profiles.clone();
+    let policy = app.launcher.spread;
     let Some(Overlay::Prompt(prompt)) = &mut app.modals.overlay else {
         return;
     };
     let PromptKind::QuickPrompt(launch) = &mut prompt.kind else {
         return;
     };
-    if !launch.cycle_profile(&profiles) {
+    if !launch.cycle_profile(&profiles, policy) {
         let harness = launch.harness_id().to_string();
         app.chrome.flash = Some(format!(
             "{harness} has no profiles: kete profile add <name> --harness {harness}"
@@ -366,12 +444,16 @@ impl QuickLaunch {
             effort.or_else(|| descriptor.default_effort().map(str::to_string)),
             custom.as_deref(),
         );
-        // The ACCOUNT SPREAD's pick (under `manual`, the default profile),
-        // so the field shows the account Enter will use.
-        let profile =
-            nebula_core::accounts::pick_now(&cfg.profiles, &descriptor.id, spread_policy(cfg))
-                .profile
-                .map(|p| p.name.trim().to_string());
+        // Under `manual`, the default profile, named so the field shows
+        // the account Enter will use. Under another ACCOUNT SPREAD,
+        // "auto": no profile is sent and the DAEMON's spread picks at
+        // launch, the field saying what it would pick now.
+        let policy = spread_policy(cfg);
+        let profile = if policy.spread == nebula_core::accounts::Spread::Manual {
+            resolved_profile(None, &cfg.profiles, &descriptor.id, policy, &[])
+        } else {
+            None
+        };
         Self {
             target,
             kind,
@@ -403,31 +485,24 @@ impl QuickLaunch {
         self.custom.as_deref().unwrap_or_else(|| self.kind.as_str())
     }
 
-    /// What `^A` steps through for this launch's harness: each of its
-    /// PROFILES in config order, led by "none" (None — the CLI's own
-    /// environment) when the harness has no default to stand for it.
-    /// Empty when the harness has no profiles at all, which keeps the
-    /// field off the box.
+    /// What `^A` steps through for this launch's harness
+    /// ([`profile_choices_in`]).
     pub fn profile_choices(
         &self,
         profiles: &[nebula_core::profiles::Profile],
+        policy: nebula_core::accounts::Policy,
     ) -> Vec<Option<String>> {
-        let all = nebula_core::profiles::enabled_for(profiles, self.harness_id());
-        if all.is_empty() {
-            return Vec::new();
-        }
-        let lead = nebula_core::profiles::default_for(profiles, self.harness_id())
-            .is_none()
-            .then_some(None);
-        lead.into_iter()
-            .chain(all.iter().map(|p| Some(p.name.trim().to_string())))
-            .collect()
+        profile_choices_in(profiles, self.harness_id(), policy)
     }
 
     /// `^A`: step to the next of [`QuickLaunch::profile_choices`],
     /// wrapping. False when the harness has none to step through.
-    pub fn cycle_profile(&mut self, profiles: &[nebula_core::profiles::Profile]) -> bool {
-        let choices = self.profile_choices(profiles);
+    pub fn cycle_profile(
+        &mut self,
+        profiles: &[nebula_core::profiles::Profile],
+        policy: nebula_core::accounts::Policy,
+    ) -> bool {
+        let choices = self.profile_choices(profiles, policy);
         if choices.is_empty() {
             return false;
         }
@@ -1321,10 +1396,11 @@ mod tests {
         assert!(!issue.with_cloud(true).cloud);
     }
 
-    /// A switched-off profile is not offered by `^A`, and a non-manual
-    /// ACCOUNT SPREAD opens the box on the account it picks.
+    /// A switched-off profile is offered last, marked off (a launch naming
+    /// it still runs on it); a non-manual ACCOUNT SPREAD opens the box on
+    /// "auto" — no profile sent — which says what it would pick.
     #[test]
-    fn a_disabled_profile_is_skipped_and_the_spread_picks_the_box_account() {
+    fn a_disabled_profile_comes_last_and_a_spread_offers_auto() {
         let profile = |name: &str, default: bool, disabled: bool| nebula_core::profiles::Profile {
             name: name.into(),
             harness: "claude".into(),
@@ -1342,19 +1418,41 @@ mod tests {
             ..Config::default()
         };
         let claude = QuickLaunch::of_kind(worktree(), AgentKind::Claude, None, None, None, &cfg);
+        let manual = nebula_core::accounts::Policy::default();
+        assert_eq!(claude.profile.as_deref(), Some("main"));
         assert_eq!(
-            claude.profile_choices(&cfg.profiles),
-            vec![Some("main".to_string()), Some("max2".to_string())]
+            claude.profile_choices(&cfg.profiles, manual),
+            vec![
+                Some("main".to_string()),
+                Some("max2".to_string()),
+                Some("off".to_string())
+            ]
         );
+        let label = |choice: Option<&str>, policy| {
+            profile_choice_label(choice, &cfg.profiles, "claude", policy, &[])
+        };
+        assert_eq!(label(Some("off"), manual), "off (off)");
+        assert_eq!(label(Some("max2"), manual), "max2");
         // least_used with no readings anywhere: the default leads the ties.
         let spread = Config {
             account_spread: "least_used".into(),
             ..cfg.clone()
         };
+        let policy = spread_policy(&spread);
+        assert_eq!(policy.spread, nebula_core::accounts::Spread::LeastUsed);
+        let auto = QuickLaunch::of_kind(worktree(), AgentKind::Claude, None, None, None, &spread);
+        assert_eq!(auto.profile, None, "auto: the daemon's spread picks");
         assert_eq!(
-            spread_policy(&spread).spread,
-            nebula_core::accounts::Spread::LeastUsed
+            auto.profile_choices(&spread.profiles, policy),
+            vec![
+                None,
+                Some("main".to_string()),
+                Some("max2".to_string()),
+                Some("off".to_string())
+            ]
         );
+        assert_eq!(label(None, policy), "auto → main");
+        assert_eq!(label(None, manual), "none");
         let mut all_off = cfg.clone();
         all_off.profiles[0].disabled = true;
         all_off.profiles[2].disabled = true;
@@ -1387,25 +1485,28 @@ mod tests {
             QuickLaunch::of_kind(worktree(), AgentKind::Claude, None, None, None, &cfg);
         assert_eq!(claude.profile.as_deref(), Some("main"));
         assert_eq!(
-            claude.profile_choices(&cfg.profiles),
+            claude.profile_choices(&cfg.profiles, Default::default()),
             vec![Some("main".to_string()), Some("max2".to_string())]
         );
-        assert!(claude.cycle_profile(&cfg.profiles));
+        assert!(claude.cycle_profile(&cfg.profiles, Default::default()));
         assert_eq!(claude.profile.as_deref(), Some("max2"));
-        assert!(claude.cycle_profile(&cfg.profiles));
+        assert!(claude.cycle_profile(&cfg.profiles, Default::default()));
         assert_eq!(claude.profile.as_deref(), Some("main"), "it wraps");
 
         let mut codex = QuickLaunch::of_kind(worktree(), AgentKind::Codex, None, None, None, &cfg);
         assert_eq!(codex.profile, None, "no default: the CLI's own login");
         assert_eq!(
-            codex.profile_choices(&cfg.profiles),
+            codex.profile_choices(&cfg.profiles, Default::default()),
             vec![None, Some("work".to_string())]
         );
-        assert!(codex.cycle_profile(&cfg.profiles));
+        assert!(codex.cycle_profile(&cfg.profiles, Default::default()));
         assert_eq!(codex.profile.as_deref(), Some("work"));
 
         let mut pi = QuickLaunch::of_kind(worktree(), AgentKind::Pi, None, None, None, &cfg);
-        assert!(!pi.cycle_profile(&cfg.profiles), "no profiles, no field");
+        assert!(
+            !pi.cycle_profile(&cfg.profiles, Default::default()),
+            "no profiles, no field"
+        );
 
         let picked = QuickLaunch::of_kind(
             worktree(),

@@ -897,7 +897,7 @@ pub(super) fn toggle_kanban(app: &mut App, out: &mut Vec<ClientRequest>) {
         kanban_move(app, 0, 0, out);
         app.chrome.flash = Some(kanban_flash(app));
     } else {
-        app.chrome.flash = Some("kanban off: a band per worktree".into());
+        app.chrome.flash = Some("overview: a band per worktree · ⇧K: board".into());
     }
     app.chrome.dirty = true;
 }
@@ -909,7 +909,7 @@ fn kanban_flash(app: &App) -> String {
     } else {
         "this project"
     };
-    format!("kanban: {scope} · h/l lanes · j/k cards · Tab: scope · ⇧K: bands")
+    format!("kanban: {scope} · h/l lanes · j/k cards · Tab: scope · ⇧K: overview")
 }
 
 /// The KANBAN's own keys, ahead of the grid's: `h`/`l` (`←`/`→`) walk the
@@ -927,24 +927,30 @@ fn kanban_action(app: &mut App, action: Action, out: &mut Vec<ClientRequest>) ->
         Action::MoveUp => kanban_move(app, 0, -1, out),
         Action::HalfPageDown => kanban_move(app, 0, HALF_PAGE * 2, out),
         Action::HalfPageUp => kanban_move(app, 0, -HALF_PAGE * 2, out),
-        Action::FocusNext => {
-            let mut cfg = crate::config::Config::load();
-            cfg.kanban_scope = if app.launcher.kanban_all {
-                "project"
-            } else {
-                "all"
-            }
-            .into();
-            if super::save_config(app, &cfg) {
-                super::apply_config(app, &cfg);
-            }
-            kanban_move(app, 0, 0, out);
-            app.chrome.flash = Some(kanban_flash(app));
-        }
+        Action::FocusNext => flip_kanban_scope(app, out),
         _ => return false,
     }
     app.chrome.dirty = true;
     true
+}
+
+/// `Tab` on the KANBAN, or a click on the scope in the header: the board
+/// between the project on screen and every project, saved as **Kanban
+/// scope**.
+pub(super) fn flip_kanban_scope(app: &mut App, out: &mut Vec<ClientRequest>) {
+    let mut cfg = crate::config::Config::load();
+    cfg.kanban_scope = if app.launcher.kanban_all {
+        "project"
+    } else {
+        "all"
+    }
+    .into();
+    if super::save_config(app, &cfg) {
+        super::apply_config(app, &cfg);
+    }
+    kanban_move(app, 0, 0, out);
+    app.chrome.flash = Some(kanban_flash(app));
+    app.chrome.dirty = true;
 }
 
 /// Move the KANBAN cursor (`launcher::kanban_step`) and land the grid's
@@ -2816,6 +2822,8 @@ fn open_model_picker(app: &mut App, back: QuickReturn) {
             cloud: back.launch.cloud,
             pr,
             quick: Some(Box::new(back)),
+            // The box keeps its own account (`with_profile_of`).
+            profile: None,
         },
     );
     if let Some(menu) = build_submenu(&row) {
@@ -4269,11 +4277,11 @@ mod tests {
             let mut off = with_empty_band();
             off.launcher.show_all_worktrees = false;
             let screen = screen_text(&draw_tall(&mut off));
-            assert!(!screen.contains("idle"), "{screen}");
+            assert!(!screen.contains("↳ idle"), "{screen}");
 
             let mut app = with_empty_band();
             let screen = screen_text(&draw_tall(&mut app));
-            assert!(screen.contains("idle"), "{screen}");
+            assert!(screen.contains("↳ idle"), "{screen}");
             assert!(
                 screen.contains(
                     "nothing running · p: new session · t: terminal · d: delete worktree"
@@ -5323,7 +5331,7 @@ mod tests {
             keys(&mut app, &[KeyCode::Esc, KeyCode::Char('j')]);
             let text = buffer_text(&draw(&mut app));
             assert!(
-                text.contains("polish-nav  ↳ feat"),
+                text.contains("polish-nav  running  claude  ↳ demo / feat"),
                 "the pane names the cursor's card and its checkout: {text}"
             );
             assert_eq!(
@@ -5350,7 +5358,7 @@ mod tests {
             key(&mut app, KeyCode::Char('k'), KeyModifiers::NONE);
             let text = buffer_text(&draw(&mut app));
             assert!(
-                text.contains("agent-1  ⌂ main"),
+                text.contains("agent-1  idle  claude  ⌂ demo / main"),
                 "the band above takes the pane: {text}"
             );
         });
@@ -10972,6 +10980,31 @@ mod tests {
     /// its text back into the picked box, and only its text: the harness
     /// was chosen a moment ago, on purpose.
     #[test]
+    fn n_picks_the_account_with_the_harness() {
+        let json = r#"{"profiles": [
+            {"name": "main", "harness": "claude", "default": true},
+            {"name": "max2", "harness": "claude"}
+        ]}"#;
+        with_config_json(json, || {
+            let mut app = two_sessions();
+            draw(&mut app);
+            key(&mut app, KeyCode::Char('n'), KeyModifiers::NONE);
+            let Some(Overlay::Menu(menu)) = &mut app.modals.overlay else {
+                panic!("{:?}", app.modals.overlay);
+            };
+            menu.hover = menu
+                .items
+                .iter()
+                .position(|i| i.label == "Claude · max2")
+                .expect("an account row for max2");
+            key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+            let (picked, _) = launch(&app);
+            assert_eq!(picked.kind, nebula_core::AgentKind::Claude);
+            assert_eq!(picked.profile.as_deref(), Some("max2"), "the box is on it");
+        });
+    }
+
+    #[test]
     fn n_picks_the_harness_first_and_opens_the_box_on_it() {
         with_default_config(|| {
             let mut app = two_sessions();
@@ -13022,7 +13055,7 @@ mod tests {
                 "the cursor lands on the one waiting on you"
             );
             let text = screen_text(&draw_at(&mut app, 240, 40));
-            for lane in ["Needs input", "Running", "Unseen", "Done", "PR open"] {
+            for lane in ["Needs you", "Running", "Unread", "Done", "PR open"] {
                 assert!(text.contains(lane), "the {lane} lane:\n{text}");
             }
             assert!(text.contains("polish-nav"), "{text}");
@@ -13049,6 +13082,38 @@ mod tests {
             key(&mut app, KeyCode::Char('K'), KeyModifiers::SHIFT);
             assert!(!app.launcher.launcher_kanban);
             assert!(!screen_text(&draw(&mut app)).contains("PR open"));
+        });
+    }
+
+    /// The header's VIEW TOGGLE is the pointer's `⇧K`: a click on Board
+    /// lays the grid out as the board (saved, as the key saves it), the
+    /// scope beside the count flips it as `Tab` does, and a click on
+    /// Overview goes back. A click on the half already lit does nothing.
+    #[test]
+    fn the_header_toggle_switches_overview_and_board_by_click() {
+        with_default_config(|| {
+            let mut app = two_sessions();
+            draw_at(&mut app, 200, 40);
+            let (x, y) = crumb_cell(&app, HitTarget::LauncherHome(false));
+            mouse(&mut app, MouseEventKind::Down(MouseButton::Left), x, y);
+            assert!(!app.launcher.launcher_kanban, "Overview is lit already");
+
+            draw_at(&mut app, 200, 40);
+            let (x, y) = crumb_cell(&app, HitTarget::LauncherHome(true));
+            mouse(&mut app, MouseEventKind::Down(MouseButton::Left), x, y);
+            assert!(app.launcher.launcher_kanban);
+            assert!(crate::config::Config::load().kanban, "saved");
+
+            let text = screen_text(&draw_at(&mut app, 200, 40));
+            assert!(text.contains("this project ⇥"), "{text}");
+            let (x, y) = crumb_cell(&app, HitTarget::LauncherKanbanScope);
+            mouse(&mut app, MouseEventKind::Down(MouseButton::Left), x, y);
+            assert!(app.launcher.kanban_all);
+
+            draw_at(&mut app, 200, 40);
+            let (x, y) = crumb_cell(&app, HitTarget::LauncherHome(false));
+            mouse(&mut app, MouseEventKind::Down(MouseButton::Left), x, y);
+            assert!(!app.launcher.launcher_kanban);
         });
     }
 

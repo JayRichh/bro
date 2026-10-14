@@ -151,7 +151,9 @@ fn spread_note(cfg: &crate::config::Config, launch: &QuickLaunch) -> Option<Stri
     }
     let pick = nebula_core::accounts::pick_now(&cfg.profiles, harness, policy);
     let picked = pick.profile.map(|p| p.name.trim().to_string());
-    (picked == launch.profile).then(|| pick.describe(harness))
+    // "auto" (no profile named) is the spread's pick; so is a named one
+    // that happens to be what it would pick.
+    (launch.profile.is_none() || picked == launch.profile).then(|| pick.describe(harness))
 }
 
 /// What every launch the screen follows does at once: the new session is

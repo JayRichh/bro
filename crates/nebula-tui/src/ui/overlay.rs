@@ -206,7 +206,17 @@ fn draw_confirm_overlay(f: &mut Frame, app: &mut App, confirm: crate::app::Confi
         confirm.action,
         crate::app::PendingAction::ThenDeleteWorktree { offered: true, .. }
     );
-    let legend = if three_way {
+    let forced = matches!(
+        confirm.action,
+        crate::app::PendingAction::ForceDeleteWorktree(_)
+    );
+    let legend = if forced {
+        Line::from(vec![
+            Span::styled("[f] delete anyway", Style::default().fg(th.err)),
+            Span::raw("   "),
+            Span::styled("[Enter/y/Esc/n] keep it", Style::default().fg(th.dim)),
+        ])
+    } else if three_way {
         Line::from(vec![
             Span::styled("[Enter/y] yes, both", Style::default().fg(th.err)),
             Span::raw("   "),

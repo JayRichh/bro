@@ -251,9 +251,13 @@ impl StartView {
             .unwrap_or(AgentKind::Claude)
     }
 
-    /// The profiles the chosen harness can run under.
+    /// The profiles the chosen harness can run under: the enabled ones in
+    /// config order, then the switched-off ones (a start naming one still
+    /// runs on it).
     pub fn harness_profiles(&self) -> Vec<&nebula_core::profiles::Profile> {
-        nebula_core::profiles::for_harness(&self.profiles, self.kind().as_str())
+        let mut all = nebula_core::profiles::for_harness(&self.profiles, self.kind().as_str());
+        all.sort_by_key(|p| p.disabled);
+        all
     }
 
     /// The profile named for the start; None = the harness's default.
@@ -267,8 +271,16 @@ impl StartView {
     }
 
     pub fn profile_label(&self) -> String {
-        self.profile_name()
-            .unwrap_or_else(|| "harness default".to_string())
+        let off = self.profile > 0
+            && self
+                .harness_profiles()
+                .get(self.profile - 1)
+                .is_some_and(|p| p.disabled);
+        match self.profile_name() {
+            Some(name) if off => format!("{name} (off)"),
+            Some(name) => name,
+            None => "harness default".to_string(),
+        }
     }
 
     /// Step the focused row's value by `delta`, wrapping.

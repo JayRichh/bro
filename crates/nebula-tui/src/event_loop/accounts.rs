@@ -18,7 +18,12 @@ fn rows(app: &mut App) -> Vec<crate::accounts_overlay::AccountRow> {
     let profiles = crate::config::Config::load().profiles;
     app.launcher.profiles = profiles.clone();
     let usage = readings(app);
-    build_rows(&profiles, &usage, crate::accounts_overlay::login_lookup)
+    build_rows(
+        &profiles,
+        &usage,
+        &app.tree.agents,
+        crate::accounts_overlay::login_lookup,
+    )
 }
 
 /// `⇧U`: open the overlay.

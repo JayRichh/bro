@@ -790,6 +790,15 @@ fn handle_left_click_target(app: &mut App, mouse: MouseEvent, out: &mut Vec<Clie
         Some(HitTarget::LauncherTabClose(id)) => launcher::close_tab(app, &id, out),
         Some(HitTarget::LauncherTabAdd) => launcher::open_project_menu(app),
         Some(HitTarget::LauncherTabMore) => launcher::open_more_tabs_menu(app),
+        // The header's VIEW TOGGLE: the half not lit switches, as
+        // `⇧K` does; the lit half is where you already are. The
+        // KANBAN's scope beside it flips as `Tab` on the board does.
+        Some(HitTarget::LauncherHome(board)) => {
+            if board != app.launcher.launcher_kanban {
+                launcher::toggle_kanban(app, out);
+            }
+        }
+        Some(HitTarget::LauncherKanbanScope) => launcher::flip_kanban_scope(app, out),
         // The key cap in the empty grid's welcome: the QUICK
         // PROMPT, through the `open_box` its key runs.
         Some(HitTarget::LauncherWelcomePrompt) => launcher::open_box(app),

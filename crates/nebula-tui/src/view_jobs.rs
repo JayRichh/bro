@@ -115,6 +115,11 @@ pub enum Answer {
         session: nebula_core::SessionRef,
         result: Result<String, String>,
     },
+    /// The DELETE CHECK behind a worktree's confirm (`delete_check::read`).
+    DeleteCheck {
+        worktree: nebula_core::WorktreeId,
+        result: Result<crate::delete_check::Findings, String>,
+    },
     /// The outcome of something a key started and did not wait for, in the
     /// footer's words (`Shift+G`: which page was opened, or why not).
     Flash(String),

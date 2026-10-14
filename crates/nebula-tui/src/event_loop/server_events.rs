@@ -557,6 +557,18 @@ fn handle_tree_event(app: &mut App, event: ServerEvent, out: &mut Vec<ClientRequ
     }
 }
 
+/// The footer line for worktrees an unforced delete kept, `branch` added
+/// to the ones the line already names — a `Shift+D` refused several times
+/// says it once.
+const KEPT_PREFIX: &str = "kept (uncommitted work; d on each to force): ";
+
+fn kept_flash(current: Option<&str>, branch: &str) -> String {
+    match current.and_then(|c| c.strip_prefix(KEPT_PREFIX)) {
+        Some(named) => format!("{KEPT_PREFIX}{named}, {branch}"),
+        None => format!("{KEPT_PREFIX}{branch}"),
+    }
+}
+
 fn handle_error_event(app: &mut App, event: ServerEvent, out: &mut Vec<ClientRequest>) {
     let _ = &mut *out;
     match event {
@@ -573,8 +585,28 @@ fn handle_error_event(app: &mut App, event: ServerEvent, out: &mut Vec<ClientReq
                 app.requests.left_behind.remove(id);
             }
             match req_id.and_then(|id| app.requests.pending.remove(&id)) {
+                // An unforced delete kept the checkout (uncommitted work,
+                // a submodule): the rows come back, and a delete of one
+                // worktree asks whether to force it — in a confirm of its
+                // own, never with nothing else up. A refusal among several
+                // only names the kept checkout in the footer.
                 Some(PendingIntent::DeleteWorktree(rollback)) => {
-                    restore_worktree_rows(app, rollback)
+                    let (id, branch, bulk) = (
+                        rollback.worktree.id.clone(),
+                        rollback.worktree.branch.clone(),
+                        rollback.bulk,
+                    );
+                    restore_worktree_rows(app, rollback);
+                    if crate::delete_check::is_refusal(&message) {
+                        if !bulk && app.modals.overlay.is_none() {
+                            super::commands::ask_force_delete_worktree(app, &id, &message);
+                            app.chrome.dirty = true;
+                            return;
+                        }
+                        app.chrome.flash = Some(kept_flash(app.chrome.flash.as_deref(), &branch));
+                        app.chrome.dirty = true;
+                        return;
+                    }
                 }
                 // A rename, an archive or a delete shown on the keypress
                 // and then refused: the row goes back to what it was.
