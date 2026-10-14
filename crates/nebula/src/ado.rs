@@ -26,7 +26,15 @@ use std::path::{Path, PathBuf};
 pub const SIGN_IN_HINT: &str =
     "Azure DevOps sign-in needed: sign in from the desktop app or run `az login`, then try again.";
 
-pub fn run_ado(command: AdoCommand) -> Result<()> {
+/// Where a command acts: the checkout it runs in, or a named kete project
+/// (and one of its worktrees) from anywhere.
+#[derive(Debug, Clone, Default)]
+pub struct Target {
+    pub project: Option<String>,
+    pub worktree: Option<String>,
+}
+
+pub fn run_ado(command: AdoCommand, target: Target) -> Result<()> {
     // Before any thread or child exists: every git (GCM's `credential
     // fill`, the PR push) inherits these, so nothing can open a sign-in
     // window or ask on the terminal.
@@ -35,16 +43,22 @@ pub fn run_ado(command: AdoCommand) -> Result<()> {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    let out = rt.block_on(run(command))?;
+    let out = rt.block_on(run(command, target))?;
     if !out.is_empty() {
         println!("{}", out.trim_end());
     }
     Ok(())
 }
 
-async fn run(command: AdoCommand) -> Result<String> {
+async fn run(command: AdoCommand, target: Target) -> Result<String> {
     let state = AdoState::system();
-    let ctx = cwd_context(&state).await?;
+    let ctx = match &target.project {
+        Some(project) => {
+            let dir = daemon::project_checkout(project, target.worktree.as_deref()).await?;
+            context_at(&state, &dir).await?
+        }
+        None => cwd_context(&state).await?,
+    };
     match command {
         AdoCommand::Tasks { all, open, json } => {
             let scope = if all {

@@ -12,7 +12,7 @@ use kete_ado::tasks::{taken_from_refs, NewWorktree, Workspace, CREATE_WORKTREE_T
 use kete_ado::{AdoContext, NewAgent};
 use nebula_core::codec::{read_frame, write_frame};
 use nebula_core::{
-    Agent, AgentId, AgentKind, AgentRole, ClientRequest, EntityId, ProjectId, ServerEvent,
+    Agent, AgentId, AgentKind, AgentRole, ClientRequest, EntityId, Project, ProjectId, ServerEvent,
     Worktree, WorktreeId,
 };
 use nebula_tui::ipc::{connect_or_spawn, Connection};
@@ -27,6 +27,7 @@ const REQ_ID: u64 = 1;
 /// What the daemon's tree says, as far as Start task cares.
 #[derive(Debug, Clone, Default)]
 pub struct Tree {
+    pub projects: Vec<Project>,
     pub worktrees: Vec<Worktree>,
     pub agents: Vec<Agent>,
 }
@@ -167,6 +168,58 @@ impl Workspace for DaemonWorkspace {
     }
 }
 
+/// `--project` (and `--worktree`): the checkout a command acts in, from
+/// the daemon's tree.
+pub async fn project_checkout(project: &str, worktree: Option<&str>) -> Result<PathBuf> {
+    let (tree, _) = fetch_tree().await?;
+    resolve_checkout(&tree, project, worktree)
+}
+
+/// The project named `project` (its id, else its name, case folded and
+/// unambiguous), then its worktree on `branch`, else its main checkout.
+pub fn resolve_checkout(tree: &Tree, project: &str, branch: Option<&str>) -> Result<PathBuf> {
+    let want = project.trim();
+    let named: Vec<&Project> = match tree.projects.iter().find(|p| p.id.0 == want) {
+        Some(p) => vec![p],
+        None => tree
+            .projects
+            .iter()
+            .filter(|p| p.name.eq_ignore_ascii_case(want))
+            .collect(),
+    };
+    let p = match named.as_slice() {
+        [p] => *p,
+        [] => {
+            let mut names: Vec<&str> = tree.projects.iter().map(|p| p.name.as_str()).collect();
+            names.sort_unstable();
+            bail!(
+                "No kete project is called {want:?}. Projects: {}.",
+                if names.is_empty() {
+                    "none".to_string()
+                } else {
+                    names.join(", ")
+                }
+            )
+        }
+        _ => bail!(
+            "Several kete projects are called {want:?}: name it by id (kete sessions --json)."
+        ),
+    };
+    let mine = tree.worktrees.iter().filter(|w| w.project_id == p.id);
+    let found = match branch.map(str::trim).filter(|b| !b.is_empty()) {
+        Some(b) => mine
+            .clone()
+            .find(|w| w.branch == b)
+            .or_else(|| mine.clone().find(|w| w.branch.eq_ignore_ascii_case(b)))
+            .ok_or_else(|| anyhow!("{} has no worktree on {b}.", p.name))?,
+        None => mine
+            .clone()
+            .find(|w| w.is_main)
+            .ok_or_else(|| anyhow!("{} has no checkout kete knows.", p.name))?,
+    };
+    Ok(found.path.clone())
+}
+
 /// The project whose worktree is checked out at `path`.
 pub fn project_for_checkout(tree: &Tree, path: &Path) -> Option<ProjectId> {
     let want = normal(path);
@@ -283,8 +336,18 @@ async fn fetch_tree() -> Result<(Tree, u32)> {
     loop {
         match read_frame::<ServerEvent, _>(&mut conn.stream).await? {
             Some(ServerEvent::Snapshot {
-                worktrees, agents, ..
-            }) => return Ok((Tree { worktrees, agents }, conn.protocol_version)),
+                projects,
+                worktrees,
+                agents,
+                ..
+            }) => {
+                let tree = Tree {
+                    projects,
+                    worktrees,
+                    agents,
+                };
+                return Ok((tree, conn.protocol_version));
+            }
             Some(_) => continue,
             None => bail!("the daemon closed the connection before sending its sessions"),
         }

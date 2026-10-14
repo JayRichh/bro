@@ -121,7 +121,15 @@ with `credential.interactive=never`, then `az account get-access-token`. When
 neither has a token the command says to sign in from the desktop app or run
 `az login`.
 
+From anywhere else, name the repo: `--project <kete project>` (its name or
+id) goes on any `kete ado` command, before or after the verb, and acts in that
+project's main checkout; add `--worktree <branch>` for one of its worktrees
+(`pr create` pushes that checkout's branch). The orchestrator, whose own
+workspace has no remote, always passes it.
+
 ```sh
+kete ado --project ledger-api tasks
+kete ado --project ledger-api --worktree jari/gst-rounding pr create --task 4211
 kete ado tasks [--all | --open] [--json]
                           # your tasks in the current sprint, by parent (--all: everyone's
                           # open items in it; --open: everything open assigned to you)

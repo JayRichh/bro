@@ -153,7 +153,11 @@ fn main() -> Result<()> {
                 nebula_tui::run_orchestrator_review(&sessions, tabs)
             }
         },
-        Some(Command::Ado { command }) => ado::run_ado(command),
+        Some(Command::Ado {
+            project,
+            worktree,
+            command,
+        }) => ado::run_ado(command, ado::Target { project, worktree }),
         Some(Command::Browser {
             port,
             bind,

@@ -293,6 +293,15 @@ pub(crate) enum Command {
     /// desktop app or run `az login`.
     #[command(after_help = ADO_EXAMPLES)]
     Ado {
+        /// Act on this kete project (name or id) instead of the checkout
+        /// you are in: the orchestrator runs in its own workspace, so it
+        /// names the repo here.
+        #[arg(long, global = true, value_name = "PROJECT")]
+        project: Option<String>,
+        /// With --project: the project's worktree on this branch (default:
+        /// its main checkout). `pr create` pushes this checkout's branch.
+        #[arg(long, global = true, value_name = "BRANCH", requires = "project")]
+        worktree: Option<String>,
         #[command(subcommand)]
         command: AdoCommand,
     },
@@ -770,6 +779,8 @@ pub(crate) fn parse_vote(s: &str) -> Result<i8, String> {
 
 const ADO_EXAMPLES: &str = "\
 Examples:
+  kete ado --project ledger-api tasks            from anywhere, e.g. the orchestrator
+  kete ado --project ledger-api --worktree jari/gst-rounding pr create --task 4211
   kete ado tasks                                 your tasks in the current sprint
   kete ado tasks --all --json
   kete ado start-task 4211                       branch, worktree and an agent for it

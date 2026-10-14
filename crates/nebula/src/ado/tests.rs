@@ -1,4 +1,6 @@
-use super::daemon::{next_agent_name, project_for_checkout, resolve_kind, spawn_request, Tree};
+use super::daemon::{
+    next_agent_name, project_for_checkout, resolve_checkout, resolve_kind, spawn_request, Tree,
+};
 use super::*;
 use kete_ado::auth::fake::Fake;
 use kete_ado::auth::{AuthError, TokenSource};
@@ -250,8 +252,8 @@ fn agent(id: &str, name: &str, role: AgentRole) -> Agent {
 
 fn tree(agents: Vec<Agent>) -> Tree {
     Tree {
-        worktrees: vec![],
         agents,
+        ..Default::default()
     }
 }
 
@@ -374,7 +376,7 @@ fn the_project_is_found_by_its_checkout_path() {
             is_main: true,
             sort_order: 0,
         }],
-        agents: vec![],
+        ..Default::default()
     };
     let spelled = PathBuf::from(format!("{}/", tmp.path().display()));
     assert_eq!(
@@ -382,4 +384,92 @@ fn the_project_is_found_by_its_checkout_path() {
         Some(ProjectId("p1".into()))
     );
     assert_eq!(project_for_checkout(&t, &tmp.path().join("nope")), None);
+}
+
+fn project(id: &str, name: &str) -> nebula_core::Project {
+    serde_json::from_value(serde_json::json!({
+        "id": id, "name": name, "repo_path": format!("/{name}"), "sort_order": 0
+    }))
+    .unwrap()
+}
+
+fn worktree(id: &str, project: &str, branch: &str, main: bool) -> Worktree {
+    Worktree {
+        id: WorktreeId(id.into()),
+        project_id: ProjectId(project.into()),
+        path: PathBuf::from(format!("/{project}/{branch}")),
+        branch: branch.into(),
+        is_main: main,
+        sort_order: 0,
+    }
+}
+
+/// `--project` lets the orchestrator, whose own workspace has no remote,
+/// name the repo; `--worktree` picks one of its checkouts.
+#[test]
+fn project_names_a_checkout_from_anywhere() {
+    let t = Tree {
+        projects: vec![
+            project("p1", "ledger-api"),
+            project("p2", "web"),
+            project("p3", "Web"),
+        ],
+        worktrees: vec![
+            worktree("w1", "p1", "main", true),
+            worktree("w2", "p1", "jari/gst-rounding", false),
+        ],
+        agents: vec![],
+    };
+    assert_eq!(
+        resolve_checkout(&t, "ledger-api", None).unwrap(),
+        PathBuf::from("/p1/main")
+    );
+    assert_eq!(
+        resolve_checkout(&t, "LEDGER-API", Some("jari/gst-rounding")).unwrap(),
+        PathBuf::from("/p1/jari/gst-rounding")
+    );
+    assert_eq!(
+        resolve_checkout(&t, "p1", None).unwrap(),
+        PathBuf::from("/p1/main")
+    );
+    let unknown = resolve_checkout(&t, "nope", None).unwrap_err().to_string();
+    assert!(unknown.contains("ledger-api, web"), "{unknown}");
+    let no_branch = resolve_checkout(&t, "ledger-api", Some("x"))
+        .unwrap_err()
+        .to_string();
+    assert!(no_branch.contains("no worktree on x"), "{no_branch}");
+    assert!(resolve_checkout(&t, "web", None)
+        .unwrap_err()
+        .to_string()
+        .contains("Several"));
+}
+
+#[test]
+fn project_and_worktree_parse_before_or_after_the_verb() {
+    use clap::Parser;
+    let parse = |args: &[&str]| crate::cli::Cli::try_parse_from(args);
+    let pick = |args: &[&str]| match parse(args).unwrap().command {
+        Some(crate::cli::Command::Ado {
+            project, worktree, ..
+        }) => (project, worktree),
+        _ => panic!("not ado"),
+    };
+    assert_eq!(
+        pick(&["kete", "ado", "--project", "ledger-api", "tasks"]),
+        (Some("ledger-api".into()), None)
+    );
+    assert_eq!(
+        pick(&[
+            "kete",
+            "ado",
+            "pr",
+            "create",
+            "--project",
+            "web",
+            "--worktree",
+            "jari/x"
+        ]),
+        (Some("web".into()), Some("jari/x".into()))
+    );
+    assert!(parse(&["kete", "ado", "--worktree", "x", "prs"]).is_err());
 }

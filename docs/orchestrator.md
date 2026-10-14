@@ -149,12 +149,13 @@ orchestrator too.
 ### Azure DevOps
 
 For a repo on Azure DevOps the guidance teaches `kete ado` (see
-[Commands](commands.md#azure-devops)) and one flow: `kete ado tasks`, pick a
-task with the user, `kete ado start-task <id>` (a branch and worktree for it,
+[Commands](commands.md#azure-devops)) and one flow, naming the repo with
+`--project` because its own workspace has no remote: `kete ado --project P
+tasks`, pick a task with the user, `kete ado --project P start-task <id>` (a branch and worktree for it,
 the task linked, assigned and moved to In Progress, and a worker on it that is
 the orchestrator's child, through `OrchestratorSpawnWith` on the new worktree),
 watch the worker with `list` and `read`, `review` it for the user, then
-`kete ado pr create` from the worker's worktree (draft, co-author lines cleaned,
+`kete ado --project P --worktree <its branch> pr create` (draft, co-author lines cleaned,
 a task and a reviewer unless waived). Votes and replies only when the user asks.
 Sign-in is never interactive: a missing credential is reported with "sign in
 from the desktop app or run `az login`", and the orchestrator passes that on
