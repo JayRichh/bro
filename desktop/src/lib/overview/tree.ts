@@ -18,6 +18,10 @@ export type Node = {
   key: string;
   agent?: Agent;
   sub?: Subagent;
+  /** A root whose parent session lives in another repo (the orchestrator,
+   *  most often): drawn with a "from <parent>" cue that opens it, rather
+   *  than as a root that came from nowhere. */
+  from?: Agent;
 };
 
 /** Children deeper than this start collapsed. */
@@ -44,7 +48,12 @@ function forestRank(forest: Node[]): number {
   return forest.reduce((r, n) => Math.min(r, attentionRank(n)), EMPTY);
 }
 
-export function buildForest(agents: Agent[], subs: Subagent[]): Node[] {
+/**
+ * `agents` nested by `parent`, subagents under the session they run in.
+ * `outside`: sessions that are not in `agents` (another repo's), so a
+ * root whose parent is one of them carries it as `from`.
+ */
+export function buildForest(agents: Agent[], subs: Subagent[], outside?: Map<string, Agent>): Node[] {
   const byId = new Map(agents.map((a) => [a.id, a]));
   const nodes = new Map<string, Node>();
   for (const a of agents) {
@@ -81,7 +90,11 @@ export function buildForest(agents: Agent[], subs: Subagent[]): Node[] {
     const n = nodes.get(a.id)!;
     const parent = a.parent && a.parent !== a.id ? nodes.get(a.parent) : undefined;
     if (parent && attachable(a)) parent.children.push(n);
-    else roots.push(n);
+    else {
+      const away = a.parent && !parent ? outside?.get(a.parent) : undefined;
+      if (away && away.id !== a.id) n.from = away;
+      roots.push(n);
+    }
   }
 
   const orderedSubs = [...subs].sort((x, y) => x.started_at - y.started_at);
