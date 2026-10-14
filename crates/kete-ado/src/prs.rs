@@ -796,6 +796,7 @@ pub async fn create(ctx: &PrCtx, pr: NewPr) -> Result<CreateResult, AdoError> {
     }
     // The target goes into a fetch refspec, so it must be a branch name.
     crate::naming::validate_branch_name(&target, &[]).map_err(AdoError::Local)?;
+    refuse_protected_source(ctx, &source, &target).await?;
 
     let base = fetch_target(repo_path, &ctx.ado.remote_name, &target).await;
     let (repo, remote, src) = (
@@ -817,6 +818,30 @@ pub async fn create(ctx: &PrCtx, pr: NewPr) -> Result<CreateResult, AdoError> {
     .map_err(|e| AdoError::Local(e.to_string()))??;
     let outcome = open(ctx, &source, &target, &pr).await?;
     Ok(CreateResult { outcome, note })
+}
+
+/// [`create`] cleans and pushes its source, so a source that is the target
+/// or the repo's default branch (a checkout left on `main`) is refused
+/// before any git runs. A default branch that cannot be looked up refuses
+/// nothing: the source == target check still stands, and the target
+/// defaults to the default branch.
+async fn refuse_protected_source(ctx: &PrCtx, source: &str, target: &str) -> Result<(), AdoError> {
+    if source.eq_ignore_ascii_case(target) {
+        return Err(AdoError::Local(format!(
+            "{source} cannot open a pull request onto itself: push from a work branch (--source <branch> or --worktree <branch>)."
+        )));
+    }
+    if let Ok(Some(default)) = ctx.ado.default_branch_ref().await {
+        let default = default
+            .strip_prefix(&format!("{}/", ctx.ado.remote_name))
+            .unwrap_or(&default);
+        if source.eq_ignore_ascii_case(default) {
+            return Err(AdoError::Local(format!(
+                "{source} is the repo's default branch: open the pull request from a work branch (--source <branch> or --worktree <branch>)."
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Steps 3 to 6 of [`create`], once the branch is on the server.
@@ -1635,6 +1660,8 @@ mod tests {
     async fn an_ambiguous_create_is_reconciled_by_listing() {
         let r = temp_repo();
         let (base, server) = scripted(vec![
+            // The default branch lookup.
+            Some(json!({"defaultBranch": "refs/heads/main"})),
             Some(json!({"value": []})),
             None,
             Some(json!({"value": [pr_json(88, true, &[])]})),
@@ -1647,15 +1674,17 @@ mod tests {
         // composer opens it.
         assert_eq!(out.outcome, CreateOutcome::Created(88));
         let seen = server.await.unwrap();
-        assert_eq!(seen.len(), 3);
+        assert_eq!(seen.len(), 4);
         assert_eq!(seen.iter().filter(|l| l.starts_with("POST ")).count(), 1);
-        assert!(seen[2].starts_with("GET "));
+        assert!(seen[3].starts_with("GET "));
     }
 
     #[tokio::test]
     async fn an_ambiguous_create_still_links_its_task() {
         let r = temp_repo();
         let (base, server) = scripted(vec![
+            // The default branch lookup.
+            Some(json!({"defaultBranch": "refs/heads/main"})),
             Some(json!({"value": []})),
             None,
             Some(json!({"value": [pr_json(88, true, &[])]})),
@@ -1670,10 +1699,10 @@ mod tests {
             .unwrap();
         assert_eq!(out.outcome, CreateOutcome::Created(88));
         let seen = server.await.unwrap();
-        assert_eq!(seen.len(), 5);
+        assert_eq!(seen.len(), 6);
         assert_eq!(seen.iter().filter(|l| l.starts_with("POST ")).count(), 1);
-        assert!(seen[3].starts_with("GET ") && seen[3].contains("/pullrequests/88/workitems"));
-        assert!(seen[4].starts_with("PATCH ") && seen[4].contains("/wit/workitems/42"));
+        assert!(seen[4].starts_with("GET ") && seen[4].contains("/pullrequests/88/workitems"));
+        assert!(seen[5].starts_with("PATCH ") && seen[5].contains("/wit/workitems/42"));
     }
 
     #[tokio::test]
@@ -1964,6 +1993,65 @@ mod tests {
         );
         assert_eq!(list.hits(), 0);
         assert!(!remote_has(&r.bare, "ja/fix"));
+    }
+
+    /// A PR from the target onto itself would clean and push the default
+    /// branch's own history: refused before any git runs.
+    #[tokio::test]
+    async fn a_source_equal_to_the_target_is_refused_before_any_git() {
+        let r = temp_repo();
+        git(&r.work, &["checkout", "-q", "main"]);
+        std::fs::write(r.work.join("a.txt"), "local\n").unwrap();
+        git(
+            &r.work,
+            &[
+                "commit",
+                "-q",
+                "-am",
+                "Local\n\nCo-Authored-By: Bot <bot@example.com>",
+            ],
+        );
+        let local_main = git(&r.work, &["rev-parse", "main"]);
+        let remote_main = git(&r.bare, &["rev-parse", "main"]);
+        let s = MockServer::start();
+        let list = mock_no_existing(&s);
+        let mut pr = new_pr(None, "x");
+        pr.source = "Main".into();
+        let e = create(&ctx_for(&s.base_url(), &r.work), pr)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&e, AdoError::Local(m) if m.contains("onto itself")),
+            "{e}"
+        );
+        assert_eq!(list.hits(), 0);
+        assert_eq!(git(&r.work, &["rev-parse", "main"]), local_main);
+        assert_eq!(git(&r.bare, &["rev-parse", "main"]), remote_main);
+    }
+
+    #[tokio::test]
+    async fn the_default_branch_as_source_is_refused_before_any_git() {
+        let r = temp_repo();
+        git(&r.work, &["branch", "-q", "trunk", "main"]);
+        let s = MockServer::start();
+        s.mock(|w, t| {
+            w.method(GET).path("/Platform/_apis/git/repositories/api");
+            t.status(200)
+                .json_body(json!({"defaultBranch": "refs/heads/trunk"}));
+        });
+        let list = mock_no_existing(&s);
+        let mut pr = new_pr(None, "x");
+        pr.source = "trunk".into();
+        pr.target = "release/1".into();
+        let e = create(&ctx_for(&s.base_url(), &r.work), pr)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&e, AdoError::Local(m) if m.contains("default branch")),
+            "{e}"
+        );
+        assert_eq!(list.hits(), 0);
+        assert!(!remote_has(&r.bare, "trunk"));
     }
 
     #[tokio::test]
