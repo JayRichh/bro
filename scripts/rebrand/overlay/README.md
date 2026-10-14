@@ -152,6 +152,61 @@ beside the form, side by side, inline or as replacements. Pull requests are crea
 each branch policy's status, every reviewer's vote and the comment threads. Publish a draft, vote,
 and reply to a thread from there, and read its changes in the same diff view.
 
+### 5. The orchestrator
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="desktop/screenshots/orchestrator-dark.png">
+  <img src="desktop/screenshots/orchestrator-light.png" alt="The orchestrator view: every session it started, across two repos, as one tree with repo and branch chips, beside its chat, with the quick prompt aimed at it" width="100%">
+</picture>
+
+The orchestrator is one agent that watches every repo for you: it reads the other sessions, sends
+them follow-ups, starts workers in fresh worktrees and asks you to review them when they are ready.
+`0` or `F10` (or the item above Repos in the rail) opens its view: every session it started, in
+any repo, as one tree with a repo and branch chip on each row, beside its chat. With none running,
+the same place offers **Start orchestrator** with a harness, profile, model and effort. The quick
+prompt sends it follow-ups while its view is up.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="desktop/screenshots/review-sheet-dark.png">
+  <img src="desktop/screenshots/review-sheet-light.png" alt="The review sheet over the orchestrator view, on a worker session's Terminal tab, with Diff, History and PR tabs beside it" width="100%">
+</picture>
+
+When it asks for a review, a notice says so without taking the focus. **Open** shows a review sheet
+with the session's terminal, its diff, its history and its pull request (the Azure DevOps review
+when the repo lives there). On the overview, a session the orchestrator started in another repo
+carries a `from ◆ Orchestrator` chip. See [Orchestrator](docs/orchestrator.md).
+
+### 6. Settings, the palette and the quick prompt
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="desktop/screenshots/settings-agents-dark.png">
+  <img src="desktop/screenshots/settings-agents-light.png" alt="Settings on its Agents tab: the quick prompt group, then each harness with its Enabled, Model and Effort rows" width="100%">
+</picture>
+
+**Settings** (`Ctrl+,`, or the gear at the bottom of the rail) edits the same `config.json` as the
+terminal app: General, Sessions, Appearance, Agents, Project, Experimental and Hotkeys, plus the
+window's own Desktop tab, your agent presets and your profiles. A change reaches a running `kete`
+within a few seconds, and sessions the window starts take the Agents tab's model and effort.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="desktop/screenshots/palette-dark.png">
+  <img src="desktop/screenshots/palette-light.png" alt="The command palette over the overview, with the query gst matching two sessions, a worktree and a draft pull request" width="100%">
+</picture>
+
+`Ctrl+K` opens the command palette: jump to any repo, worktree, session or pull request, what needs
+you first, or run any action. `?` lists every key. Right-click a session, card or repo (or press
+`Shift+F10`) for the terminal app's card menu: follow-up, restart, duplicate, move, rename, archive,
+delete, run and stop, new terminal, open in editor, new worktree.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="desktop/screenshots/quick-prompt-dark.png">
+  <img src="desktop/screenshots/quick-prompt-light.png" alt="The quick prompt open with a two-line task, and its options row: model, effort, profile, preset and new worktree" width="100%">
+</picture>
+
+The quick prompt along the bottom takes a task, `Enter` starts it, and `Shift+Enter` adds a line.
+While it has the focus, a row above it picks the model, effort, profile and agent preset, and
+whether the session gets a new worktree.
+
 ## Azure DevOps
 
 The Tasks, Branches and Pull requests views work on any repo whose git remote is on
@@ -166,6 +221,23 @@ When neither has a sign-in, the view says so: run `git fetch` once in the repo, 
 your organisation asks you to sign in again (MFA, conditional access, an expired login), the view
 shows **Sign in again**, which runs `az login` (for the organisation's tenant when Kete knows it)
 and then reloads.
+
+### From the command line
+
+`kete ado` does the same from a terminal or an agent, on the repo you are in, or any repo Kete
+knows with `--project <name>` (and `--worktree <branch>` for one of its worktrees):
+
+```powershell
+kete ado tasks                    # the sprint's tasks
+kete ado start-task 4211          # branch, worktree, task set active, and an agent on it
+kete ado prs                      # your pull requests, and the ones waiting on your review
+kete ado pr create --task 4211    # a draft pull request from this branch
+```
+
+`kete ado pr <id>`, `vote` and `reply` read and answer one. `pr create` follows the desktop
+composer's rules, never pushes the default branch, and needs `--worktree` or `--source` with
+`--project`. It never signs in for you: with no sign-in it says to sign in from the desktop app or
+run `az login`. See [Commands](docs/commands.md#azure-devops).
 
 ## In the terminal
 
@@ -186,6 +258,7 @@ project tabs, and each tab counts its sessions' dots. A red `●1` on a tab tell
 | **Find, grep, browse** | `f` finds a file, `F` runs `git grep`, `b` opens the tree browser, all scoped to the worktree. |
 | **Themes** | Kete Workshop dark (the default) and light, One Dark and One Light, `auto` to follow the OS, or `vscode` to take VS Code's palette. |
 | **Agents that drive Kete back** | Ask a session to "do this in a worktree" and it runs `kete worktree`. "Show me the file" runs `kete open`. "Start a new session that..." runs `kete spawn`. |
+| **Account usage** | `Shift+U` lists every account with its 5h and weekly use, when each resets and whether it is signed in. The quick prompt's profile field and each session card carry the same numbers. |
 | **One orchestrator chat** | `F10` starts the one pinned orchestrator agent (pick a harness and profile) or brings it back full-screen, with every other session as a chip across the top in attention order. It lists, reads, messages and starts sessions across projects, and opens a review of any of them: terminal, diff, history and PR. |
 
 ### Keys
@@ -202,6 +275,7 @@ project tabs, and each tab counts its sessions' dots. A red `●1` on a tab tell
 | `v` / `i` | pull requests, issues |
 | `w` / `Shift+W` | open the worktree's dev server in a browser, or screenshot it |
 | `F10` | orchestrator chat: start it, open it, and `F10` again for the grid |
+| `Shift+U` | accounts: usage bars, resets, login state, switch a profile on or off |
 | `s` | settings, where every key can be rebound |
 | `q` | leave; the sessions keep running |
 
@@ -234,7 +308,29 @@ kete profile add max2 --harness claude                            # a second one
 kete profile login max2                                           # sign it in
 ```
 
-In the quick prompt, `Ctrl+A` steps through the harness's profiles. See [Profiles](docs/profiles.md).
+In the quick prompt, `Ctrl+A` steps through the harness's profiles.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="desktop/screenshots/accounts-rail-dark.png">
+  <img src="desktop/screenshots/accounts-rail-light.png" alt="The rail's Accounts list: each account with 5h and weekly bars and percents, a default star, an on/off switch, and a login chip on one that needs signing in" width="100%">
+</picture>
+
+Kete reads each account's 5h and weekly use (a Copilot account's monthly allowances) and each
+session's context: from Claude's status line, Codex's session logs and Copilot's logs and quota.
+`Shift+U` in the terminal, the rail's **Accounts** list in the window and `kete profile list`
+show it, with when each window resets and whether the account is signed in. A session's row and card
+show its context (`ctx 42%`) and how often it has compacted. `kete profile disable <name>` (or the
+switch beside it) keeps a profile out of launches that name none.
+
+**Account spread** (Settings, Sessions) picks the profile for a session that names none: `failover`
+stays on the default until its 5h or weekly use reaches a threshold, then moves to the next enabled
+profile; `least_used` takes the one with the least use; `manual` (the default) always takes the
+default.
+
+For Claude, Kete starts each session with a status line of its own (`--settings`, nothing written
+into your repo). It runs your own statusLine after it, or prints `ctx 34% · 5h 21% · wk 3%`. It
+takes the place of Claude's footer hints; Settings, Sessions, **Usage status line** turns it off.
+See [Profiles](docs/profiles.md).
 
 ## Ports per worktree
 
