@@ -204,3 +204,71 @@ and so does a stray full reset) after which every click goes to the terminal and
 its own scrollback instead of the pane. kete asks for the mouse (and bracketed paste, focus reports
 and the kitty keyboard flags) again every two seconds (never in the middle of a drag) so the mouse
 comes back on its own; resizing the window also re-enters the alternate screen and repaints every cell.
+
+## The desktop app
+
+The desktop window has keys of its own, from one table (`desktop/src/lib/shortcuts.ts`): the
+window dispatches through it, `?` or `F1` lists it, and the command palette shows each action's keys
+from it. The window's keys are not rebindable yet, and the terminal app's HOTKEYS TAB does not change
+them. **Where** says when a key counts: a key that works in a terminal pane takes it from the shell,
+so the window keeps those to chords a shell rarely needs.
+
+### General
+
+| Key | Where | What it does |
+|---|---|---|
+| `Ctrl+K` | anywhere but a terminal | Command palette (not inside the diff editor, which has its own Ctrl+K) |
+| `Ctrl+Shift+P` | anywhere, a terminal too | Command palette |
+| `?` | not while typing | Keyboard shortcuts |
+| `F1` | anywhere, a terminal too | Keyboard shortcuts |
+| `Ctrl+,` | anywhere, a terminal too | Settings |
+| `p`, `n` | not while typing | Quick prompt |
+| `Ctrl+Shift+N` | anywhere, a terminal too | Quick prompt |
+| `Ctrl+Shift+L` | anywhere, a terminal too | Cycle theme: system, light, dark |
+| `Shift+N` | not while typing | New worktree in this repo |
+
+### Views
+
+| Key | Where | What it does |
+|---|---|---|
+| `Alt+←` | anywhere but a terminal | Back |
+| `Alt+→` | anywhere but a terminal | Forward |
+| `Ctrl+Shift+B` | anywhere, a terminal too | Board |
+| `Ctrl+Shift+O` | anywhere, a terminal too | Overview |
+| `Shift+K` | not while typing | Switch overview and board |
+| `Ctrl+Shift+T` | anywhere, a terminal too | Show the session |
+| `Ctrl+Shift+D` | anywhere, a terminal too | Diff the worktree |
+| `1` | not while typing | Home |
+| `2` | not while typing | Session |
+| `3` | not while typing | Diff |
+| `0` | not while typing | Orchestrator (start one when there is none) |
+| `F10` | anywhere but a terminal | Orchestrator (start one when there is none) |
+| `Esc` | not while typing | Close the split or Settings |
+| `Shift+A` | not while typing | Show or hide archived sessions |
+
+### Sessions
+
+| Key | Where | What it does |
+|---|---|---|
+| `r` | a focused session row or card | Rename |
+| `a` | a focused session row or card | Archive |
+| `u` | a focused session row or card | Unarchive |
+| `Del` | a focused session row or card | Delete (asks first) |
+| `Shift+R` | a focused session row or card | Restart the agent |
+| `m` | a focused session row or card | Move to another worktree |
+| `Shift+P` | a focused session row or card | Duplicate into the quick prompt |
+| `f` | a focused session row or card | Follow-up prompt |
+| `t` | a focused session row or card | New terminal in its worktree |
+| `Shift+O` | a focused session row or card | Open its worktree in the editor |
+| `Shift+G` | a focused session row or card | Open the repo remote in the browser |
+| `Shift+F10`, `Menu` | a focused session row or card | Actions menu |
+
+### Overview and board
+
+| Key | Where | What it does |
+|---|---|---|
+| `j`, `k`, `↓`, `↑` | the overview or the board | Move through the rows (cards on the board) |
+| `Enter`, `Space` | the overview or the board | Open the session |
+| `→`, `←` | the overview or the board | Overview: unfold, fold nested sessions |
+| `h`, `l` | the board | Board: across lanes (also the side arrows) |
+| `d` | the board | Board: diff the selected card |

@@ -444,7 +444,7 @@ pub(crate) enum Command {
     /// looked for beside this `kete` first, then on PATH; when neither has
     /// it, this prints where to get it. Arguments after `--` go to the
     /// window: `--view board|session|diff|orchestrator`, `--session <name>`,
-    /// `--theme light|dark|system`.
+    /// `--theme light|dark|system`, `--diff side|inline|replacement`.
     #[command(after_help = DESKTOP_EXAMPLES)]
     Desktop {
         /// Options for the window, after `--`.

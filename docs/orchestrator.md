@@ -48,6 +48,9 @@ sessions and how many need you.
   `←`/`→` walk them, `Enter` reviews one, `Esc` goes back to typing, and `^q`
   again leaves for the grid.
 - The orchestrator's card wears a `◆ orchestrator` badge on the grid.
+- **Open on the orchestrator** (Settings, General, `orchestrator_view`) picks
+  whether kete starts on this view when an orchestrator exists: `auto` (the
+  default) only in a terminal narrower than 100 columns, `always`, or `never`.
 
 ## Review modal
 
@@ -209,7 +212,5 @@ fresh read. Nothing is written into its chat box unasked.
 
 ## Follow-ups
 
-- The `orchestrator_view` setting (`auto` on narrow terminals, `always`,
-  `never`) for the startup mode.
 - Optional idle-note injection for the orchestrator, behind an autonomy setting.
 - Azure DevOps pipelines in `kete ado`.
