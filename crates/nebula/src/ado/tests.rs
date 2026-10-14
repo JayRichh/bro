@@ -46,6 +46,25 @@ fn a_pr_needs_a_task_and_a_reviewer_unless_waived() {
     assert!(!e.contains("--task") && e.contains("--no-reviewer"), "{e}");
 }
 
+/// `--project` alone acts in the main checkout, whose branch is the
+/// default one: pr create needs the worker's checkout or branch named.
+#[test]
+fn pr_create_with_project_needs_a_worktree_or_source() {
+    let t = |project: Option<&str>, worktree: Option<&str>| Target {
+        project: project.map(str::to_string),
+        worktree: worktree.map(str::to_string),
+    };
+    let e = pr_create_target_check(&t(Some("api"), None), None)
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("--worktree") && e.contains("--source"), "{e}");
+    assert!(pr_create_target_check(&t(Some("api"), None), Some("  ")).is_err());
+    assert!(pr_create_target_check(&t(Some("api"), Some("jr/gst")), None).is_ok());
+    assert!(pr_create_target_check(&t(Some("api"), None), Some("jr/gst")).is_ok());
+    // In a checkout: its branch, as before.
+    assert!(pr_create_target_check(&t(None, None), None).is_ok());
+}
+
 fn person(name: &str, email: &str) -> Reviewer {
     Reviewer {
         id: email.into(),

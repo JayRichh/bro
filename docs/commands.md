@@ -124,7 +124,9 @@ neither has a token the command says to sign in from the desktop app or run
 From anywhere else, name the repo: `--project <kete project>` (its name or
 id) goes on any `kete ado` command, before or after the verb, and acts in that
 project's main checkout; add `--worktree <branch>` for one of its worktrees
-(`pr create` pushes that checkout's branch). The orchestrator, whose own
+(`pr create` pushes that checkout's branch, so with `--project` it needs
+`--worktree` or `--source`; a source that is the target or the repo's default
+branch is refused before anything is cleaned or pushed). The orchestrator, whose own
 workspace has no remote, always passes it.
 
 ```sh

@@ -51,6 +51,13 @@ pub fn run_ado(command: AdoCommand, target: Target) -> Result<()> {
 }
 
 async fn run(command: AdoCommand, target: Target) -> Result<String> {
+    if let AdoCommand::Pr {
+        action: Some(AdoPrAction::Create { source, .. }),
+        ..
+    } = &command
+    {
+        pr_create_target_check(&target, source.as_deref())?;
+    }
     let state = AdoState::system();
     let ctx = match &target.project {
         Some(project) => {
@@ -225,6 +232,20 @@ async fn run(command: AdoCommand, target: Target) -> Result<String> {
             Ok(format!("Replied on !{id}, thread {thread}."))
         }
     }
+}
+
+/// `pr create` cleans and pushes its source branch. With `--project` and
+/// no `--worktree` the checkout is the project's main one, on its default
+/// branch: refused unless `--source` names the branch, before anything
+/// is looked up or pushed.
+pub fn pr_create_target_check(target: &Target, source: Option<&str>) -> Result<()> {
+    let named = source.is_some_and(|s| !s.trim().is_empty());
+    if target.project.is_some() && target.worktree.is_none() && !named {
+        bail!(
+            "pr create with --project needs the worker's checkout: add --worktree <its branch> (or --source <branch>)."
+        );
+    }
+    Ok(())
 }
 
 /// The ADO context of the checkout the command runs in.

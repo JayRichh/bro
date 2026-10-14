@@ -725,7 +725,9 @@ pub(crate) enum AdoPrAction {
     /// taken out of unpushed commit messages first, the PR opens as a draft
     /// unless --publish, it needs a linked task (--task, else the branch's
     /// own) unless --no-task and a reviewer unless --no-reviewer. An active
-    /// PR from the branch is reported, never doubled.
+    /// PR from the branch is reported, never doubled. With --project it
+    /// needs --worktree (or --source); a source that is the target or the
+    /// repo's default branch is refused before anything is pushed.
     Create {
         /// Title (default: the task's title, else the only commit subject).
         #[arg(long)]

@@ -82,10 +82,10 @@ happen are listed, not fatal.\n\
   kete ado pr <id> [--json]      one PR: reviewers and votes, policies, comment threads\n\
   kete ado pr create [--title T] [--summary S] [--testing T] [--target B] [--task <id> | \
 --no-task] [--reviewer <name or email>]... [--no-reviewer] [--publish]\n\
-With `--worktree <the worker's branch>` (or run in its worktree): pushes that branch and opens a DRAFT PR (unless `--publish`) with \
+With `--worktree <the worker's branch>` (required with `--project`; or run in its worktree): pushes that branch and opens a DRAFT PR (unless `--publish`) with \
 the desktop composer's rules: co-author and AI attribution lines are cleaned out of unpushed \
 commit messages, a linked task (the branch's own by default) and a reviewer are required unless \
-waived, and an existing PR from the branch is reported rather than doubled.\n\
+waived, and an existing PR from the branch is reported rather than doubled. It refuses to push the default branch or a branch onto itself.\n\
   kete ado vote <id> approve|approve-with-suggestions|wait|reject|reset\n\
   kete ado reply <id> <thread> \"<text>\"\n\
 The everyday flow: `kete ado --project P tasks`, pick a task with the user, `kete ado --project \
