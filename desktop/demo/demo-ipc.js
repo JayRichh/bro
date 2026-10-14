@@ -380,11 +380,6 @@ const handlers = {
     if (r) r.disabled = !enabled;
     return null;
   },
-  attach: () => null,
-  detach: () => null,
-  resize: () => null,
-  input: () => null,
-  mark_seen: () => null,
 };
 
 let cb = 0;
