@@ -1,3 +1,4 @@
+mod ado;
 mod browser;
 mod cli;
 mod desktop;
@@ -152,6 +153,7 @@ fn main() -> Result<()> {
                 nebula_tui::run_orchestrator_review(&sessions, tabs)
             }
         },
+        Some(Command::Ado { command }) => ado::run_ado(command),
         Some(Command::Browser {
             port,
             bind,

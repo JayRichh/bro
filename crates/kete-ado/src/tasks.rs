@@ -523,6 +523,15 @@ async fn item_and_parent(
     Ok((item, parent))
 }
 
+/// Work item `id` alone, hydrated (for a branch name from its title).
+pub async fn work_item(ctx: &AdoContext, id: u32) -> Result<WorkItem, AdoError> {
+    let mut found = hydrate(ctx, &[id], &mut HashMap::new()).await?;
+    if found.is_empty() {
+        return Err(AdoError::NotFound);
+    }
+    Ok(found.remove(0).item)
+}
+
 /// The prompt Start would give an agent for task `id`.
 pub async fn prompt_for(ctx: &AdoContext, id: u32) -> Result<String, AdoError> {
     let (item, parent) = item_and_parent(ctx, id, &mut HashMap::new()).await?;
@@ -2201,6 +2210,21 @@ mod tests {
             out.problems
         );
         assert!(!out.problems[0].message.contains("Sam Lee"));
+    }
+
+    #[tokio::test]
+    async fn work_item_reads_one_item_or_not_found() {
+        let s = MockServer::start();
+        common(&s);
+        s.mock(|w, t| {
+            w.method(POST).path("/Platform/_apis/wit/workitemsbatch");
+            t.status(200).body(BATCH_MAIN);
+        });
+        let ctx = testing::context(&s.base_url(), testing::temp_store());
+        let item = work_item(&ctx, 101).await.unwrap();
+        assert_eq!(item.title, "Fix GST rounding");
+        assert_eq!(item.kind, "Task");
+        assert_eq!(work_item(&ctx, 999).await, Err(AdoError::NotFound));
     }
 
     #[tokio::test]

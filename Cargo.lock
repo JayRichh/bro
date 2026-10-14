@@ -1893,11 +1893,16 @@ name = "nebula"
 version = "0.45.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "clap",
+ "httpmock",
+ "kete-ado",
+ "nebula-config",
  "nebula-core",
  "nebula-daemon",
  "nebula-tui",
  "portable-pty",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",
