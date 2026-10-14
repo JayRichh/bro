@@ -262,7 +262,12 @@ export async function openEditor(worktree: string | undefined) {
         confirm: 'Run',
       });
       if (!ok.ok) return;
-      r = await api.openWorktree(worktree, true);
+      const shown = r.command;
+      r = await api.openWorktree(worktree, shown);
+      if (!r.opened) {
+        toast('The repo's open command changed before it ran. Open again to review it.');
+        return;
+      }
     }
     if (r.opened) toast(`Opened with: ${r.command}`);
   });
