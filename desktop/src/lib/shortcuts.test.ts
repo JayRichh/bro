@@ -101,3 +101,13 @@ describe('chordOf and shortcutFor', () => {
     expect([...scopes].sort()).toEqual(['anywhere', 'board', 'fields', 'global', 'overview', 'row']);
   });
 });
+
+describe('inside the diff editor', () => {
+  const editor: KeyContext = { inTerminal: false, inEditor: true, typing: true, onRow: false };
+  it('leaves Ctrl+K to Monaco and keeps Ctrl+Shift+P', () => {
+    expect(inScope('fields', editor)).toBe(false);
+    expect(inScope('anywhere', editor)).toBe(true);
+    expect(SHORTCUTS.find((s) => s.id === 'palette')?.scope).toBe('fields');
+    expect(SHORTCUTS.find((s) => s.id === 'palette_alt')?.scope).toBe('anywhere');
+  });
+});

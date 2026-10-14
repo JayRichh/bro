@@ -48,7 +48,8 @@ export type ShortcutId =
  * Where a key counts:
  * - `anywhere`: even while typing in a field or a terminal;
  * - `fields`: while typing in a field, but not inside a terminal (whose
- *   shell owns the key: Ctrl+K is kill-line, Alt+arrows are words);
+ *   shell owns the key: Ctrl+K is kill-line, Alt+arrows are words) or the
+ *   diff editor (Monaco's own Ctrl+K chords);
  * - `global`: only when no field or terminal has the keys;
  * - `row`: like `global`, acting on the focused session row or card;
  * - `overview`, `board`: the home view's own walking keys, handled by
@@ -126,6 +127,9 @@ export function chordOf(e: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'altKey' | 's
 export interface KeyContext {
   /** Inside an xterm pane. */
   inTerminal: boolean;
+  /** Inside a Monaco editor (the diff), which owns its Ctrl chords:
+   *  Ctrl+K starts its own chords there. */
+  inEditor?: boolean;
   /** In an input, textarea, select or editor (a terminal counts too). */
   typing: boolean;
   /** A session row or card has the focus. */
@@ -137,7 +141,7 @@ export function inScope(scope: Scope, ctx: KeyContext): boolean {
     case 'anywhere':
       return true;
     case 'fields':
-      return !ctx.inTerminal;
+      return !ctx.inTerminal && !ctx.inEditor;
     case 'global':
       return !ctx.typing;
     case 'row':

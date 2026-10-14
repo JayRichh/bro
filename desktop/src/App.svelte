@@ -93,7 +93,7 @@
     const t = e.target instanceof Element ? e.target : document.body;
     const inTerminal = !!t.closest('.xterm');
     const typing = inTerminal || !!t.closest('input, textarea, select, .monaco-editor');
-    const s = shortcutFor(e, { inTerminal, typing, onRow: !!focusedTarget() });
+    const s = shortcutFor(e, { inTerminal, inEditor: !!t.closest('.monaco-editor'), typing, onRow: !!focusedTarget() });
     if (s && runShortcut(s.id)) e.preventDefault();
   }
 
