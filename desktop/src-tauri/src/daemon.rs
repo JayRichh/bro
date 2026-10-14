@@ -68,6 +68,12 @@ pub struct PrInfo {
     pub url: String,
     pub title: String,
     pub draft: bool,
+    /// `open`, `merged` or `closed`.
+    pub state: String,
+    /// The head commit `gh` reports; empty where the source has none
+    /// (Azure DevOps). Only the merged-worktree cleanup reads it.
+    #[serde(skip)]
+    pub head_sha: String,
 }
 
 /// What a pane hears about its session, on the Channel it attached with.

@@ -20,7 +20,7 @@
     const spec = ui.dialog;
     if (!spec) return;
     values = spec.kind === 'prompt' ? Object.fromEntries(spec.fields.map((f) => [f.key, f.value ?? ''])) : {};
-    checked = false;
+    checked = spec.kind === 'confirm' && !!spec.checked;
     query = '';
     at = 0;
     tick().then(() => {

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { app, markSeen, openSession, openDiff } from './store.svelte';
-  import { LANES, lanes, toneOf, harnessLabel, lastPrompt, age, placeOf, type Lane } from './status';
+  import { LANES, lanes, toneOf, harnessLabel, lastPrompt, age, placeOf, prWord, type Lane } from './status';
   import Status from './Status.svelte';
   import { retract } from './motion';
   import Empty from './Empty.svelte';
@@ -122,10 +122,10 @@
                 <span class="truncate text-[14px] font-medium {alert ? 'text-ember-ink' : 'text-ink'}">{a.name}</span>
                 <span class="ml-auto font-mono text-[12px] text-muted">{age(a.status_changed_at, app.now)}</span>
               </span>
-              <Status tone={lane.id === 'pr' ? 'pr' : toneOf(a)} />
+              <Status tone={lane.id === 'pr' ? 'pr' : lane.id === 'done' && pr?.state === 'merged' ? 'merged' : toneOf(a)} />
               <span class="truncate text-[13px] text-muted">{harnessLabel(a)}{a.profile ? ` \u00b7 ${a.profile}` : ''}</span>
               <span class="truncate font-mono text-[12px] text-muted"
-                >{where.project} / {where.branch}{#if pr}<span class="ml-2 text-ink">PR #{pr.number}</span>{/if}</span
+                >{where.project} / {where.branch}{#if pr}<span class="ml-2 {pr.state === 'merged' ? 'text-merged' : pr.state === 'closed' ? 'text-muted' : 'text-ink'}">{prWord(pr)} #{pr.number}</span>{/if}</span
               >
               {#if prompt}<span class="line-clamp-2 text-[13px] text-muted">{prompt}</span>{/if}
             </button>

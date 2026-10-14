@@ -82,6 +82,13 @@ export interface PrInfo {
   url: string;
   title: string;
   draft: boolean;
+  /** Absent from an older backend, which only reported open ones. */
+  state?: 'open' | 'merged' | 'closed';
+}
+
+/** A PR still taking work (drafts too); merged and closed ones are history. */
+export function prOpen(pr: PrInfo | undefined): pr is PrInfo {
+  return !!pr && (pr.state ?? 'open') === 'open';
 }
 /** One measured plan limit (`nebula_core::usage::UsageWindow`). */
 export interface UsageWindow {

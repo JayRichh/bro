@@ -7,7 +7,7 @@
   import { tick } from 'svelte';
   import { app, openSession, projectOf, sessionKey, toast } from '../store.svelte';
   import { api } from '../api';
-  import { harnessLabel, placeOf, toneOf } from '../status';
+  import { harnessLabel, placeOf, prWord, toneOf } from '../status';
   import Status from '../Status.svelte';
   import Terminal from '../Terminal.svelte';
   import DiffPane from '../DiffPane.svelte';
@@ -184,7 +184,7 @@
           <div class="flex flex-col items-start gap-3 p-6">
             <p class="m-0 text-[14px] text-ink">
               <span class="font-mono text-[13px]">#{pr.number}</span>
-              {pr.title}{pr.draft ? ' (draft)' : ''}
+              {pr.title}{prWord(pr) === 'PR' ? '' : ` (${prWord(pr).replace(/ PR$/, '')})`}
             </p>
             <button class={tool} onclick={() => api.openUrl(pr.url).catch((e) => toast(String(e)))}>Open on GitHub</button>
           </div>

@@ -39,6 +39,7 @@ export type ShortcutId =
   | 'new_terminal'
   | 'open_editor'
   | 'open_remote'
+  | 'switch_branch'
   | 'row_menu'
   | 'list_move'
   | 'list_open'
@@ -109,6 +110,7 @@ export const SHORTCUTS: Shortcut[] = [
   { id: 'new_terminal', keys: ['t'], scope: 'row', label: 'New terminal in its worktree', group: 'Sessions' },
   { id: 'open_editor', keys: ['shift+o'], scope: 'row', label: 'Open its worktree in the editor', group: 'Sessions' },
   { id: 'open_remote', keys: ['shift+g'], scope: 'row', label: 'Open the repo remote in the browser', group: 'Sessions' },
+  { id: 'switch_branch', keys: ['c'], scope: 'row', label: 'Switch the repo root checkout to another branch', group: 'Sessions' },
   { id: 'row_menu', keys: ['shift+f10', 'contextmenu'], scope: 'row', label: 'Actions menu', group: 'Sessions' },
 
   { id: 'list_move', keys: ['j', 'k', 'arrowdown', 'arrowup'], scope: 'overview', label: 'Move through the rows (cards on the board)', group: 'Overview and board' },

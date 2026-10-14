@@ -7,10 +7,12 @@
 
 mod accounts;
 mod ado;
+mod branches;
 mod daemon;
 mod git;
 mod launch;
 mod orchestrator;
+mod pr_poll;
 mod presets;
 mod profiles;
 mod projects;
@@ -19,11 +21,10 @@ mod settings;
 
 use ado::client::CmdError;
 use ado::prs::{self, PrCtx, PrCtxExt};
-use ado::{AdoContext, AdoState, AdoStateExt};
+use ado::{AdoState, AdoStateExt};
 use daemon::{Client, Model, PtyEvent};
 use nebula_core::{AgentId, ClientRequest, EntityId, SessionRef, WorktreeId};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -622,74 +623,6 @@ async fn session_ask(
     client.ask(&agent, question).await.map_err(err)
 }
 
-/// The open ADO pull request from `branch`, for the PR open lane. Its
-/// client is silent: the poll never opens a sign-in window, and finds a
-/// token once a user-initiated command has signed in. A sign-in failure
-/// pauses the org's poll until a command works for it again.
-async fn ado_open_pr(ado: &AdoState, ctx: AdoContext, branch: &str) -> Option<daemon::PrInfo> {
-    let org = ctx.remote.org_url.clone();
-    if ado.is_paused(&org) {
-        return None;
-    }
-    let res = async {
-        let ctx = PrCtx::new(ctx).await?;
-        prs::for_source(&ctx.ado.client, &ctx.repo_id, branch).await
-    }
-    .await;
-    match res {
-        Ok(list) => list.into_iter().next().map(|p| daemon::PrInfo {
-            number: p.id.into(),
-            url: p.url,
-            title: p.title,
-            draft: p.is_draft,
-        }),
-        Err(e) => {
-            if prs::is_auth_error(&e) {
-                ado.pause(&org);
-            }
-            None
-        }
-    }
-}
-
-/// Ask for each worktree's open pull request, now and then, for the PR
-/// open lane: Azure DevOps for ADO remotes, `gh` for the rest. Only
-/// checkouts with agent sessions are asked.
-async fn poll_prs(client: Arc<Client>, app: tauri::AppHandle) {
-    let ado = app.state::<AdoState>();
-    let have_gh = tauri::async_runtime::spawn_blocking(git::have_gh)
-        .await
-        .unwrap_or(false);
-    loop {
-        let model = client.snapshot();
-        let wanted: Vec<(String, PathBuf, String)> = model
-            .worktrees
-            .iter()
-            .filter(|w| !w.is_main && model.agents.iter().any(|a| a.worktree_id == w.id))
-            .map(|w| (w.id.0.clone(), w.path.clone(), w.branch.clone()))
-            .collect();
-        let mut out = HashMap::new();
-        for (id, path, branch) in wanted {
-            // Several ADO remotes and none of them origin reads as none.
-            let pr = match ado.silent_context(&path).await.ok().flatten() {
-                Some(ctx) => ado_open_pr(&ado, ctx, &branch).await,
-                None if have_gh => {
-                    tauri::async_runtime::spawn_blocking(move || git::open_pr(&path, &branch))
-                        .await
-                        .ok()
-                        .flatten()
-                }
-                None => None,
-            };
-            if let Some(pr) = pr {
-                out.insert(id, pr);
-            }
-        }
-        client.set_prs(out);
-        tokio::time::sleep(Duration::from_secs(90)).await;
-    }
-}
-
 /// Push the model to the window whenever it changes, at most every 50 ms.
 async fn emit_state(app: tauri::AppHandle, client: Arc<Client>) {
     loop {
@@ -711,6 +644,8 @@ fn main() {
         // One token source, one ado.json store and one set of clients for
         // every ADO command and the PR poll.
         .manage(AdoState::system())
+        .manage(pr_poll::PrRefresh::default())
+        .manage(branches::Switching::default())
         .setup(move |app| {
             let handle = app.handle().clone();
             // The Agents tab's model lists, as the TUI's: Claude Code's own
@@ -729,13 +664,20 @@ fn main() {
             }));
             tauri::async_runtime::spawn(daemon::run(client.clone()));
             tauri::async_runtime::spawn(emit_state(handle.clone(), client.clone()));
-            tauri::async_runtime::spawn(poll_prs(client.clone(), handle));
+            tauri::async_runtime::spawn(pr_poll::poll_prs(client.clone(), handle));
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.set_title("kete");
             }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            // Worktrees, branches and pull requests
+            pr_poll::refresh_prs,
+            branches::worktree_settings,
+            branches::checkout_state,
+            branches::branch_list,
+            branches::branch_fetch,
+            branches::branch_switch,
             get_state,
             retry_connect,
             attach,
