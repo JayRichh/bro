@@ -771,10 +771,21 @@ fn owning_session<T: Clone>(
 }
 
 /// The machine's process table as pid → ppid; empty when it can't be read.
+/// Windows keeps a child's ppid after its parent exits, and pids are
+/// reused, so a long-dead ancestor's pid can now name an agent session's
+/// shell. A link whose "parent" was created after the child is such a stale
+/// one and is dropped; one whose times can't be read is kept.
 #[cfg(windows)]
 fn process_parents() -> HashMap<u32, u32> {
+    use nebula_core::platform::process_created_at;
+    let mut created: HashMap<u32, Option<u64>> = HashMap::new();
+    let mut at = |pid: u32| *created.entry(pid).or_insert_with(|| process_created_at(pid));
     nebula_core::platform::process_table()
         .into_iter()
+        .filter(|row| match (at(row.ppid), at(row.pid)) {
+            (Some(parent), Some(child)) => parent <= child,
+            _ => true,
+        })
         .map(|row| (row.pid, row.ppid))
         .collect()
 }

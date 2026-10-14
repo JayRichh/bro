@@ -98,6 +98,25 @@ mod windows {
         rows
     }
 
+    /// When `pid` was created, as a FILETIME tick count. None when the
+    /// process can't be opened (gone, or protected).
+    pub fn process_created_at(pid: u32) -> Option<u64> {
+        use windows_sys::Win32::Foundation::FILETIME;
+        use windows_sys::Win32::System::Threading::GetProcessTimes;
+        let process = Process::open(pid, PROCESS_QUERY_LIMITED_INFORMATION)?;
+        let zero = FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        };
+        let (mut created, mut exited, mut kernel, mut user) = (zero, zero, zero, zero);
+        // SAFETY: `process` is live with query access; the out-params are
+        // plain FILETIMEs.
+        let ok = unsafe {
+            GetProcessTimes(process.0, &mut created, &mut exited, &mut kernel, &mut user)
+        } != 0;
+        ok.then(|| (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime))
+    }
+
     /// Working set of one process, bytes — the RSS of the unix readings.
     pub fn process_rss_bytes(pid: u32) -> Option<u64> {
         let process = Process::open(pid, PROCESS_QUERY_LIMITED_INFORMATION)?;

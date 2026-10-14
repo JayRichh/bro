@@ -240,7 +240,19 @@ fn protocol_range_on_path(path: &OsStr, cwd: &Path) -> Option<(u32, u32)> {
 }
 
 fn protocol_probe(exe: &Path, arg: &str, cwd: &Path) -> Option<u32> {
-    let out = Command::new(exe).arg(arg).current_dir(cwd).output().ok()?;
+    // A binary written moments ago (an upgrade's fresh install, a test's
+    // fake) can still be open for writing in a process forked meanwhile:
+    // Linux refuses to exec it with ETXTBSY until that fork execs. Brief.
+    let mut tries = 0;
+    let out = loop {
+        match Command::new(exe).arg(arg).current_dir(cwd).output() {
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && tries < 20 => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            other => break other.ok()?,
+        }
+    };
     if !out.status.success() {
         return None;
     }
