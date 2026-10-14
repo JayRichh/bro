@@ -29,6 +29,10 @@ pub enum ProfileOp {
     Default {
         name: String,
     },
+    Enable {
+        name: String,
+        on: bool,
+    },
     Login {
         name: String,
         args: Vec<String>,
@@ -124,43 +128,119 @@ pub fn run_profile(op: ProfileOp) -> Result<()> {
             println!("`{}` is now its harness's default profile", name.trim());
             Ok(())
         }
+        ProfileOp::Enable { name, on } => {
+            profiles::set_enabled_in_file(&config, &name, on).map_err(anyhow::Error::msg)?;
+            println!(
+                "`{}` is {}",
+                name.trim(),
+                if on {
+                    "enabled"
+                } else {
+                    "disabled: launches that pick no profile skip it"
+                }
+            );
+            Ok(())
+        }
         ProfileOp::Login { name, args } => login(&name, &args),
     }
 }
 
 fn list() -> Result<()> {
     let all = profiles::load();
+    let usage = nebula_core::usage::read_all_in(&profiles::profiles_root());
+    let policy = nebula_core::accounts::load_policy();
+    let now = nebula_core::clock::now_secs() as i64;
+    let lines = render_list(&all, &usage, now, |p, harness| {
+        nebula_core::accounts::login_state(p, harness)
+    });
     if all.is_empty() {
         println!(
             "no profiles: add one with: kete profile add <name> --harness <claude|codex|copilot>"
         );
-        return Ok(());
     }
-    for profile in &all {
-        let flag = if profiles::default_for(&all, &profile.harness)
-            .is_some_and(|d| d.name == profile.name)
-        {
-            " (default)"
-        } else {
-            ""
+    for line in lines {
+        println!("{line}");
+    }
+    if !all.is_empty() {
+        let spread = match policy.spread {
+            nebula_core::accounts::Spread::Manual => "manual (the default profile)".to_string(),
+            nebula_core::accounts::Spread::Failover => {
+                format!("failover at {}%", policy.threshold)
+            }
+            nebula_core::accounts::Spread::LeastUsed => "least used".to_string(),
         };
-        let home = match profile.home() {
-            Some(home) => home.display().to_string(),
-            None => "the CLI's default login".to_string(),
-        };
-        let usage = profiles::read_usage(profile)
-            .map(|u| format!("  · {}", u.summary()))
-            .unwrap_or_default();
-        let problem = profile
-            .problem()
-            .map(|p| format!("  ! {p}"))
-            .unwrap_or_default();
-        println!(
-            "{:<16} {:<8}{flag}  {home}{usage}{problem}",
-            profile.name, profile.harness
-        );
+        println!("\naccount spread: {spread}  (Settings \u{2192} Sessions \u{2192} Accounts)");
     }
     Ok(())
+}
+
+/// Width of a usage bar in `kete profile list`.
+const BAR: usize = 10;
+
+/// `kete profile list`'s lines: every profile, then each harness's own
+/// login that has a reading (`@claude`), with a bar for its session (5h)
+/// and weekly use, and whether it is signed in.
+fn render_list(
+    all: &[Profile],
+    usage: &[nebula_core::usage::AccountUsage],
+    now: i64,
+    login: impl Fn(Option<&Profile>, &str) -> nebula_core::accounts::LoginState,
+) -> Vec<String> {
+    use nebula_core::accounts::LoginState;
+    use nebula_core::usage::{block_bar, pct_text};
+    let cell = |w: Option<&nebula_core::usage::UsageWindow>| {
+        let p = w.map(|w| w.percent_at(now));
+        format!("{} {:>4}", block_bar(p, BAR), pct_text(p))
+    };
+    let mut rows: Vec<(String, String, String, String, String)> = Vec::new();
+    let mut push = |name: String, harness: &str, profile: Option<&Profile>| {
+        let key = nebula_core::usage::account_key(profile.map(|p| p.name.as_str()), harness);
+        let reading = usage.iter().find(|u| u.account == key);
+        let [top, bottom] = reading.map_or([None, None], |u| u.bars());
+        let state = match profile.and_then(Profile::problem) {
+            Some(problem) => format!("! {problem}"),
+            None => match login(profile, harness) {
+                LoginState::LoggedIn => "signed in".to_string(),
+                LoginState::NeedsLogin => match profile.and_then(profiles::login_hint) {
+                    Some(hint) => format!("needs login: {hint}"),
+                    None => "needs login".to_string(),
+                },
+                LoginState::Unknown => String::new(),
+            },
+        };
+        rows.push((name, harness.to_string(), cell(top), cell(bottom), state));
+    };
+    for profile in all {
+        let mut name = profile.name.clone();
+        if profiles::default_for(all, &profile.harness).is_some_and(|d| d.name == profile.name) {
+            name.push_str(" *");
+        }
+        if profile.disabled {
+            name.push_str(" (off)");
+        }
+        push(name, profile.harness.trim(), Some(profile));
+    }
+    for u in usage {
+        if let Some(harness) = nebula_core::usage::default_login_harness(&u.account) {
+            push(format!("{} (own login)", harness), harness, None);
+        }
+    }
+    if rows.is_empty() {
+        return Vec::new();
+    }
+    let mut out = vec![format!(
+        "{:<22} {:<8} {:<15} {:<15} {}",
+        "ACCOUNT", "HARNESS", "5H / FIRST", "WEEKLY / NEXT", "LOGIN"
+    )];
+    for (name, harness, top, bottom, state) in rows {
+        out.push(
+            format!("{name:<22} {harness:<8} {top:<15} {bottom:<15} {state}")
+                .trim_end()
+                .to_string(),
+        );
+    }
+    out.push("* default".to_string());
+    out
 }
 
 /// Run the harness's sign-in in this terminal under the profile's
@@ -257,4 +337,72 @@ fn purge_home(home: &std::path::Path) -> Result<()> {
         );
     }
     std::fs::remove_dir_all(&target).with_context(|| format!("delete {}", target.display()))
+}
+
+#[cfg(test)]
+mod list_tests {
+    use super::*;
+    use nebula_core::accounts::LoginState;
+    use nebula_core::usage::{AccountUsage, UsageSource, UsageWindow, WindowKind};
+
+    #[test]
+    fn the_list_draws_bars_flags_and_the_login_command() {
+        let p = |name: &str, default: bool, disabled: bool| Profile {
+            name: name.into(),
+            harness: "claude".into(),
+            env: BTreeMap::new(),
+            default,
+            use_default: false,
+            disabled,
+        };
+        let all = vec![p("work", true, false), p("home", false, true)];
+        let usage = vec![
+            AccountUsage {
+                account: "work".into(),
+                harness: "claude".into(),
+                windows: vec![
+                    UsageWindow {
+                        kind: WindowKind::Session,
+                        label: None,
+                        percent: 50.0,
+                        resets_at: None,
+                    },
+                    UsageWindow {
+                        kind: WindowKind::Weekly,
+                        label: None,
+                        percent: 10.0,
+                        resets_at: None,
+                    },
+                ],
+                source: UsageSource::Statusline,
+                at: 0,
+                plan: None,
+            },
+            AccountUsage {
+                account: "@codex".into(),
+                harness: "codex".into(),
+                windows: Vec::new(),
+                source: UsageSource::Rollout,
+                at: 0,
+                plan: None,
+            },
+        ];
+        let lines = render_list(&all, &usage, 0, |p, _| match p {
+            Some(p) if p.name == "home" => LoginState::NeedsLogin,
+            _ => LoginState::LoggedIn,
+        });
+        assert!(lines[0].starts_with("ACCOUNT"));
+        assert!(lines[1].starts_with("work *"), "{}", lines[1]);
+        assert!(
+            lines[1].contains("\u{25b0}\u{25b0}\u{25b0}\u{25b0}\u{25b0}\u{25b1}"),
+            "{}",
+            lines[1]
+        );
+        assert!(lines[1].contains(" 50%") && lines[1].contains(" 10%"));
+        assert!(lines[1].ends_with("signed in"));
+        assert!(lines[2].starts_with("home (off)"));
+        assert!(lines[2].contains("\u{2014}"), "unknown reads as a dash");
+        assert!(lines[2].ends_with("needs login: kete profile login home"));
+        assert!(lines[3].starts_with("codex (own login)"));
+    }
 }

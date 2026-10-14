@@ -147,7 +147,9 @@ impl AccountUsage {
         self.windows
             .iter()
             .map(|w| w.percent_at(now_secs))
-            .fold(None, |acc: Option<f32>, p| Some(acc.map_or(p, |a| a.max(p))))
+            .fold(None, |acc: Option<f32>, p| {
+                Some(acc.map_or(p, |a| a.max(p)))
+            })
     }
 
     /// The two bars a row draws, top then bottom: the session (5h) and the
@@ -386,10 +388,14 @@ pub fn claude_statusline(v: &Value) -> StatuslineReading {
     match current {
         Some(Value::Object(_)) => {
             let c = current.unwrap();
-            let tokens = ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]
-                .iter()
-                .filter_map(|k| u64_at(c, &[k]))
-                .sum::<u64>();
+            let tokens = [
+                "input_tokens",
+                "cache_creation_input_tokens",
+                "cache_read_input_tokens",
+            ]
+            .iter()
+            .filter_map(|k| u64_at(c, &[k]))
+            .sum::<u64>();
             out.context_tokens = Some(tokens);
         }
         Some(Value::Null) => out.usage_cleared = true,
@@ -432,10 +438,13 @@ fn codex_kind(minutes: Option<u64>) -> WindowKind {
     }
 }
 
+/// Tokens in a context window, and the window, when known.
+pub type ContextTokens = (u64, Option<u64>);
+
 /// What one Codex `token_count` payload says: plan windows, context, plan.
 pub fn codex_token_count(
     payload: &Value,
-) -> (Vec<UsageWindow>, Option<(u64, Option<u64>)>, Option<String>) {
+) -> (Vec<UsageWindow>, Option<ContextTokens>, Option<String>) {
     let mut windows = Vec::new();
     let limits = payload.get("rate_limits");
     for key in ["primary", "secondary"] {
@@ -455,7 +464,12 @@ pub fn codex_token_count(
     // what the window holds now.
     let context = info
         .and_then(|i| u64_at(i, &["last_token_usage", "input_tokens"]))
-        .map(|tokens| (tokens, info.and_then(|i| u64_at(i, &["model_context_window"]))));
+        .map(|tokens| {
+            (
+                tokens,
+                info.and_then(|i| u64_at(i, &["model_context_window"])),
+            )
+        });
     let plan = limits
         .and_then(|l| l.get("plan_type"))
         .and_then(Value::as_str)
@@ -684,7 +698,10 @@ impl TranscriptScan {
                     }
                 }
             }
-            t if t.starts_with("session.") && t.contains("compaction") && t.ends_with("complete") => {
+            t if t.starts_with("session.")
+                && t.contains("compaction")
+                && t.ends_with("complete") =>
+            {
                 self.compacted(stamp());
             }
             _ => {}
@@ -856,9 +873,7 @@ pub fn write_account_in(root: &Path, usage: &AccountUsage) -> std::io::Result<()
     let stored = Stored {
         percent: worst.map_or(0, |w| w.percent.round().clamp(0.0, 100.0) as u8),
         window: worst.map(legacy_window_name).unwrap_or_default(),
-        resets: worst
-            .and_then(|w| w.resets_at)
-            .map(|at| resets_in(at, now)),
+        resets: worst.and_then(|w| w.resets_at).map(|at| resets_in(at, now)),
         at: usage.at,
         harness: Some(usage.harness.clone()),
         windows: usage.windows.clone(),
@@ -867,7 +882,10 @@ pub fn write_account_in(root: &Path, usage: &AccountUsage) -> std::io::Result<()
     };
     let value = serde_json::to_value(&stored)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    crate::settings::write_json(&crate::profiles::usage_path_in(root, &usage.account), &value)
+    crate::settings::write_json(
+        &crate::profiles::usage_path_in(root, &usage.account),
+        &value,
+    )
 }
 
 /// Every kept reading under `root`.
@@ -994,7 +1012,10 @@ mod tests {
         assert!((ctx.percent.unwrap() - 6.21).abs() < 0.01);
 
         // Appended lines only; a half-written line waits for its end.
-        let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
         use std::io::Write;
         write!(f, r#"{{"type":"compacted","#).unwrap();
         assert!(scan.feed());
@@ -1038,7 +1059,11 @@ mod tests {
         });
         let (windows, plan) = copilot_quota(&v);
         assert_eq!(plan.as_deref(), Some("individual"));
-        assert_eq!(windows.len(), 1, "no premium requests is unknown, not 100% used");
+        assert_eq!(
+            windows.len(),
+            1,
+            "no premium requests is unknown, not 100% used"
+        );
         assert_eq!(windows[0].label.as_deref(), Some("chat"));
         assert!((windows[0].percent - 0.2).abs() < 0.01);
         assert_eq!(windows[0].resets_at, date_epoch("2026-11-01"));
@@ -1083,7 +1108,10 @@ mod tests {
         let back = read_account_in(dir.path(), "@claude").unwrap();
         assert_eq!(back.harness, "claude");
         assert_eq!(back.source, UsageSource::Screen);
-        assert_eq!(back.windows, vec![UsageWindow::new(WindowKind::Weekly, 91.0, None)]);
+        assert_eq!(
+            back.windows,
+            vec![UsageWindow::new(WindowKind::Weekly, 91.0, None)]
+        );
         assert_eq!(read_all_in(dir.path()).len(), 2);
     }
 
@@ -1125,7 +1153,11 @@ mod tests {
         assert_eq!(tone(80.0), Tone::Warn);
         assert_eq!(tone(95.0), Tone::Hot);
         assert_eq!(block_bar(Some(50.0), 4), "\u{25b0}\u{25b0}\u{25b1}\u{25b1}");
-        assert_eq!(block_bar(Some(1.0), 4), "\u{25b0}\u{25b1}\u{25b1}\u{25b1}", "any use shows");
+        assert_eq!(
+            block_bar(Some(1.0), 4),
+            "\u{25b0}\u{25b1}\u{25b1}\u{25b1}",
+            "any use shows"
+        );
         assert_eq!(block_bar(Some(0.0), 2), "\u{25b1}\u{25b1}");
         assert_eq!(block_bar(None, 2), "\u{254c}\u{254c}");
         assert_eq!(pct_text(None), "\u{2014}");
@@ -1153,7 +1185,12 @@ mod tests {
     #[test]
     fn a_rollout_is_found_by_its_session_id() {
         let dir = tempfile::tempdir().unwrap();
-        let day = dir.path().join("sessions").join("2026").join("10").join("14");
+        let day = dir
+            .path()
+            .join("sessions")
+            .join("2026")
+            .join("10")
+            .join("14");
         std::fs::create_dir_all(&day).unwrap();
         let path = day.join("rollout-2026-10-14T00-02-43-abc-123.jsonl");
         std::fs::write(&path, "").unwrap();

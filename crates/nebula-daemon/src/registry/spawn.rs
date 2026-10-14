@@ -455,7 +455,15 @@ impl Daemon {
         // exactly like that harness, and a harness with none runs
         // hookless (process-based status until a dialect is mapped).
         let install_result = match harness.hook_dialect() {
-            Some(AgentKind::Claude) => hooks::installer::install_claude_hooks(&worktree.path),
+            // Kete's statusLine too: the session's plan usage and context
+            // (`registry::usage`), unless Settings switched it off.
+            Some(AgentKind::Claude) => hooks::installer::install_claude_hooks(&worktree.path)
+                .and_then(|()| {
+                    hooks::installer::install_claude_statusline(
+                        &worktree.path,
+                        crate::config::Config::load().usage_statusline,
+                    )
+                }),
             // Codex's hooks live in its home, not the worktree, so one
             // trust approval covers every worktree (see installer docs);
             // any per-worktree copy an older nebula left is pruned.
@@ -666,31 +674,12 @@ impl Daemon {
         if agent.kind == AgentKind::Cursor {
             session.arm_question_scan();
         }
-        // Only a session under a PROFILE has somewhere to file a reading.
-        if agent.kind == AgentKind::Claude && agent.profile.is_some() {
+        // A reading files under the session's PROFILE, or `@claude` for
+        // the CLI's own login (`registry::usage`).
+        if agent.kind == AgentKind::Claude {
             session.arm_usage_scan();
         }
         Ok(session)
-    }
-
-    /// A PLAN USAGE reading off `id`'s screen: kept as its PROFILE's latest
-    /// (`<data dir>/profiles/.usage/<name>.json`), stamped now. A row with
-    /// no profile has nowhere to keep it.
-    pub(crate) fn on_pty_usage(&self, id: &AgentId, mut usage: nebula_core::profiles::Usage) {
-        let Ok(Some(agent)) = self.store.get_agent(id) else {
-            return;
-        };
-        let Some(name) = agent.profile else {
-            return;
-        };
-        usage.at = nebula_core::clock::now_ms();
-        if let Err(e) = nebula_core::profiles::write_usage_in(
-            &nebula_core::profiles::profiles_root(),
-            &name,
-            &usage,
-        ) {
-            tracing::warn!(profile = %name, error = %e, "recording plan usage failed");
-        }
     }
 
     /// A resumed session (`claude --resume` / `codex resume` /

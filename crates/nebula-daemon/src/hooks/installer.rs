@@ -348,6 +348,60 @@ pub fn install_claude_hooks(cwd: &Path) -> Result<()> {
     )
 }
 
+/// The hidden subcommand kete's Claude statusLine runs (`kete
+/// _statusline`), and what marks a `statusLine` as kete's.
+pub const STATUSLINE_SUBCOMMAND: &str = "_statusline";
+
+/// The statusLine command: this binary's own `_statusline`, spelled for
+/// whichever shell Claude runs it under.
+fn statusline_command() -> String {
+    let exe = std::env::current_exe()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| "kete".into());
+    #[cfg(windows)]
+    let exe = shell_neutral_path(&exe);
+    #[cfg(unix)]
+    let exe = nebula_core::shell::single_quote(&exe);
+    format!("{exe} {STATUSLINE_SUBCOMMAND}")
+}
+
+fn is_kete_statusline(value: &Value) -> bool {
+    value
+        .get("command")
+        .and_then(Value::as_str)
+        .is_some_and(|c| c.contains(&format!(" {STATUSLINE_SUBCOMMAND}")))
+}
+
+/// Point a Claude session's statusLine at kete's wrapper in
+/// `<cwd>/.claude/settings.local.json` (`enabled`), or take kete's away
+/// (off). A statusLine of the user's own in that file is never touched —
+/// that session then reports no usage through it. The wrapper runs the
+/// user's statusLine from their other settings files and prints its
+/// output, so their line still shows. Writes only when something changed.
+pub fn install_claude_statusline(cwd: &Path, enabled: bool) -> Result<()> {
+    let dir = cwd.join(CLAUDE_DIR);
+    let path = dir.join(CLAUDE_SETTINGS_FILE);
+    let mut root = load_hooks_root(&path)?;
+    let before = root.clone();
+    let root_obj = root_object_mut(&mut root, &path)?;
+    match root_obj.get("statusLine") {
+        Some(existing) if !is_kete_statusline(existing) => return Ok(()),
+        _ => {}
+    }
+    if enabled {
+        root_obj.insert(
+            "statusLine".into(),
+            json!({ "type": "command", "command": statusline_command(), "padding": 0 }),
+        );
+    } else {
+        root_obj.remove("statusLine");
+    }
+    if root == before {
+        return Ok(());
+    }
+    write_hooks_root(&dir, CLAUDE_SETTINGS_FILE, &root)
+}
+
 /// Claude Code's two attribution switches, forced off on every spawn
 /// whatever the file said: the legacy boolean and the newer per-surface
 /// text (an empty string writes nothing).
@@ -798,6 +852,36 @@ mod tests {
     fn read_json(dir: &Path, rel: &str) -> Value {
         let text = std::fs::read_to_string(dir.join(rel)).unwrap();
         serde_json::from_str(&text).unwrap()
+    }
+
+    #[test]
+    fn the_statusline_is_kete_s_unless_the_file_has_one_of_the_user_s() {
+        let tmp = tempfile::tempdir().unwrap();
+        install_claude_hooks(tmp.path()).unwrap();
+        install_claude_statusline(tmp.path(), true).unwrap();
+        let settings = read_settings(tmp.path());
+        let cmd = settings["statusLine"]["command"].as_str().unwrap();
+        assert!(cmd.ends_with(" _statusline"), "{cmd}");
+        assert_eq!(settings["statusLine"]["type"], "command");
+        assert!(settings["hooks"]["Stop"].is_array(), "hooks kept");
+        // Unchanged: no rewrite.
+        let path = tmp.path().join(".claude").join("settings.local.json");
+        let stamp = std::fs::metadata(&path).unwrap().modified().unwrap();
+        install_claude_statusline(tmp.path(), true).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), stamp);
+        // Off takes kete's away.
+        install_claude_statusline(tmp.path(), false).unwrap();
+        assert!(read_settings(tmp.path()).get("statusLine").is_none());
+        // The user's own stays, on or off.
+        let mut settings = read_settings(tmp.path());
+        settings["statusLine"] = json!({"type": "command", "command": "my-line"});
+        std::fs::write(&path, settings.to_string()).unwrap();
+        install_claude_statusline(tmp.path(), true).unwrap();
+        install_claude_statusline(tmp.path(), false).unwrap();
+        assert_eq!(
+            read_settings(tmp.path())["statusLine"]["command"],
+            "my-line"
+        );
     }
 
     fn read_settings(dir: &Path) -> Value {

@@ -41,8 +41,7 @@ pub fn run_hook(endpoint: &str, event: &str) -> anyhow::Result<()> {
 /// The daemon's reply body, or None for anything short of a 200.
 fn post(endpoint: &str, event: &str) -> Option<String> {
     let agent = env::non_empty(env::AGENT_ID)?;
-    let url = env::non_empty(env::API_URL)?;
-    let token = env::non_empty(env::API_TOKEN).unwrap_or_default();
+    env::non_empty(env::API_URL)?;
     if ![endpoint, event, &agent]
         .iter()
         .all(|word| is_query_safe(word))
@@ -51,7 +50,18 @@ fn post(endpoint: &str, event: &str) -> Option<String> {
     }
     let mut payload = Vec::new();
     std::io::stdin().read_to_end(&mut payload).ok()?;
+    post_to(
+        &format!("/api/hooks/{endpoint}?agentId={agent}&hookEvent={event}"),
+        &payload,
+    )
+}
 
+/// POST `payload` to `$NEBULA_API_URL` + `path` with the session's bearer
+/// token: the daemon's reply body, or None for anything short of a 200 (or
+/// outside a kete session). `path` carries its own query string.
+pub(crate) fn post_to(path: &str, payload: &[u8]) -> Option<String> {
+    let url = env::non_empty(env::API_URL)?;
+    let token = env::non_empty(env::API_TOKEN).unwrap_or_default();
     let rest = url.strip_prefix("http://")?;
     let (authority, base) = match rest.find('/') {
         Some(slash) => rest.split_at(slash),
@@ -62,7 +72,7 @@ fn post(endpoint: &str, event: &str) -> Option<String> {
     stream.set_read_timeout(Some(TIMEOUT)).ok()?;
     stream.set_write_timeout(Some(TIMEOUT)).ok()?;
     let request = format!(
-        "POST {}/api/hooks/{endpoint}?agentId={agent}&hookEvent={event} HTTP/1.1\r\n\
+        "POST {}{path} HTTP/1.1\r\n\
          Host: {authority}\r\n\
          Authorization: Bearer {token}\r\n\
          Content-Type: application/json\r\n\
@@ -72,7 +82,7 @@ fn post(endpoint: &str, event: &str) -> Option<String> {
         payload.len()
     );
     stream.write_all(request.as_bytes()).ok()?;
-    stream.write_all(&payload).ok()?;
+    stream.write_all(payload).ok()?;
     let mut response = Vec::new();
     stream.read_to_end(&mut response).ok()?;
     response_body(&response)
@@ -80,7 +90,7 @@ fn post(endpoint: &str, event: &str) -> Option<String> {
 
 /// A word that goes into the query string as it is: ids and event names
 /// are plain, and anything else is not a nebula session's.
-fn is_query_safe(word: &str) -> bool {
+pub(crate) fn is_query_safe(word: &str) -> bool {
     !word.is_empty()
         && word
             .bytes()

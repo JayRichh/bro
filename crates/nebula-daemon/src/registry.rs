@@ -242,6 +242,8 @@ pub struct Daemon {
     /// Serializes orchestrator provisioning (start, set, clear), so a check,
     /// demote and create never interleave with another.
     pub(crate) provision_gate: tokio::sync::Mutex<()>,
+    /// ACCOUNT USAGE and SESSION CONTEXT readings (`usage.rs`), taken alone.
+    pub(crate) usage: Mutex<usage::UsageBook>,
 }
 
 mod exit;
@@ -254,6 +256,7 @@ mod spawn;
 mod status;
 mod subagents;
 mod terminals;
+mod usage;
 
 pub use subagents::{SubagentCarry, SubagentHookInfo};
 
@@ -285,6 +288,7 @@ impl Daemon {
             subagents: Mutex::new(subagents::SubagentBook::default()),
             orchestrator_home: Mutex::new(None),
             provision_gate: tokio::sync::Mutex::new(()),
+            usage: Mutex::new(usage::UsageBook::default()),
         })
     }
 
@@ -1022,15 +1026,25 @@ fn profile_env_line(env: &nebula_core::profiles::LaunchEnv) -> String {
 
 /// The PROFILE a create on `harness` runs under, by name: `asked` when
 /// the launch named one — it must exist and be an account for that
-/// harness — else the harness's default, else none.
+/// harness — else the ACCOUNT SPREAD's pick (`nebula_core::accounts`):
+/// under `manual`, the harness's default, else none.
 fn resolve_profile_name(
     harness: &nebula_core::harness::HarnessDescriptor,
     asked: Option<&str>,
 ) -> Result<Option<String>> {
     let config = crate::config::Config::load();
-    nebula_core::profiles::resolve(&config.profiles, &harness.id, asked)
-        .map(|profile| profile.map(|p| p.name.trim().to_string()))
-        .map_err(anyhow::Error::msg)
+    if asked.map(str::trim).is_some_and(|a| !a.is_empty()) {
+        return nebula_core::profiles::resolve(&config.profiles, &harness.id, asked)
+            .map(|profile| profile.map(|p| p.name.trim().to_string()))
+            .map_err(anyhow::Error::msg);
+    }
+    let pick = nebula_core::accounts::pick_now(
+        &config.profiles,
+        &harness.id,
+        nebula_core::accounts::load_policy(),
+    );
+    tracing::debug!(choice = %pick.describe(&harness.id), "account spread");
+    Ok(pick.profile.map(|p| p.name.trim().to_string()))
 }
 
 /// The PROFILE `agent` runs under, read fresh from the config: None for a

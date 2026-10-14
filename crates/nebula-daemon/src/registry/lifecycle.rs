@@ -443,6 +443,7 @@ impl Daemon {
         self.last_cwd.lock().remove(id);
         self.pending_moves.lock().remove(id);
         self.forget_subagents(id);
+        self.forget_context(id);
         self.store.delete_agent(id)?;
         self.broadcast(ServerEvent::EntityRemoved {
             id: EntityId::Agent(id.clone()),

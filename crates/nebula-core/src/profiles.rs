@@ -431,7 +431,14 @@ pub fn update_in_file(path: &Path, profile: &Profile) -> Result<(), String> {
         };
         let mut entry = entries[at].as_object().cloned().unwrap_or_default();
         // Fields left out when empty or off must go, not linger.
-        for key in ["name", "harness", "env", "default", "use_default", "disabled"] {
+        for key in [
+            "name",
+            "harness",
+            "env",
+            "default",
+            "use_default",
+            "disabled",
+        ] {
             entry.remove(key);
         }
         entry.extend(known);
@@ -860,12 +867,19 @@ mod tests {
         add_to_file(&path, &a).unwrap();
         add_to_file(&path, &profile("b", "claude")).unwrap();
         let raw = std::fs::read_to_string(&path).unwrap();
-        assert!(!raw.contains("disabled"), "an enabled profile writes no flag");
+        assert!(
+            !raw.contains("disabled"),
+            "an enabled profile writes no flag"
+        );
         set_enabled_in_file(&path, "a", false).unwrap();
         let obj = crate::settings::read_object(&path).unwrap().unwrap();
         let all = from_settings(&obj);
         assert!(all[0].disabled);
-        assert_eq!(default_for(&all, "claude"), None, "a disabled default is none");
+        assert_eq!(
+            default_for(&all, "claude"),
+            None,
+            "a disabled default is none"
+        );
         assert_eq!(
             resolve(&all, "claude", Some("a")).unwrap().unwrap().name,
             "a",

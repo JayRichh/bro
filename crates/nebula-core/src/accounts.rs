@@ -93,10 +93,7 @@ pub fn load_policy() -> Policy {
         serde_json::Value::String(s) => s,
         other => other.to_string(),
     });
-    Policy::from_words(
-        loaded.value.account_spread.as_deref(),
-        threshold.as_deref(),
-    )
+    Policy::from_words(loaded.value.account_spread.as_deref(), threshold.as_deref())
 }
 
 /// Why [`pick`] chose what it chose.
@@ -140,7 +137,10 @@ impl Pick<'_> {
                 format!("failover, {} used", crate::usage::pct_text(*percent))
             }
             Reason::FailedOver { from, percent } => {
-                format!("failover: {from} at {}", crate::usage::pct_text(Some(*percent)))
+                format!(
+                    "failover: {from} at {}",
+                    crate::usage::pct_text(Some(*percent))
+                )
             }
             Reason::AllOver { percent } => format!(
                 "every account over its threshold; least used, {}",
@@ -238,6 +238,99 @@ pub fn pick<'a>(
     }
 }
 
+/// Whether an account has a login, as far as its files say. Only the
+/// existence of a credentials file (and, for Claude on macOS, where the
+/// keychain holds it, the account entry in `.claude.json`) is looked at:
+/// nothing in them is read out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LoginState {
+    LoggedIn,
+    NeedsLogin,
+    /// A harness kete knows no sign-in files for.
+    Unknown,
+}
+
+/// The config dir `harness` keeps its login in under `profile` (its home
+/// dir, or the CLI's default for an adopted login or no profile).
+fn login_dir(
+    profile: Option<&Profile>,
+    harness: &str,
+    root: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    use crate::env;
+    let var = match harness.trim() {
+        "claude" => env::CLAUDE_CONFIG_DIR,
+        "codex" => env::CODEX_HOME,
+        "copilot" => profiles::GH_CONFIG_DIR,
+        _ => return None,
+    };
+    if let Some(dir) = profile.and_then(|p| p.dir_for(root, var)) {
+        return Some(dir);
+    }
+    if let Some(dir) = env::non_empty(var) {
+        return Some(std::path::PathBuf::from(dir));
+    }
+    let home = env::home_dir()?;
+    Some(match harness.trim() {
+        "claude" => home.join(".claude"),
+        "codex" => home.join(".codex"),
+        _ => {
+            // gh: %APPDATA%\GitHub CLI on Windows, ~/.config/gh elsewhere.
+            #[cfg(windows)]
+            {
+                std::path::PathBuf::from(std::env::var_os("APPDATA")?).join("GitHub CLI")
+            }
+            #[cfg(not(windows))]
+            {
+                home.join(".config").join("gh")
+            }
+        }
+    })
+}
+
+/// [`LoginState`] of `profile` (None = the harness's own default login).
+pub fn login_state_in(
+    profile: Option<&Profile>,
+    harness: &str,
+    root: &std::path::Path,
+) -> LoginState {
+    let Some(dir) = login_dir(profile, harness, root) else {
+        return LoginState::Unknown;
+    };
+    let found = match harness.trim() {
+        "claude" => {
+            dir.join(".credentials.json").is_file() || {
+                // `.claude.json` sits in the config dir for a moved one,
+                // beside `~/.claude` for the default.
+                let json = if profile.is_some_and(|p| !p.use_default)
+                    || crate::env::non_empty(crate::env::CLAUDE_CONFIG_DIR).is_some()
+                {
+                    dir.join(".claude.json")
+                } else {
+                    dir.with_file_name(".claude.json")
+                };
+                std::fs::read_to_string(json)
+                    .ok()
+                    .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+                    .is_some_and(|v| v.get("oauthAccount").is_some_and(|a| a.is_object()))
+            }
+        }
+        "codex" => dir.join("auth.json").is_file(),
+        _ => dir.join("hosts.yml").is_file(),
+    };
+    if found {
+        LoginState::LoggedIn
+    } else {
+        LoginState::NeedsLogin
+    }
+}
+
+/// [`login_state_in`] under the profiles root.
+pub fn login_state(profile: Option<&Profile>, harness: &str) -> LoginState {
+    login_state_in(profile, harness, &profiles::profiles_root())
+}
+
 /// [`pick`] against the kept readings, now.
 pub fn pick_now<'a>(all: &'a [Profile], harness: &str, policy: Policy) -> Pick<'a> {
     pick(
@@ -267,30 +360,34 @@ mod tests {
     }
 
     fn usage(map: &[(&str, f32, f32)]) -> impl Fn(&str) -> Option<AccountUsage> {
-        let map: Vec<(String, f32, f32)> =
-            map.iter().map(|(n, s, w)| (n.to_string(), *s, *w)).collect();
+        let map: Vec<(String, f32, f32)> = map
+            .iter()
+            .map(|(n, s, w)| (n.to_string(), *s, *w))
+            .collect();
         move |name: &str| {
-            map.iter().find(|(n, _, _)| n == name).map(|(n, s, w)| AccountUsage {
-                account: n.clone(),
-                harness: "claude".into(),
-                windows: vec![
-                    UsageWindow {
-                        kind: WindowKind::Session,
-                        label: None,
-                        percent: *s,
-                        resets_at: None,
-                    },
-                    UsageWindow {
-                        kind: WindowKind::Weekly,
-                        label: None,
-                        percent: *w,
-                        resets_at: Some(1000),
-                    },
-                ],
-                source: UsageSource::Statusline,
-                at: 0,
-                plan: None,
-            })
+            map.iter()
+                .find(|(n, _, _)| n == name)
+                .map(|(n, s, w)| AccountUsage {
+                    account: n.clone(),
+                    harness: "claude".into(),
+                    windows: vec![
+                        UsageWindow {
+                            kind: WindowKind::Session,
+                            label: None,
+                            percent: *s,
+                            resets_at: None,
+                        },
+                        UsageWindow {
+                            kind: WindowKind::Weekly,
+                            label: None,
+                            percent: *w,
+                            resets_at: Some(1000),
+                        },
+                    ],
+                    source: UsageSource::Statusline,
+                    at: 0,
+                    plan: None,
+                })
         }
     }
 
@@ -304,8 +401,18 @@ mod tests {
     #[test]
     fn manual_is_todays_behaviour() {
         let all = vec![profile("a", false), profile("b", true)];
-        let p = pick(&all, "claude", policy(Spread::Manual), 0, usage(&[("b", 99.0, 99.0)]));
-        assert_eq!(p.profile.unwrap().name, "b", "the default, whatever its use");
+        let p = pick(
+            &all,
+            "claude",
+            policy(Spread::Manual),
+            0,
+            usage(&[("b", 99.0, 99.0)]),
+        );
+        assert_eq!(
+            p.profile.unwrap().name,
+            "b",
+            "the default, whatever its use"
+        );
         assert_eq!(p.reason, Reason::Default);
         let none = vec![profile("a", false)];
         let p = pick(&none, "claude", policy(Spread::Manual), 0, usage(&[]));
@@ -318,10 +425,24 @@ mod tests {
     fn failover_moves_on_at_the_threshold_and_skips_disabled() {
         let mut off = profile("off", false);
         off.disabled = true;
-        let all = vec![profile("a", false), off, profile("main", true), profile("c", false)];
-        let u = usage(&[("main", 20.0, 95.0), ("off", 0.0, 0.0), ("a", 91.0, 10.0), ("c", 5.0, 5.0)]);
+        let all = vec![
+            profile("a", false),
+            off,
+            profile("main", true),
+            profile("c", false),
+        ];
+        let u = usage(&[
+            ("main", 20.0, 95.0),
+            ("off", 0.0, 0.0),
+            ("a", 91.0, 10.0),
+            ("c", 5.0, 5.0),
+        ]);
         let p = pick(&all, "claude", policy(Spread::Failover), 0, &u);
-        assert_eq!(p.profile.unwrap().name, "c", "main over on weekly, a over on 5h");
+        assert_eq!(
+            p.profile.unwrap().name,
+            "c",
+            "main over on weekly, a over on 5h"
+        );
         assert_eq!(
             p.reason,
             Reason::FailedOver {
@@ -354,12 +475,56 @@ mod tests {
         let all = vec![profile("a", false), profile("b", true), profile("c", false)];
         let u = usage(&[("a", 10.0, 30.0), ("b", 40.0, 0.0)]);
         let p = pick(&all, "claude", policy(Spread::LeastUsed), 0, &u);
-        assert_eq!(p.profile.unwrap().name, "c", "no reading yet counts as unused");
+        assert_eq!(
+            p.profile.unwrap().name,
+            "c",
+            "no reading yet counts as unused"
+        );
         let u = usage(&[("a", 0.0, 0.0), ("b", 0.0, 0.0), ("c", 0.0, 0.0)]);
         let p = pick(&all, "claude", policy(Spread::LeastUsed), 0, &u);
         assert_eq!(p.profile.unwrap().name, "b");
         let p = pick(&[], "claude", policy(Spread::LeastUsed), 0, &u);
         assert_eq!(p.profile, None);
+    }
+
+    #[test]
+    fn login_state_looks_only_for_the_credentials_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let work = profile("work", false);
+        assert_eq!(
+            login_state_in(Some(&work), "claude", root),
+            LoginState::NeedsLogin
+        );
+        let claude = root.join("work").join("claude");
+        std::fs::create_dir_all(&claude).unwrap();
+        std::fs::write(
+            claude.join(".claude.json"),
+            r#"{"hasCompletedOnboarding":true}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            login_state_in(Some(&work), "claude", root),
+            LoginState::NeedsLogin
+        );
+        std::fs::write(claude.join(".claude.json"), r#"{"oauthAccount":{}}"#).unwrap();
+        assert_eq!(
+            login_state_in(Some(&work), "claude", root),
+            LoginState::LoggedIn
+        );
+        let mut codex = profile("cx", false);
+        codex.harness = "codex".into();
+        assert_eq!(
+            login_state_in(Some(&codex), "codex", root),
+            LoginState::NeedsLogin
+        );
+        std::fs::create_dir_all(root.join("cx").join("codex")).unwrap();
+        std::fs::write(root.join("cx").join("codex").join("auth.json"), "{}").unwrap();
+        assert_eq!(
+            login_state_in(Some(&codex), "codex", root),
+            LoginState::LoggedIn
+        );
+        assert_eq!(login_state_in(None, "aider", root), LoginState::Unknown);
     }
 
     #[test]
@@ -371,7 +536,10 @@ mod tests {
                 threshold: 80
             }
         );
-        assert_eq!(Policy::from_words(Some("nope"), Some("200")), Policy::default());
+        assert_eq!(
+            Policy::from_words(Some("nope"), Some("200")),
+            Policy::default()
+        );
         assert_eq!(Policy::from_words(None, Some("95%")).threshold, 95);
         assert_eq!(Spread::parse("least_used"), Spread::LeastUsed);
     }

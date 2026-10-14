@@ -5,6 +5,7 @@ mod hook;
 mod profile;
 mod setup;
 mod ssh;
+mod statusline;
 mod tunnel;
 mod upgrade;
 
@@ -65,6 +66,8 @@ fn main() -> Result<()> {
             },
             ProfileCommand::Remove { name, purge } => profile::ProfileOp::Remove { name, purge },
             ProfileCommand::Default { name } => profile::ProfileOp::Default { name },
+            ProfileCommand::Enable { name } => profile::ProfileOp::Enable { name, on: true },
+            ProfileCommand::Disable { name } => profile::ProfileOp::Enable { name, on: false },
             ProfileCommand::Login { name, args } => profile::ProfileOp::Login { name, args },
         }),
         Some(Command::Kill) => nebula_tui::run_kill(),
@@ -226,6 +229,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         Some(Command::Hook { endpoint, event }) => hook::run_hook(&endpoint, &event),
+        Some(Command::Statusline) => statusline::run_statusline(),
         None => match cli.dir {
             Some(dir) => nebula_tui::run_add_project(dir),
             None => {

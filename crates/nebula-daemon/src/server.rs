@@ -132,6 +132,9 @@ struct ClientConnection {
     attached: HashMap<SessionRef, tokio::task::JoinHandle<()>>,
     subscription: Option<tokio::task::JoinHandle<()>>,
     handshaken: bool,
+    /// The protocol the client said at Hello: what it can decode
+    /// (`ServerEvent::decodable_by`). 0 until then.
+    peer_protocol: u32,
     /// The client process's pid, when the OS said.
     peer_pid: Option<u32>,
 }
@@ -144,6 +147,7 @@ impl ClientConnection {
             attached: HashMap::new(),
             subscription: None,
             handshaken: false,
+            peer_protocol: 0,
             peer_pid: None,
         }
     }
@@ -886,6 +890,7 @@ impl ClientConnection {
 
     async fn handle_hello(&mut self, protocol_version: u32) -> bool {
         self.handshaken = nebula_core::protocol_compatible_with(protocol_version);
+        self.peer_protocol = protocol_version;
         let reply = if self.handshaken {
             ServerEvent::HelloOk {
                 protocol_version: PROTOCOL_VERSION,
@@ -915,8 +920,17 @@ impl ClientConnection {
             ports: self.daemon.worktree_ports(),
         })
         .await;
+        // ACCOUNT USAGE and SESSION CONTEXT too, to a peer that reads them.
+        for ev in usage_events(&self.daemon, self.peer_protocol).await {
+            self.send(ev).await;
+        }
         let tx = self.out_tx.clone();
-        let forward = tokio::spawn(forward_subscription_events(self.daemon.clone(), rx, tx));
+        let forward = tokio::spawn(forward_subscription_events(
+            self.daemon.clone(),
+            rx,
+            tx,
+            self.peer_protocol,
+        ));
         if let Some(old) = self.subscription.replace(forward) {
             old.abort();
         }
@@ -1424,31 +1438,67 @@ fn snapshot_or_empty(daemon: &Daemon) -> ServerEvent {
     })
 }
 
-async fn send_snapshot(daemon: &Daemon, tx: &mpsc::Sender<ServerEvent>) -> bool {
-    tx.send(snapshot_or_empty(daemon)).await.is_ok()
+/// The usage lists a subscriber at `peer` gets beside the Snapshot: none
+/// for a peer older than `USAGE_EVENTS_PROTOCOL`.
+async fn usage_events(daemon: &Arc<Daemon>, peer: u32) -> Vec<ServerEvent> {
+    if peer < nebula_core::USAGE_EVENTS_PROTOCOL {
+        return Vec::new();
+    }
+    let daemon = daemon.clone();
+    tokio::task::spawn_blocking(move || {
+        vec![
+            ServerEvent::AccountUsage {
+                accounts: daemon.account_usage_list(),
+            },
+            ServerEvent::SessionContexts {
+                contexts: daemon.session_contexts(),
+            },
+        ]
+    })
+    .await
+    .unwrap_or_default()
+}
+
+async fn send_snapshot(daemon: &Arc<Daemon>, tx: &mpsc::Sender<ServerEvent>, peer: u32) -> bool {
+    if !(tx.send(snapshot_or_empty(daemon)).await.is_ok()
         && tx
             .send(ServerEvent::WorktreePorts {
                 ports: daemon.worktree_ports(),
             })
             .await
-            .is_ok()
+            .is_ok())
+    {
+        return false;
+    }
+    for ev in usage_events(daemon, peer).await {
+        if tx.send(ev).await.is_err() {
+            return false;
+        }
+    }
+    true
 }
 
 async fn forward_subscription_events(
     daemon: Arc<Daemon>,
     mut rx: broadcast::Receiver<ServerEvent>,
     tx: mpsc::Sender<ServerEvent>,
+    peer: u32,
 ) {
     loop {
         match rx.recv().await {
             Ok(ev) => {
+                // An event an older peer cannot decode would drop its
+                // connection mid-stream: it never sees it.
+                if !ev.decodable_by(peer) {
+                    continue;
+                }
                 if tx.send(ev).await.is_err() {
                     break;
                 }
             }
             Err(broadcast::error::RecvError::Lagged(skipped)) => {
                 tracing::warn!(skipped, "client subscription lagged; sending snapshot");
-                if !send_snapshot(&daemon, &tx).await {
+                if !send_snapshot(&daemon, &tx, peer).await {
                     break;
                 }
             }
@@ -1528,7 +1578,12 @@ mod tests {
             .unwrap();
 
         let (tx, mut out) = mpsc::channel(4);
-        let forward = tokio::spawn(forward_subscription_events(daemon, rx, tx));
+        let forward = tokio::spawn(forward_subscription_events(
+            daemon,
+            rx,
+            tx,
+            nebula_core::PROTOCOL_VERSION,
+        ));
 
         let ev = tokio::time::timeout(std::time::Duration::from_secs(1), out.recv())
             .await
@@ -1540,6 +1595,41 @@ mod tests {
             matches!(ev, ServerEvent::Snapshot { .. }),
             "lag should resync with a snapshot, got {ev:?}"
         );
+    }
+
+    /// Usage events reach a 55 subscriber and never a 54 one, whose
+    /// decoder would fail on the unknown variant and drop the connection.
+    #[tokio::test]
+    async fn usage_events_are_forwarded_only_to_peers_that_decode_them() {
+        let usage = || ServerEvent::AccountUsage {
+            accounts: Vec::new(),
+        };
+        let ack = || ServerEvent::Ack {
+            req_id: 7,
+            created: None,
+        };
+        for (peer, expect_usage) in [(54u32, false), (55, true)] {
+            let daemon = test_daemon();
+            let (events, rx) = broadcast::channel(8);
+            events.send(usage()).unwrap();
+            events.send(ack()).unwrap();
+            let (tx, mut out) = mpsc::channel(8);
+            let forward = tokio::spawn(forward_subscription_events(daemon, rx, tx, peer));
+            let first = tokio::time::timeout(std::time::Duration::from_secs(1), out.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            forward.abort();
+            assert_eq!(
+                matches!(first, ServerEvent::AccountUsage { .. }),
+                expect_usage,
+                "peer {peer}: {first:?}"
+            );
+            if !expect_usage {
+                assert!(matches!(first, ServerEvent::Ack { req_id: 7, .. }));
+            }
+        }
+        assert!(usage_events(&test_daemon(), 54).await.is_empty());
     }
 
     /// A handshaken connection over `daemon`, and the receiving end of
