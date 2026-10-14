@@ -29,6 +29,9 @@ fn projects(model: &Model) -> Vec<ProjectRef> {
 /// Every tab and row, with the values stored now.
 #[tauri::command]
 pub fn settings_schema(client: State<'_, Arc<Client>>) -> schema::Schema {
+    // `Config::load` also brings the Claude model list up to a hand-edited
+    // `claude_models`, which the Agents tab's rows read.
+    let _ = Config::load();
     let (path, local) = nebula_config::layer_paths();
     schema_at(&path, &local, &projects(&client.snapshot()))
 }
