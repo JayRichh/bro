@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Agent, Model } from './api';
-import { buildItems, labelMarks, search } from './palette';
+import { buildItems, labelMarks, scattered, search } from './palette';
 
 const agent = (id: string, worktree: string, status: Agent['status'], extra: Partial<Agent> = {}): Agent => ({
   id,
@@ -90,5 +90,29 @@ describe('the palette', () => {
   it('marks only the label part of a path row', () => {
     const [top] = search(items, 'asks');
     expect([...labelMarks(top.item, top.positions)]).toEqual([0, 1, 2, 3]);
+  });
+});
+
+describe('palette ranking', () => {
+  it('puts a name that holds the query whole above one that holds it scattered', () => {
+    const m: Model = {
+      ...model,
+      agents: [
+        // Running and newer, so first on attention alone: its name holds
+        // g..s..t only as scattered letters.
+        agent('ledger-recon-test', 'w2', 'running', { status_changed_at: 90 }),
+        agent('gst-rounding', 'w2', 'finished', { status_changed_at: 10 }),
+      ],
+    };
+    const rows = search(buildItems(m, []), 'gst').filter((r) => r.item.target.kind === 'session');
+    expect(rows.map((r) => r.item.label)).toEqual(['gst-rounding', 'ledger-recon-test']);
+  });
+
+  it('tells a scattered name from a prefix, word start or substring', () => {
+    expect(scattered('gst', 'ledger-recon-test')).toBe(true);
+    expect(scattered('gst', 'gst-rounding')).toBe(false);
+    expect(scattered('round', 'gst-rounding')).toBe(false);
+    expect(scattered('ound', 'gst-rounding')).toBe(false);
+    expect(scattered('gst', 'main')).toBe(false);
   });
 });

@@ -6,7 +6,7 @@
 // first, then the window's actions; typing reaches everything.
 
 import type { Model } from './api';
-import { rank } from './fuzzy';
+import { fuzzyMatch, rank } from './fuzzy';
 
 export type PaletteTarget =
   | { kind: 'repo'; id: string }
@@ -125,7 +125,20 @@ export function search(items: PaletteItem[], query: string): { item: PaletteItem
   const pool = query.trim() ? items : items.filter((i) => i.idle);
   const order = new Map<PaletteItem, number>();
   [...pool].sort((a, b) => a.tier - b.tier || b.stamp - a.stamp).forEach((it, i) => order.set(it, i));
-  return rank(query, pool, (i) => i.text, (i) => order.get(i) ?? 0);
+  // Among equal scores, a row whose own name holds the query only as
+  // scattered letters ("gst" in ledger-recon-test, matched through its
+  // gst-rounding worktree) goes after the rest: its name is a coincidence.
+  const demoted = (i: PaletteItem) => (scattered(query, i.label) ? pool.length : 0);
+  return rank(query, pool, (i) => i.text, (i) => demoted(i) + (order.get(i) ?? 0));
+}
+
+/** `label` matches `query` only as a subsequence: some term is not a
+ *  contiguous run in it (a prefix, word start or any substring is one). */
+export function scattered(query: string, label: string): boolean {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length || !fuzzyMatch(query, label)) return false;
+  const l = label.toLowerCase();
+  return terms.some((t) => !l.includes(t));
 }
 
 /** Map positions in `text` onto the label for highlighting (the label is
