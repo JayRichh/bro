@@ -201,8 +201,31 @@ fn registry() -> Vec<String> {
         .collect()
 }
 
-fn paths() -> (std::path::PathBuf, std::path::PathBuf) {
-    (nebula_core::paths::config_path(), profiles::profiles_root())
+/// The layer the profiles come from, so the one an edit must change: the
+/// local layer's `profiles` list replaces config.json's whole (layers
+/// merge key by key), so when config.local.json holds one, every listed
+/// profile is from there.
+pub fn profiles_layer(config: &Path, local: &Path) -> std::path::PathBuf {
+    let local_holds = nebula_core::settings::read_object(local)
+        .ok()
+        .flatten()
+        .is_some_and(|obj| obj.contains_key(profiles::CONFIG_KEY));
+    if local_holds { local } else { config }.to_path_buf()
+}
+
+/// Run a profile edit on the layer the profiles come from. An edit of the
+/// local layer also holds config.json's lock, which the settings writers
+/// take for both layers.
+fn on_layer<T>(edit: impl FnOnce(&Path, &Path) -> Res<T>) -> Res<T> {
+    let config = nebula_core::paths::config_path();
+    let local = nebula_core::paths::config_local_path();
+    let layer = profiles_layer(&config, &local);
+    let _lock = if layer == local {
+        Some(nebula_core::settings::lock(&config).map_err(|e| e.to_string())?)
+    } else {
+        None
+    };
+    edit(&layer, &profiles::profiles_root())
 }
 
 /// Every profile, as sessions see them (the local layer over config.json).
@@ -219,26 +242,24 @@ pub fn profile_harnesses() -> Vec<String> {
 
 #[tauri::command]
 pub fn profile_add(form: ProfileForm) -> Res<ProfileSaved> {
-    let (config, root) = paths();
-    add_at(&config, &root, &registry(), form)
+    let registry = registry();
+    on_layer(|config, root| add_at(config, root, &registry, form))
 }
 
 #[tauri::command]
 pub fn profile_update(form: ProfileForm, keep_env: bool) -> Res<ProfileSaved> {
-    let (config, root) = paths();
-    update_at(&config, &root, &registry(), form, keep_env)
+    let registry = registry();
+    on_layer(|config, root| update_at(config, root, &registry, form, keep_env))
 }
 
 #[tauri::command]
 pub fn profile_remove(name: String) -> Res<ProfileSaved> {
-    let (config, root) = paths();
-    remove_at(&config, &root, &name)
+    on_layer(|config, root| remove_at(config, root, &name))
 }
 
 #[tauri::command]
 pub fn profile_set_default(name: String) -> Res<Vec<ProfileRow>> {
-    let (config, root) = paths();
-    set_default_at(&config, &root, &name)
+    on_layer(|config, root| set_default_at(config, root, &name))
 }
 
 #[cfg(test)]
@@ -398,6 +419,25 @@ mod wrappers {
             assert_eq!(super::profiles_list().len(), 1);
             super::profile_remove("work".into()).unwrap();
             assert!(super::profiles_list().is_empty());
+
+            // Profiles the local layer defines are edited there.
+            let config = dir.path().join("config.json");
+            let local = dir.path().join("config.local.json");
+            let config_before = std::fs::read_to_string(&config).unwrap();
+            std::fs::write(
+                &local,
+                r#"{"profiles": [{"name": "loc", "harness": "claude", "use_default": true}]}"#,
+            )
+            .unwrap();
+            assert_eq!(super::profiles_list()[0].name, "loc");
+            super::profile_set_default("loc".into()).unwrap();
+            let held: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&local).unwrap()).unwrap();
+            assert_eq!(held["profiles"][0]["default"], true);
+            super::profile_remove("loc".into()).unwrap();
+            assert!(super::profiles_list().is_empty());
+            assert_eq!(std::fs::read_to_string(&config).unwrap(), config_before);
+            assert!(!dir.path().join("config.json.lock").exists());
         });
 
         match keep_data {
