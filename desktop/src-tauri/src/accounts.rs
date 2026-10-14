@@ -1,22 +1,27 @@
-//! The rail's ACCOUNTS: every profile, plus each harness's own login
-//! (`@claude`) that is in use but has no profile, with its last plan
-//! usage, whether it is signed in, and the command that signs it in.
-//! Usage here is what is kept on disk (`nebula_core::usage`); the live
-//! `AccountUsage` events in the model take over once they arrive. The
-//! window never signs anyone in.
+//! The rail's ACCOUNTS: every profile (a broken one with what is wrong
+//! with it), plus each harness's own login (`@claude`) while it is in use,
+//! with its last plan usage, whether it is signed in, and the command that
+//! signs it in. Usage here is what is kept on disk (`nebula_core::usage`);
+//! the live `AccountUsage` events in the model take over once they arrive.
+//! The window signs nobody in itself: at most it opens a terminal and
+//! types the login command there, for the user to finish.
 
+use crate::daemon::Client;
 use crate::Res;
-use nebula_core::accounts::{self, LoginState};
+use nebula_core::accounts::{self, LoginCheck, LoginState};
 use nebula_core::profiles::{self, Profile};
 use nebula_core::usage::{self, AccountUsage};
+use nebula_core::{ClientRequest, SessionRef, TerminalId};
 use serde::Serialize;
 use std::path::Path;
+use std::sync::Arc;
 
 /// One account as the rail lists it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountRow {
-    /// The usage key: a profile's name, or `@<harness>`.
+    /// The usage key: a profile's name, or `@<harness>`; `!<n>` for the
+    /// n-th profile entry when it is broken (its name may be the trouble).
     pub key: String,
     /// What the rail shows: the profile's name, or the harness for its
     /// own login.
@@ -24,81 +29,116 @@ pub struct AccountRow {
     pub harness: String,
     /// False for a harness's own login (no profile to edit).
     pub profile: bool,
+    /// The default a launch naming no profile takes (`default_for`).
     pub default: bool,
+    /// Flagged default whether or not it is switched off: the star draws
+    /// dimmed, "default (disabled)", on one that is off.
+    pub flagged_default: bool,
     pub disabled: bool,
     pub use_default: bool,
+    /// Credentials found or not: not proof that they still work.
     pub login: LoginState,
-    /// `kete profile login <name>`, for the user to run.
+    /// The credentials say the login has run out (Claude's refresh token).
+    pub expired: bool,
+    /// The command that signs it in, for the user to run: `kete profile
+    /// login <name>`, or the CLI's own sign-in for its own login.
     pub login_hint: Option<String>,
+    /// Why a profile entry cannot be used; such a row has no usage, login
+    /// or switches, only the way to Settings, Profiles.
+    pub problem: Option<String>,
     pub usage: Option<AccountUsage>,
 }
 
-/// The rows: profiles in config order, then a harness's own login for
-/// each harness with no profile that has a reading or a session.
+/// The rows: profiles in config order (broken ones too, with their
+/// problem), then each harness's own login in `own` (the ones in use:
+/// `accounts::own_login_harnesses`).
 pub fn rows(
     all: &[Profile],
     readings: &[AccountUsage],
-    session_harnesses: &[String],
-    login: impl Fn(Option<&Profile>, &str) -> LoginState,
+    own: &[String],
+    login: impl Fn(Option<&Profile>, &str) -> LoginCheck,
 ) -> Vec<AccountRow> {
     let reading = |key: &str| readings.iter().find(|u| u.account == key).cloned();
     let mut out: Vec<AccountRow> = all
         .iter()
-        .filter(|p| p.problem().is_none())
-        .map(|p| AccountRow {
-            key: p.name.trim().to_string(),
-            name: p.name.trim().to_string(),
-            harness: p.harness.trim().to_string(),
-            profile: true,
-            default: profiles::default_for(all, &p.harness).is_some_and(|d| d.name == p.name),
-            disabled: p.disabled,
-            use_default: p.use_default,
-            login: login(Some(p), &p.harness),
-            login_hint: profiles::login_hint(p),
-            usage: reading(p.name.trim()),
+        .enumerate()
+        .map(|(i, p)| {
+            let name = p.name.trim().to_string();
+            let harness = p.harness.trim().to_string();
+            if let Some(problem) = p.problem() {
+                return AccountRow {
+                    key: format!("!{i}"),
+                    name: if name.is_empty() {
+                        "(no name)".into()
+                    } else {
+                        name
+                    },
+                    harness,
+                    profile: true,
+                    default: false,
+                    flagged_default: false,
+                    disabled: p.disabled,
+                    use_default: p.use_default,
+                    login: LoginState::Unknown,
+                    expired: false,
+                    login_hint: None,
+                    problem: Some(problem),
+                    usage: None,
+                };
+            }
+            let check = login(Some(p), &harness);
+            AccountRow {
+                key: name.clone(),
+                default: profiles::default_for(all, &harness).is_some_and(|d| d.name == p.name),
+                flagged_default: profiles::flagged_default(all, &harness)
+                    .is_some_and(|d| d.name == p.name),
+                disabled: p.disabled,
+                use_default: p.use_default,
+                login: check.state,
+                expired: check.expired,
+                login_hint: accounts::login_command(Some(p), &harness),
+                problem: None,
+                usage: reading(&name),
+                profile: true,
+                name,
+                harness,
+            }
         })
         .collect();
-    let mut own: Vec<String> = readings
-        .iter()
-        .filter_map(|u| usage::default_login_harness(&u.account).map(str::to_string))
-        .chain(session_harnesses.iter().cloned())
-        .collect();
-    own.sort();
-    own.dedup();
     for harness in own {
-        if all.iter().any(|p| p.harness.trim() == harness) {
-            continue;
-        }
-        let key = usage::account_key(None, &harness);
+        let key = usage::account_key(None, harness);
+        let check = login(None, harness);
         out.push(AccountRow {
             usage: reading(&key),
             key,
             name: harness.clone(),
             profile: false,
             default: false,
+            flagged_default: false,
             disabled: false,
             use_default: true,
-            login: login(None, &harness),
-            login_hint: None,
-            harness,
+            login: check.state,
+            expired: check.expired,
+            login_hint: accounts::login_command(None, harness),
+            problem: None,
+            harness: harness.clone(),
         });
     }
     out
 }
 
-/// The harnesses kete has sessions of that accounts track (the ones with
-/// a known login: claude, codex, copilot).
-fn session_harnesses(model: &crate::daemon::Model) -> Vec<String> {
-    let mut out: Vec<String> = model
-        .agents
-        .iter()
-        .filter(|a| !a.archived)
-        .map(|a| a.kind.as_str().to_string())
-        .filter(|h| matches!(h.as_str(), "claude" | "codex" | "copilot"))
-        .collect();
-    out.sort();
-    out.dedup();
-    out
+/// The own logins in use: a kept reading under `@<harness>`, or a live
+/// session of the harness with no profile.
+fn own_logins(readings: &[AccountUsage], model: &crate::daemon::Model) -> Vec<String> {
+    accounts::own_login_harnesses(readings.iter().map(|u| u.account.as_str()), &model.agents)
+}
+
+fn list_in(root: &Path, all: &[Profile], model: &crate::daemon::Model) -> Vec<AccountRow> {
+    let readings = usage::read_all_in(root);
+    let now = nebula_core::clock::now_ms();
+    rows(all, &readings, &own_logins(&readings, model), |p, h| {
+        accounts::login_check_in(p, h, root, now)
+    })
 }
 
 #[cfg(test)]
@@ -108,12 +148,7 @@ fn list_at(config: &Path, root: &Path, model: &crate::daemon::Model) -> Vec<Acco
         .flatten()
         .map(|obj| profiles::from_settings(&obj))
         .unwrap_or_default();
-    rows(
-        &all,
-        &usage::read_all_in(root),
-        &session_harnesses(model),
-        |p, h| accounts::login_state_in(p, h, root),
-    )
+    list_in(root, &all, model)
 }
 
 pub fn set_enabled_at(config: &Path, name: &str, enabled: bool) -> Res<()> {
@@ -121,16 +156,11 @@ pub fn set_enabled_at(config: &Path, name: &str, enabled: bool) -> Res<()> {
 }
 
 #[tauri::command]
-pub fn accounts_list(
-    client: tauri::State<'_, std::sync::Arc<crate::daemon::Client>>,
-) -> Vec<AccountRow> {
-    let all = profiles::load();
-    let root = profiles::profiles_root();
-    rows(
-        &all,
-        &usage::read_all_in(&root),
-        &session_harnesses(&client.snapshot()),
-        accounts::login_state,
+pub fn accounts_list(client: tauri::State<'_, Arc<Client>>) -> Vec<AccountRow> {
+    list_in(
+        &profiles::profiles_root(),
+        &profiles::load(),
+        &client.snapshot(),
     )
 }
 
@@ -139,6 +169,39 @@ pub fn profile_set_enabled(name: String, enabled: bool) -> Res<()> {
     // The layer the profiles come from, under the config lock, as every
     // other profile edit.
     crate::profiles::on_layer(|config, _| set_enabled_at(config, &name, enabled))
+}
+
+/// A new shell in `worktree` with `line` typed into it and Enter pressed;
+/// its terminal id. The shell buffers what arrives before its prompt.
+pub async fn run_in_new_terminal(client: &Client, worktree: String, line: &str) -> Res<String> {
+    let terminal = crate::new_terminal(client, worktree).await?;
+    client
+        .send(ClientRequest::Input {
+            session: SessionRef::Terminal(TerminalId(terminal.clone())),
+            data: format!("{line}\r").into_bytes(),
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(terminal)
+}
+
+/// The rail's "Run login": the account's login command (looked up here,
+/// never taken from the window), run in a new terminal in `worktree`.
+#[tauri::command]
+pub async fn account_login_run(
+    client: tauri::State<'_, Arc<Client>>,
+    worktree: String,
+    key: String,
+) -> Res<String> {
+    let line = list_in(
+        &profiles::profiles_root(),
+        &profiles::load(),
+        &client.snapshot(),
+    )
+    .into_iter()
+    .find(|r| r.key == key)
+    .and_then(|r| r.login_hint)
+    .ok_or_else(|| format!("no login command for `{key}`"))?;
+    run_in_new_terminal(&client, worktree, &line).await
 }
 
 #[cfg(test)]
@@ -175,13 +238,20 @@ mod tests {
         }
     }
 
+    fn signed_in(_: Option<&Profile>, _: &str) -> LoginCheck {
+        LoginCheck {
+            state: LoginState::LoggedIn,
+            expired: false,
+        }
+    }
+
     #[test]
     fn with_no_profiles_the_harness_own_login_is_the_account() {
         let rows = rows(
             &[],
             &[reading("@claude", "claude")],
             &["claude".into(), "codex".into()],
-            |_, _| LoginState::LoggedIn,
+            signed_in,
         );
         let keys: Vec<&str> = rows.iter().map(|r| r.key.as_str()).collect();
         assert_eq!(keys, ["@claude", "@codex"]);
@@ -189,11 +259,15 @@ mod tests {
         assert!(!rows[0].profile);
         assert_eq!(rows[0].usage.as_ref().unwrap().windows[0].percent, 34.0);
         assert!(rows[1].usage.is_none(), "a session but no reading yet");
-        assert_eq!(rows[0].login_hint, None, "an own login has no kete login");
+        assert_eq!(
+            rows[0].login_hint.as_deref(),
+            Some("claude auth login --claudeai"),
+            "an own login signs in with the CLI's own command"
+        );
     }
 
     #[test]
-    fn profiles_come_first_and_hide_their_harness_own_login() {
+    fn profiles_come_first_then_the_own_logins_in_use() {
         let mut work = profile("work", "claude");
         work.default = true;
         let mut off = profile("off", "claude");
@@ -202,16 +276,19 @@ mod tests {
             &[work, off, profile("gh2", "copilot")],
             &[reading("@claude", "claude"), reading("work", "claude")],
             &["claude".into()],
-            |p, _| match p {
-                Some(p) if p.name == "gh2" => LoginState::NeedsLogin,
-                _ => LoginState::LoggedIn,
+            |p, _| LoginCheck {
+                state: match p {
+                    Some(p) if p.name == "gh2" => LoginState::NeedsLogin,
+                    _ => LoginState::LoggedIn,
+                },
+                expired: false,
             },
         );
         let keys: Vec<&str> = rows.iter().map(|r| r.key.as_str()).collect();
         assert_eq!(
             keys,
-            ["work", "off", "gh2"],
-            "no @claude beside claude profiles"
+            ["work", "off", "gh2", "@claude"],
+            "the own login in use shows beside the claude profiles"
         );
         assert!(rows[0].default && rows[0].usage.is_some());
         assert!(rows[1].disabled);
@@ -220,6 +297,38 @@ mod tests {
             rows[2].login_hint.as_deref(),
             Some("kete profile login gh2")
         );
+    }
+
+    /// A switched-off default keeps a dimmed star: flagged, not in force.
+    /// An adopted login has a login command too.
+    #[test]
+    fn a_disabled_default_stays_flagged_and_every_profile_can_sign_in() {
+        let mut main = profile("main", "claude");
+        main.default = true;
+        main.disabled = true;
+        main.use_default = true;
+        let rows = rows(&[main], &[], &[], signed_in);
+        assert!(!rows[0].default && rows[0].flagged_default);
+        assert_eq!(
+            rows[0].login_hint.as_deref(),
+            Some("kete profile login main")
+        );
+    }
+
+    #[test]
+    fn a_broken_profile_is_listed_with_its_problem() {
+        let rows = rows(
+            &[profile("bad name", "claude"), profile("", "claude")],
+            &[reading("bad name", "claude")],
+            &[],
+            |_, _| panic!("a broken profile's login is never looked up"),
+        );
+        assert_eq!(rows[0].key, "!0");
+        assert_eq!(rows[0].name, "bad name");
+        assert!(rows[0].problem.as_deref().unwrap().contains("letters"));
+        assert!(rows[0].usage.is_none() && rows[0].login_hint.is_none());
+        assert_eq!(rows[1].key, "!1");
+        assert_eq!(rows[1].name, "(no name)");
     }
 
     #[test]
@@ -267,5 +376,29 @@ mod tests {
         assert!(!std::fs::read_to_string(&config)
             .unwrap()
             .contains("disabled"));
+    }
+
+    /// Run login: a shell in the worktree, the command typed into it.
+    #[tokio::test]
+    async fn run_login_opens_a_shell_and_types_the_command() {
+        use crate::sessions::testkit::run;
+        use nebula_core::EntityId;
+        let (client, mut rx) = Client::connected_for_test();
+        let (out, seen) = run(
+            &client,
+            &mut rx,
+            run_in_new_terminal(&client, "w1".into(), "kete profile login work"),
+            |_| Ok(Some(EntityId::Terminal(TerminalId("t9".into())))),
+        )
+        .await;
+        assert_eq!(out.unwrap(), "t9");
+        assert!(
+            matches!(&seen[0], ClientRequest::CreateTerminal { worktree, .. } if worktree.0 == "w1")
+        );
+        let ClientRequest::Input { session, data } = &seen[1] else {
+            panic!("{seen:?}")
+        };
+        assert_eq!(*session, SessionRef::Terminal(TerminalId("t9".into())));
+        assert_eq!(data, b"kete profile login work\r");
     }
 }
