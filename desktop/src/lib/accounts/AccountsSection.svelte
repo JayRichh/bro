@@ -157,8 +157,8 @@
             <button
               class="hidden size-[16px] flex-none place-items-center border-0 bg-transparent p-0 text-muted group-hover:grid hover:text-ink focus-visible:grid"
               onclick={() => focusQuickPrompt({ harness: r.harness, profile: r.profile ? r.name : undefined })}
-              title="Start a session with {r.name}"
-              aria-label="Start a session with {r.name}"
+              title={r.profile ? `Start a session with ${r.name}` : `Start a ${r.harness} session (auto picks the account)`}
+              aria-label={r.profile ? `Start a session with ${r.name}` : `Start a ${r.harness} session`}
             >
               <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M5 1v8M1 5h8" stroke="currentColor" stroke-width="1.3" /></svg>
             </button>
