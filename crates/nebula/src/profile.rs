@@ -11,6 +11,7 @@
 use anyhow::{bail, Context, Result};
 use nebula_core::profiles::{self, Profile};
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 /// What `kete profile` was asked to do.
 pub enum ProfileOp {
@@ -36,7 +37,10 @@ pub enum ProfileOp {
 }
 
 pub fn run_profile(op: ProfileOp) -> Result<()> {
-    let config = nebula_core::paths::config_path();
+    let config = profiles_layer(
+        &nebula_core::paths::config_path(),
+        &nebula_core::paths::config_local_path(),
+    )?;
     match op {
         ProfileOp::List => list(),
         ProfileOp::Add {
@@ -237,6 +241,74 @@ fn login_command(program: &str, args: &[String]) -> Result<std::process::Command
     let mut command = std::process::Command::new(program);
     command.args(args);
     Ok(command)
+}
+
+/// The settings layer an edit of the PROFILES list goes to: the one whose
+/// `profiles` key is in force. Layers merge key by key, so a
+/// `config.local.json` with a `profiles` key replaces `config.json`'s
+/// list whole, and an edit there is the only one that shows. A local layer
+/// that is there but unreadable is refused: there is no telling which list
+/// is in force.
+fn profiles_layer(config: &Path, local: &Path) -> Result<PathBuf> {
+    let held = nebula_core::settings::read_object(local)
+        .map_err(|e| anyhow::anyhow!("{}: {e}: fix it, then try again", local.display()))?;
+    Ok(
+        if held.is_some_and(|obj| obj.contains_key(profiles::CONFIG_KEY)) {
+            local.to_path_buf()
+        } else {
+            config.to_path_buf()
+        },
+    )
+}
+
+#[cfg(test)]
+mod layer_tests {
+    use super::*;
+
+    fn layers(dir: &Path) -> (PathBuf, PathBuf) {
+        (dir.join("config.json"), dir.join("config.local.json"))
+    }
+
+    #[test]
+    fn profiles_edit_the_base_layer_unless_the_local_one_holds_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let (config, local) = layers(dir.path());
+        assert_eq!(profiles_layer(&config, &local).unwrap(), config);
+        std::fs::write(&local, r#"{"theme": "rose"}"#).unwrap();
+        assert_eq!(profiles_layer(&config, &local).unwrap(), config);
+        std::fs::write(&local, r#"{"profiles": []}"#).unwrap();
+        assert_eq!(profiles_layer(&config, &local).unwrap(), local);
+        std::fs::write(&local, "{ not json").unwrap();
+        assert!(profiles_layer(&config, &local).is_err());
+    }
+
+    /// An add lands where `profiles::load` reads it back from.
+    #[test]
+    fn an_added_profile_is_one_the_merged_settings_show() {
+        let dir = tempfile::tempdir().unwrap();
+        let (config, local) = layers(dir.path());
+        std::fs::write(
+            &config,
+            r#"{"profiles": [{"name": "base", "harness": "claude"}]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &local,
+            r#"{"profiles": [{"name": "work", "harness": "claude"}]}"#,
+        )
+        .unwrap();
+        let profile: Profile =
+            serde_json::from_value(serde_json::json!({"name": "home", "harness": "claude"}))
+                .unwrap();
+        profiles::add_to_file(&profiles_layer(&config, &local).unwrap(), &profile).unwrap();
+        let merged: Vec<String> =
+            profiles::from_settings(&nebula_core::settings::read_object(&local).unwrap().unwrap())
+                .into_iter()
+                .map(|p| p.name)
+                .collect();
+        assert_eq!(merged, ["work", "home"]);
+        assert!(!std::fs::read_to_string(&config).unwrap().contains("home"));
+    }
 }
 
 /// Delete a PROFILE HOME — only ever a directory directly inside
