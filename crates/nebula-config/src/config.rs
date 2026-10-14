@@ -1699,14 +1699,27 @@ impl Config {
             "Config::save() in a test without a path override: wrap the \
              test body in config::with_config_path (or with_default_config)"
         );
-        self.write_layers(&settings_path(), &local_settings_path(), false, None)
+        self.save_layers(&settings_path(), &local_settings_path())
+    }
+
+    /// [`Config::save`] on explicit layers: one read of both under the
+    /// settings lock, this config's known keys patched in, and only a file
+    /// whose contents changed written back. A layer that is there but can't
+    /// be parsed is an error and nothing is written.
+    fn save_layers(&self, path: &Path, local: &Path) -> std::io::Result<()> {
+        let _lock = nebula_core::settings::lock(path)?;
+        let mut layers = Layers::read(path, local)?;
+        self.patch_layers(&mut layers, None);
+        layers.commit(path, local, false)
     }
 
     /// Put every setting back to its default and return the result.
     /// `config.json` is rewritten from scratch rather than patched like
     /// [`Config::save`] and `config.local.json` is removed, so keys the
     /// overlay doesn't own — anything hand-added — go too: a reset reads as
-    /// if neither file had ever been edited.
+    /// if neither file had ever been edited. A layer that can't be parsed
+    /// is copied to `<name>.bak` first, so the reset never destroys a hand
+    /// edit with one typo in it.
     pub fn reset_to_defaults() -> std::io::Result<Self> {
         #[cfg(any(test, feature = "test-support"))]
         assert!(
@@ -1714,13 +1727,26 @@ impl Config {
             "Config::reset_to_defaults() in a test without a path override: wrap \
              the test body in config::with_config_path (or with_default_config)"
         );
-        let local = local_settings_path();
-        match std::fs::remove_file(&local) {
+        Self::reset_layers(&settings_path(), &local_settings_path())
+    }
+
+    fn reset_layers(path: &Path, local: &Path) -> std::io::Result<Self> {
+        let _lock = nebula_core::settings::lock(path)?;
+        for layer in [path, local] {
+            if strict_object(layer).is_err() {
+                let mut bak = layer.as_os_str().to_owned();
+                bak.push(".bak");
+                std::fs::copy(layer, PathBuf::from(bak))?;
+            }
+        }
+        match std::fs::remove_file(local) {
             Err(err) if err.kind() != std::io::ErrorKind::NotFound => return Err(err),
             _ => {}
         }
         let cfg = Self::default();
-        cfg.write_layers(&settings_path(), &local, true, None)?;
+        let mut layers = Layers::default();
+        cfg.patch_layers(&mut layers, None);
+        layers.commit(path, local, true)?;
         Ok(cfg)
     }
 
@@ -1753,7 +1779,35 @@ impl Config {
         local: &Path,
         change: impl FnOnce(&mut Config),
     ) -> std::io::Result<Config> {
-        let before = load_layers(path, local);
+        Self::update_with_raw(path, local, change, None)
+    }
+
+    /// [`Config::update_in`], plus one top-level key `Config` has no field
+    /// for (the window's `desktop` object) set from its stored value by
+    /// `raw` — both in the same read and the same write, under one lock.
+    pub fn update_in_with_raw(
+        path: &Path,
+        local: &Path,
+        change: impl FnOnce(&mut Config),
+        key: &str,
+        raw: impl FnOnce(Option<&serde_json::Value>) -> std::io::Result<serde_json::Value>,
+    ) -> std::io::Result<Config> {
+        Self::update_with_raw(path, local, change, Some((key, Box::new(raw))))
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn update_with_raw<'a>(
+        path: &Path,
+        local: &Path,
+        change: impl FnOnce(&mut Config),
+        raw: Option<(
+            &str,
+            Box<dyn FnOnce(Option<&serde_json::Value>) -> std::io::Result<serde_json::Value> + 'a>,
+        )>,
+    ) -> std::io::Result<Config> {
+        let _lock = nebula_core::settings::lock(path)?;
+        let mut layers = Layers::read(path, local)?;
+        let before = layers.config();
         let mut after = before.clone();
         change(&mut after);
         let old = serde_json::to_value(&before).map_err(invalid_data)?;
@@ -1768,8 +1822,13 @@ impl Config {
             _ => BTreeSet::new(),
         };
         if !changed.is_empty() {
-            after.write_layers(path, local, false, Some(&changed))?;
+            after.patch_layers(&mut layers, Some(&changed));
         }
+        if let Some((key, raw)) = raw {
+            let value = raw(layers.raw(key))?;
+            layers.set_raw(key, value);
+        }
+        layers.commit(path, local, false)?;
         Ok(after)
     }
 
@@ -1779,34 +1838,20 @@ impl Config {
         load_layers(path, local)
     }
 
-    /// Write this config's known keys into the two layers and swap each
-    /// file that changed into place atomically. `fresh` starts `config.json`
-    /// from an empty object instead of patching what is there. `only`
-    /// limits the write to those keys ([`Config::update`]); a key in it the
-    /// config no longer serializes (an emptied, skip-if-empty map) is
-    /// removed from whichever layer holds it.
-    fn write_layers(
-        &self,
-        path: &Path,
-        local: &Path,
-        fresh: bool,
-        only: Option<&BTreeSet<String>>,
-    ) -> std::io::Result<()> {
-        use nebula_core::settings;
-        let mut root = if fresh {
-            settings::Object::new()
-        } else {
-            patchable_object(path)?
-        };
-        // A local layer that isn't a readable object was ignored on load,
-        // so it holds no keys — and is never rewritten from a partial view.
-        let mut local_root = settings::read_object(local).ok().flatten();
-        let serde_json::Value::Object(known) = serde_json::to_value(self).map_err(invalid_data)?
+    /// Patch this config's known keys into `layers`: a key the local layer
+    /// holds goes back into it, every other key into `config.json`'s
+    /// object. `only` limits the patch to those keys ([`Config::update`]);
+    /// a key in it the config no longer serializes (an emptied,
+    /// skip-if-empty map) is removed from whichever layer holds it.
+    fn patch_layers(&self, layers: &mut Layers, only: Option<&BTreeSet<String>>) {
+        let root = &mut layers.root;
+        let local_root = &mut layers.local;
+        let serde_json::Value::Object(known) =
+            serde_json::to_value(self).expect("Config serializes")
         else {
             unreachable!("Config serializes to a JSON object");
         };
-        let defaults = serde_json::to_value(Self::default()).map_err(invalid_data)?;
-        let mut local_changed = false;
+        let defaults = serde_json::to_value(Self::default()).expect("Config serializes");
         for (old, new) in RENAMED_KEYS {
             let moved = root.remove(*old);
             // A partial write (`only`) may not rewrite the new key: carry the
@@ -1819,7 +1864,6 @@ impl Config {
             if let Some(held) = local_root.as_mut() {
                 if let Some(value) = held.remove(*old) {
                     held.entry(new.to_string()).or_insert(value);
-                    local_changed = true;
                 }
             }
         }
@@ -1827,7 +1871,7 @@ impl Config {
             for key in only.iter().filter(|key| !known.contains_key(*key)) {
                 root.remove(key);
                 if let Some(held) = local_root.as_mut() {
-                    local_changed |= held.remove(key).is_some();
+                    held.remove(key);
                 }
             }
         }
@@ -1842,21 +1886,13 @@ impl Config {
             }
             match local_root.as_mut() {
                 Some(held) if held.contains_key(&key) => {
-                    if held.get(&key) != Some(&value) {
-                        held.insert(key, value);
-                        local_changed = true;
-                    }
+                    held.insert(key, value);
                 }
                 _ => {
                     root.insert(key, value);
                 }
             }
         }
-        settings::write_json(path, &serde_json::Value::Object(root))?;
-        if let (true, Some(held)) = (local_changed, local_root) {
-            settings::write_json(local, &serde_json::Value::Object(held))?;
-        }
-        Ok(())
     }
 
     /// `session_pane` as one of [`PANE_SIDES`]: the side the LAUNCHER
@@ -3044,18 +3080,113 @@ pub fn load_from(path: &Path) -> Config {
     load_layers(path, &sibling_local_path(path))
 }
 
-/// The object a settings file holds, to patch keys into: empty when the
-/// file is missing or isn't a JSON object (the save replaces it, as it
-/// always has), an error only when the file is there and can't be read.
-fn patchable_object(path: &Path) -> std::io::Result<nebula_core::settings::Object> {
-    match std::fs::read_to_string(path) {
-        Ok(raw) => Ok(match serde_json::from_str(&raw) {
-            Ok(serde_json::Value::Object(obj)) => obj,
-            _ => nebula_core::settings::Object::new(),
-        }),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Default::default()),
-        Err(err) => Err(err),
+/// The two settings layers as one writer read them, under the lock: what
+/// each file held, and the objects being patched. A file is written back
+/// only when its object changed.
+#[derive(Default)]
+struct Layers {
+    root: nebula_core::settings::Object,
+    root_read: nebula_core::settings::Object,
+    /// None while there is no `config.local.json`.
+    local: Option<nebula_core::settings::Object>,
+    local_read: Option<nebula_core::settings::Object>,
+}
+
+impl Layers {
+    /// Both layers, once. A file that is there but isn't a JSON object
+    /// (malformed, a trailing comma, a list) is an error: a writer that went
+    /// on would replace the user's file with defaults.
+    fn read(path: &Path, local: &Path) -> std::io::Result<Layers> {
+        let root = strict_object(path)?;
+        let local = local.exists().then(|| strict_object(local)).transpose()?;
+        Ok(Layers {
+            root_read: root.clone(),
+            root,
+            local_read: local.clone(),
+            local,
+        })
     }
+
+    /// The config the layers hold, as [`Config::load`] reads it.
+    fn config(&self) -> Config {
+        let mut merged = self.root.clone();
+        if let Some(local) = &self.local {
+            merged.extend(local.clone());
+        }
+        let (value, skipped) = nebula_core::settings::parse_lenient::<Config>(&merged);
+        if !skipped.is_empty() {
+            tracing::warn!(keys = ?skipped, "settings this build can't read keep their defaults");
+        }
+        Config { skipped, ..value }
+    }
+
+    /// One raw top-level key, the local layer's over `config.json`'s.
+    fn raw(&self, key: &str) -> Option<&serde_json::Value> {
+        self.local
+            .as_ref()
+            .and_then(|held| held.get(key))
+            .or_else(|| self.root.get(key))
+    }
+
+    /// Set one raw key where it lives: the local layer when that holds it,
+    /// else `config.json`.
+    fn set_raw(&mut self, key: &str, value: serde_json::Value) {
+        match self.local.as_mut() {
+            Some(held) if held.contains_key(key) => {
+                held.insert(key.to_string(), value);
+            }
+            _ => {
+                self.root.insert(key.to_string(), value);
+            }
+        }
+    }
+
+    /// Write each layer whose object changed (`config.json` always when
+    /// `force_root`), atomically.
+    fn commit(self, path: &Path, local: &Path, force_root: bool) -> std::io::Result<()> {
+        use nebula_core::settings;
+        if force_root || self.root != self.root_read {
+            settings::write_json(path, &serde_json::Value::Object(self.root))?;
+        }
+        if let Some(held) = self
+            .local
+            .filter(|held| Some(held) != self.local_read.as_ref())
+        {
+            settings::write_json(local, &serde_json::Value::Object(held))?;
+        }
+        Ok(())
+    }
+}
+
+/// The object a settings file holds: empty when there is no file, an error
+/// naming the file when it is there and can't be read or parsed as one.
+fn strict_object(path: &Path) -> std::io::Result<nebula_core::settings::Object> {
+    let raw = match std::fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Default::default()),
+        Err(err) => return Err(err),
+    };
+    let refuse = |why: String| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "{} can't be parsed ({why}); nothing was written. Fix or remove the file",
+                path.display()
+            ),
+        )
+    };
+    match serde_json::from_str(nebula_core::settings::strip_bom(&raw)) {
+        Ok(serde_json::Value::Object(obj)) => Ok(obj),
+        Ok(_) => Err(refuse("not a JSON object".into())),
+        Err(err) => Err(refuse(err.to_string())),
+    }
+}
+
+/// Why a write to the layers at `path` / `local` would be refused right
+/// now — a file that can't be parsed — for a window to show before the user
+/// edits anything. None when both read.
+pub fn write_blocker(path: &Path, local: &Path) -> Option<String> {
+    Layers::read(path, local).err().map(|err| err.to_string())
 }
 
 fn invalid_data(err: serde_json::Error) -> std::io::Error {
@@ -3105,7 +3236,7 @@ pub fn with_config_path<T>(path: PathBuf, f: impl FnOnce() -> T) -> T {
 impl Config {
     /// [`Config::save`] into `path`, with its local layer beside it.
     pub fn save_to(&self, path: &Path) -> std::io::Result<()> {
-        self.write_layers(path, &sibling_local_path(path), false, None)
+        self.save_layers(path, &sibling_local_path(path))
     }
 }
 
@@ -3160,16 +3291,24 @@ pub fn patch_raw_key(
     key: &str,
     value: serde_json::Value,
 ) -> std::io::Result<()> {
-    use nebula_core::settings;
-    if let Some(mut held) = settings::read_object(local).ok().flatten() {
-        if held.contains_key(key) {
-            held.insert(key.to_string(), value);
-            return settings::write_json(local, &serde_json::Value::Object(held));
-        }
-    }
-    let mut root = patchable_object(path)?;
-    root.insert(key.to_string(), value);
-    settings::write_json(path, &serde_json::Value::Object(root))
+    update_raw_key(path, local, key, |_| Ok(value)).map(|_| ())
+}
+
+/// Set one raw top-level key from its stored value (None when neither
+/// layer holds it) in one locked read and write, as [`patch_raw_key`]
+/// places it. Returns the value written.
+pub fn update_raw_key(
+    path: &Path,
+    local: &Path,
+    key: &str,
+    change: impl FnOnce(Option<&serde_json::Value>) -> std::io::Result<serde_json::Value>,
+) -> std::io::Result<serde_json::Value> {
+    let _lock = nebula_core::settings::lock(path)?;
+    let mut layers = Layers::read(path, local)?;
+    let value = change(layers.raw(key))?;
+    layers.set_raw(key, value.clone());
+    layers.commit(path, local, false)?;
+    Ok(value)
 }
 
 /// One top-level key out of the merged layers, `local` over `path`, raw.
@@ -3234,7 +3373,7 @@ mod update_tests {
         std::fs::write(&local, r#"{"theme": "forest"}"#).unwrap();
         Config::update_in(&path, &local, |cfg| cfg.theme = "rose".into()).unwrap();
         assert_eq!(read(&local), json!({"theme": "rose"}));
-        assert!(read(&path).get("theme").is_none());
+        assert!(!path.exists(), "config.json, unchanged, is not written");
     }
 
     #[test]
@@ -3289,5 +3428,135 @@ mod update_tests {
             read_raw_key(&path, &local, "desktop"),
             Some(json!({"theme": "light"}))
         );
+    }
+
+    /// What Notepad leaves after a hand edit with one typo: a byte order
+    /// mark, and a trailing comma.
+    const BROKEN: &str = "\u{feff}{\n  \"theme\": \"rose\",\n  \"profiles\": [],\n}\n";
+
+    fn assert_refused(err: impl std::fmt::Display, path: &Path) {
+        let err = err.to_string();
+        assert!(err.contains("can't be parsed"), "{err}");
+        assert!(err.contains("nothing was written"), "{err}");
+        assert_eq!(std::fs::read_to_string(path).unwrap(), BROKEN, "untouched");
+        assert!(
+            !path.with_file_name("config.json.lock").exists(),
+            "lock let go"
+        );
+    }
+
+    #[test]
+    fn a_byte_order_mark_is_read_and_written_past() {
+        let dir = tempfile::tempdir().unwrap();
+        let (path, local) = layers(&dir);
+        std::fs::write(&path, "\u{feff}{\"theme\": \"rose\", \"x\": 1}").unwrap();
+        assert_eq!(Config::load_at(&path, &local).theme, "rose");
+        Config::update_in(&path, &local, |cfg| cfg.kanban = true).unwrap();
+        assert_eq!(read(&path)["theme"], "rose");
+        assert_eq!(read(&path)["x"], 1);
+        assert_eq!(read(&path)["kanban"], true);
+    }
+
+    #[test]
+    fn no_writer_replaces_a_settings_file_it_cannot_parse() {
+        let dir = tempfile::tempdir().unwrap();
+        let (path, local) = layers(&dir);
+        std::fs::write(&path, BROKEN).unwrap();
+        assert_refused(
+            Config::update_in(&path, &local, |cfg| cfg.kanban = true).unwrap_err(),
+            &path,
+        );
+        assert_refused(Config::default().save_to(&path).unwrap_err(), &path);
+        assert_refused(
+            patch_raw_key(&path, &local, "desktop", json!({})).unwrap_err(),
+            &path,
+        );
+        assert_refused(
+            crate::desktop::DesktopPrefs::update_in(&path, &local, |p| p.set("theme", "dark"))
+                .unwrap_err(),
+            &path,
+        );
+        assert_refused(crate::schema::reset_in(&path, &local).unwrap_err(), &path);
+        assert!(write_blocker(&path, &local)
+            .unwrap()
+            .contains("config.json can't be parsed"));
+    }
+
+    #[test]
+    fn a_broken_local_layer_is_refused_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let (path, local) = layers(&dir);
+        std::fs::write(&path, r#"{"theme": "rose"}"#).unwrap();
+        std::fs::write(&local, "[1,").unwrap();
+        let err = Config::update_in(&path, &local, |cfg| cfg.kanban = true).unwrap_err();
+        assert!(err.to_string().contains("config.local.json"), "{err}");
+        assert_eq!(read(&path), json!({"theme": "rose"}));
+        assert_eq!(std::fs::read_to_string(&local).unwrap(), "[1,");
+        assert!(write_blocker(&path, &local).is_some());
+        std::fs::remove_file(&local).unwrap();
+        assert_eq!(write_blocker(&path, &local), None);
+    }
+
+    #[test]
+    fn a_terminal_reset_backs_a_broken_file_up_before_replacing_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (path, local) = layers(&dir);
+        std::fs::write(&path, BROKEN).unwrap();
+        std::fs::write(&local, "{\"theme\": \"sand\"}").unwrap();
+        let cfg = Config::reset_layers(&path, &local).unwrap();
+        assert_eq!(cfg.theme, Config::default().theme);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("config.json.bak")).unwrap(),
+            BROKEN
+        );
+        assert!(
+            !dir.path().join("config.local.json.bak").exists(),
+            "it parsed"
+        );
+        assert!(!local.exists());
+        assert!(read(&path).is_object());
+    }
+
+    #[test]
+    fn a_change_to_the_local_layer_leaves_config_json_unwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let (path, local) = layers(&dir);
+        // Hand formatted: a rewrite would reflow it.
+        let hand = "{\"kanban\": false,   \"x\": [1,2]}";
+        std::fs::write(&path, hand).unwrap();
+        std::fs::write(&local, r#"{"theme": "forest"}"#).unwrap();
+        Config::update_in(&path, &local, |cfg| cfg.theme = "rose".into()).unwrap();
+        assert_eq!(read(&local), json!({"theme": "rose"}));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), hand);
+        // A save that changes nothing writes nothing either.
+        let cfg = Config::load_at(&path, &local);
+        cfg.save_layers(&path, &local).unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        cfg.save_layers(&path, &local).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), saved);
+    }
+
+    #[test]
+    fn a_reset_is_one_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let (path, local) = layers(&dir);
+        std::fs::write(
+            &path,
+            r#"{"kanban": true, "desktop": {"theme": "dark", "future": 1}}"#,
+        )
+        .unwrap();
+        let held = nebula_core::settings::lock(&path).unwrap();
+        let reset = {
+            let (path, local) = (path.clone(), local.clone());
+            std::thread::spawn(move || crate::schema::reset_in(&path, &local))
+        };
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert_eq!(read(&path)["kanban"], true, "waits on the lock");
+        drop(held);
+        reset.join().unwrap().unwrap();
+        let after = read(&path);
+        assert_eq!(after["kanban"], false);
+        assert_eq!(after["desktop"]["theme"], "system");
+        assert_eq!(after["desktop"]["future"], 1);
     }
 }

@@ -833,18 +833,19 @@ pub fn reset_config(cfg: &mut Config) {
     }
 }
 
-/// [`reset_config`] and the window's preferences, written to the layers.
+/// [`reset_config`] and the window's preferences, written to the layers
+/// in one read and one write.
 pub fn reset_in(path: &Path, local: &Path) -> Result<(), String> {
-    Config::update_in(path, local, reset_config).map_err(|e| e.to_string())?;
-    DesktopPrefs::update_in(path, local, |p| {
-        let other = std::mem::take(&mut p.other);
-        *p = DesktopPrefs {
+    Config::update_in_with_raw(path, local, reset_config, crate::desktop::KEY, |stored| {
+        let other = DesktopPrefs::from_raw(stored.cloned()).other;
+        let prefs = DesktopPrefs {
             other,
             ..DesktopPrefs::default()
         };
-        Ok(())
+        serde_json::to_value(&prefs).map_err(std::io::Error::other)
     })
     .map(|_| ())
+    .map_err(|e| e.to_string())
 }
 
 /// Every overlay row the window renders, for the parity check.

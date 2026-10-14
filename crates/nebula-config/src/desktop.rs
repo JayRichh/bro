@@ -55,7 +55,12 @@ impl DesktopPrefs {
     /// unreadable object is the defaults, and a word off its list is that
     /// preference's default — never an error the window has to show.
     pub fn load_at(path: &Path, local: &Path) -> Self {
-        let raw = crate::read_raw_key(path, local, KEY);
+        Self::from_raw(crate::read_raw_key(path, local, KEY))
+    }
+
+    /// The preferences a stored `desktop` value holds, on [`Self::load_at`]'s
+    /// terms.
+    pub fn from_raw(raw: Option<serde_json::Value>) -> Self {
         let mut prefs: DesktopPrefs = raw
             .and_then(|value| serde_json::from_value(value).ok())
             .unwrap_or_default();
@@ -106,17 +111,21 @@ impl DesktopPrefs {
     }
 
     /// Read the stored object fresh, apply `change`, and write the object
-    /// back, leaving every other key in both layers alone.
+    /// back, leaving every other key in both layers alone — one read and
+    /// one write under the settings lock. A refused change, or a settings
+    /// file that can't be parsed, writes nothing.
     pub fn update_in(
         path: &Path,
         local: &Path,
         change: impl FnOnce(&mut DesktopPrefs) -> Result<(), String>,
     ) -> Result<DesktopPrefs, String> {
-        let mut prefs = Self::load_at(path, local);
-        change(&mut prefs)?;
-        let value = serde_json::to_value(&prefs).map_err(|e| e.to_string())?;
-        crate::patch_raw_key(path, local, KEY, value).map_err(|e| e.to_string())?;
-        Ok(prefs)
+        let value = crate::update_raw_key(path, local, KEY, |stored| {
+            let mut prefs = Self::from_raw(stored.cloned());
+            change(&mut prefs).map_err(std::io::Error::other)?;
+            serde_json::to_value(&prefs).map_err(std::io::Error::other)
+        })
+        .map_err(|e| e.to_string())?;
+        Ok(Self::from_raw(Some(value)))
     }
 
     pub fn update(
