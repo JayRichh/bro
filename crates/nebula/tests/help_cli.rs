@@ -123,8 +123,8 @@ fn the_root_help_lists_one_line_per_command() {
     }
     assert_eq!(
         commands.lines().count(),
-        23,
-        "twenty-two commands plus `help`:\n{commands}"
+        24,
+        "twenty-three commands plus `help`:\n{commands}"
     );
 }
 
