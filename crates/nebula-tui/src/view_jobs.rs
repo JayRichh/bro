@@ -52,6 +52,11 @@ pub struct DiffListing {
     /// The reviewed ✓ marks that still apply — each stored mark checked
     /// against the file's diff as it is now.
     pub reviewed: HashMap<String, u64>,
+    /// What `files` were read against, the base there is, and the commits
+    /// since it (`nebula_core::review_base`).
+    pub against: nebula_core::review_base::Against,
+    pub base: Option<nebula_core::review_base::ReviewBase>,
+    pub commits: Vec<nebula_core::review_base::CommitLine>,
 }
 
 #[derive(Debug)]

@@ -385,6 +385,15 @@ fn handle_diff_mouse(
                     view.files_drag = Some(bx as i32 - mouse.column as i32);
                     return true;
                 }
+                // The header's against toggle: the base, or HEAD.
+                if view.against_area.contains(mouse_pos) {
+                    app.chrome.flash = Some(super::overlays::diff_toggle_against(
+                        view,
+                        &mut app.modals.diff_against,
+                    ));
+                    app.chrome.dirty = true;
+                    return true;
+                }
                 let area = view.list_area;
                 if view.log.is_some() {
                     let first = crate::app::window_start(view.side_cursor(), area.height as usize);

@@ -1317,6 +1317,7 @@ fn draw_diff_overlay(f: &mut Frame, app: &mut App, view: crate::app::DiffView) {
     ])
     .areas(area);
 
+    let (against_area, files_a) = draw_diff_against(f, &view, files_a, th);
     let list_inner = draw_diff_file_list(f, &view, files_a, app.chrome.icons, th);
 
     // Right: the selected file's diff, scrolled — or, on a tree
@@ -1434,7 +1435,104 @@ fn draw_diff_overlay(f: &mut Frame, app: &mut App, view: crate::app::DiffView) {
         v.area = area;
         v.files_width = files_w;
         v.wide_shown = wide;
+        v.against_area = against_area;
     }
+}
+
+/// The most rows the COMMITS strip takes above the files.
+const COMMIT_STRIP_ROWS: u16 = 5;
+
+/// The head of the DIFF VIEWER's file column: what the files are read
+/// against — `vs main (merge-base abc1234)` or `vs HEAD` — as a toggle
+/// (`Ctrl+g`, or a click), and under it, with a base, the COMMITS made
+/// since it, read-only. Returns the toggle's rect (empty without a base,
+/// so a click misses it) and what is left of `col` for the file list.
+fn draw_diff_against(
+    f: &mut Frame,
+    view: &crate::app::DiffView,
+    col: Rect,
+    th: Theme,
+) -> (Rect, Rect) {
+    // A pull request's view is read against its own base, and says so in
+    // its title already.
+    if view.prefetched.is_some() || col.height < 8 {
+        return (Rect::default(), col);
+    }
+    let [head, rest] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(col);
+    let label = view.against_label();
+    let line = match &view.base {
+        Some(base) => {
+            let other = match view.against {
+                nebula_core::review_base::Against::Base => "HEAD".to_string(),
+                nebula_core::review_base::Against::Head => base.branch.clone(),
+            };
+            Line::from(vec![
+                Span::styled(
+                    format!(" {label} "),
+                    Style::default()
+                        .fg(th.accent)
+                        .add_modifier(Modifier::BOLD | Modifier::REVERSED),
+                ),
+                Span::styled(format!(" ^g: vs {other}"), Style::default().fg(th.dim)),
+            ])
+        }
+        None => Line::from(Span::styled(
+            format!(" {label} · no base branch"),
+            Style::default().fg(th.dim),
+        )),
+    };
+    f.render_widget(Paragraph::new(line), head);
+    let toggle = if view.base.is_some() {
+        head
+    } else {
+        Rect::default()
+    };
+    if view.base.is_none() || view.commits.is_empty() {
+        return (toggle, rest);
+    }
+    // Room for the strip and still a usable file list under it.
+    let rows = (view.commits.len() as u16)
+        .min(COMMIT_STRIP_ROWS)
+        .min(rest.height.saturating_sub(8) / 2);
+    if rows == 0 {
+        return (toggle, rest);
+    }
+    let [strip, files] =
+        Layout::vertical([Constraint::Length(rows + 2), Constraint::Min(0)]).areas(rest);
+    let more = view.commits.len() > rows as usize;
+    let title = format!(
+        "Commits ({}{})",
+        view.commits.len(),
+        if view.commits.len() >= nebula_core::review_base::MAX_COMMITS {
+            "+"
+        } else {
+            ""
+        }
+    );
+    let mut block = panel_block(&title, false, th);
+    if more {
+        block = block.title_bottom(Line::from(Span::styled(
+            format!(" +{} more ", view.commits.len() - rows as usize),
+            Style::default().fg(th.dim),
+        )));
+    }
+    let inner = block.inner(strip);
+    f.render_widget(block, strip);
+    let width = inner.width as usize;
+    let lines: Vec<Line> = view
+        .commits
+        .iter()
+        .take(rows as usize)
+        .map(|c| {
+            let subject = truncate(&c.subject, width.saturating_sub(c.short.len() + 1));
+            Line::from(vec![
+                Span::styled(format!("{} ", c.short), Style::default().fg(th.dim)),
+                Span::raw(subject),
+            ])
+        })
+        .collect();
+    f.render_widget(Paragraph::new(lines), inner);
+    (toggle, files)
 }
 
 /// A unified diff line's color: added green, removed red, hunk headers in

@@ -316,7 +316,14 @@ pub fn head_oid(root: &Path) -> Option<String> {
 /// errors become the displayed text so the modal survives a repo vanishing
 /// out from under it.
 pub fn diff_for(root: &Path, file: &DiffFile, head_ok: bool, commit: Option<&str>) -> String {
-    diff_with(root, file, head_ok, commit, None)
+    diff_with(root, file, head_ok, commit, None, None)
+}
+
+/// [`diff_for`] of a working-tree file against `base` (a merge-base SHA)
+/// when given one — what was committed since and what is not yet,
+/// together — else against HEAD.
+pub fn diff_since(root: &Path, file: &DiffFile, head_ok: bool, base: Option<&str>) -> String {
+    diff_with(root, file, head_ok, None, None, base)
 }
 
 /// How much context the FULL CONTEXT read asks git for: more lines than
@@ -327,7 +334,7 @@ pub const FULL_CONTEXT: &str = "-U1000000";
 /// with unchanged lines on (`Ctrl+o`). Read for display only — the ✓ marks
 /// fingerprint `diff_for`'s three-line text, which this never replaces.
 pub fn full_context_diff(root: &Path, file: &DiffFile, head_ok: bool) -> String {
-    diff_with(root, file, head_ok, None, Some(FULL_CONTEXT))
+    diff_with(root, file, head_ok, None, Some(FULL_CONTEXT), None)
 }
 
 fn diff_with(
@@ -336,6 +343,7 @@ fn diff_with(
     head_ok: bool,
     commit: Option<&str>,
     context: Option<&str>,
+    base: Option<&str>,
 ) -> String {
     let output = if let Some(sha) = commit {
         let mut args = vec![
@@ -368,8 +376,10 @@ fn diff_with(
         )
     } else {
         let mut args = vec!["diff"];
-        if head_ok {
-            args.push("HEAD");
+        match base {
+            Some(sha) => args.push(sha),
+            None if head_ok => args.push("HEAD"),
+            None => {}
         }
         args.extend(context);
         args.extend(["--no-color", "--no-ext-diff", "--", &file.path]);
@@ -525,27 +535,111 @@ pub fn cap_lines(text: &str, max: usize, already_cut: bool) -> String {
 /// the reviewed ✓ marks that still apply — each stored mark checked against
 /// its file's diff as it is now, one `git diff` per mark, and the pruned
 /// set written back. Off the loop for a view with BACKGROUND READS.
-pub fn read_listing(root: &Path) -> Result<crate::view_jobs::DiffListing, String> {
-    let files = changed_files(root)?;
+///
+/// Read against the base branch (`nebula_core::review_base`) when there is
+/// one and `asked` — the reader's last pick — does not say HEAD: the
+/// files changed since the merge-base, committed or not, and the commits
+/// since it. Its marks are the base's, scoped to the merge-base.
+pub fn read_listing(
+    root: &Path,
+    asked: Option<nebula_core::review_base::Against>,
+) -> Result<crate::view_jobs::DiffListing, String> {
+    use nebula_core::review_base::{self as rb, Against};
+    let setting = crate::config::Config::load().worktree_base_branch;
+    let base = rb::resolve(root, &setting);
+    let against = rb::default_against(base.as_ref(), asked);
+    let since = base
+        .as_ref()
+        .filter(|_| against == Against::Base)
+        .map(|b| b.sha.clone());
+    let files = match &since {
+        Some(sha) => files_since(root, sha)?,
+        None => changed_files(root)?,
+    };
+    let commits = base
+        .as_ref()
+        .map(|b| rb::commits_since(root, &b.sha, rb::MAX_COMMITS))
+        .unwrap_or_default();
     let head = head_oid(root);
     let head_key = head.clone().unwrap_or_default();
-    let stored = crate::review::load_marks(root, &head_key);
+    let scope = match &since {
+        Some(sha) => crate::review::Scope::Base(sha),
+        None => crate::review::Scope::Head(&head_key),
+    };
+    let stored = crate::review::load_scoped(root, scope);
     let reviewed: std::collections::HashMap<String, u64> = files
         .iter()
         .filter_map(|file| {
             let mark = *stored.get(&file.path)?;
-            let diff = diff_for(root, file, head.is_some(), None);
+            let diff = diff_since(root, file, head.is_some(), since.as_deref());
             (crate::review::fingerprint(&diff) == mark).then(|| (file.path.clone(), mark))
         })
         .collect();
     if reviewed.len() != stored.len() {
-        crate::review::store_marks(root, &head_key, &reviewed);
+        crate::review::store_scoped(root, scope, &reviewed);
     }
     Ok(crate::view_jobs::DiffListing {
         files,
         head,
         reviewed,
+        against,
+        base,
+        commits,
     })
+}
+
+/// The working tree's changes since commit `base` as the list's files:
+/// each with the one-column status it has against the base (`A `, `M `,
+/// `D `, `R ` with where it came from) and an untracked file as `??`, so
+/// it is diffed as all added.
+pub fn files_since(root: &Path, base: &str) -> Result<Vec<DiffFile>, String> {
+    Ok(nebula_core::review_base::files_since(root, base)?
+        .into_iter()
+        .map(base_file)
+        .collect())
+}
+
+/// One `review_base::BaseChange` as a list entry.
+pub fn base_file(change: nebula_core::review_base::BaseChange) -> DiffFile {
+    let xy = match change.status {
+        'U' => ['?', '?'],
+        status => [status, ' '],
+    };
+    DiffFile {
+        path: change.path,
+        orig_path: change.from,
+        xy,
+    }
+}
+
+/// `Ctrl+g`, or a click on the header's toggle: read the list again
+/// against the other of the base and HEAD. Nothing without a base, or in
+/// a pull request's view. Returns what it asked for, which the caller
+/// remembers for the next open.
+pub fn toggle_against(view: &mut DiffView) -> Option<nebula_core::review_base::Against> {
+    if view.base.is_none() || view.prefetched.is_some() {
+        return None;
+    }
+    let want = view.against.other();
+    view.keep_open = true;
+    let root = view.root.clone();
+    match view.jobs.clone() {
+        Some(jobs) => {
+            let ticket = crate::view_jobs::ticket();
+            view.listing = Some(ticket);
+            jobs.run(move || {
+                Some(crate::view_jobs::Answer::DiffListing {
+                    ticket,
+                    result: read_listing(&root, Some(want)),
+                })
+            });
+        }
+        None => {
+            let listing = read_listing(&root, Some(want)).ok()?;
+            fill_view(view, listing);
+        }
+    }
+    Some(want)
 }
 
 /// Put a listing into the view that was opened ahead of it (or built for
@@ -563,6 +657,14 @@ pub fn fill_view(view: &mut DiffView, listing: crate::view_jobs::DiffListing) {
     let before = view.selected_file().cloned();
     let head_ok = listing.head.is_some();
     let head_changed = !view.files.is_empty() && view.head_ok != head_ok;
+    // Read against something else now: every diff in hand is the other's.
+    let base_changed = view.against != listing.against
+        || view.base.as_ref().map(|b| &b.sha) != listing.base.as_ref().map(|b| &b.sha);
+    let head_changed = head_changed || base_changed;
+    view.against = listing.against;
+    view.base = listing.base.map(Box::new);
+    view.commits = listing.commits;
+    view.keep_open = false;
     view.head_ok = head_ok;
     view.head_key = listing.head.unwrap_or_default();
     view.files = listing.files;
@@ -633,7 +735,7 @@ pub fn load_selected_diff(view: &mut DiffView) {
         return;
     }
     let Some(jobs) = view.jobs.clone() else {
-        let diff = diff_for(&view.root, &file, view.head_ok, None);
+        let diff = diff_since(&view.root, &file, view.head_ok, view.diff_base());
         view.show_diff(Some(&file.path), diff, false);
         request_aux(view);
         return;
@@ -654,11 +756,12 @@ fn request_diff(
     prefetch: bool,
 ) {
     let (root, head_ok, id) = (view.root.clone(), view.head_ok, view.id);
+    let base = view.diff_base().map(str::to_string);
     let work = move || {
         Some(crate::view_jobs::Answer::DiffText {
             view: id,
             ticket,
-            diff: diff_for(&root, &file, head_ok, None),
+            diff: diff_since(&root, &file, head_ok, base.as_deref()),
             path: file.path,
             prefetch,
         })
@@ -778,6 +881,9 @@ mod tests {
             files: paths.iter().map(|p| modified(p)).collect(),
             head: Some("abc123".into()),
             reviewed: reviewed.iter().map(|p| (p.to_string(), 1)).collect(),
+            against: nebula_core::review_base::Against::Head,
+            base: None,
+            commits: Vec::new(),
         }
     }
 
@@ -1285,5 +1391,128 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let err = changed_files(dir.path()).unwrap_err();
         assert!(err.contains("git status failed"), "{err}");
+    }
+
+    #[test]
+    fn base_changes_become_one_column_entries_and_untracked_stays_untracked() {
+        use nebula_core::review_base::BaseChange;
+        let change = |status, path: &str, from: Option<&str>| BaseChange {
+            status,
+            path: path.into(),
+            from: from.map(str::to_string),
+        };
+        let renamed = base_file(change('R', "new.rs", Some("old.rs")));
+        assert_eq!(renamed.xy, ['R', ' ']);
+        assert_eq!(renamed.orig_path.as_deref(), Some("old.rs"));
+        assert_eq!(base_file(change('A', "a", None)).status_str(), "A ");
+        assert!(base_file(change('U', "n", None)).is_untracked());
+    }
+
+    /// A repo on `feat`, forked from `main` at `fork`: one commit made on
+    /// the branch (`b.txt`), one file edited and not committed (`tracked.txt`).
+    fn branch_with_a_commit(dir: &tempfile::TempDir) -> (PathBuf, String) {
+        let repo = make_repo(dir);
+        git(&repo, &["config", "commit.gpgsign", "false"]);
+        let fork = String::from_utf8(
+            Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(["rev-parse", "HEAD"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .trim()
+        .to_string();
+        git(&repo, &["checkout", "-q", "-b", "feat"]);
+        std::fs::write(repo.join("b.txt"), "agent work\n").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-q", "-m", "agent commit"]);
+        std::fs::write(repo.join("tracked.txt"), "new line\n").unwrap();
+        (repo, fork)
+    }
+
+    #[test]
+    fn a_branch_opens_against_its_base_and_keeps_its_commits_in_view() {
+        use nebula_core::review_base::Against;
+        let _env = crate::test_env::spawning();
+        let dir = tempfile::tempdir().unwrap();
+        let (repo, fork) = branch_with_a_commit(&dir);
+        crate::review::with_store_path(dir.path().join("reviewed.json"), || {
+            let listing = read_listing(&repo, None).unwrap();
+            assert_eq!(listing.against, Against::Base);
+            assert_eq!(
+                listing.base.as_ref().map(|b| b.sha.as_str()),
+                Some(fork.as_str())
+            );
+            let paths: Vec<&str> = listing.files.iter().map(|f| f.path.as_str()).collect();
+            assert_eq!(paths, vec!["b.txt", "tracked.txt"]);
+            let subjects: Vec<&str> = listing.commits.iter().map(|c| c.subject.as_str()).collect();
+            assert_eq!(subjects, vec!["agent commit"]);
+
+            let mut view = DiffView::new(repo.clone(), "feat".into(), Vec::new(), true);
+            fill_view(&mut view, listing);
+            assert_eq!(
+                view.against_label(),
+                format!("vs main (merge-base {})", &fork[..7])
+            );
+            // The committed file's diff reads against the base.
+            assert!(view.select_path("b.txt"));
+            load_selected_diff(&mut view);
+            assert!(view.diff.contains("+agent work"), "{}", view.diff);
+            // Staging works against HEAD: nothing to stage from here.
+            assert!(view.stageable().is_none());
+
+            // Toggled to HEAD: the commit leaves the list, staging is back.
+            assert_eq!(toggle_against(&mut view), Some(Against::Head));
+            assert_eq!(view.against, Against::Head);
+            assert_eq!(view.against_label(), "vs HEAD");
+            let paths: Vec<&str> = view.files.iter().map(|f| f.path.as_str()).collect();
+            assert_eq!(paths, vec!["tracked.txt"]);
+            assert_eq!(view.commits.len(), 1, "the commits stay listed");
+            load_selected_diff(&mut view);
+            assert!(view.stageable().is_some());
+        });
+    }
+
+    #[test]
+    fn reviewed_marks_against_the_base_survive_a_commit() {
+        let _env = crate::test_env::spawning();
+        let dir = tempfile::tempdir().unwrap();
+        let (repo, _) = branch_with_a_commit(&dir);
+        crate::review::with_store_path(dir.path().join("reviewed.json"), || {
+            let mut view = DiffView::new(repo.clone(), "feat".into(), Vec::new(), true);
+            fill_view(&mut view, read_listing(&repo, None).unwrap());
+            assert!(view.select_path("tracked.txt"));
+            load_selected_diff(&mut view);
+            assert!(view.toggle_reviewed().is_some());
+            view.store_marks();
+            assert!(view.reviewed.contains_key("tracked.txt"));
+            // The agent commits the file as it was approved: HEAD moves, the
+            // merge-base does not, and the diff against it is the same.
+            git(&repo, &["commit", "-q", "-am", "commit the edit"]);
+            let listing = read_listing(&repo, None).unwrap();
+            assert!(listing.reviewed.contains_key("tracked.txt"));
+            // Against HEAD there is nothing left, marked or not.
+            let head = read_listing(&repo, Some(nebula_core::review_base::Against::Head)).unwrap();
+            assert!(head.files.is_empty() && head.reviewed.is_empty());
+        });
+    }
+
+    #[test]
+    fn the_base_branch_itself_reads_against_head() {
+        let _env = crate::test_env::spawning();
+        let dir = tempfile::tempdir().unwrap();
+        let repo = make_repo(&dir);
+        std::fs::write(repo.join("tracked.txt"), "new line\n").unwrap();
+        crate::review::with_store_path(dir.path().join("reviewed.json"), || {
+            let listing = read_listing(&repo, None).unwrap();
+            assert_eq!(listing.against, nebula_core::review_base::Against::Head);
+            assert!(listing.base.is_none() && listing.commits.is_empty());
+            let mut view = DiffView::new(repo.clone(), "main".into(), Vec::new(), true);
+            fill_view(&mut view, listing);
+            assert_eq!(toggle_against(&mut view), None, "nothing to switch to");
+        });
     }
 }

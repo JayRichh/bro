@@ -1495,6 +1495,22 @@ pub struct DiffView {
     /// `Ctrl+x` asked to discard this CHANGE from the worktree, and the
     /// pane is waiting on `y`/`Enter` to do it; any other key keeps it.
     pub confirm_discard: Option<usize>,
+    /// What the files are read against (`Ctrl+g`, the header's toggle):
+    /// the merge-base with the base branch, so an agent's commits stay in
+    /// view, or HEAD, where changes stage. Base only while `base` is some.
+    pub against: nebula_core::review_base::Against,
+    /// Where this checkout's branch forked from its base branch; None on
+    /// the base branch itself, detached, or with none in the clone.
+    pub base: Option<Box<nebula_core::review_base::ReviewBase>>,
+    /// The commits since `base`, newest first: the COMMITS strip above
+    /// the files. Read-only.
+    pub commits: Vec<nebula_core::review_base::CommitLine>,
+    /// Screen rect of the header's against toggle, written back during
+    /// draw so a click can hit it.
+    pub against_area: Rect,
+    /// The list is being read again for a toggle: an empty answer keeps
+    /// the modal up (saying so) rather than closing it.
+    pub keep_open: bool,
 }
 
 /// A diff read and laid out: the document, its rows in the view's DIFF
@@ -1779,7 +1795,9 @@ impl DiffView {
     /// staged and discarded? Not a pull request's diff, a commit's, an
     /// untracked file, nor one cut short at [`crate::git_diff::MAX_DIFF_LINES`].
     pub fn stageable(&self) -> Option<&DiffFile> {
-        if self.prefetched.is_some() || self.place != Place::Changes {
+        // Against the base the CHANGES are the base's, and the hunks
+        // staging cuts are HEAD's: they would not line up.
+        if self.prefetched.is_some() || self.place != Place::Changes || self.diff_base().is_some() {
             return None;
         }
         let file = self.selected_file()?;
@@ -1863,6 +1881,35 @@ impl DiffView {
         )
     }
 
+    /// The merge-base the diffs are read from, while reading against it.
+    pub fn diff_base(&self) -> Option<&str> {
+        match (&self.base, self.against) {
+            (Some(base), nebula_core::review_base::Against::Base) => Some(base.sha.as_str()),
+            _ => None,
+        }
+    }
+
+    /// `vs main (merge-base abc1234)` or `vs HEAD`.
+    pub fn against_label(&self) -> String {
+        nebula_core::review_base::against_label(self.against, self.base.as_deref())
+    }
+
+    /// What the reviewed ✓ marks are scoped to: the merge-base against the
+    /// base, HEAD against HEAD.
+    pub fn marks_scope(&self) -> crate::review::Scope<'_> {
+        match self.diff_base() {
+            Some(sha) => crate::review::Scope::Base(sha),
+            None => crate::review::Scope::Head(&self.head_key),
+        }
+    }
+
+    /// Write the reviewed ✓ marks under the scope they were made in.
+    pub fn store_marks(&self) {
+        if self.prefetched.is_none() {
+            crate::review::store_scoped(&self.root, self.marks_scope(), &self.reviewed);
+        }
+    }
+
     pub fn new(root: PathBuf, branch: String, files: Vec<DiffFile>, head_ok: bool) -> Self {
         let mut view = Self {
             root,
@@ -1903,6 +1950,11 @@ impl DiffView {
             aux: None,
             change_cursor: None,
             confirm_discard: None,
+            against: nebula_core::review_base::Against::Head,
+            base: None,
+            commits: Vec::new(),
+            against_area: Rect::default(),
+            keep_open: false,
         };
         view.apply_filter();
         view
@@ -4536,6 +4588,9 @@ pub struct ModalState {
     /// UNCHANGED CONTEXT in full: **Diff context** (`diff_context`),
     /// which `Ctrl+o` inside a diff modal flips.
     pub diff_full_context: bool,
+    /// What the diff modal last read against, as the reader picked it
+    /// (`Ctrl+g`); None until they do: the base when there is one.
+    pub diff_against: Option<nebula_core::review_base::Against>,
     /// Selected tab of the settings modal, remembered across opens.
     pub settings_tab: usize,
     /// Cursor row of the settings modal, one per tab, remembered across
@@ -4582,6 +4637,7 @@ impl Default for ModalState {
             diff_mode: crate::diff_layout::DiffMode::SideBySide,
             diff_mode_configured: false,
             diff_full_context: false,
+            diff_against: None,
             settings_tab: 0,
             settings_selected: vec![0; crate::config::tab_count()],
             settings_on_tabs: true,
