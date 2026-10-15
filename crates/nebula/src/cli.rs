@@ -213,6 +213,13 @@ pub(crate) enum Command {
         /// Refused when the branch already exists.
         #[arg(long, value_name = "REF", requires = "worktree")]
         base: Option<String>,
+        /// The account (a PROFILE's name) the new session runs on; it must
+        /// be one for the new session's harness.
+        ///
+        /// Defaults to this session's account on this session's harness,
+        /// else the harness's default account. Needs daemon protocol 58.
+        #[arg(long, value_name = "NAME")]
+        profile: Option<String>,
     },
     /// Show files to the user inside this kete.
     ///

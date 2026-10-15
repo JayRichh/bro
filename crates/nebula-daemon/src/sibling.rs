@@ -23,8 +23,8 @@ another session to …\", \"open a new session for …\", \"hand this off\"), do
 process yourself. Run this shell command instead, exactly once:\n\n  kete spawn \"<task>\"\n\nwhere \
 <task> is the work the user wants that session to do, in their own words, the new session opens on \
 it as its first prompt, so make it self-contained. Add `--kind \
-claude|codex|cursor|pi|muse|grok|opencode` only when the user names the harness; otherwise the new \
-session matches this one. kete starts it beside this session, in the same worktree, and it shows \
+claude|codex|cursor|pi|muse|grok|opencode` only when the user names the harness, and `--profile <name>` only when they name the account; \
+otherwise the new session matches this one. kete starts it beside this session, in the same worktree, and it shows \
 up in the sessions list on its own. When the user wants that separate new/parallel session on its \
 own branch or worktree (\"start a new session on branch fix-login\", \"spin up an agent in a new \
 worktree to fix login\"), add `--worktree <branch>`: kete starts it in the project's worktree on \
@@ -114,13 +114,15 @@ impl Daemon {
     /// `worktree`: the caller's harness unless `kind` overrides, a default
     /// `agent-N` name free in that worktree so AUTO-TITLE applies, and
     /// `starting_prompt` as the first prompt (which `create_agent`
-    /// validates). Pure lookup, so it is unit-testable without a PTY.
+    /// validates), on `profile` when the spawn named one. Pure lookup, so
+    /// it is unit-testable without a PTY.
     pub(crate) fn sibling_spec(
         &self,
         caller: &Agent,
         kind: Option<AgentKind>,
         worktree: &WorktreeId,
         starting_prompt: &str,
+        profile: Option<&str>,
     ) -> Result<CreateAgentSpec> {
         let SiblingHarness {
             kind,
@@ -128,11 +130,19 @@ impl Daemon {
             model,
             effort,
         } = Self::sibling_harness(caller, kind);
-        // A sibling on the caller's own harness runs on the caller's
-        // account; one on another harness takes that harness's default.
-        let profile = (kind == caller.kind && custom_harness == caller.custom_harness)
-            .then(|| caller.profile.clone())
-            .flatten();
+        // `--profile` names the account, resolved at create as every
+        // launch's is. Else a sibling on the caller's own harness runs on
+        // the caller's account, and one on another harness takes that
+        // harness's default.
+        let named = profile
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .map(str::to_string);
+        let profile = named.or_else(|| {
+            (kind == caller.kind && custom_harness == caller.custom_harness)
+                .then(|| caller.profile.clone())
+                .flatten()
+        });
         Ok(CreateAgentSpec {
             parent: Some(caller.id.clone()),
             profile,
@@ -155,14 +165,16 @@ impl Daemon {
     /// boot a new agent beside it with `starting_prompt` as its first
     /// prompt — in the caller's worktree, or with `worktree` in the
     /// caller's PROJECT's worktree on that branch, cut first when there is
-    /// none. Returns the new row's id; a created worktree and the agent
-    /// reach every client through the ordinary create paths.
+    /// none. `profile` is the account it runs on (`--profile`), None for
+    /// the usual pick. Returns the new row's id; a created worktree and the
+    /// agent reach every client through the ordinary create paths.
     pub async fn spawn_sibling_agent(
         self: &Arc<Self>,
         id: &AgentId,
         kind: Option<AgentKind>,
         worktree: Option<SiblingWorktree<'_>>,
         starting_prompt: &str,
+        profile: Option<&str>,
     ) -> Result<EntityId> {
         let caller = self.spawning_caller(id)?;
         let target = match worktree {
@@ -176,6 +188,11 @@ impl Daemon {
                 // harness, a missing CLI — is asked before git cuts a
                 // checkout nobody would then launch in.
                 let harness = Self::sibling_harness(&caller, kind);
+                crate::registry::check_launch_profile(
+                    harness.kind,
+                    harness.custom_harness.as_deref(),
+                    profile.map(str::trim).filter(|p| !p.is_empty()),
+                )?;
                 self.check_cold_launch(
                     harness.kind,
                     harness.custom_harness.as_deref(),
@@ -192,7 +209,7 @@ impl Daemon {
                     .id
             }
         };
-        let spec = self.sibling_spec(&caller, kind, &target, starting_prompt)?;
+        let spec = self.sibling_spec(&caller, kind, &target, starting_prompt, profile)?;
         self.create_agent(spec).await
     }
 }
@@ -295,7 +312,13 @@ mod tests {
 
         let caller = daemon.spawning_caller(&AgentId("agent-1".into())).unwrap();
         let spec = daemon
-            .sibling_spec(&caller, None, &caller.worktree_id, "Fix the login redirect")
+            .sibling_spec(
+                &caller,
+                None,
+                &caller.worktree_id,
+                "Fix the login redirect",
+                None,
+            )
             .unwrap();
         assert_eq!(spec.worktree.to_string(), "feat");
         assert_eq!(spec.name, "agent-2");
@@ -329,6 +352,7 @@ mod tests {
                 Some(AgentKind::Codex),
                 &caller.worktree_id,
                 "Run the tests",
+                None,
             )
             .unwrap();
         assert_eq!(spec.kind, AgentKind::Codex);
@@ -343,6 +367,7 @@ mod tests {
                 Some(AgentKind::Claude),
                 &caller.worktree_id,
                 "Run the tests",
+                None,
             )
             .unwrap();
         assert_eq!(same.model.as_deref(), Some("opus"));
@@ -375,7 +400,7 @@ mod tests {
             .insert_agent(&agent("agent-1", "feat", AgentKind::Claude, None))
             .unwrap();
         let err = daemon
-            .spawn_sibling_agent(&AgentId("agent-1".into()), None, None, " \n ")
+            .spawn_sibling_agent(&AgentId("agent-1".into()), None, None, " \n ", None)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("is empty"), "{err}");
@@ -447,19 +472,19 @@ mod tests {
             base: None,
         };
         let err = daemon
-            .spawn_sibling_agent(&caller, None, Some(blank_branch), "Fix it")
+            .spawn_sibling_agent(&caller, None, Some(blank_branch), "Fix it", None)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("branch name is empty"), "{err}");
 
         let err = daemon
-            .spawn_sibling_agent(&caller, None, Some(fresh), " \n ")
+            .spawn_sibling_agent(&caller, None, Some(fresh), " \n ", None)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("is empty"), "{err}");
 
         let err = daemon
-            .spawn_sibling_agent(&AgentId("nope".into()), None, Some(fresh), "Fix it")
+            .spawn_sibling_agent(&AgentId("nope".into()), None, Some(fresh), "Fix it", None)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("agent not found"), "{err}");
@@ -471,12 +496,69 @@ mod tests {
             .insert_agent(&agent("custom-1", "feat", AgentKind::Custom, None))
             .unwrap();
         let err = daemon
-            .spawn_sibling_agent(&AgentId("custom-1".into()), None, Some(fresh), "Fix it")
+            .spawn_sibling_agent(
+                &AgentId("custom-1".into()),
+                None,
+                Some(fresh),
+                "Fix it",
+                None,
+            )
             .await
             .unwrap_err();
         assert!(err.to_string().contains("missing its registry id"), "{err}");
 
+        // A named profile that no launch could run on is refused there
+        // too, before git: undefined, or an account for another harness.
+        let data = tempfile::tempdir().unwrap();
+        std::fs::write(
+            data.path().join("config.json"),
+            r#"{"profiles": [{"name": "gpt", "harness": "codex"}]}"#,
+        )
+        .unwrap();
+        {
+            let _env = crate::registry::tests::EnvGuard::set_all(&[
+                (nebula_core::env::DATA_DIR, data.path().to_str().unwrap()),
+                (nebula_core::env::CONFIG_FILE, ""),
+            ]);
+            for profile in ["gone", "gpt"] {
+                let err = daemon
+                    .spawn_sibling_agent(&caller, None, Some(fresh), "Fix it", Some(profile))
+                    .await
+                    .unwrap_err();
+                assert!(err.to_string().contains(profile), "{profile}: {err}");
+            }
+        }
+
         let (_, worktrees, _, _) = daemon.store.load_tree().unwrap();
         assert_eq!(worktrees.len(), 2, "no worktree was registered");
+    }
+
+    /// `--profile` names the account over the caller's, with the caller's
+    /// harness or a named one; blank is no profile named.
+    #[test]
+    fn a_named_profile_wins_over_the_callers_account() {
+        let daemon = daemon();
+        let mut caller = agent("agent-1", "feat", AgentKind::Claude, Some("opus"));
+        caller.profile = Some("home".into());
+        daemon.store.insert_agent(&caller).unwrap();
+        let caller = daemon.spawning_caller(&caller.id).unwrap();
+        let spec = |kind, profile| {
+            daemon
+                .sibling_spec(&caller, kind, &caller.worktree_id, "Go", profile)
+                .unwrap()
+                .profile
+        };
+        assert_eq!(spec(None, Some("work")).as_deref(), Some("work"));
+        assert_eq!(
+            spec(Some(AgentKind::Codex), Some("gpt")).as_deref(),
+            Some("gpt")
+        );
+        assert_eq!(spec(None, None).as_deref(), Some("home"), "inherited");
+        assert_eq!(spec(None, Some("  ")).as_deref(), Some("home"));
+        assert_eq!(
+            spec(Some(AgentKind::Codex), None),
+            None,
+            "another harness takes its own default at create"
+        );
     }
 }
