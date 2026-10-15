@@ -262,9 +262,11 @@ fn quick_prompt_footer_hint(app: &App, th: Theme) -> FooterHint {
 /// TUI's tooltip, so no button is a mystery until it is clicked.
 fn button_tooltip(app: &App, th: Theme) -> Option<FooterHint> {
     let action = match app.launcher.hover_crumb.as_ref()? {
-        HitTarget::Button(action) | HitTarget::CardButton(_, action) => *action,
+        HitTarget::Button(action)
+        | HitTarget::CardButton(_, action)
+        | HitTarget::KanbanButton(_, action) => *action,
         HitTarget::LauncherBandNew(_) => Action::QuickPrompt,
-        HitTarget::CardMenu(_) | HitTarget::LauncherPaneMenu => {
+        HitTarget::CardMenu(_) | HitTarget::KanbanMenu(_) | HitTarget::LauncherPaneMenu => {
             return Some(dim_hint(
                 "click: the card's menu (a right-click on any card opens its own)",
                 th,

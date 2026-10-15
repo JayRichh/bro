@@ -614,6 +614,18 @@ pub(crate) fn menu_items_for_session_in(app: &App, a: &nebula_core::Agent) -> Ve
         MenuAction::OpenWorktree(w.id.clone()),
     ));
     items.extend(links);
+    // The card's place in its band (or its lane), and its band's among the
+    // project's: what `⌥↑` / `⌥↓` and a drag do.
+    items.extend(move_items(
+        crate::order::OrderTarget::Agent(a.id.clone()),
+        "",
+    ));
+    if !w.is_main {
+        items.extend(move_items(
+            crate::order::OrderTarget::Worktree(w.id.clone()),
+            "worktree",
+        ));
+    }
     if w.is_main {
         items.push(MenuItem::new(
             "Switch branch…",
@@ -626,6 +638,22 @@ pub(crate) fn menu_items_for_session_in(app: &App, a: &nebula_core::Agent) -> Ve
         ));
     }
     items
+}
+
+/// **Move up** / **Move down** for `target`, `what` naming it when the menu
+/// holds more than one kind of row ("Move worktree up").
+pub(crate) fn move_items(target: crate::order::OrderTarget, what: &str) -> [MenuItem; 2] {
+    let label = |dir: &str| {
+        if what.is_empty() {
+            format!("Move {dir}")
+        } else {
+            format!("Move {what} {dir}")
+        }
+    };
+    [
+        MenuItem::new(label("up"), MenuAction::Reorder(target.clone(), -1)),
+        MenuItem::new(label("down"), MenuAction::Reorder(target, 1)),
+    ]
 }
 
 pub(crate) fn menu_items_for_terminal(t: &nebula_core::TerminalTab) -> Vec<MenuItem> {
@@ -847,6 +875,11 @@ pub(crate) fn worktree_menu_items(app: &App, w: &nebula_core::Worktree) -> Vec<M
             MenuAction::SwitchBranch(w.id.clone()),
         ));
     } else {
+        // The band's place among the project's; the root's stays first.
+        items.extend(move_items(
+            crate::order::OrderTarget::Worktree(w.id.clone()),
+            "",
+        ));
         items.push(MenuItem::destructive(
             "Delete worktree",
             MenuAction::DeleteWorktree(w.id.clone()),

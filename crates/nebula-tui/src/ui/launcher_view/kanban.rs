@@ -13,8 +13,9 @@
 //! cursor" act on the card the board shows lit.
 
 use super::{draw_any_card, draw_head, draw_rule, pad_x, row_rect, truncate, HeadCount};
-use crate::app::{App, Focus, HitTarget};
+use crate::app::{App, Focus, HitTarget, OrderItem, OrderOver};
 use crate::launcher::{Card, Lane, CARD_H};
+use crate::order::{lane_drop, DropLane, LaneDrop, Place};
 use crate::theme::Theme;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -52,10 +53,22 @@ pub(super) fn draw(f: &mut Frame, app: &mut App, body: Rect) {
         crate::launcher::Hidden::default(),
     );
     let g = crate::launcher::bands_layout(body);
-    let area = g.area;
+    let mut area = g.area;
     if area.height <= LANE_HEAD_H || area.width < Lane::ALL.len() as u16 * 8 {
         return;
     }
+    // A card held: the ARCHIVED zone takes the board's foot, under the
+    // lanes rather than beside them, so no lane moves under the pointer.
+    let held = held_card(app);
+    let archive = (held.is_some() && area.height > LANE_HEAD_H + CARD_H + ARCHIVE_H).then(|| {
+        let zone = Rect {
+            y: area.bottom() - ARCHIVE_H,
+            height: ARCHIVE_H,
+            ..area
+        };
+        area.height -= ARCHIVE_H + 1;
+        zone
+    });
     let cursor = app
         .selected_session()
         .filter(|_| !app.launcher.launcher_unaimed)
@@ -66,6 +79,7 @@ pub(super) fn draw(f: &mut Frame, app: &mut App, body: Rect) {
         .split(area);
     let mut cfg = None;
     let mut hits = Vec::new();
+    let mut lane_hits = Vec::new();
     for (i, lane) in Lane::ALL.into_iter().enumerate() {
         let r = rects[i];
         let cards = &lanes[i];
@@ -85,7 +99,15 @@ pub(super) fn draw(f: &mut Frame, app: &mut App, body: Rect) {
             ]);
             f.render_widget(Paragraph::new(title), head);
         }
-        draw_rule(f, r, 1, if cards.is_empty() { th.edge } else { color });
+        // The lane a held card is over: its rule in the accent for a drop
+        // that acts, the error's for one it refuses.
+        let rule = match lane_mark(app, lane) {
+            Some(true) => th.accent,
+            Some(false) => th.err,
+            None if cards.is_empty() => th.edge,
+            None => color,
+        };
+        draw_rule(f, r, 1, rule);
         let room = r.height.saturating_sub(LANE_HEAD_H);
         let fit = (room / CARD_H).max(1) as usize;
         let at = cursor.filter(|(l, _)| *l == i).map(|(_, row)| row);
@@ -99,6 +121,7 @@ pub(super) fn draw(f: &mut Frame, app: &mut App, body: Rect) {
                     line,
                 );
             }
+            lane_hits.push((r, HitTarget::KanbanLane(i)));
             continue;
         }
         for (n, row) in cards.iter().enumerate().skip(start).take(fit) {
@@ -127,8 +150,30 @@ pub(super) fn draw(f: &mut Frame, app: &mut App, body: Rect) {
             if app.launcher.kanban_all {
                 draw_project_label(f, rect, &row.project, th);
             }
+            let placed = crate::launcher::Placed {
+                rect,
+                cut_top: 0,
+                cut_bottom: 0,
+            };
+            // The card under the cursor's buttons, its diff first, giving
+            // way to the SUBAGENT CHIP at the left end of the same edge;
+            // both registered ahead of the card, so they win the click.
+            if selected && !app.launcher.launcher_unaimed {
+                let reserve = crate::ui::subagents_view::card_chip_width(app, &card);
+                let buttons = super::card_buttons(
+                    &card,
+                    &super::ButtonsOn::Board(row.agent.id.clone()),
+                    placed,
+                    reserve,
+                );
+                super::draw_card_buttons(f.buffer_mut(), app, &buttons);
+                hits.extend(buttons.into_iter().map(|(rect, hit, _)| (rect, hit)));
+            }
+            hits.extend(crate::ui::subagents_view::card_chip_hit(app, &card, placed));
+            draw_beside_mark(f, app, rect, &row.agent.id);
             hits.push((rect, HitTarget::KanbanCard(row.agent.id.clone())));
         }
+        lane_hits.push((r, HitTarget::KanbanLane(i)));
         let shown = (start + fit).min(cards.len());
         if shown < cards.len() {
             if let Some(line) = row_rect(r, r.height.saturating_sub(1) as usize) {
@@ -157,10 +202,103 @@ pub(super) fn draw(f: &mut Frame, app: &mut App, body: Rect) {
             );
         }
     }
+    if let Some(zone) = archive {
+        draw_archive_zone(f, app, zone);
+        hits.push((zone, HitTarget::KanbanArchive));
+    }
+    // The lanes after their cards, so a card wins the click; a held card
+    // let go on a lane's air is let go on the lane. Only while a card is
+    // pressed: otherwise the air is the board's, its menu and its wheel.
+    let pressed = app
+        .launcher
+        .order_drag
+        .as_ref()
+        .is_some_and(|d| matches!(d.item, OrderItem::Board { .. }));
+    if pressed {
+        hits.extend(lane_hits);
+    }
     app.chrome.hits.extend(hits);
     app.chrome
         .hits
         .push((area, HitTarget::PanelBg(Focus::Sessions)));
+}
+
+/// Rows the ARCHIVED zone takes: its box, a line of words inside.
+const ARCHIVE_H: u16 = 3;
+
+/// The board card held under the button, once the drag has started.
+fn held_card(app: &App) -> Option<&crate::app::OrderDrag> {
+    app.launcher
+        .order_drag
+        .as_ref()
+        .filter(|d| d.active && matches!(d.item, OrderItem::Board { .. }))
+}
+
+/// Whether a held card is over `lane` (and not beside a card of it):
+/// Some(true) when letting go there acts, Some(false) when it is refused.
+fn lane_mark(app: &App, lane: Lane) -> Option<bool> {
+    let drag = held_card(app)?;
+    let OrderItem::Board { lane: from, .. } = &drag.item else {
+        return None;
+    };
+    match &drag.over {
+        Some(OrderOver::Lane(DropLane::Lane(to), None)) if *to == lane && *from != lane => Some(
+            !matches!(lane_drop(*from, DropLane::Lane(lane)), LaneDrop::Refuse(_)),
+        ),
+        _ => None,
+    }
+}
+
+/// The insert mark of a held card about to land beside `id`: an accent
+/// rule along the card's top edge (before it) or its bottom (after).
+fn draw_beside_mark(f: &mut Frame, app: &App, rect: Rect, id: &nebula_core::AgentId) {
+    let Some(OrderOver::Lane(_, Some((target, place)))) =
+        held_card(app).and_then(|d| d.over.as_ref())
+    else {
+        return;
+    };
+    if target != id {
+        return;
+    }
+    let y = match place {
+        Place::Before => rect.y,
+        Place::After => rect.bottom().saturating_sub(1),
+    };
+    let th = app.chrome.theme;
+    f.buffer_mut().set_stringn(
+        rect.x,
+        y,
+        "─".repeat(rect.width as usize),
+        rect.width as usize,
+        Style::default().fg(th.accent),
+    );
+}
+
+/// The ARCHIVED zone along the board's foot while a card is held: a box
+/// that says what letting go there does, lit in the accent once the card
+/// is over it.
+fn draw_archive_zone(f: &mut Frame, app: &App, zone: Rect) {
+    let th = app.chrome.theme;
+    let over = held_card(app)
+        .is_some_and(|d| matches!(d.over, Some(OrderOver::Lane(DropLane::Archived, _))));
+    let edge = if over { th.accent } else { th.edge };
+    let block = ratatui::widgets::Block::default()
+        .borders(ratatui::widgets::Borders::ALL)
+        .border_style(Style::default().fg(edge))
+        .title(Span::styled(
+            " Archived ",
+            Style::default().fg(if over { th.accent } else { th.muted }),
+        ));
+    let inner = block.inner(zone);
+    f.render_widget(block, zone);
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            "let go here to archive the session (u brings it back)",
+            Style::default().fg(if over { th.text } else { th.dim }),
+        ))
+        .alignment(ratatui::layout::Alignment::Center),
+        inner,
+    );
 }
 
 /// On the all-projects board, a card's project on its top border, left,

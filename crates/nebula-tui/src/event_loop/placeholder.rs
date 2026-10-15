@@ -2106,7 +2106,7 @@ mod tests {
                     id: ProjectId("p2".into()),
                     name: "two".into(),
                     repo_path: "/tmp/two".into(),
-                    sort_order: 1,
+                    sort_order: 0,
                 }),
             },
         );

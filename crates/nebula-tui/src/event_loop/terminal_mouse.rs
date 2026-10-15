@@ -569,6 +569,8 @@ pub(crate) fn update_pointer(app: &mut App, mouse: &MouseEvent) {
                 | HitTarget::FooterHint(_)
                 | HitTarget::CardButton(..)
                 | HitTarget::CardMenu(_)
+                | HitTarget::KanbanButton(..)
+                | HitTarget::KanbanMenu(_)
                 | HitTarget::LauncherBandNew(_)
                 | HitTarget::LauncherPaneMenu
         )

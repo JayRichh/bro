@@ -135,6 +135,12 @@ pub enum Action {
     /// project or another one, picked from a list. Dragging the card onto
     /// another band or project tab does the same.
     MoveSession,
+    /// `⌥↑`: the card, band or project tab under the cursor one place
+    /// earlier in the user's order (`ClientRequest::Reorder`), as dragging
+    /// it there does.
+    ReorderUp,
+    /// `⌥↓`: one place later.
+    ReorderDown,
     /// `⇧S`: the SUBAGENTS OVERLAY — the project's sessions as a tree,
     /// each with the subagents running inside it.
     Subagents,
@@ -639,6 +645,26 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "SESSIONS",
         scope: Scope::Global,
         defaults: &["m"],
+    },
+    ActionSpec {
+        action: Action::ReorderUp,
+        id: "reorder_up",
+        label: "Move item up",
+        hint: "Move the card under the cursor one place earlier in its band (on the board, among its worktree's cards in its lane), or on a band with no card to be on (empty or folded) that band, or with the project tabs holding the keys the tab under their cursor one place left; the menus' Move up and dragging do the same. ⌥↑ needs Option as Meta on a Mac; ⇧↑ is bound beside it",
+        group: "SESSIONS",
+        scope: Scope::Global,
+        // ⌥↑ is the desktop's chord; ⇧↑ beside it arrives where Option is
+        // not Meta.
+        defaults: &["alt+up", "shift+up"],
+    },
+    ActionSpec {
+        action: Action::ReorderDown,
+        id: "reorder_down",
+        label: "Move item down",
+        hint: "Move the card under the cursor one place later in its band (on the board, in its lane), or the project tab under the header's cursor one place right; the menus' Move down and dragging do the same",
+        group: "SESSIONS",
+        scope: Scope::Global,
+        defaults: &["alt+down", "shift+down"],
     },
     ActionSpec {
         action: Action::Subagents,

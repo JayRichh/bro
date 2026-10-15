@@ -83,6 +83,17 @@ pub enum HitTarget {
     /// A session card on the KANBAN, by its session: a click lands the
     /// cursor on it, a second one goes down into the pane.
     KanbanCard(nebula_core::AgentId),
+    /// A KANBAN lane's column, by its place in `Lane::ALL`, registered
+    /// after its cards so they win: where a held board card is let go.
+    KanbanLane(usize),
+    /// The ARCHIVED zone along the board's foot, drawn only while a card
+    /// is held: let go there, the session is archived.
+    KanbanArchive,
+    /// A CARD BUTTON on the board card under the cursor, by its session
+    /// and action: the cursor onto the card, then the action as its key.
+    KanbanButton(nebula_core::AgentId, crate::keymap::Action),
+    /// The `⋯` at the end of those: the card's CONTEXT MENU.
+    KanbanMenu(nebula_core::AgentId),
     /// A BAND's rule on the grid — the checkout's own row over its cards,
     /// by the band's place in `launcher::bands`: a click puts the cursor
     /// on the band, as `j`/`k` walking onto it do.
@@ -407,6 +418,10 @@ pub enum MenuAction {
         id: AgentId,
         worktree: WorktreeId,
     },
+    /// **Move up** / **Move down** on a card's, a band's or a tab's menu:
+    /// the row one place earlier (-1) or later (1) in the user's order,
+    /// what `⌥↑` / `⌥↓` do (`crate::order::step`).
+    Reorder(crate::order::OrderTarget, i64),
     EditLink(LinkId),
     DeleteLink(LinkId),
     DeleteWorktree(WorktreeId),
@@ -528,6 +543,52 @@ pub struct CardDrag {
     /// The PROJECT TAB under the pointer instead: `over` is then that
     /// project's first checkout, its root unless the card is already there.
     pub over_tab: Option<ProjectId>,
+    /// Over another session card of its own band instead: the release
+    /// puts the card on that side of it, in the user's order — not a
+    /// move, a reorder (`crate::order::drop_agent`).
+    pub slot: Option<(AgentId, crate::order::Place)>,
+}
+
+/// What an [`OrderDrag`] holds: a BAND by its checkout, a PROJECT TAB, or
+/// a card on the KANBAN, with the lane it was picked up from.
+#[derive(Debug, Clone, PartialEq)]
+pub enum OrderItem {
+    Band(WorktreeId),
+    Tab(ProjectId),
+    Board {
+        agent: AgentId,
+        worktree: WorktreeId,
+        lane: crate::launcher::Lane,
+    },
+}
+
+/// Where an [`OrderDrag`] would land if let go now.
+#[derive(Debug, Clone, PartialEq)]
+pub enum OrderOver {
+    /// Beside another band of the project.
+    Band(WorktreeId, crate::order::Place),
+    /// Beside another tab.
+    Tab(ProjectId, crate::order::Place),
+    /// A lane of the board, or the ARCHIVED zone, and — in its own lane —
+    /// the card of its checkout it would land beside.
+    Lane(
+        crate::order::DropLane,
+        Option<(AgentId, crate::order::Place)>,
+    ),
+}
+
+/// A band's rule, a project tab or a board card held under the pressed
+/// mouse button to put it elsewhere ([`App::order_drag`]): the BANDS and
+/// the tabs reorder, a board card acts on the lane it is let go on
+/// (`crate::order::lane_drop`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct OrderDrag {
+    pub item: OrderItem,
+    /// The cell the press landed on: the drag starts once the pointer
+    /// leaves it, so a plain click never becomes one.
+    pub from: (u16, u16),
+    pub active: bool,
+    pub over: Option<OrderOver>,
 }
 
 #[derive(Debug, Clone)]
@@ -4181,6 +4242,9 @@ pub struct LauncherState {
     /// A session card pressed on the grid, which a drag carries onto
     /// another band to move the session there (`MoveAgent`).
     pub card_drag: Option<CardDrag>,
+    /// A band, a project tab or a board card pressed, which a drag puts
+    /// elsewhere in the user's order or (a board card) drops on a lane.
+    pub order_drag: Option<OrderDrag>,
     /// That edge is under the mouse, or being dragged: its grip lights up.
     /// Only ever set in terminals that report plain mouse motion;
     /// elsewhere the grip rests until a drag takes hold.
@@ -5469,6 +5533,7 @@ impl App {
     pub fn mouse_held(&self) -> bool {
         let splitter = self.launcher.launcher_pane_drag.is_some()
             || self.launcher.card_drag.is_some()
+            || self.launcher.order_drag.is_some()
             || match &self.modals.overlay {
                 Some(Overlay::Diff(view)) => view.files_drag.is_some(),
                 Some(Overlay::Tree(view)) => view.files_drag.is_some(),
@@ -5562,11 +5627,12 @@ impl App {
     /// Projects panel rows in display order, each an index into
     /// `tree.projects` — every project gets one.
     ///
-    /// Most recently interacted with first — the newest stamp under any of
-    /// the project's worktrees, so the project you just worked in heads the
-    /// column (mirrors the sessions list; there is no manual reorder). The
-    /// sort is stable, so never-run projects keep tree order at the bottom
-    /// instead of shuffling between frames.
+    /// The user's order (`sort_order`) once the projects have one — the
+    /// daemon numbers them as they are added, so two or more always do,
+    /// and a drag of a PROJECT TAB rewrites it. Before that, most recently
+    /// interacted with first — the newest stamp under any of the project's
+    /// worktrees. The sort is stable, so never-run projects keep tree order
+    /// at the bottom instead of shuffling between frames.
     pub fn project_rows(&self) -> Vec<usize> {
         self.chrome.rows_memo.with(
             |m| &m.projects,
@@ -5606,6 +5672,12 @@ impl App {
             .collect();
         // One pass for every project rather than one per comparison the
         // sort makes (`project_recencies`).
+        // Once the user has ordered them (two projects or more, always),
+        // the user's order: the order the PROJECT TABS are in.
+        if crate::order::projects_ordered(self) {
+            rows.sort_by_key(|&i| self.tree.projects[i].sort_order);
+            return rows;
+        }
         let recencies = project_recencies(&self.tree, now);
         rows.sort_by_key(|i| {
             // The raw stamp breaks the tie every project with a session
@@ -5925,7 +5997,8 @@ impl App {
     }
 
     /// Worktrees of the selected project: the root checkout first, always,
-    /// then the rest most recently interacted with first (mirrors the
+    /// then the user's order once a band has been dragged or stepped, else
+    /// the rest most recently interacted with first (mirrors the
     /// sessions list). The stamp is the newest of the checkout's sessions;
     /// a stable sort keeps never-run worktrees in tree order at the bottom.
     pub fn visible_worktrees(&self) -> Vec<&Worktree> {
@@ -5947,11 +6020,28 @@ impl App {
         let Some(project) = self.selected_project() else {
             return vec![];
         };
+        self.worktree_order(&project.id)
+    }
+
+    /// `project`'s worktrees in the order the BANDS lay them out: the root
+    /// first, then the user's order once there is one
+    /// (`crate::order::worktrees_ordered`), else the most recently worked
+    /// in.
+    pub fn worktrees_in_order(&self, project: &ProjectId) -> Vec<&Worktree> {
+        self.worktree_order(project)
+            .into_iter()
+            .map(|i| &self.tree.worktrees[i])
+            .collect()
+    }
+
+    /// [`App::worktrees_in_order`], as indices into `tree.worktrees`.
+    fn worktree_order(&self, project: &ProjectId) -> Vec<usize> {
         let now = now_ms();
         let worktrees = &self.tree.worktrees;
         let mut rows: Vec<usize> = (0..worktrees.len())
-            .filter(|&i| worktrees[i].project_id == project.id)
+            .filter(|&i| &worktrees[i].project_id == project)
             .collect();
+        let ordered = crate::order::worktrees_ordered(self, project);
         // Rolled up once for every checkout rather than re-walked per
         // comparison the sort makes (`worktree_recencies`).
         let recencies = worktree_recencies(&self.tree, now);
@@ -5962,6 +6052,7 @@ impl App {
             let r = recencies.get(&w.id).copied().unwrap_or_default();
             (
                 std::cmp::Reverse(w.is_main),
+                if ordered { w.sort_order } else { 0 },
                 std::cmp::Reverse(r.interacted),
                 std::cmp::Reverse(r.stamped),
             )
@@ -6266,6 +6357,17 @@ impl App {
             .cloned()
             .collect();
         rows.sort_by_key(|a| recency_key(a, now));
+        // The user's order over it, once the checkout has one (archived
+        // sessions count: they keep their slots).
+        if crate::order::has_user_order(
+            self.tree
+                .agents
+                .iter()
+                .filter(|a| &a.worktree_id == wt)
+                .map(|a| a.sort_order),
+        ) {
+            rows.sort_by_key(|a| a.sort_order);
+        }
         // A stable pass over the top of it: the session just launched
         // leads the list from the moment its row arrives, rather than
         // sitting under the working ones until its own turn starts.

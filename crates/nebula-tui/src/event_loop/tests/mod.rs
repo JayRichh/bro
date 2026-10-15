@@ -27,7 +27,7 @@ fn seed_agent_in(app: &mut App, id: &str, worktree: &nebula_core::WorktreeId) {
                 effort: None,
                 session_id: None,
                 cloud_session_id: None,
-                sort_order: 9,
+                sort_order: 0,
                 status_changed_at: 0,
                 alive: true,
                 issue_url: None,
@@ -59,7 +59,7 @@ fn seed_second_agent(app: &mut App, status: nebula_core::AgentStatus) {
                 effort: None,
                 session_id: None,
                 cloud_session_id: None,
-                sort_order: 1,
+                sort_order: 0,
                 status_changed_at: 0,
                 alive: true,
                 issue_url: None,
@@ -1301,7 +1301,7 @@ fn a_merge_seen_to_land_keeps_the_sweep_ticking_for_a_few_seconds() {
                 id: ProjectId("p2".into()),
                 name: "other".into(),
                 repo_path: "/tmp/other".into(),
-                sort_order: 1,
+                sort_order: 0,
             }),
         },
     );
@@ -3908,7 +3908,7 @@ fn the_open_list_sweep_visits_the_other_projects_on_a_slow_beat() {
                 id: p2.clone(),
                 name: "other".into(),
                 repo_path: "/tmp/other".into(),
-                sort_order: 1,
+                sort_order: 0,
             }),
         },
     );
@@ -4382,7 +4382,7 @@ fn worktree_move_arms_prewarm_and_fire_sends_request() {
                 path: "/tmp/demo-w2".into(),
                 branch: "feature".into(),
                 is_main: false,
-                sort_order: 1,
+                sort_order: 0,
             }),
         },
     );
@@ -4594,7 +4594,7 @@ fn a_worktree_switch_clears_the_backoff() {
                 path: "/tmp/demo-w2".into(),
                 branch: "feature".into(),
                 is_main: false,
-                sort_order: 1,
+                sort_order: 0,
             }),
         },
     );
@@ -4630,7 +4630,7 @@ fn add_worktree(app: &mut App, id: &str, path: &str) -> nebula_core::WorktreeId 
                 path: path.into(),
                 branch: id.into(),
                 is_main: false,
-                sort_order: 1,
+                sort_order: 0,
             }),
         },
     );
@@ -5194,7 +5194,7 @@ fn working_sessions_head_the_list_regardless_of_age() {
     let now = crate::app::now_ms();
     let stale = now - 2 * 3_600_000;
     let mk =
-        |id: &str, status: AgentStatus, changed_at: i64, sort: i64| ServerEvent::EntityUpserted {
+        |id: &str, status: AgentStatus, changed_at: i64, _sort: i64| ServerEvent::EntityUpserted {
             entity: Entity::Agent(Agent {
                 parent: None,
                 profile: None,
@@ -5211,7 +5211,8 @@ fn working_sessions_head_the_list_regardless_of_age() {
                 effort: None,
                 session_id: None,
                 cloud_session_id: None,
-                sort_order: sort,
+                // Never reordered: the recency is what is under test.
+                sort_order: 0,
                 status_changed_at: changed_at,
                 alive: true,
                 issue_url: None,
@@ -5251,7 +5252,7 @@ fn sessions_order_by_last_interaction() {
     seed_tree(&mut app); // agent-1: fresh, never run (stamp 0)
     let now = crate::app::now_ms();
     let mins = |n: i64| now - n * 60_000;
-    let mk = |id: &str, status: AgentStatus, at: i64, sort: i64| ServerEvent::EntityUpserted {
+    let mk = |id: &str, status: AgentStatus, at: i64, _sort: i64| ServerEvent::EntityUpserted {
         entity: Entity::Agent(Agent {
             parent: None,
             profile: None,
@@ -5268,7 +5269,8 @@ fn sessions_order_by_last_interaction() {
             effort: None,
             session_id: None,
             cloud_session_id: None,
-            sort_order: sort,
+            // Never reordered: the recency is what is under test.
+            sort_order: 0,
             status_changed_at: at,
             alive: true,
             issue_url: None,
@@ -5336,7 +5338,7 @@ fn a_session_created_running_leads_the_working_ones() {
     let mut app = App::new();
     seed_tree(&mut app); // agent-1: fresh, never run
     let now = crate::app::now_ms();
-    let mk = |id: &str, status: AgentStatus, at: i64, sort: i64| ServerEvent::EntityUpserted {
+    let mk = |id: &str, status: AgentStatus, at: i64, _sort: i64| ServerEvent::EntityUpserted {
         entity: Entity::Agent(Agent {
             parent: None,
             profile: None,
@@ -5353,7 +5355,8 @@ fn a_session_created_running_leads_the_working_ones() {
             effort: None,
             session_id: None,
             cloud_session_id: None,
-            sort_order: sort,
+            // Never reordered: the recency is what is under test.
+            sort_order: 0,
             status_changed_at: at,
             alive: true,
             issue_url: None,
@@ -5416,7 +5419,7 @@ fn status_change_resorts_and_selection_follows() {
                 effort: None,
                 session_id: None,
                 cloud_session_id: None,
-                sort_order: 1,
+                sort_order: 0,
                 status_changed_at: 0,
                 alive: true,
                 issue_url: None,
@@ -5971,7 +5974,7 @@ fn a_picked_session_launches_into_the_selected_worktree_and_takes_the_pane() {
                     status: AgentStatus::Fresh,
                     kind: AgentKind::Claude,
                     custom_harness: None,
-                    sort_order: 1,
+                    sort_order: 0,
                     ..template
                 }),
             },
@@ -7377,7 +7380,7 @@ fn t_from_projects_targets_the_root_checkout() {
                 path: "/tmp/demo-worktrees/feat".into(),
                 branch: "feat".into(),
                 is_main: false,
-                sort_order: 1,
+                sort_order: 0,
             }),
         },
     );
@@ -7875,7 +7878,7 @@ fn walking_onto_a_reaped_session_still_waits_out_the_debounce() {
                 effort: None,
                 session_id: None,
                 cloud_session_id: None,
-                sort_order: 1,
+                sort_order: 0,
                 status_changed_at: 0,
                 alive: false,
                 issue_url: None,
@@ -10226,10 +10229,11 @@ fn renaming_a_project_to_nothing_undoes_the_rename() {
     );
 }
 
-/// The shifted keys used to reorder projects; the column orders itself
-/// now, so they neither send a request nor move anything.
+/// The shifted letters used to reorder projects and no longer do; the
+/// move keys are `⌥↓` / `⇧↓` (and their up twins), which ask the daemon
+/// for the new order rather than moving anything here first.
 #[test]
-fn shifted_keys_no_longer_reorder_projects() {
+fn shifted_letters_do_not_reorder_projects_the_move_keys_do() {
     // `Shift+K` is the KANBAN now, a toggle saved to the config.
     with_default_config(|| {
         let mut app = App::new();
@@ -10243,7 +10247,6 @@ fn shifted_keys_no_longer_reorder_projects() {
         let mut out = Vec::new();
         app.nav.focus = Focus::Projects;
         for key in [
-            KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT),
             KeyEvent::new(KeyCode::Char('J'), KeyModifiers::SHIFT),
             KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT),
         ] {
@@ -10256,6 +10259,17 @@ fn shifted_keys_no_longer_reorder_projects() {
             .map(|i| app.tree.projects[i].name.as_str())
             .collect();
         assert_eq!(order, ["demo", "two"], "nothing moved");
+        app.nav.focus = Focus::Projects;
+        app.nav.sel_project = 0;
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Down, KeyModifiers::ALT),
+            &mut out,
+        );
+        assert!(
+            matches!(out.as_slice(), [ClientRequest::Reorder { scope: nebula_core::ReorderScope::Projects, ids, .. }] if ids == &["p2", "p1"]),
+            "{out:?}"
+        );
     });
 }
 
@@ -10300,10 +10314,12 @@ fn projects_sort_by_last_interaction_and_selection_follows() {
     use nebula_core::AgentStatus;
     let mut app = App::new();
     seed_tree(&mut app); // p1 "demo" / w1 / a1 (never run)
+                         // Both at 0, as a daemon that predates the user order leaves them:
+                         // with no order of the user's, the column follows the work.
     hse(
         &mut app,
         ServerEvent::EntityUpserted {
-            entity: project("p2", "two", 1),
+            entity: project("p2", "two", 0),
         },
     );
     hse(
@@ -10707,7 +10723,7 @@ fn switching_contexts_restores_the_remembered_session() {
                 path: "/tmp/demo-worktrees/other".into(),
                 branch: "other".into(),
                 is_main: false,
-                sort_order: 1,
+                sort_order: 0,
             }),
         },
     );
@@ -12010,7 +12026,7 @@ fn seed_second_project(app: &mut App) {
                 id: ProjectId("p2".into()),
                 name: "nebula".into(),
                 repo_path: "/tmp/nebula".into(),
-                sort_order: 1,
+                sort_order: 0,
             }),
         },
     );
@@ -12074,7 +12090,7 @@ fn seed_second_project(app: &mut App) {
                 effort: None,
                 session_id: None,
                 cloud_session_id: None,
-                sort_order: 1,
+                sort_order: 0,
                 status_changed_at: 0,
                 alive: false,
                 issue_url: None,
@@ -12407,7 +12423,7 @@ fn seed_attention_ring(app: &mut App) {
         effort: None,
         session_id: None,
         cloud_session_id: None,
-        sort_order: 5,
+        sort_order: 0,
         status_changed_at: 500,
         alive: true,
         issue_url: None,
@@ -12498,7 +12514,7 @@ fn attention_jump_from_off_the_ring_starts_at_either_end() {
                 path: "/tmp/demo-empty".into(),
                 branch: "empty".into(),
                 is_main: false,
-                sort_order: 1,
+                sort_order: 0,
             }),
         },
     );
@@ -12782,7 +12798,7 @@ fn palette_rebuilds_when_the_tree_changes_under_it() {
                 id: ProjectId("p9".into()),
                 name: "fresh".into(),
                 repo_path: "/tmp/fresh".into(),
-                sort_order: 9,
+                sort_order: 0,
             }),
         },
     );
@@ -15161,7 +15177,7 @@ fn shift_d_bulk_deletes_the_visible_sessions() {
                     effort: None,
                     session_id: None,
                     cloud_session_id: None,
-                    sort_order: 1,
+                    sort_order: 0,
                     status_changed_at: 0,
                     alive: true,
                     issue_url: None,
@@ -15237,7 +15253,7 @@ fn agent_entity(id: &str, wt: &str, name: &str, archived: bool) -> nebula_core::
         effort: None,
         session_id: None,
         cloud_session_id: None,
-        sort_order: 1,
+        sort_order: 0,
         status_changed_at: 0,
         alive: true,
         issue_url: None,
@@ -15779,7 +15795,7 @@ pub(super) fn seed_other_project(app: &mut App) {
                 id: ProjectId("p9".into()),
                 name: "secret".into(),
                 repo_path: "/tmp/secret".into(),
-                sort_order: 9,
+                sort_order: 0,
             }),
         },
     );
@@ -16485,7 +16501,7 @@ fn e_on_an_open_pr_row_picks_a_preset_and_launches_a_pr_session_on_it() {
                     path: "/tmp/demo-worktrees/pr-7-head".into(),
                     branch: "pr-7-head".into(),
                     is_main: false,
-                    sort_order: 1,
+                    sort_order: 0,
                 }),
             },
         );
@@ -17921,7 +17937,7 @@ pub(super) fn seed_feat_worktree(app: &mut App, id: &str, branch: &str) {
                 path: format!("/tmp/demo-worktrees/{branch}").into(),
                 branch: branch.into(),
                 is_main: false,
-                sort_order: 1,
+                sort_order: 0,
             }),
         },
     );
@@ -17967,7 +17983,7 @@ fn the_project_tab_run_command_is_typed_into_the_selected_projects_entry() {
                     id: ProjectId("p2".into()),
                     name: "other".into(),
                     repo_path: "/tmp/other".into(),
-                    sort_order: 1,
+                    sort_order: 0,
                 }),
             },
         );
@@ -18301,7 +18317,7 @@ fn a_quick_prompt_lands_the_row_without_taking_the_pane() {
                     effort: None,
                     session_id: None,
                     cloud_session_id: None,
-                    sort_order: 1,
+                    sort_order: 0,
                     status_changed_at: 0,
                     alive: true,
                     issue_url: None,

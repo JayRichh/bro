@@ -616,6 +616,9 @@ pub(crate) fn run_menu_action(app: &mut App, action: MenuAction, out: &mut Vec<C
             crate::account_switch::confirm(app, id, profile)
         }
         MenuAction::MoveAgent { id, worktree } => launcher::move_agent(app, id, worktree, out),
+        MenuAction::Reorder(target, dir) => {
+            crate::order::step(app, &target, dir, out);
+        }
         MenuAction::RenameAgent(id) => open_prompt(app, PromptKind::RenameAgent { id }),
         MenuAction::ArchiveAgent(id) => {
             archive_agent(app, id, out);

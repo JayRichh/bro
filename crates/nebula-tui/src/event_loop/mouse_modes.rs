@@ -763,6 +763,7 @@ fn handle_left_click(app: &mut App, mouse: MouseEvent, out: &mut Vec<ClientReque
     app.pane.next_drag_autoscroll = None;
     app.pane.term_mouse_grab = None;
     app.launcher.card_drag = None;
+    app.launcher.order_drag = None;
     handle_left_click_target(app, mouse, out);
     app.chrome.dirty = true;
 }
@@ -840,14 +841,32 @@ fn handle_left_click_target(app: &mut App, mouse: MouseEvent, out: &mut Vec<Clie
         // The press also arms a drag of the card onto another
         // band, which moves its session there. Armed first: the
         // card is found by the grid as drawn, before the click.
-        Some(HitTarget::KanbanCard(id)) => launcher::click_kanban(app, &id, out),
+        // The press also arms a drag of the card onto a lane, or beside
+        // a card of its checkout.
+        Some(HitTarget::KanbanCard(id)) => {
+            launcher::press_kanban(app, &id, (mouse.column, mouse.row));
+            launcher::click_kanban(app, &id, out);
+        }
+        // The board card's buttons and its `⋯`, as on the grid.
+        Some(HitTarget::KanbanButton(id, action)) => {
+            launcher::click_kanban_button(app, &id, action, out)
+        }
+        Some(HitTarget::KanbanMenu(id)) => launcher::click_kanban_menu(app, &id, out),
+        // A lane's air and the ARCHIVED zone take only a held card.
+        Some(HitTarget::KanbanLane(_) | HitTarget::KanbanArchive) => {
+            app.nav.focus = Focus::Sessions;
+        }
         Some(HitTarget::LauncherCard(at)) => {
             launcher::press_card(app, at, (mouse.column, mouse.row));
             launcher::click_card(app, at, out);
         }
         // A BAND's rule: the cursor lands on the band, as `j`/`k`
         // walking onto it do.
-        Some(HitTarget::LauncherBand(i)) => launcher::click_band(app, i, out),
+        // The press also arms a drag of the band among the project's.
+        Some(HitTarget::LauncherBand(i)) => {
+            launcher::press_band(app, i, (mouse.column, mouse.row));
+            launcher::click_band(app, i, out);
+        }
         // The `❮` / `❯` beside a band's row: one card that way
         // along the band, the very step `h` / `l` take.
         Some(HitTarget::LauncherStripLeft(i)) => launcher::click_strip_arrow(app, i, -1, out),
@@ -886,7 +905,11 @@ fn handle_left_click_target(app: &mut App, mouse: MouseEvent, out: &mut Vec<Clie
         // project, narrowed by whatever you type, and a row that
         // opens a folder — whose pick opens a tab; the MORE CHIP
         // drops the tabs the row had no room for.
-        Some(HitTarget::LauncherTab(id)) => launcher::click_tab(app, &id, out),
+        // The press also arms a drag of the tab along the header.
+        Some(HitTarget::LauncherTab(id)) => {
+            launcher::press_tab(app, &id, (mouse.column, mouse.row));
+            launcher::click_tab(app, &id, out);
+        }
         Some(HitTarget::LauncherTabClose(id)) => launcher::close_tab(app, &id, out),
         Some(HitTarget::LauncherTabAdd) => launcher::open_project_menu(app),
         Some(HitTarget::LauncherTabMore) => launcher::open_more_tabs_menu(app),
@@ -1029,6 +1052,8 @@ fn handle_left_click_target(app: &mut App, mouse: MouseEvent, out: &mut Vec<Clie
 fn handle_left_drag(app: &mut App, mouse: MouseEvent, out: &mut Vec<ClientRequest>) {
     if app.launcher.card_drag.is_some() {
         launcher::drag_card(app, (mouse.column, mouse.row));
+    } else if app.launcher.order_drag.is_some() {
+        launcher::drag_order(app, (mouse.column, mouse.row));
     } else if let Some(grab) = app.launcher.launcher_pane_drag {
         let at = app.launcher_pane_side().along(mouse.column, mouse.row);
         app.set_launcher_pane(at + grab);
@@ -1064,6 +1089,8 @@ fn handle_left_release(app: &mut App, mouse: MouseEvent, out: &mut Vec<ClientReq
         app.chrome.dirty = true;
     } else if app.launcher.card_drag.is_some() {
         launcher::drop_card(app, out);
+    } else if app.launcher.order_drag.is_some() {
+        launcher::drop_order(app, out);
     } else if let Some(sref) = app.pane.term_mouse_grab.take() {
         // The release closes the program's button — except under
         // press-only tracking (`?9h`), which has no release report.

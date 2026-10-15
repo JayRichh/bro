@@ -62,6 +62,92 @@ const ADD_EMPTY: &str = "+ open a project";
 /// lot instead (`event_loop::launcher::open_session`, the `collapsed` arm
 /// of `ui::draw`).
 pub(super) fn draw(f: &mut Frame, app: &mut App, body: Rect) {
+    draw_view(f, app, body);
+    draw_drop_marks(f, app);
+}
+
+/// Where a held card, band or tab would land, marked over the frame just
+/// drawn in the theme's accent: a 1px rule in the gap beside the card it would
+/// sit next to, the rule of the band it would go before (`▲`) or after
+/// (`▼`), a bar at the side of the tab it would go beside. Read off the
+/// frame's own hit map, so the mark is where the cells are.
+fn draw_drop_marks(f: &mut Frame, app: &App) {
+    use crate::app::{OrderItem, OrderOver};
+    use crate::order::Place;
+    let th = app.chrome.theme;
+    let accent = Style::default().fg(th.accent).add_modifier(Modifier::BOLD);
+    let frame = f.area();
+    let buf = f.buffer_mut();
+    // A bar one column wide down `r`'s height at `x`, kept on the frame.
+    let mut bar = |x: u16, r: Rect| {
+        if x < frame.right() {
+            for y in r.y..r.bottom().min(frame.bottom()) {
+                buf.set_string(x, y, "│", accent);
+            }
+        }
+    };
+    let beside = |r: Rect, place: Place| match place {
+        Place::Before => r.x.saturating_sub(1),
+        Place::After => r.right(),
+    };
+    if let Some((target, place)) = app
+        .launcher
+        .card_drag
+        .as_ref()
+        .filter(|d| d.active)
+        .and_then(|d| d.slot.clone())
+    {
+        let bands = crate::launcher::bands(app);
+        let sref = nebula_core::SessionRef::Agent(target);
+        let rect = app.chrome.hits.iter().find_map(|(r, hit)| match hit {
+            HitTarget::LauncherCard(at)
+                if crate::launcher::card_at(&bands, *at).is_some_and(|c| c.sref() == sref) =>
+            {
+                Some(*r)
+            }
+            _ => None,
+        });
+        if let Some(r) = rect {
+            bar(beside(r, place), r);
+        }
+        return;
+    }
+    let Some(drag) = app.launcher.order_drag.as_ref().filter(|d| d.active) else {
+        return;
+    };
+    match (&drag.item, &drag.over) {
+        (OrderItem::Tab(_), Some(OrderOver::Tab(id, place))) => {
+            if let Some(r) = app.hit_rect(&HitTarget::LauncherTab(id.clone())) {
+                bar(beside(r, *place), r);
+            }
+        }
+        (OrderItem::Band(_), Some(OrderOver::Band(w, place))) => {
+            let bands = crate::launcher::bands(app);
+            let rule = app.chrome.hits.iter().find_map(|(r, hit)| match hit {
+                HitTarget::LauncherBand(i) if bands.get(*i).is_some_and(|b| &b.worktree == w) => {
+                    Some(*r)
+                }
+                _ => None,
+            });
+            if let Some(r) = rule {
+                let mark = match place {
+                    Place::Before => "▲ before ",
+                    Place::After => "▼ after ",
+                };
+                buf.set_stringn(r.x, r.y, mark, usize::from(r.width), accent);
+                let from = r.x + mark.chars().count() as u16;
+                for x in from..r.right().min(frame.right()) {
+                    if let Some(cell) = buf.cell_mut((x, r.y)) {
+                        cell.set_fg(th.accent);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn draw_view(f: &mut Frame, app: &mut App, body: Rect) {
     app.chrome.body_area = body;
     app.settle_launcher_focus();
     // The project the grid is on gets its tab, whichever way it was
@@ -2485,14 +2571,22 @@ fn draw_card(
 /// though it is drawn last, at the right end.
 fn card_button_list(
     card: &crate::launcher::Card,
-    at: crate::launcher::CardRef,
+    on: &ButtonsOn,
 ) -> Vec<(&'static str, HitTarget)> {
     use crate::keymap::Action;
-    let act = |label, action| (label, HitTarget::CardButton(at, action));
-    let mut list = vec![(CARD_MENU, HitTarget::CardMenu(at))];
+    let act = |label, action| (label, on.button(action));
+    let mut list = vec![(CARD_MENU, on.menu())];
     match card {
         crate::launcher::Card::Session(row) if row.agent.archived => {
             list.push(act(" unarchive ", Action::Unarchive));
+            list.push(act(" delete ", Action::Delete));
+        }
+        // A board card is narrow — a fifth of the width — and is there to
+        // be read and acted on in place: its diff comes first.
+        crate::launcher::Card::Session(_) if matches!(on, ButtonsOn::Board(_)) => {
+            list.push(act(" diff ", Action::GitDiff));
+            list.push(act(" reply ", Action::FollowUp));
+            list.push(act(" archive ", Action::Archive));
             list.push(act(" delete ", Action::Delete));
         }
         crate::launcher::Card::Session(_) => {
@@ -2509,25 +2603,53 @@ fn card_button_list(
     list
 }
 
+/// Which card the CARD BUTTONS are on: a band's, by its place on the grid,
+/// or a board card, by its session — so a click reaches the very card it
+/// was drawn on in either view.
+pub(super) enum ButtonsOn {
+    Grid(crate::launcher::CardRef),
+    Board(nebula_core::AgentId),
+}
+
+impl ButtonsOn {
+    fn button(&self, action: crate::keymap::Action) -> HitTarget {
+        match self {
+            ButtonsOn::Grid(at) => HitTarget::CardButton(*at, action),
+            ButtonsOn::Board(id) => HitTarget::KanbanButton(id.clone(), action),
+        }
+    }
+
+    fn menu(&self) -> HitTarget {
+        match self {
+            ButtonsOn::Grid(at) => HitTarget::CardMenu(*at),
+            ButtonsOn::Board(id) => HitTarget::KanbanMenu(id.clone()),
+        }
+    }
+}
+
 /// The order the CARD BUTTONS read in, left to right; the `⋯` last.
 fn card_button_rank(hit: &HitTarget) -> usize {
     use crate::keymap::Action;
-    match hit {
-        HitTarget::CardButton(_, Action::FollowUp | Action::Unarchive) => 0,
-        HitTarget::CardButton(_, Action::GitDiff) => 1,
-        HitTarget::CardButton(_, Action::Archive) => 2,
-        HitTarget::CardButton(_, Action::Delete) => 3,
+    let action = match hit {
+        HitTarget::CardButton(_, action) | HitTarget::KanbanButton(_, action) => *action,
+        _ => return 4,
+    };
+    match action {
+        Action::FollowUp | Action::Unarchive => 0,
+        Action::GitDiff => 1,
+        Action::Archive => 2,
+        Action::Delete => 3,
         _ => 4,
     }
 }
 
-/// The CARD BUTTONS of the card at `at`, drawn at `placed`, laid out on
+/// The CARD BUTTONS of the card `on`, drawn at `placed`, laid out on
 /// its bottom border: right-aligned inside the corners, each whole or not
 /// at all ([`card_button_list`] says which go first), and none on a card
 /// whose bottom row the window cut off.
-fn card_buttons(
+pub(super) fn card_buttons(
     card: &crate::launcher::Card,
-    at: crate::launcher::CardRef,
+    on: &ButtonsOn,
     placed: crate::launcher::Placed,
     reserve: usize,
 ) -> Vec<(Rect, HitTarget, &'static str)> {
@@ -2540,7 +2662,7 @@ fn card_buttons(
     let room = (usize::from(r.width) - 4).saturating_sub(reserve);
     let mut kept: Vec<(&'static str, HitTarget)> = Vec::new();
     let mut used = 0;
-    for (label, hit) in card_button_list(card, at) {
+    for (label, hit) in card_button_list(card, on) {
         let w = label.chars().count();
         if used + w > room {
             break;
@@ -2569,7 +2691,11 @@ fn card_buttons(
 /// Draw [`card_buttons`] over the card's bottom border: muted, the one
 /// under the pointer in the accent and underlined, as every button on the
 /// grid is.
-fn draw_card_buttons(buf: &mut Buffer, app: &App, buttons: &[(Rect, HitTarget, &'static str)]) {
+pub(super) fn draw_card_buttons(
+    buf: &mut Buffer,
+    app: &App,
+    buttons: &[(Rect, HitTarget, &'static str)],
+) {
     let th = app.chrome.theme;
     for (rect, hit, label) in buttons {
         let style = if app.launcher.hover_crumb.as_ref() == Some(hit) {
@@ -2598,7 +2724,7 @@ fn selected_card_buttons(
         return;
     }
     let reserve = super::subagents_view::card_chip_width(app, card);
-    let buttons = card_buttons(card, at, placed, reserve);
+    let buttons = card_buttons(card, &ButtonsOn::Grid(at), placed, reserve);
     draw_card_buttons(f.buffer_mut(), app, &buttons);
     app.chrome
         .hits
@@ -4524,7 +4650,6 @@ mod tests {
                 name: format!("session {i}"),
                 status: AgentStatus::Finished,
                 kind: AgentKind::Claude,
-                sort_order: i as i64,
                 ..one.clone()
             })
             .collect();
@@ -5081,7 +5206,6 @@ mod tests {
                 name: format!("session {i}"),
                 status: AgentStatus::Finished,
                 kind: AgentKind::Claude,
-                sort_order: i as i64,
                 ..one.clone()
             })
             .collect();
