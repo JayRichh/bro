@@ -143,8 +143,9 @@ describe('chordOf and shortcutFor', () => {
     expect([...scopes].sort()).toEqual(['anywhere', 'board', 'fields', 'global', 'overview', 'review', 'row']);
   });
 
-  it("reads the review row's Alt chords from the physical key, as the terminal app's review has them", () => {
-    const alt = (code: string, m: Partial<{ ctrlKey: boolean; shiftKey: boolean; metaKey: boolean }> = {}) => ({
+  it("reads the review row's Alt chords as the terminal app's review has them", () => {
+    const alt = (k: string, code: string, m: Partial<{ ctrlKey: boolean; shiftKey: boolean; metaKey: boolean }> = {}) => ({
+      key: k,
       code,
       altKey: true,
       ctrlKey: false,
@@ -152,13 +153,19 @@ describe('chordOf and shortcutFor', () => {
       metaKey: false,
       ...m,
     });
-    expect(reviewKeyFor(alt('KeyP'))?.id).toBe('review_pr');
-    expect(reviewKeyFor(alt('KeyM'))?.id).toBe('review_merge');
-    expect(reviewKeyFor(alt('KeyA'))?.id).toBe('review_archive');
-    expect(reviewKeyFor(alt('KeyW'))?.id).toBe('review_delete_worktree');
-    expect(reviewKeyFor(alt('KeyP', { ctrlKey: true }))).toBeUndefined();
-    expect(reviewKeyFor(alt('KeyP', { shiftKey: true }))).toBeUndefined();
-    expect(reviewKeyFor({ ...alt('KeyP'), altKey: false })).toBeUndefined();
+    expect(reviewKeyFor(alt('p', 'KeyP'))?.id).toBe('review_pr');
+    expect(reviewKeyFor(alt('m', 'KeyM'))?.id).toBe('review_merge');
+    expect(reviewKeyFor(alt('a', 'KeyA'))?.id).toBe('review_archive');
+    expect(reviewKeyFor(alt('w', 'KeyW'))?.id).toBe('review_delete_worktree');
+    // The letter typed wins: on AZERTY the key labelled Z is KeyW, on
+    // Dvorak the P sits on KeyR.
+    expect(reviewKeyFor(alt('z', 'KeyW'))).toBeUndefined();
+    expect(reviewKeyFor(alt('p', 'KeyR'))?.id).toBe('review_pr');
+    // Option and a letter on a Mac types a symbol: the physical key then.
+    expect(reviewKeyFor(alt(String.fromCharCode(0x3c0), 'KeyP'))?.id).toBe('review_pr');
+    expect(reviewKeyFor(alt('p', 'KeyP', { ctrlKey: true }))).toBeUndefined();
+    expect(reviewKeyFor(alt('P', 'KeyP', { shiftKey: true }))).toBeUndefined();
+    expect(reviewKeyFor({ ...alt('p', 'KeyP'), altKey: false })).toBeUndefined();
     // Only the review row takes them: no window key fires on them anywhere.
     for (const ctx of [idle, row, field, term]) expect(shortcutFor(key('p', { altKey: true }), ctx)).toBeUndefined();
   });

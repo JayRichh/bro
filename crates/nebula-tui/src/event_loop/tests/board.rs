@@ -947,5 +947,16 @@ fn the_chip_picks_an_account() {
         // The palette's row does what the click does.
         run_action(&mut app, crate::keymap::Action::ScopeAccount, &mut out);
         assert!(matches!(app.modals.overlay, Some(Overlay::Menu(_))));
+
+        // Scoped to the root checkout, only its sessions' accounts.
+        app.modals.overlay = None;
+        app.launcher.scope.worktree = Some(WorktreeId("w1".into()));
+        run_action(&mut app, crate::keymap::Action::ScopeAccount, &mut out);
+        let labels: Vec<String> = match &app.modals.overlay {
+            Some(Overlay::Menu(m)) => m.items.iter().map(|i| i.label.trim().to_string()).collect(),
+            other => panic!("no picker: {other:?}"),
+        };
+        assert_eq!(labels.len(), 2, "{labels:?}");
+        assert!(!labels.contains(&"@work".to_string()), "{labels:?}");
     });
 }

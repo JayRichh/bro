@@ -2113,9 +2113,10 @@ pub(super) fn open_more_tabs_menu(app: &mut App) {
 }
 
 /// The SCOPE CHIP's account picker: Any account, then each account the
-/// sessions on the board run on (`@work`, `@claude` for a harness's own
-/// login), the one in the scope ticked. A pick narrows the scope to it,
-/// the repo and worktree kept, as the desktop chip's menu does.
+/// sessions on the board (in its repo or worktree) run on (`@work`,
+/// `@claude` for a harness's own login), the one in the scope ticked. A
+/// pick narrows the scope to it, the repo and worktree kept, as the
+/// desktop chip's menu does.
 pub(super) fn open_account_picker(app: &mut App) {
     use nebula_core::scope::Scope;
     let scope = app.launcher.scope.clone();
@@ -2133,7 +2134,16 @@ pub(super) fn open_account_picker(app: &mut App) {
             ..scope.clone()
         }),
     )];
-    for key in nebula_core::accounts::sessions_by_account(&app.tree.agents).into_keys() {
+    // The accounts of the sessions the board shows now, the account part
+    // of the scope aside: one picked from elsewhere would empty it.
+    let mut place = view::effective_scope(app);
+    place.account = None;
+    let shown = app
+        .tree
+        .agents
+        .iter()
+        .filter(|a| view::scope_admits(app, &place, a));
+    for key in nebula_core::accounts::sessions_by_account(shown).into_keys() {
         let on = scope.account.as_deref() == Some(key.as_str());
         let label = format!("@{}", key.trim_start_matches('@'));
         items.push(MenuItem::new(

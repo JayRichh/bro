@@ -163,15 +163,18 @@ export function shortcutFor(
   return table.find((s) => s.keys.includes(chord) && inScope(s.scope, ctx) && !(ctx.inEditor && s.editorOwns));
 }
 
-/** The review row's key a key event is, if any: Alt and a letter, read
- *  from the physical key (`e.code`), since Option and a letter on a Mac
- *  types a symbol (Option+P is a pi) rather than the letter. */
+/** The review row's key a key event is, if any: Alt and a letter. The
+ *  letter the key types (`e.key`), so a layout's own letters hold; where
+ *  Alt types a symbol instead (Option+P is a pi on a Mac), the letter on
+ *  the physical key (`e.code`). */
 export function reviewKeyFor(
-  e: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey'>,
+  e: Pick<KeyboardEvent, 'key' | 'code' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey'>,
   table: Shortcut[] = SHORTCUTS,
 ): Shortcut | undefined {
-  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || !/^Key[A-Z]$/.test(e.code)) return undefined;
-  const chord = `alt+${e.code.slice(3).toLowerCase()}`;
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return undefined;
+  const letter = /^[a-z]$/i.test(e.key) ? e.key.toLowerCase() : /^Key[A-Z]$/.test(e.code) ? e.code.slice(3).toLowerCase() : null;
+  if (!letter) return undefined;
+  const chord = `alt+${letter}`;
   return table.find((s) => s.scope === 'review' && s.keys.includes(chord));
 }
 

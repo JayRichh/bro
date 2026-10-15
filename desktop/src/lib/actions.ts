@@ -479,7 +479,10 @@ function prVerbs(worktree: string, session?: string): VerbTable {
  *  worktree's) or the repo, the account narrowing kept. */
 function focusVerb(on: { worktree: string } | { repo: string }): VerbImpl {
   return {
-    run: () => setScope('repo' in on ? repoScope(m().scope, on.repo) : worktreeScope(m(), m().scope, on.worktree)),
+    run: () => {
+      const s = m().scope ?? {};
+      setScope('repo' in on ? repoScope(s, on.repo) : worktreeScope(m(), s, on.worktree));
+    },
   };
 }
 

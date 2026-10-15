@@ -301,7 +301,7 @@ here** on a card's or row's menu narrows it to that worktree.
 
 A Review or Ship card opened shows its worktree's diff against the base under a verb row. The
 review's keys are the terminal app's review unit's, and count anywhere in the review, the diff
-editor included (they read the physical key, so Option and the letter work on a Mac):
+editor included (on a Mac, Option and the letter):
 
 | Key | Where | What it does |
 |---|---|---|
