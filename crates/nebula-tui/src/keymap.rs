@@ -1051,6 +1051,9 @@ mod tests {
                             | Action::ToggleRun
                             | Action::DeleteWorktree
                             | Action::RemoveProject
+                            | Action::CreatePullRequest
+                            | Action::MergePullRequest
+                            | Action::FocusScope
                     ),
                     "{} ships with no chord",
                     spec.id

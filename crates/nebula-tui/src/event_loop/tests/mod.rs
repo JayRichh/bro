@@ -21134,6 +21134,16 @@ fn every_overlay() -> Vec<(&'static str, fn(&mut App), Option<&'static str>)> {
             None,
         ),
         (
+            // The pull request composer on the seeded checkout, as a
+            // Review card dropped on Ship opens it.
+            "Ship",
+            |app| {
+                seed_tree(app);
+                super::ship::open_composer(app, &nebula_core::WorktreeId("w1".into()), None, None);
+            },
+            None,
+        ),
+        (
             // ⇧S from the grid.
             "Subagents",
             |app| {
@@ -21289,6 +21299,7 @@ fn overlay_label(overlay: &Overlay) -> &'static str {
         Overlay::Accounts(_) => "Accounts",
         Overlay::Subagents(_) => "Subagents",
         Overlay::Ado(_) => "Ado",
+        Overlay::Ship(_) => "Ship",
     }
 }
 
@@ -21318,7 +21329,7 @@ fn the_overlay_table_covers_every_variant_exactly_once() {
         let mut unique = seen.clone();
         unique.dedup();
         assert_eq!(unique, seen, "two rows for the same variant");
-        assert_eq!(seen.len(), 22, "a variant came or went: {seen:?}");
+        assert_eq!(seen.len(), 23, "a variant came or went: {seen:?}");
     });
 }
 
@@ -22577,6 +22588,7 @@ fn a_desktop_write_waits_for_the_reset_confirm_too() {
         assert!(app.launcher.launcher_kanban);
     });
 }
+mod board;
 mod buttons;
 mod dispatch;
 mod orch_view;

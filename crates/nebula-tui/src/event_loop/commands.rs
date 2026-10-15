@@ -785,6 +785,16 @@ pub(crate) fn run_menu_action(app: &mut App, action: MenuAction, out: &mut Vec<C
                 app.modals.overlay = Some(Overlay::Confirm(confirm_remove_project(&p.name, id)));
             }
         }
+        MenuAction::CreatePullRequest { worktree, agent } => {
+            ship::open_composer(app, &worktree, agent, None)
+        }
+        MenuAction::MergePullRequest { worktree, agent } => {
+            ship::open_merge(app, &worktree, agent, None)
+        }
+        MenuAction::FocusScope(scope) => {
+            board::set_scope(app, scope);
+            launcher::after_scope_change(app, out);
+        }
         MenuAction::ToggleArchived => toggle_archived(app, out),
         MenuAction::ToggleOpenPrs => toggle_open_prs(app, out),
         MenuAction::ToggleIssues => toggle_issues(app, out),

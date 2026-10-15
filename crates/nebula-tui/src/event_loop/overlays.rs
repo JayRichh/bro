@@ -48,6 +48,7 @@ pub(crate) fn handle_overlay_key(app: &mut App, key: KeyEvent, out: &mut Vec<Cli
         Overlay::Accounts(_) => accounts::handle_key(app, key, out),
         Overlay::Subagents(_) => desk::handle_subagents_key(app, key, out),
         Overlay::Ado(_) => ado::handle_key(app, key, out),
+        Overlay::Ship(_) => ship::handle_key(app, key, out),
         Overlay::ProjectPicker(_) => launcher::handle_picker_key(app, key),
         Overlay::Menu(_) => handle_menu_key(app, key, out),
         Overlay::Prompt(_) => handle_prompt_key(app, key, out),
@@ -523,7 +524,20 @@ fn handle_confirm_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>
 }
 
 fn handle_diff_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) {
-    let _ = &mut *out;
+    // The REVIEW UNIT's verbs, and the way back to the board card a diff
+    // was opened from, ahead of the diff's own keys.
+    if let Some(Overlay::Diff(view)) = &app.modals.overlay {
+        if view.confirm_discard.is_none() {
+            if let Some(verb) = super::review::verb_of(view, &key) {
+                super::review::run_verb(app, verb, out);
+                return;
+            }
+            if key.code == KeyCode::Esc && view.filter.is_empty() && view.from_card.is_some() {
+                super::review::close_diff(app, out);
+                return;
+            }
+        }
+    }
     let Some(overlay) = &mut app.modals.overlay else {
         return;
     };

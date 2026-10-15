@@ -169,6 +169,7 @@ fn overlay_name(app: &App) -> &'static str {
         Some(Overlay::Accounts(_)) => "Accounts",
         Some(Overlay::Subagents(_)) => "Subagents",
         Some(Overlay::Ado(_)) => "Ado",
+        Some(Overlay::Ship(_)) => "Ship",
     }
 }
 

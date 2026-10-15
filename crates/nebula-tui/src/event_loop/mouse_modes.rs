@@ -86,6 +86,7 @@ fn handle_overlay_mouse(
         Overlay::Subagents(_) => desk::handle_subagents_mouse(app, mouse, out),
         Overlay::Ado(_) => ado::handle_mouse(app, mouse, out),
         Overlay::Accounts(_) => accounts::handle_mouse(app, mouse, out),
+        Overlay::Ship(_) => ship::handle_mouse(app, mouse, mouse_pos, out),
         _ => true,
     }
 }
@@ -355,7 +356,9 @@ fn handle_diff_mouse(
     mouse_pos: ratatui::layout::Position,
     out: &mut Vec<ClientRequest>,
 ) -> bool {
-    let _ = &mut *out;
+    if let Some(took) = super::review::handle_click(app, mouse, mouse_pos, out) {
+        return took;
+    }
     // Diff modal: the wheel over the file list walks its cursor a row a
     // notch (↑/↓'s own step), anywhere else it scrolls the diff; a click on
     // a file-list row selects that file (and folds or unfolds a tree
@@ -935,7 +938,16 @@ fn handle_left_click_target(app: &mut App, mouse: MouseEvent, out: &mut Vec<Clie
                 launcher::toggle_kanban(app, out);
             }
         }
-        Some(HitTarget::LauncherKanbanScope) => launcher::flip_kanban_scope(app, out),
+        // The SCOPE CHIP: a segment widens the scope to it, the `✕`
+        // to everything.
+        Some(HitTarget::ScopeChip(keep)) => {
+            super::board::widen_scope(app, keep);
+            launcher::after_scope_change(app, out);
+        }
+        Some(HitTarget::ScopeClear) => {
+            super::board::widen_scope(app, 0);
+            launcher::after_scope_change(app, out);
+        }
         // The key cap in the empty grid's welcome: the QUICK
         // PROMPT, through the `open_box` its key runs.
         Some(HitTarget::LauncherWelcomePrompt) => launcher::open_box(app),

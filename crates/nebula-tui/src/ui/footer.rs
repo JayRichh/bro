@@ -275,6 +275,21 @@ fn button_tooltip(app: &App, th: Theme) -> Option<FooterHint> {
                 th,
             ));
         }
+        HitTarget::ScopeChip(0) | HitTarget::ScopeClear => {
+            return Some(dim_hint(
+                format!(
+                    "click: the scope back to everything (Esc, once no card is aimed at) · {} on the board flips this project / every project · Focus here (?) narrows it",
+                    key_hint(app, Action::FocusNext)
+                ),
+                th,
+            ));
+        }
+        HitTarget::ScopeChip(_) => {
+            return Some(dim_hint(
+                "click: widen the scope to this · Focus here (? on a tab, band or card) narrows it",
+                th,
+            ));
+        }
         HitTarget::AccountChip(_) => {
             return Some(dim_hint(
                 format!(
@@ -382,10 +397,12 @@ fn launcher_grid_footer_hint(app: &App, _th: Theme) -> FooterHint {
             .map(|(action, word)| button(k(action), word, action))
             .collect();
     let mut hints = if app.launcher.launcher_kanban {
-        let scope = if app.launcher.kanban_all {
-            "this project"
+        // `Tab` is the scope chip's old switch: a narrowed scope back to
+        // everything, else this project / every project.
+        let scope = if !app.launcher.scope.is_everything() || !app.launcher.kanban_all {
+            "all"
         } else {
-            "all projects"
+            "this project"
         };
         let mut hints = vec![
             keys(

@@ -40,6 +40,11 @@ export type ActionId =
   | "git_diff"
   | "open_repo"
   | "open_pull_request"
+  | "create_pull_request"
+  | "merge_pull_request"
+  | "focus_scope"
+  | "move_card_left"
+  | "move_card_right"
   | "open_issue"
   | "refresh_pull_requests"
   | "comment_pull_request"
@@ -667,6 +672,71 @@ export const ACTIONS: readonly ActionRow[] = [
     worksIn: ["grid", "board"],
     surface: "tui",
     tui: ["shift+v"],
+    desktop: [],
+  },
+  {
+    id: "create_pull_request",
+    label: "Create pull request\u2026",
+    hint: "The pull request composer for the checkout under the cursor: title, body, base branch and draft, prefilled from the session and its commits; Enter pushes the branch and opens it. Dropping a Review card on Ship does the same",
+    group: "PROJECTS & WORKTREES",
+    word: "open PR",
+    destructive: false,
+    appliesTo: ["session", "worktree"],
+    worksIn: ["grid", "board", "diff"],
+    surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
+    id: "merge_pull_request",
+    label: "Merge pull request\u2026",
+    hint: "Merge the open pull request of the checkout under the cursor, after a confirm that picks the method and whether the remote branch goes. Dropping a Ship card on Done does the same",
+    group: "PROJECTS & WORKTREES",
+    word: "merge",
+    destructive: false,
+    appliesTo: ["session", "worktree"],
+    worksIn: ["grid", "board", "diff"],
+    surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
+    id: "focus_scope",
+    label: "Focus here",
+    hint: "Narrow the scope chip in the header to the repo, worktree or card under the cursor: the board, the attention strip, . and , and the quick prompt follow it. The chip's \u2715 widens it back to everything, as Esc does once the cursor has let go of the card",
+    group: "PROJECTS & WORKTREES",
+    word: "focus",
+    destructive: false,
+    appliesTo: ["repo", "worktree", "session"],
+    worksIn: ["grid", "board"],
+    surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
+    id: "move_card_left",
+    label: "Move card to the lane on the left",
+    hint: "On the board: let the card under the cursor go on the lane to its left, as dropping it there does. A lane the agent owns refuses, saying why",
+    group: "PROJECTS & WORKTREES",
+    word: "\u2190 lane",
+    destructive: false,
+    appliesTo: ["session"],
+    worksIn: ["board"],
+    surface: "tui",
+    tui: ["shift+left"],
+    desktop: [],
+  },
+  {
+    id: "move_card_right",
+    label: "Move card to the lane on the right",
+    hint: "On the board: let the card under the cursor go on the lane to its right, as dropping it there does: Review to Ship opens the pull request composer, Ship to Done merges, and past Done archives (offering the worktree's safe delete)",
+    group: "PROJECTS & WORKTREES",
+    word: "lane \u2192",
+    destructive: false,
+    appliesTo: ["session"],
+    worksIn: ["board"],
+    surface: "tui",
+    tui: ["shift+right"],
     desktop: [],
   },
   {
@@ -1528,10 +1598,10 @@ export const MENU_LABELS: readonly { id: ActionId; on: AppliesTo | null; label: 
 
 /** Each kind's menu, in order: a right-click's rows in both apps. */
 export const MENUS: Readonly<Partial<Record<AppliesTo, readonly ActionId[]>>> = {
-  session: ["activate", "follow_up", "restart", "duplicate_session", "move_session", "move_to_account", "rename", "pin_orchestrator", "open_pull_request", "open_issue", "reorder_up", "reorder_down", "unarchive", "archive", "delete"],
+  session: ["activate", "follow_up", "restart", "duplicate_session", "move_session", "move_to_account", "rename", "pin_orchestrator", "open_pull_request", "create_pull_request", "merge_pull_request", "open_issue", "focus_scope", "reorder_up", "reorder_down", "unarchive", "archive", "delete"],
   terminal: ["activate", "rename", "delete"],
-  worktree: ["new", "quick_prompt", "new_terminal", "toggle_run", "git_diff", "open_worktree", "open_repo", "switch_branch", "reorder_up", "reorder_down", "delete_all", "delete_worktree"],
-  repo: ["quick_prompt", "new_worktree", "switch_branch", "toggle_run", "open_worktree", "open_repo", "refresh_pull_requests", "rename", "reorder_up", "reorder_down", "delete_worktree", "remove_project"],
+  worktree: ["new", "quick_prompt", "new_terminal", "toggle_run", "git_diff", "open_worktree", "open_repo", "switch_branch", "create_pull_request", "merge_pull_request", "focus_scope", "reorder_up", "reorder_down", "delete_all", "delete_worktree"],
+  repo: ["quick_prompt", "new_worktree", "switch_branch", "toggle_run", "open_worktree", "open_repo", "refresh_pull_requests", "focus_scope", "rename", "reorder_up", "reorder_down", "delete_worktree", "remove_project"],
 };
 
 /** The verbs a footer and the verb bar lead with, per kind, best first. */

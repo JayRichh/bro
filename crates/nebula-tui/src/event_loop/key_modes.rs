@@ -426,7 +426,13 @@ fn handle_global_action(
         | Action::MoveToAccount
         | Action::ToggleRun
         | Action::DeleteWorktree
-        | Action::RemoveProject => super::verbs::run_on_selection(app, action, out),
+        | Action::RemoveProject
+        | Action::CreatePullRequest
+        | Action::MergePullRequest
+        | Action::FocusScope => super::verbs::run_on_selection(app, action, out),
+        // `Shift+←` / `Shift+→` on the board: the card onto the next lane.
+        Action::MoveCardLeft => board::move_card(app, -1, out),
+        Action::MoveCardRight => board::move_card(app, 1, out),
         // Listed rather than `_`: a new action is a compile error here
         // until it is routed, never an `unreachable!` at the user's press.
         Action::GitDiff
