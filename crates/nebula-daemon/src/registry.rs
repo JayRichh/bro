@@ -1060,6 +1060,23 @@ fn resolve_profile_name(
     Ok(pick.profile.map(|p| p.name.trim().to_string()))
 }
 
+/// Refuse a launch that names `profile` when [`resolve_profile_name`]
+/// would refuse it at create (undefined, switched off, or for another
+/// harness): for a caller with work to do first, like `nebula spawn
+/// --worktree` cutting a checkout, so nothing is cut for a launch that
+/// cannot happen.
+pub(crate) fn check_launch_profile(
+    kind: AgentKind,
+    custom_harness: Option<&str>,
+    profile: Option<&str>,
+) -> Result<()> {
+    let Some(profile) = profile else {
+        return Ok(());
+    };
+    let harness = resolve_harness(kind, custom_harness)?;
+    resolve_profile_name(&harness, Some(profile), None).map(|_| ())
+}
+
 /// The PROFILE `agent` runs under, read fresh from the config: None for a
 /// session with none, `Err` when its profile was removed or now names
 /// another harness — the spawn is refused with the reason rather than
@@ -3409,7 +3426,7 @@ pub(crate) mod tests {
 
         let events = daemon.events.subscribe();
         let EntityId::Agent(child) = daemon
-            .spawn_sibling_agent(&caller, None, None, "Write the tests")
+            .spawn_sibling_agent(&caller, None, None, "Write the tests", None)
             .await
             .unwrap()
         else {

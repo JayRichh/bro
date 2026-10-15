@@ -406,7 +406,7 @@ pub async fn rename_current_agent(title: &str, mode: RenameMode) -> Result<()> {
 }
 
 /// CLI: `nebula spawn "<task>" [--kind <claude|codex|cursor>] [--worktree
-/// <branch> [--base <ref>]]` from inside an agent session — ask the daemon
+/// <branch> [--base <ref>]] [--profile <name>]` from inside an agent session — ask the daemon
 /// to start a new agent beside this one, in the same worktree or in the
 /// project's worktree on `worktree` (created when the branch has none),
 /// opening on `task` as its first prompt. The caller is untouched: no
@@ -422,6 +422,7 @@ pub async fn spawn_sibling_for_current_agent(
     kind: Option<AgentKind>,
     worktree: Option<String>,
     base: Option<String>,
+    profile: Option<String>,
 ) -> Result<()> {
     let agent_id = current_agent_id("spawn")?;
     let task = task.trim();
@@ -443,11 +444,29 @@ pub async fn spawn_sibling_for_current_agent(
         Some("") => bail!("the base is empty: `--base <ref>` needs a branch, tag or commit"),
         other => other.map(str::to_string),
     };
+    let profile = match profile.as_deref().map(str::trim) {
+        Some("") => bail!("the profile is empty: `--profile <name>` needs an account's name"),
+        other => other.map(str::to_string),
+    };
     let sock = paths::socket_path();
     let Ok(stream) = try_connect(&sock).await else {
         bail!("no kete daemon is running, no session started");
     };
     let mut conn = handshake(stream).await?;
+    // Without a profile the frame is 57's, which every daemon in range
+    // reads; one naming a profile would make an older daemon drop the
+    // connection, so it is refused here with the way out. The model in the
+    // session reads this: `kete reload` keeps every session (its own too),
+    // where `require_protocol`'s `kete kill` would stop them all.
+    if profile.is_some() && conn.protocol_version < nebula_core::SPAWN_PROFILE_PROTOCOL {
+        bail!(
+            "`kete spawn --profile` needs daemon protocol v{}, but the running daemon speaks v{}: \
+             no session started. Ask the user to run `kete reload` (it keeps every session), \
+             or spawn without --profile",
+            nebula_core::SPAWN_PROFILE_PROTOCOL,
+            conn.protocol_version
+        );
+    }
     let req_id = ONE_SHOT_REQ_ID;
     write_frame(
         &mut conn.stream,
@@ -458,17 +477,21 @@ pub async fn spawn_sibling_for_current_agent(
             starting_prompt: task.to_string(),
             worktree: worktree.clone(),
             base,
+            profile: profile.clone(),
         },
     )
     .await?;
     await_ack(&mut conn, req_id).await?;
     let harness = kind.map(|k| format!("{} ", k.as_str())).unwrap_or_default();
+    let account = profile
+        .map(|p| format!(" on the {p} account"))
+        .unwrap_or_default();
     let place = match &worktree {
         Some(branch) => format!("the worktree on branch \"{branch}\""),
         None => "this worktree".to_string(),
     };
     println!(
-        "started a new {harness}session in {place}; it is working on that task now and \
+        "started a new {harness}session in {place}{account}; it is working on that task now and \
          shows in the sessions list. This session is unaffected: carry on."
     );
     Ok(())

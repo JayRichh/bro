@@ -10,7 +10,7 @@ use std::path::PathBuf;
 ///
 /// Bump on every protocol change. Additive changes keep
 /// [`MIN_COMPATIBLE_PROTOCOL`] where it is; breaking changes bump both.
-pub const PROTOCOL_VERSION: u32 = 57;
+pub const PROTOCOL_VERSION: u32 = 58;
 
 /// Oldest IPC protocol this build can safely talk to.
 ///
@@ -66,6 +66,13 @@ impl ServerEvent {
 /// A client sends it only to a daemon that said this or later at Hello: an
 /// older one fails to decode the unknown variant and drops the connection.
 pub const SWITCH_ACCOUNT_PROTOCOL: u32 = 57;
+
+/// The first protocol whose daemon reads [`ClientRequest::SpawnSiblingAgent`]'s
+/// trailing `profile`. The field is left off the frame when it is None, so a
+/// spawn without one is the 57 frame byte for byte; one that names a profile
+/// goes only to a daemon that said this or later at Hello (an older one
+/// would refuse the longer frame and drop the connection).
+pub const SPAWN_PROFILE_PROTOCOL: u32 = 58;
 
 /// Max IPC frame size (length prefix sanity bound).
 pub const MAX_FRAME_LEN: u32 = 4 * 1024 * 1024;
@@ -362,6 +369,13 @@ pub enum ClientRequest {
         /// already exists is refused). Ignored without `worktree`.
         #[serde(default)]
         base: Option<String>,
+        /// `--profile <name>`: the ACCOUNT the new session runs on, resolved
+        /// as every launch's is (it must exist and be for the new session's
+        /// harness). None: the caller's account on the caller's harness,
+        /// else that harness's default. Protocol 58; left off the frame
+        /// when None, so a 57 daemon still reads every spawn without one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        profile: Option<String>,
     },
     /// `nebula open <file>…`, run by the agent from inside its own session:
     /// show these files to the user in every attached TUI's FILE TABS —
@@ -1237,6 +1251,70 @@ mod tests {
             };
             assert_eq!((req_id, id.0.as_str(), got), (9, "a1", profile));
         }
+    }
+
+    /// 58 adds `profile` to the end of `SpawnSiblingAgent`. Without one the
+    /// frame is 57's byte for byte (so a 57 daemon reads it), a 57 frame
+    /// reads back as no profile, and a named one round-trips.
+    #[test]
+    fn protocol_58_spawn_profile_is_additive() {
+        /// `SpawnSiblingAgent` as protocol 57 knew it.
+        #[derive(Debug, PartialEq, Serialize, Deserialize)]
+        enum V57 {
+            SpawnSiblingAgent {
+                req_id: u64,
+                id: AgentId,
+                kind: Option<AgentKind>,
+                starting_prompt: String,
+                #[serde(default)]
+                worktree: Option<String>,
+                #[serde(default)]
+                base: Option<String>,
+            },
+        }
+        const { assert!(SPAWN_PROFILE_PROTOCOL <= PROTOCOL_VERSION) };
+        assert_eq!(MIN_COMPATIBLE_PROTOCOL, 53, "58 is additive");
+        assert!(protocol_compatible_with(57));
+        let spawn = |profile: Option<&str>| ClientRequest::SpawnSiblingAgent {
+            req_id: 4,
+            id: AgentId("a1".into()),
+            kind: Some(AgentKind::Codex),
+            starting_prompt: "fix it".into(),
+            worktree: Some("fix-login".into()),
+            base: None,
+            profile: profile.map(str::to_string),
+        };
+        let old = V57::SpawnSiblingAgent {
+            req_id: 4,
+            id: AgentId("a1".into()),
+            kind: Some(AgentKind::Codex),
+            starting_prompt: "fix it".into(),
+            worktree: Some("fix-login".into()),
+            base: None,
+        };
+        assert_eq!(encode(&spawn(None)), encode(&old));
+        let from_57: V57 = rmp_serde::from_slice(&encode(&spawn(None))).unwrap();
+        assert_eq!(from_57, old);
+        let back: ClientRequest = rmp_serde::from_slice(&encode(&old)).unwrap();
+        let ClientRequest::SpawnSiblingAgent { profile, .. } = back else {
+            panic!("not a SpawnSiblingAgent");
+        };
+        assert_eq!(profile, None);
+        let back: ClientRequest = rmp_serde::from_slice(&encode(&spawn(Some("work")))).unwrap();
+        let ClientRequest::SpawnSiblingAgent {
+            profile, worktree, ..
+        } = back
+        else {
+            panic!("not a SpawnSiblingAgent");
+        };
+        assert_eq!(
+            (profile.as_deref(), worktree.as_deref()),
+            (Some("work"), Some("fix-login"))
+        );
+        assert!(
+            rmp_serde::from_slice::<V57>(&encode(&spawn(Some("work")))).is_err(),
+            "a 57 daemon refuses a named profile: the client gates it"
+        );
     }
 
     #[test]
