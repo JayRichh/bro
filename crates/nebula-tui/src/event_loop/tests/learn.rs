@@ -295,6 +295,43 @@ fn an_older_daemon_is_named_on_the_first_snapshot() {
     }
 }
 
+/// The one-time notices lead with what to run, so a 120-column footer
+/// (beside the connection and the breadcrumb) shows the tracked-settings
+/// command whole, and what to run on an older daemon.
+#[test]
+fn the_upgrade_notices_show_their_command_at_120_columns() {
+    let found = [(
+        "alpha feat/login".to_string(),
+        ".claude/settings.local.json",
+    )];
+    for (flash, needle) in [
+        (
+            nebula_core::tracked_settings::notice(&found).unwrap(),
+            "git rm --cached .claude/settings.local.json",
+        ),
+        (
+            crate::event_loop::background::OLDER_DAEMON.to_string(),
+            if cfg!(windows) {
+                "kete kill"
+            } else {
+                "kete reload"
+            },
+        ),
+    ] {
+        let mut app = App::new();
+        seed_tree(&mut app);
+        app.chrome.flash = Some(flash);
+        let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
+        let screen = buffer_text(&terminal);
+        assert!(
+            screen.contains(needle),
+            "{needle}:
+{screen}"
+        );
+    }
+}
+
 /// The page opens before the daemon's first snapshot lands, and is
 /// already recorded as shown: the snapshot (its remembered selection and
 /// pane) must not close it, or the user never sees it.

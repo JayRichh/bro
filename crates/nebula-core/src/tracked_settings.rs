@@ -55,18 +55,19 @@ pub fn untrack_command(file: &str) -> String {
 
 /// The one-line notice for checkouts found tracking Kete's files: each
 /// `(label, file)` is a checkout's name for the user (`alpha feat/login`)
-/// and one file it tracks. None for none.
+/// and one file it tracks. The command leads, so a narrow footer that cuts
+/// the line still shows it whole. None for none.
 pub fn notice(found: &[(String, &'static str)]) -> Option<String> {
     let (label, file) = found.first()?;
     let command = untrack_command(file);
     Some(match found.len() {
-        1 => format!("{label} tracks Kete's {file}: run {command} there, then commit"),
+        1 => format!("{command} in {label}, then commit: git tracks Kete's hooks file"),
         n if found.iter().all(|(_, f)| f == file) => format!(
-            "{n} checkouts track Kete's {file} ({label} and {} more): run {command} in each, then commit",
+            "{command} in {n} checkouts ({label} and {} more), then commit: git tracks Kete's hooks file",
             n - 1
         ),
         n => format!(
-            "{n} checkouts track Kete's hook settings ({label} and {} more): run git rm --cached on the file in each, then commit",
+            "git rm --cached Kete's hooks files in {n} checkouts ({label} and {} more), then commit",
             n - 1
         ),
     })
@@ -115,22 +116,26 @@ mod tests {
         let one = notice(&[("alpha feat/login".into(), KETE_WRITTEN[0])]).unwrap();
         assert_eq!(
             one,
-            "alpha feat/login tracks Kete's .claude/settings.local.json: run git rm --cached .claude/settings.local.json there, then commit"
+            "git rm --cached .claude/settings.local.json in alpha feat/login, then commit: git tracks Kete's hooks file"
         );
+        // The whole command fits the 80 columns a footer has.
+        assert!(one.find(" in ").unwrap() < 80);
         let two = notice(&[
             ("alpha main".into(), KETE_WRITTEN[0]),
             ("beta spike".into(), KETE_WRITTEN[1]),
         ])
         .unwrap();
-        assert!(two.starts_with("2 checkouts"), "{two}");
-        assert!(two.contains("git rm --cached on the file"), "{two}");
+        assert!(
+            two.starts_with("git rm --cached Kete's hooks files in 2 checkouts"),
+            "{two}"
+        );
         let same = notice(&[
             ("alpha main".into(), KETE_WRITTEN[0]),
             ("beta spike".into(), KETE_WRITTEN[0]),
         ])
         .unwrap();
         assert!(
-            same.contains("run git rm --cached .claude/settings.local.json in each"),
+            same.starts_with("git rm --cached .claude/settings.local.json in 2 checkouts"),
             "{same}"
         );
     }

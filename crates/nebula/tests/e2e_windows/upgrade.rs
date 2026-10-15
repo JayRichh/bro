@@ -237,7 +237,7 @@ pub fn a_048_data_dir_upgrades_in_place() {
     tui.wait_for_text("What's new in 0.49 to 0.52");
     // The checkout that tracks Kete's hooks file, named with the command.
     tui.wait_for_text(
-        "alpha feat/login tracks Kete's .claude/settings.local.json: run git rm --cached .claude/settings.local.json there",
+        "git rm --cached .claude/settings.local.json in alpha feat/login, then commit: git tracks Kete's hooks file",
     );
     tui.send(ESC);
     tui.wait_for_gone("What's new in 0.49 to 0.52");
@@ -326,5 +326,5 @@ pub fn a_048_data_dir_upgrades_in_place() {
     let back = tui.try_wait_for_text("What's new in 0.49", std::time::Duration::from_secs(3));
     assert!(!back, "What's new came back:\n{}", tui.screen_text());
     let text = tui.screen_text();
-    assert!(!text.contains("tracks Kete's"), "{text}");
+    assert!(!text.contains("git tracks Kete's"), "{text}");
 }

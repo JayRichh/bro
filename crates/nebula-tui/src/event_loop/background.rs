@@ -1514,13 +1514,13 @@ pub(crate) fn land_client_rss(app: &mut App, bytes: u64) {
     }
 }
 
-/// What an OLDER DAEMON note says: how to move the daemon onto this build.
+/// What an OLDER DAEMON note says: what to run first, so a narrow footer
+/// that cuts the line still shows it.
 #[cfg(windows)]
 pub(crate) const OLDER_DAEMON: &str =
-    "Kete's daemon is still the older build: run kete kill, then relaunch (sessions stop)";
+    "kete kill, then relaunch: the daemon still runs the older build (sessions stop)";
 #[cfg(unix)]
-pub(crate) const OLDER_DAEMON: &str =
-    "Kete's daemon is still the older build: run kete reload to move it onto this one";
+pub(crate) const OLDER_DAEMON: &str = "kete reload: the daemon still runs the older build";
 
 /// An OLDER DAEMON: this TUI attached to a daemon an earlier install left
 /// running (installing swaps the binary, not the daemon running it). It
