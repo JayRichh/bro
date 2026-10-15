@@ -82,7 +82,7 @@ impl TuiHarness {
         std::fs::create_dir_all(&data_dir).unwrap();
         std::fs::write(
             data_dir.join(nebula_core::paths::CONFIG_FILE_NAME),
-            r#"{"theme": "default", "icons": "off"}"#,
+            r#"{"theme": "default", "icons": "off", "show_tips": false, "whats_new_seen": "999.0"}"#,
         )
         .unwrap();
         setup(&data_dir);

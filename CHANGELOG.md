@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.52.0
+
+The new board, review and keys are now taught in the app, attribution is exact per turn, and the flows are tested end to end on Windows.
+
+- **Tips the first time.** A one-line tip appears the first time you meet the `?` verbs menu, the scope chip, the Review and Ship lanes, drag on the board, or the docked review. It names your own keys. Choose "Got it" or "Don't show tips"; Settings → General → Show tips turns them back on.
+- **What's new.** After an upgrade, a page summarises 0.49 to 0.52, including the keys that changed. It shows once and stays in Help (`w` in the terminal app's Help, a button in the desktop's) and the palette.
+- **Empty screens say what to do.** Every empty lane, worktree, repo and search result says what goes there and offers its one action with your key.
+- **Less to read.** Footers show at most seven items: `? more`, how to move, and the selection's top verbs. The desktop's Help (`F1`) groups keys by task (Navigate, Act on a session, Review & ship, Window), with rare ones behind Show all.
+- **"This session" is exact per turn.** Kete snapshots each turn's start and end. Other sessions' work between a session's turns drops out of its diff, even in a file both touched. It still counts edits another session makes during this session's turn, and it shows more rather than less when git can't merge a gap. Snapshot refs now live under `refs/kete/d/<daemon id>/` and are swept at startup, when a project is added or removed, and daily (migration 35).
+- **`kete ship`** uses the worktree's recorded base, as the apps do.
+- **Fixes:**
+  - A path pasted or typed into Open project on Windows replaces the `~/` prefill instead of being appended to it.
+  - Claude's `.claude/settings.local.json`, which Kete writes for its hooks, is excluded from git, so an agent's `git add -A` no longer commits it.
+- **Tested end to end on Windows.** A new suite drives the real `kete` binaries through ConPTY with a scripted agent:
+  - start, Running, Needs you, reply, Review with its commit;
+  - `?` verbs, scope, and the diff against base;
+  - the PR form's fix for a missing `gh`;
+  - archive and the worktree delete, by keys and by drag;
+  - a 20 KB paste arriving as one paste.
+
+  It runs in CI.
+- **Pastes on Windows:** the console layer converts input at about 23 KB/s. A 110 KB paste reaches the agent in about 4–5 seconds, and Kete itself no longer adds to that.
+
 ## 0.51.0
 
 See which session made a change, paste large text quickly on Windows, and do the rest of the command line's jobs from either app.

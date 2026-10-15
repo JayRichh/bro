@@ -78,7 +78,7 @@ impl Tui {
             std::fs::create_dir_all(dir).unwrap();
         }
         // The look the assertions read (the indexed default theme, no file
-        // icons), and the fake agent as the `claude` harness's program:
+        // icons, no tips), and the fake agent as the `claude` harness's program:
         // the quick prompt launches Claude, and the daemon installs
         // Claude's hooks for it and passes it Claude's argv.
         let me = std::env::current_exe().unwrap();
@@ -88,6 +88,9 @@ impl Tui {
                 "theme": "default",
                 "icons": "off",
                 "quick_prompt_new_worktree": true,
+                // No tips or What's new page over the screens the tests read.
+                "show_tips": false,
+                "whats_new_seen": "999.0",
                 "harnesses": { "claude": { "program": me.display().to_string() } },
             })
             .to_string(),

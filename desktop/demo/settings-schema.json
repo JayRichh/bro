@@ -151,6 +151,21 @@
               "default": true,
               "restart": null,
               "is_new": false
+            },
+            {
+              "target": {
+                "scope": "global",
+                "key": "show_tips"
+              },
+              "label": "Show tips",
+              "hint": "A one-line tip the first time you meet something (the ? menu, the scope chip, the board's lanes, drag, the review), each once; off hides them all",
+              "control": {
+                "type": "toggle"
+              },
+              "value": true,
+              "default": true,
+              "restart": null,
+              "is_new": true
             }
           ]
         },
@@ -3060,6 +3075,15 @@
           "bound": [
             "f1"
           ],
+          "overridden": false
+        },
+        {
+          "id": "whats_new",
+          "label": "What's new",
+          "hint": "What changed in the last few releases, and the keys that moved: shown once after an upgrade, here any time after (Help has it too)",
+          "group": "GENERAL",
+          "defaults": [],
+          "bound": [],
           "overridden": false
         },
         {
