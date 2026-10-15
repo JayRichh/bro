@@ -303,6 +303,7 @@ pub(crate) fn opens_from_closed_splash(action: crate::keymap::Action) -> bool {
             | Action::NextAttention
             | Action::PrevAttention
             | Action::Quit
+            | Action::Verbs
             | Action::Help
             | Action::Settings
             | Action::Metrics

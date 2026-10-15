@@ -721,7 +721,7 @@ fn cards_offer_make_orchestrator_and_the_orchestrator_card_wears_the_badge() {
             .unwrap()
             .clone();
         let labels = |a: &Agent| -> Vec<String> {
-            menu_items_for_session(a)
+            menu_items_for_session_in(&app, a)
                 .into_iter()
                 .map(|i| i.label.to_string())
                 .collect()

@@ -104,11 +104,14 @@ fn every_button_is_drawn_whole_inside_the_frame_at_every_width() {
             // on its last row; 60 columns of context leave it none.
             assert!(w < 100 || !footer.is_empty(), "{w}: no footer buttons");
             assert!(footer.iter().all(|(r, _)| r.y == 39), "{w}: {footer:?}");
-            // Help is always a click away — the header's `?` or the footer's
-            // — and every other action is a click on one of its rows.
+            // Help is always a click away — the header's `?`, or the
+            // footer's `? more`, whose last row is every key — and every
+            // other action is a click on one of its rows.
             assert!(
                 app.hit_rect(&HitTarget::Button(Action::Help)).is_some()
-                    || app.hit_rect(&HitTarget::FooterHint(Action::Help)).is_some(),
+                    || app
+                        .hit_rect(&HitTarget::FooterHint(Action::Verbs))
+                        .is_some(),
                 "{w}: no way to the help"
             );
             // The card under the cursor carries its buttons, the `⋯` always.
@@ -183,9 +186,11 @@ fn a_footer_hint_and_a_header_tool_run_their_action() {
         assert!(
             matches!(&app.modals.overlay, Some(Overlay::Prompt(p)) if matches!(p.kind, PromptKind::QuickPrompt(_)))
         );
-        // A bar wide enough for every hint: the jump, the help, the diff.
+        // A bar wide enough for every hint: the jump, the verbs, the diff.
         let mut app = grid(400);
-        assert!(app.hit_rect(&HitTarget::FooterHint(Action::Help)).is_some());
+        assert!(app
+            .hit_rect(&HitTarget::FooterHint(Action::Verbs))
+            .is_some());
         assert!(app
             .hit_rect(&HitTarget::FooterHint(Action::GitDiff))
             .is_some());
@@ -386,12 +391,7 @@ fn the_pane_headers_account_chip_moves_the_session_to_another_account() {
 fn a_help_row_runs_its_action() {
     with_default_config(|| {
         let mut app = grid(160);
-        press(
-            &mut app,
-            KeyCode::Char('?'),
-            KeyModifiers::NONE,
-            &mut Vec::new(),
-        );
+        press(&mut app, KeyCode::F(1), KeyModifiers::NONE, &mut Vec::new());
         drawn_modal_area(&mut app);
         let palette = match &app.modals.overlay {
             Some(Overlay::Help(h)) => h

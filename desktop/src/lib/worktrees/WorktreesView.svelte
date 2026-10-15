@@ -14,6 +14,7 @@
   import { firstDir, gitSignal, groupOf, prLabel, sortRows, tableRow, type SortDir, type SortKey } from './groups';
   import { refreshGit, rows, watchGit } from './rows.svelte';
   import { sweepWorktrees, verbTitle, verbsFor, worktreeMenu } from './verbs';
+  import VerbBar from '../VerbBar.svelte';
 
   let { repo }: { repo: string } = $props();
 
@@ -216,4 +217,6 @@
       </div>
     {/each}
   </div>
+  <!-- The focused worktree's verbs, with their keys. -->
+  <VerbBar />
 </section>

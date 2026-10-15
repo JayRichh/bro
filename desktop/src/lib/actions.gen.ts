@@ -33,6 +33,10 @@ export type ActionId =
   | "project_dropdown"
   | "add_project"
   | "new"
+  | "new_worktree"
+  | "toggle_run"
+  | "delete_worktree"
+  | "remove_project"
   | "git_diff"
   | "open_repo"
   | "open_pull_request"
@@ -54,6 +58,9 @@ export type ActionId =
   | "toggle_archived"
   | "delete"
   | "delete_all"
+  | "restart"
+  | "pin_orchestrator"
+  | "move_to_account"
   | "agent_presets"
   | "quick_prompt"
   | "follow_up"
@@ -75,10 +82,10 @@ export type ActionId =
   | "hosts"
   | "settings"
   | "metrics"
+  | "verbs"
   | "help"
   | "quit"
   | "cycle_theme"
-  | "new_worktree"
   | "home_board"
   | "home_overview"
   | "open_session"
@@ -86,7 +93,6 @@ export type ActionId =
   | "go_session"
   | "go_diff"
   | "close_split"
-  | "restart"
   | "row_menu"
   | "list_move"
   | "list_open"
@@ -96,6 +102,7 @@ export type ActionId =
 export type DeskKeyId =
   | "palette"
   | "palette_alt"
+  | "verbs"
   | "help"
   | "help_f1"
   | "settings"
@@ -572,6 +579,58 @@ export const ACTIONS: readonly ActionRow[] = [
     desktop: [],
   },
   {
+    id: "new_worktree",
+    label: "New worktree",
+    hint: "Cut a new worktree in the selected or shown project",
+    group: "PROJECTS & WORKTREES",
+    word: "worktree",
+    destructive: false,
+    appliesTo: ["repo"],
+    worksIn: ["grid", "board", "pane", "diff"],
+    surface: "both",
+    tui: [],
+    desktop: ["new_worktree"],
+  },
+  {
+    id: "toggle_run",
+    label: "Run / stop the run command",
+    hint: "Start the checkout's run command (the project's Run setting, else its .kete.json run), or stop it while it runs",
+    group: "PROJECTS & WORKTREES",
+    word: "run",
+    destructive: false,
+    appliesTo: ["worktree", "repo"],
+    worksIn: ["grid", "board"],
+    surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
+    id: "delete_worktree",
+    label: "Delete worktree",
+    hint: "Delete the selected linked worktree's folder, behind a confirmation; its branch stays",
+    group: "PROJECTS & WORKTREES",
+    word: "delete",
+    destructive: true,
+    appliesTo: ["worktree", "repo"],
+    worksIn: ["grid", "board"],
+    surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
+    id: "remove_project",
+    label: "Remove project",
+    hint: "Take the project off the list, behind a confirmation: nothing on disk is touched",
+    group: "PROJECTS & WORKTREES",
+    word: "remove",
+    destructive: true,
+    appliesTo: ["repo"],
+    worksIn: ["grid", "board"],
+    surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
     id: "git_diff",
     label: "Git diff",
     hint: "Open the diff viewer for the checkout under the cursor, or, with the pane reading a pull request, that pull request's diff",
@@ -591,7 +650,7 @@ export const ACTIONS: readonly ActionRow[] = [
     group: "PROJECTS & WORKTREES",
     word: "remote",
     destructive: false,
-    appliesTo: ["repo"],
+    appliesTo: ["repo", "worktree"],
     worksIn: ["grid", "board"],
     surface: "both",
     tui: ["shift+g"],
@@ -682,7 +741,7 @@ export const ACTIONS: readonly ActionRow[] = [
     group: "PROJECTS & WORKTREES",
     word: "branch",
     destructive: false,
-    appliesTo: ["repo"],
+    appliesTo: ["repo", "worktree"],
     worksIn: ["grid", "board"],
     surface: "both",
     tui: ["c"],
@@ -708,7 +767,7 @@ export const ACTIONS: readonly ActionRow[] = [
     group: "PROJECTS & WORKTREES",
     word: "editor",
     destructive: false,
-    appliesTo: ["worktree"],
+    appliesTo: ["worktree", "repo"],
     worksIn: ["grid", "board"],
     surface: "both",
     tui: ["shift+enter", "shift+o", "alt+enter"],
@@ -773,7 +832,7 @@ export const ACTIONS: readonly ActionRow[] = [
     group: "SESSIONS",
     word: "rename",
     destructive: false,
-    appliesTo: ["session", "terminal"],
+    appliesTo: ["session", "terminal", "repo"],
     worksIn: ["grid", "board"],
     surface: "both",
     tui: ["r"],
@@ -840,8 +899,47 @@ export const ACTIONS: readonly ActionRow[] = [
     destructive: true,
     appliesTo: ["worktree"],
     worksIn: ["grid", "board"],
-    surface: "tui",
+    surface: "both",
     tui: ["shift+d"],
+    desktop: [],
+  },
+  {
+    id: "restart",
+    label: "Restart the agent",
+    hint: "Restart the selected session's agent, resuming its conversation",
+    group: "SESSIONS",
+    word: "restart",
+    destructive: false,
+    appliesTo: ["session"],
+    worksIn: ["grid", "board", "pane"],
+    surface: "both",
+    tui: [],
+    desktop: ["restart"],
+  },
+  {
+    id: "pin_orchestrator",
+    label: "Make or unpin the orchestrator",
+    hint: "Pin the selected session as the machine's orchestrator, or unpin it when it is one",
+    group: "SESSIONS",
+    word: "orchestrator",
+    destructive: false,
+    appliesTo: ["session"],
+    worksIn: ["grid", "board", "pane"],
+    surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
+    id: "move_to_account",
+    label: "Move to another account",
+    hint: "Restart the selected session fresh on another account, picked from a list (its conversation stays behind)",
+    group: "SESSIONS",
+    word: "account",
+    destructive: false,
+    appliesTo: ["session"],
+    worksIn: ["grid", "board", "pane"],
+    surface: "both",
+    tui: [],
     desktop: [],
   },
   {
@@ -864,7 +962,7 @@ export const ACTIONS: readonly ActionRow[] = [
     group: "SESSIONS",
     word: "prompt",
     destructive: false,
-    appliesTo: ["worktree"],
+    appliesTo: ["worktree", "repo", "global"],
     worksIn: ["grid", "board", "pane"],
     surface: "both",
     tui: ["p"],
@@ -1118,16 +1216,29 @@ export const ACTIONS: readonly ActionRow[] = [
     desktop: [],
   },
   {
+    id: "verbs",
+    label: "Verbs for the selection",
+    hint: "What can be done to the card, band, tab or row under the cursor, each with its key: type to narrow, Enter runs one; the last row is every key",
+    group: "GENERAL",
+    word: "more",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board", "pane", "diff", "overlay"],
+    surface: "both",
+    tui: ["?"],
+    desktop: ["verbs"],
+  },
+  {
     id: "help",
     label: "Help",
-    hint: "Toggle the keyboard help overlay",
+    hint: "Toggle the keyboard help overlay: every key (? lists the selection's verbs, with this one row down)",
     group: "GENERAL",
     word: "help",
     destructive: false,
     appliesTo: ["global"],
     worksIn: ["grid", "board", "pane", "diff"],
     surface: "both",
-    tui: ["?"],
+    tui: ["f1"],
     desktop: ["help", "help_f1"],
   },
   {
@@ -1155,19 +1266,6 @@ export const ACTIONS: readonly ActionRow[] = [
     surface: "desktop",
     tui: [],
     desktop: ["cycle_theme"],
-  },
-  {
-    id: "new_worktree",
-    label: "New worktree",
-    hint: "Cut a new worktree in the focused or shown repo",
-    group: "PROJECTS & WORKTREES",
-    word: "worktree",
-    destructive: false,
-    appliesTo: ["repo"],
-    worksIn: ["grid", "board", "pane", "diff"],
-    surface: "desktop",
-    tui: [],
-    desktop: ["new_worktree"],
   },
   {
     id: "home_board",
@@ -1261,19 +1359,6 @@ export const ACTIONS: readonly ActionRow[] = [
     desktop: ["close_split"],
   },
   {
-    id: "restart",
-    label: "Restart the agent",
-    hint: "Restart the focused session's agent, resuming its conversation",
-    group: "SESSIONS",
-    word: "restart",
-    destructive: false,
-    appliesTo: ["session"],
-    worksIn: ["grid", "board", "pane"],
-    surface: "desktop",
-    tui: [],
-    desktop: ["restart"],
-  },
-  {
     id: "row_menu",
     label: "Actions menu",
     hint: "The focused row's or card's actions, as a right-click shows them",
@@ -1344,7 +1429,8 @@ export const ACTIONS: readonly ActionRow[] = [
 export const DESK_KEYS: readonly DeskKey[] = [
   { id: "palette", action: "command_palette", label: "Command palette", group: "General", scope: "fields", editorOwns: true, chords: ["ctrl+k"] },
   { id: "palette_alt", action: "command_palette", label: "Command palette", group: "General", scope: "anywhere", editorOwns: false, chords: ["ctrl+shift+p"] },
-  { id: "help", action: "help", label: "Keyboard shortcuts", group: "General", scope: "global", editorOwns: false, chords: ["?"] },
+  { id: "verbs", action: "verbs", label: "Verbs for the selection", group: "General", scope: "global", editorOwns: false, chords: ["?"] },
+  { id: "help", action: "help", label: "Keyboard shortcuts", group: "General", scope: "global", editorOwns: false, chords: [] },
   { id: "help_f1", action: "help", label: "Keyboard shortcuts", group: "General", scope: "anywhere", editorOwns: false, chords: ["f1"] },
   { id: "settings", action: "settings", label: "Settings", group: "General", scope: "anywhere", editorOwns: false, chords: ["ctrl+,"] },
   { id: "find", action: "palette", label: "Find: the view's filter, else the palette", group: "General", scope: "global", editorOwns: false, chords: ["f", "/"] },
@@ -1402,3 +1488,61 @@ export const DESK_KEYS: readonly DeskKey[] = [
   { id: "overview_fold", action: "overview_fold", label: "Overview: unfold, fold nested sessions", group: "Overview and board", scope: "overview", editorOwns: false, chords: ["arrowright", "arrowleft"] },
   { id: "board_lanes", action: "board_lanes", label: "Board: across lanes (also the side arrows)", group: "Overview and board", scope: "board", editorOwns: false, chords: ["h", "l"] },
 ];
+
+/** A verb's words in a menu, the verbs menu and the verb bar; `on`: that kind only. */
+export const MENU_LABELS: readonly { id: ActionId; on: AppliesTo | null; label: string }[] = [
+  { id: "activate", on: null, label: "Open" },
+  { id: "follow_up", on: null, label: "Follow-up prompt\u2026" },
+  { id: "restart", on: null, label: "Restart agent" },
+  { id: "duplicate_session", on: null, label: "Duplicate" },
+  { id: "move_session", on: null, label: "Move to\u2026" },
+  { id: "move_to_account", on: null, label: "Move to account\u2026" },
+  { id: "rename", on: null, label: "Rename\u2026" },
+  { id: "pin_orchestrator", on: null, label: "Make orchestrator" },
+  { id: "archive", on: null, label: "Archive" },
+  { id: "unarchive", on: null, label: "Unarchive" },
+  { id: "delete", on: "terminal", label: "Close terminal\u2026" },
+  { id: "delete", on: null, label: "Delete\u2026" },
+  { id: "open_pull_request", on: null, label: "Open pull request" },
+  { id: "open_issue", on: null, label: "Open issue" },
+  { id: "comment_pull_request", on: null, label: "Comment on pull request\u2026" },
+  { id: "reorder_up", on: null, label: "Move up" },
+  { id: "reorder_down", on: null, label: "Move down" },
+  { id: "toggle_run", on: null, label: "Run" },
+  { id: "new", on: null, label: "New agent\u2026" },
+  { id: "quick_prompt", on: null, label: "New session\u2026" },
+  { id: "new_terminal", on: null, label: "New terminal" },
+  { id: "git_diff", on: null, label: "Diff" },
+  { id: "open_worktree", on: null, label: "Open in editor" },
+  { id: "open_repo", on: null, label: "Open remote in browser" },
+  { id: "switch_branch", on: null, label: "Switch branch\u2026" },
+  { id: "delete_all", on: null, label: "Delete all sessions\u2026" },
+  { id: "delete_worktree", on: null, label: "Delete worktree\u2026" },
+  { id: "new_worktree", on: null, label: "New worktree\u2026" },
+  { id: "refresh_pull_requests", on: null, label: "Refresh pull requests" },
+  { id: "remove_project", on: null, label: "Remove from Kete\u2026" },
+  { id: "toggle_full_screen", on: null, label: "Full screen" },
+  { id: "accounts", on: null, label: "Accounts\u2026" },
+  { id: "add_project", on: null, label: "Add project\u2026" },
+];
+
+/** Each kind's menu, in order: a right-click's rows in both apps. */
+export const MENUS: Readonly<Partial<Record<AppliesTo, readonly ActionId[]>>> = {
+  session: ["activate", "follow_up", "restart", "duplicate_session", "move_session", "move_to_account", "rename", "pin_orchestrator", "open_pull_request", "open_issue", "reorder_up", "reorder_down", "unarchive", "archive", "delete"],
+  terminal: ["activate", "rename", "delete"],
+  worktree: ["new", "quick_prompt", "new_terminal", "toggle_run", "git_diff", "open_worktree", "open_repo", "switch_branch", "reorder_up", "reorder_down", "delete_all", "delete_worktree"],
+  repo: ["quick_prompt", "new_worktree", "switch_branch", "toggle_run", "open_worktree", "open_repo", "refresh_pull_requests", "rename", "reorder_up", "reorder_down", "delete_worktree", "remove_project"],
+};
+
+/** The verbs a footer and the verb bar lead with, per kind, best first. */
+export const PRIMARY: Readonly<Partial<Record<AppliesTo, readonly ActionId[]>>> = {
+  session: ["activate", "follow_up", "git_diff", "archive", "unarchive", "rename", "restart", "delete"],
+  terminal: ["activate", "rename", "delete"],
+  worktree: ["new", "quick_prompt", "new_terminal", "git_diff", "open_worktree", "toggle_run"],
+  repo: ["quick_prompt", "new_worktree", "switch_branch", "refresh_pull_requests", "rename"],
+  account: ["accounts"],
+  global: ["quick_prompt", "command_palette", "toggle_kanban", "settings"],
+};
+
+/** How many verbs the verb bar shows before `? more`. */
+export const PRIMARY_SHOWN = 4;

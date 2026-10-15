@@ -120,6 +120,12 @@ fn draw_menu_overlay(f: &mut Frame, app: &mut App, menu: crate::app::ContextMenu
         .map(|i| i.label.chars().count())
         .max()
         .unwrap_or(8);
+    // Each verb's key at the row's right, as the keymap has it now (a
+    // rebound key shows as bound, an unbound one shows nothing): the
+    // menu teaches the key while the mouse runs the verb.
+    let keys: Vec<String> = menu.items.iter().map(|i| menu_key(app, i)).collect();
+    let key_w = keys.iter().map(|k| k.chars().count()).max().unwrap_or(0);
+    let key_col = if key_w > 0 { key_w + 2 } else { 0 };
     // Rows that expand into a submenu get a right-aligned ▸ in an
     // extra column so the affordance is visible before hovering.
     let any_submenu = menu.items.iter().any(|i| i.action.submenu().is_some());
@@ -130,7 +136,7 @@ fn draw_menu_overlay(f: &mut Frame, app: &mut App, menu: crate::app::ContextMenu
     // settings` did, doubling the width of a six-row list — never
     // pads the modal with empty space, and hovering a row with more
     // keys (the Claude row's Tab) never resizes it.
-    let width = (label_w + 4 + if any_submenu { 2 } else { 0 })
+    let width = (label_w + 4 + key_col + if any_submenu { 2 } else { 0 })
         .max(title_width + 2)
         .min(f.area().width as usize) as u16;
     let height = menu.items.len() as u16 + 2;
@@ -168,9 +174,13 @@ fn draw_menu_overlay(f: &mut Frame, app: &mut App, menu: crate::app::ContextMenu
     // the border, and the ▸ sits at the right edge — so a title
     // wider than the rows leaves no ragged gap beside them.
     let row_w = inner.width as usize;
-    let label_w = row_w.saturating_sub(if any_submenu { 4 } else { 2 });
-    for (i, item) in menu.items.iter().enumerate() {
-        let Some(row) = row_rect(inner, i) else { break };
+    let label_w = row_w.saturating_sub(if any_submenu { 4 } else { 2 } + key_col);
+    // A list taller than the screen scrolls with its hover.
+    let skip = crate::app::menu_scroll(menu.hover, menu.items.len(), inner.height as usize);
+    for (i, item) in menu.items.iter().enumerate().skip(skip) {
+        let Some(row) = row_rect(inner, i - skip) else {
+            break;
+        };
         let mut style = if item.destructive {
             Style::default().fg(th.err)
         } else {
@@ -179,18 +189,51 @@ fn draw_menu_overlay(f: &mut Frame, app: &mut App, menu: crate::app::ContextMenu
         if i == menu.hover {
             style = style.bg(th.sel_bg).add_modifier(Modifier::BOLD);
         }
-        let text = if item.action.submenu().is_some() {
-            format!(" {:<label_w$} ▸ ", item.label)
-        } else if any_submenu {
-            format!(" {:<label_w$}   ", item.label)
+        let label: String = item.label.chars().take(label_w).collect();
+        let key = if key_col > 0 {
+            format!("{:>key_w$}  ", keys[i])
         } else {
-            format!(" {:<label_w$} ", item.label)
+            String::new()
         };
-        f.render_widget(Paragraph::new(Span::styled(text, style)), row);
+        let (text, tail) = if item.action.submenu().is_some() {
+            (format!(" {label:<label_w$}"), format!("{key}▸ "))
+        } else if any_submenu {
+            (format!(" {label:<label_w$}"), format!("{key}  "))
+        } else {
+            (format!(" {label:<label_w$}"), key)
+        };
+        let dim = if i == menu.hover {
+            style
+        } else {
+            style.fg(th.dim)
+        };
+        let tail = format!(" {tail}");
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(text, style),
+                Span::styled(tail, dim),
+            ])),
+            row,
+        );
     }
     // Record the drawn area for click hit-testing.
     if let Some(Overlay::Menu(m)) = &mut app.modals.overlay {
         m.area = area;
+    }
+}
+
+/// The key a menu row shows: its registry verb's first chord as bound
+/// now, else a key of its own; empty for a row that has neither.
+fn menu_key(app: &App, item: &crate::app::MenuItem) -> String {
+    match (&item.verb, &item.key) {
+        (Some(verb), _) => app
+            .chrome
+            .keymap
+            .first(*verb)
+            .map(|c| c.display())
+            .unwrap_or_default(),
+        (None, Some(key)) => key.clone(),
+        (None, None) => String::new(),
     }
 }
 
@@ -531,6 +574,7 @@ const HELP_RIGHT: &[HelpSection] = &[
             (Act(&[Hosts]), "ssh hosts (a: new, d: del)"),
             (Act(&[Settings]), "settings; Hotkeys tab rebinds"),
             (Act(&[Metrics, Accounts]), "memory / accounts + usage"),
+            (Act(&[Verbs]), "what the selection can do"),
             (Act(&[Quit, Help]), "quit / toggle this help"),
         ],
     ),
@@ -3003,6 +3047,9 @@ mod help_tests {
         let missing: Vec<&str> = crate::keymap::ACTIONS
             .iter()
             .filter(|spec| !matches!(spec.action, crate::keymap::Action::SelectProjectTab(_)))
+            // The menus' own verbs ship unbound: the menus and `?` list
+            // them, with a key once one is bound, and Hotkeys binds them.
+            .filter(|spec| !spec.defaults.is_empty())
             .filter(|spec| !listed.contains(&spec.action))
             .map(|spec| spec.id)
             .collect();

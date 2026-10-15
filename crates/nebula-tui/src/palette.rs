@@ -112,6 +112,10 @@ pub struct PaletteItem {
     /// kind of row. The row goes red for it and its badge names it
     /// (`merge conflicts`, `checks failing`) in place of the standing.
     pub trouble: Option<Trouble>,
+    /// A verb of the selection the COMMAND PALETTE was opened on: listed
+    /// first, ahead of every tier, so what can be done to the thing under
+    /// the cursor is the top of the list.
+    pub pinned: bool,
 }
 
 /// Fuzzy-search palette over every project, worktree, and session (`/`).
@@ -132,6 +136,9 @@ pub struct Palette {
     /// The COMMAND PALETTE (`^K`): the rows carry every action too
     /// ([`command_items`]), kept across [`Palette::rebuild`].
     pub commands: bool,
+    /// The selection's verbs the COMMAND PALETTE leads with ([`Palette::with_verbs`]),
+    /// by their menu words, kept across [`Palette::rebuild`].
+    pub verbs: Vec<(crate::keymap::Action, String)>,
 }
 
 impl Palette {
@@ -140,6 +147,15 @@ impl Palette {
     pub fn with_commands(mut self) -> Self {
         self.commands = true;
         self.list.items.extend(command_items());
+        self.apply_filter();
+        self
+    }
+
+    /// The selection's verbs first: `verbs` as command rows ahead of
+    /// every other row, each run as its key runs on the selection.
+    pub fn with_verbs(mut self, verbs: Vec<(crate::keymap::Action, String)>) -> Self {
+        self.list.items.extend(verb_items(&verbs));
+        self.verbs = verbs;
         self.apply_filter();
         self
     }
@@ -155,6 +171,7 @@ impl Palette {
             enter_attaches,
             area: Rect::default(),
             commands: false,
+            verbs: Vec::new(),
         };
         palette.apply_filter();
         palette
@@ -176,6 +193,7 @@ impl Palette {
         if self.commands {
             self.list.items.extend(command_items());
         }
+        self.list.items.extend(verb_items(&self.verbs));
         self.apply_filter();
         if let Some(target) = keep {
             if let Some(row) = self
@@ -263,6 +281,7 @@ impl PaletteItem {
             interacted: 0,
             standing: None,
             trouble: None,
+            pinned: false,
         }
     }
 }
@@ -308,13 +327,31 @@ pub fn command_items() -> Vec<PaletteItem> {
     items
 }
 
+/// The selection's verbs as pinned command rows.
+fn verb_items(verbs: &[(crate::keymap::Action, String)]) -> Vec<PaletteItem> {
+    verbs
+        .iter()
+        .map(|(action, label)| PaletteItem {
+            pinned: true,
+            ..PaletteItem::command(PaletteTarget::Action(*action), label)
+        })
+        .collect()
+}
+
 /// Each item's position in the attention order: tier first, then most
 /// recently interacted, then build order — which keeps a project over its
 /// worktrees over their sessions when they share a stamp, and never-run
 /// rows in tree order.
 fn attention_rank(items: &[PaletteItem]) -> Vec<usize> {
     let mut order: Vec<usize> = (0..items.len()).collect();
-    order.sort_by_key(|&i| (items[i].tier, std::cmp::Reverse(items[i].interacted), i));
+    order.sort_by_key(|&i| {
+        (
+            !items[i].pinned,
+            items[i].tier,
+            std::cmp::Reverse(items[i].interacted),
+            i,
+        )
+    });
     let mut rank = vec![0; items.len()];
     for (pos, i) in order.into_iter().enumerate() {
         rank[i] = pos;
@@ -380,6 +417,7 @@ fn build_palette_items(
             interacted: project_recency(tree, &p.id, now).interacted,
             standing: None,
             trouble: None,
+            pinned: false,
         });
     }
     for p in &projects {
@@ -397,6 +435,7 @@ fn build_palette_items(
                 interacted: worktree_recency(tree, &w.id, now).interacted,
                 standing: None,
                 trouble: None,
+                pinned: false,
             });
         }
     }
@@ -423,6 +462,7 @@ fn build_palette_items(
                     interacted: last_interaction_ms(a, now),
                     standing: None,
                     trouble: None,
+                    pinned: false,
                 });
             }
         }
@@ -455,6 +495,7 @@ fn build_palette_items(
                 interacted: 0,
                 standing: Some(pr.standing()),
                 trouble: pr.trouble(),
+                pinned: false,
             });
         }
     }

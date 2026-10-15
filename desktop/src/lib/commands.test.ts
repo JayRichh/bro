@@ -4,7 +4,10 @@ vi.mock('./api', () => ({ api: {} }));
 
 const { app } = await import('./store.svelte');
 const { nav } = await import('./shell/history.svelte');
-const { runShortcut, toggleMaximize } = await import('./commands');
+const { runShortcut, toggleMaximize, verbsMenu } = await import('./commands');
+const { ui } = await import('./ui/ui.svelte');
+const { paletteCommands } = await import('./commands');
+const { selection } = await import('./selection.svelte');
 
 describe('the full pane', () => {
   beforeEach(() => {
@@ -74,5 +77,41 @@ describe('the shared keys', () => {
     expect(nav.current.repo).toBe('p1');
     expect(runShortcut('repo_3')).toBe(false);
     app.model.projects = was;
+  });
+});
+
+describe('the verbs menu (?)', () => {
+  const label = (e: unknown) => (typeof e === 'object' && e && 'label' in e ? (e as { label: string }).label : null);
+
+  it('lists the verbs of the row with their keys, All keys last', () => {
+    app.model = {
+      ...app.model,
+      agents: [{ id: 'a', worktree_id: 'w', name: 'fix-login', archived: false, unseen: false, status: 'finished' }],
+      terminals: [],
+      worktrees: [{ id: 'w', project_id: 'p', path: '/p', branch: 'main', is_main: true, sort_order: 0 }],
+      projects: [{ id: 'p', name: 'demo', repo_path: '/p', sort_order: 0 }],
+    } as unknown as typeof app.model;
+    const { items, title } = verbsMenu({ kind: 'agent', id: 'a' });
+    expect(title).toBe('session fix-login');
+    expect(label(items[0])).toBe('Open');
+    const last = items[items.length - 1] as { label: string; pinned?: boolean; run: () => void };
+    expect(last.label).toBe('All keys\u2026');
+    expect(last.pinned).toBe(true);
+    last.run();
+    expect(ui.help).toBe(true);
+    ui.help = false;
+  });
+
+  it('offers the own verbs of the window with nothing selected', () => {
+    const { items, title } = verbsMenu(null);
+    expect(title).toBe('Verbs');
+    expect(items.map(label)).toContain('New session\u2026');
+  });
+
+  it('puts the verbs of the selection first in the palette', () => {
+    selection.target = { kind: 'agent', id: 'a' };
+    const rows = paletteCommands().filter((c) => c.pinned);
+    expect(rows[0]).toMatchObject({ label: 'Open', group: 'session fix-login' });
+    selection.target = null;
   });
 });

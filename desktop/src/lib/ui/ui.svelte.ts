@@ -12,6 +12,9 @@ export type MenuItem = {
   keys?: string[];
   danger?: boolean;
   disabled?: boolean;
+  /** Kept last whatever a searchable menu's query (the verbs menu's All
+   *  keys). */
+  pinned?: boolean;
 };
 export type MenuEntry = MenuItem | { heading: string } | 'sep';
 
@@ -55,7 +58,9 @@ export type DialogSpec =
     };
 
 export const ui = $state({
-  menu: null as { x: number; y: number; items: MenuEntry[]; label: string } | null,
+  /** `search`: a field over the rows narrows them as you type (the
+   *  verbs menu, `?`). */
+  menu: null as { x: number; y: number; items: MenuEntry[]; label: string; search?: boolean } | null,
   dialog: null as DialogSpec | null,
   palette: false,
   help: false,
@@ -71,7 +76,7 @@ export type ReviewTab = 'terminal' | 'diff' | 'history' | 'pr';
 export type ReviewSheet = { sessions: string[]; at: number; tab: ReviewTab };
 
 /** Open a context menu at the pointer (or under an element). */
-export function openMenu(items: MenuEntry[], at: { x: number; y: number } | HTMLElement, label = 'Actions') {
+export function openMenu(items: MenuEntry[], at: { x: number; y: number } | HTMLElement, label = 'Actions', opts: { search?: boolean } = {}) {
   if (!items.length) return;
   let x: number, y: number;
   if (at instanceof HTMLElement) {
@@ -79,7 +84,7 @@ export function openMenu(items: MenuEntry[], at: { x: number; y: number } | HTML
     x = r.left;
     y = r.bottom;
   } else ({ x, y } = at);
-  ui.menu = { x, y, items, label };
+  ui.menu = { x, y, items, label, ...(opts.search ? { search: true } : {}) };
 }
 
 export function closeMenu() {

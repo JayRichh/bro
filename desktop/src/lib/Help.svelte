@@ -1,6 +1,7 @@
 <script lang="ts">
-  // ? or F1: every shortcut the window answers, from the one table App.svelte
-  // dispatches through, so this list can't drift from the keys.
+  // F1, or the verbs menu's (?) last row: every shortcut the window
+  // answers, from the one table App.svelte dispatches through, so this list
+  // can't drift from the keys.
   import { tick } from 'svelte';
   import { ui } from './ui/ui.svelte';
   import { helpGroups, keyLabel, type Scope } from './shortcuts';

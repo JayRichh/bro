@@ -27,7 +27,8 @@ describe('the registry behind the table', () => {
     // A home view's walking key is the view's: never overridden.
     expect(keysOf('list_move')).toEqual(defaultKeys('list_move'));
     expect(shortcutFor(press('F2'), idle)?.id).toBe('help');
-    expect(shortcutFor(press('?'), idle)).toBeUndefined();
+    // `?` stays the verbs menu's.
+    expect(shortcutFor(press('?'), idle)?.id).toBe('verbs');
     expect(withKey('Keyboard shortcuts', ['help', 'help_f1'])).toBe('Keyboard shortcuts (F2 or F1)');
     applyOverrides({});
     expect(keysOf('help')).toEqual(defaultKeys('help'));

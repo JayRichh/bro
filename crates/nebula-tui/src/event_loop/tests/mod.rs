@@ -1015,7 +1015,7 @@ fn cloud_row_can_send_a_message_to_its_session() {
         "cloud rows get both cloud verbs: {labels:?}"
     );
     assert!(
-        !labels.contains(&"Attach") && !labels.contains(&"Restart"),
+        !labels.contains(&"Open") && !labels.contains(&"Restart agent"),
         "nothing local to attach or restart: {labels:?}"
     );
 
@@ -10962,14 +10962,14 @@ fn the_root_rows_menu_offers_switch_branch_and_a_worktree_row_offers_delete() {
     app.nav.sel_worktree = 1;
     open_row_menu(&mut app);
     let linked = labels(&app);
-    assert!(linked.iter().any(|l| l == "Delete worktree"), "{linked:?}");
+    assert!(linked.iter().any(|l| l == "Delete worktree…"), "{linked:?}");
     assert!(!linked.iter().any(|l| l == "Switch branch…"), "{linked:?}");
     app.modals.overlay = None;
 
     app.nav.sel_worktree = 0;
     open_row_menu(&mut app);
     let root = labels(&app);
-    assert!(!root.iter().any(|l| l == "Delete worktree"), "{root:?}");
+    assert!(!root.iter().any(|l| l == "Delete worktree…"), "{root:?}");
     let at = root
         .iter()
         .position(|l| l == "Switch branch…")
@@ -13549,8 +13549,8 @@ fn rebinding_an_action_takes_effect_and_persists() {
         // …and the old one no longer does.
         let mut fresh = App::new();
         fresh.chrome.keymap = crate::config::Config::load().keymap();
-        press(&mut fresh, KeyCode::Char('?'), KeyModifiers::NONE, &mut out);
-        assert!(fresh.modals.overlay.is_none(), "? is unbound now");
+        press(&mut fresh, KeyCode::F(1), KeyModifiers::NONE, &mut out);
+        assert!(fresh.modals.overlay.is_none(), "F1 is unbound now");
     });
 }
 
@@ -13576,7 +13576,7 @@ fn a_duplicate_chord_warns_before_it_is_taken() {
         assert!(!view.capturing(), "the capture is paused on the warning");
         assert_eq!(
             app.chrome.keymap.label(crate::keymap::Action::Help),
-            "?",
+            "F1",
             "nothing changed yet"
         );
 
@@ -13586,7 +13586,7 @@ fn a_duplicate_chord_warns_before_it_is_taken() {
             app.chrome.keymap.label(crate::keymap::Action::GitDiff),
             "d g"
         );
-        assert_eq!(app.chrome.keymap.label(crate::keymap::Action::Help), "?");
+        assert_eq!(app.chrome.keymap.label(crate::keymap::Action::Help), "F1");
     });
 }
 
@@ -20687,7 +20687,7 @@ fn a_second_click_on_a_settings_row_is_enter_on_it() {
 fn help_click_outside_closes_and_inside_stays() {
     let mut app = App::new();
     let mut out = Vec::new();
-    press(&mut app, KeyCode::Char('?'), KeyModifiers::NONE, &mut out);
+    press(&mut app, KeyCode::F(1), KeyModifiers::NONE, &mut out);
     let area = drawn_modal_area(&mut app);
     // Its border: inside the box, and no row's button.
     click(&mut app, area.x + 2, area.y, &mut out);
@@ -20862,7 +20862,7 @@ fn every_overlay() -> Vec<(&'static str, fn(&mut App), Option<&'static str>)> {
         ),
         (
             "Help",
-            |app| press(app, KeyCode::Char('?'), KeyModifiers::NONE, &mut Vec::new()),
+            |app| press(app, KeyCode::F(1), KeyModifiers::NONE, &mut Vec::new()),
             None,
         ),
         (
@@ -21600,7 +21600,10 @@ fn key_combo_display_spells_each_press_with_what_it_did() {
 
     // The hardwired hatch out of any modal names itself.
     press(&mut app, KeyCode::Char('?'), KeyModifiers::NONE, &mut out);
-    assert_eq!(combo_text(&app).as_deref(), Some("? - Help"));
+    assert_eq!(
+        combo_text(&app).as_deref(),
+        Some("? - Verbs for the selection")
+    );
     press(
         &mut app,
         KeyCode::Char('q'),
@@ -22491,6 +22494,7 @@ fn a_desktop_write_waits_for_the_reset_confirm_too() {
 mod buttons;
 mod dispatch;
 mod orch_view;
+mod verbs;
 
 /// The DELETE CHECK's two steps: `d` on a worktree asks, `Enter` sends
 /// the delete UNFORCED; a check that found changes makes `Enter` open the

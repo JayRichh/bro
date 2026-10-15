@@ -28,7 +28,8 @@ export interface PaletteItem {
   /** Chords for an action row. */
   keys?: string[];
   /** A session's is the model's (0 needs you, 1 running, 2 unread, 3 the
-   *  rest); repos, worktrees and PRs are 3, actions 4. */
+   *  rest); repos, worktrees and PRs are 3, actions 4, the selection's
+   *  verbs -1. */
   tier: number;
   /** Newer first within a tier. */
   stamp: number;
@@ -43,6 +44,8 @@ export interface PaletteCommand {
   words?: string;
   keys?: string[];
   group: string;
+  /** A verb of the selection: listed first, ahead of every session. */
+  pinned?: boolean;
 }
 
 /** What a session row says at the right, by its tier. */
@@ -111,7 +114,7 @@ export function buildItems(m: Model, commands: PaletteCommand[]): PaletteItem[] 
       label: c.label,
       hint: '',
       keys: c.keys,
-      tier: 4,
+      tier: c.pinned ? -1 : 4,
       stamp: 0,
       idle: true,
     });

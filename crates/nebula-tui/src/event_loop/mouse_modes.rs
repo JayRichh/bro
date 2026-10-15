@@ -201,8 +201,13 @@ fn handle_menu_mouse(
                 && mouse.column < area.x + area.width
                 && mouse.row > area.y
                 && mouse.row < area.y + area.height.saturating_sub(1);
+            let skip = crate::app::menu_scroll(
+                menu.hover,
+                menu.items.len(),
+                area.height.saturating_sub(2) as usize,
+            );
             let hit = inside
-                .then(|| (mouse.row - area.y - 1) as usize)
+                .then(|| (mouse.row - area.y - 1) as usize + skip)
                 .filter(|index| *index < menu.items.len());
             match hit {
                 // Enter on that row, whichever row the hover was on.

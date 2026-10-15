@@ -222,7 +222,8 @@ within a few seconds, and sessions the window starts take the Agents tab's model
 </picture>
 
 `Ctrl+K` opens the command palette: jump to any repo, worktree, session or pull request, what needs
-you first, or run any action. `?` lists every key. Right-click a session, card or repo (or press
+you first, or run any action. `?` lists what you can do to the focused row, each with its key, and `F1` every
+key. Right-click a session, card or repo (or press
 `Shift+F10`) for the terminal app's card menu: follow-up, restart, duplicate, move, rename, archive,
 delete, run and stop, new terminal, open in editor, new worktree.
 
