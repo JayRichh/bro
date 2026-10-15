@@ -1,4 +1,5 @@
 pub mod accounts_overlay;
+pub mod ado;
 pub mod agent_picker;
 pub mod agent_presets;
 pub mod app;

@@ -16,6 +16,9 @@ use nebula_core::SubagentSummary;
 pub(crate) fn on_snapshot_subagents(app: &mut App, subs: Vec<SubagentSummary>) {
     app.desk.subagents.replace(subs);
     refresh_subagents(app);
+    // And which of the projects are on Azure DevOps, for the header's
+    // `ado` button.
+    super::ado::probe(app);
 }
 
 /// One subagent started, ended, or closed with its session.
@@ -281,6 +284,8 @@ pub(crate) fn note_place(app: &mut App) {
     if let Some(place) = current_place(app) {
         app.desk.history.note(place);
     }
+    // A project added since the snapshot gets its Azure DevOps probe.
+    super::ado::probe(app);
 }
 
 /// `⌥←` (`delta` -1) / `⌥→` (1), or the header's `‹ ›`: the place before

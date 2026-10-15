@@ -168,6 +168,7 @@ fn overlay_name(app: &App) -> &'static str {
         Some(Overlay::OrchestratorStart(_)) => "OrchestratorStart",
         Some(Overlay::Accounts(_)) => "Accounts",
         Some(Overlay::Subagents(_)) => "Subagents",
+        Some(Overlay::Ado(_)) => "Ado",
     }
 }
 

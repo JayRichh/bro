@@ -208,6 +208,9 @@ pub enum HitTarget {
     /// The header's BACK and FORWARD buttons (`‹ ›`), as `⌥←` / `⌥→`.
     NavBack,
     NavForward,
+    /// The header's `ado` button, on a project whose remote is on Azure
+    /// DevOps: the AZURE DEVOPS OVERLAY, as `⇧B`.
+    AdoButton,
 }
 
 /// Default outer width of the diff modal's file-list panel.
@@ -2362,6 +2365,8 @@ pub enum Overlay {
     Accounts(crate::accounts_overlay::AccountsView),
     /// `⇧S`: the SUBAGENTS OVERLAY — the project's SESSION TREE.
     Subagents(crate::subagents::SubagentsView),
+    /// `⇧B`: the AZURE DEVOPS OVERLAY — tasks, pull requests, branches.
+    Ado(crate::ado::AdoView),
 }
 
 /// Rows optimistically removed for an in-flight DeleteWorktree, kept so an

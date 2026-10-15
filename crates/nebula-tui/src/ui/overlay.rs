@@ -47,6 +47,7 @@ impl Overlay {
             Overlay::OrchestratorStart(view) => draw_orchestrator_start_overlay(f, app, view),
             Overlay::Accounts(view) => super::accounts_view::draw(f, app, view),
             Overlay::Subagents(view) => super::subagents_view::draw(f, app, view),
+            Overlay::Ado(view) => super::ado_view::draw(f, app, view),
         }
     }
 }

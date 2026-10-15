@@ -32,6 +32,7 @@ use std::time::Duration;
 mod accounts;
 mod actions;
 mod activate;
+mod ado;
 mod alerts;
 mod background;
 mod commands;

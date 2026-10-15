@@ -106,6 +106,7 @@ fn overlay_footer_hint(app: &App, overlay: &Overlay, th: Theme) -> FooterHint {
                 th,
             )
         }
+        Overlay::Ado(_) => dim_hint("↑/↓: move  Tab/1-3: list  Enter: open  Esc: close", th),
         Overlay::Palette(p) if p.commands => dim_hint(
             "type: search  ↑/↓: move  Enter: jump or run  Ctrl+u: clear  Esc: clear/close",
             th,

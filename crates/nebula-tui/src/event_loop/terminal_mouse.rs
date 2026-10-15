@@ -561,6 +561,7 @@ pub(crate) fn update_pointer(app: &mut App, mouse: &MouseEvent) {
                 | HitTarget::Attention(_)
                 | HitTarget::NavBack
                 | HitTarget::NavForward
+                | HitTarget::AdoButton
                 | HitTarget::FooterUsage
         )
     });

@@ -79,6 +79,7 @@ fn handle_overlay_mouse(
         Overlay::Settings(_) => handle_settings_mouse(app, mouse, mouse_pos, out),
         Overlay::Metrics(_) => handle_metrics_mouse(app, mouse, mouse_pos, out),
         Overlay::Subagents(_) => desk::handle_subagents_mouse(app, mouse, out),
+        Overlay::Ado(_) => ado::handle_mouse(app, mouse, out),
         _ => true,
     }
 }
@@ -836,6 +837,7 @@ fn handle_left_click_target(app: &mut App, mouse: MouseEvent, out: &mut Vec<Clie
         Some(HitTarget::Attention(tone)) => desk::jump_attention_kind(app, tone, out),
         Some(HitTarget::NavBack) => desk::go(app, -1, out),
         Some(HitTarget::NavForward) => desk::go(app, 1, out),
+        Some(HitTarget::AdoButton) => ado::open(app),
         Some(
             target @ (HitTarget::ProjectRow(_)
             | HitTarget::WorktreeRow(_)

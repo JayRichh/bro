@@ -9,4 +9,8 @@ pub struct DeskState {
     pub subagents: crate::subagents::Subagents,
     pub attention: crate::attention::Turns,
     pub history: crate::history::History,
+    /// Whether each project's remote is on Azure DevOps, as probed
+    /// (`event_loop::ado::probe`), and the probes still out.
+    pub ado_remote: std::collections::HashMap<nebula_core::ProjectId, bool>,
+    pub ado_probing: std::collections::HashSet<nebula_core::ProjectId>,
 }

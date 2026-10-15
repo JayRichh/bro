@@ -90,6 +90,10 @@ pub enum Action {
     /// `c`: the BRANCH SWITCHER — move the project's ROOT WORKTREE onto
     /// another branch, asking what to do with uncommitted changes.
     SwitchBranch,
+    /// `⇧B`: the AZURE DEVOPS OVERLAY — the project's sprint tasks, its
+    /// active pull requests and its branches, on a project whose remote
+    /// is on Azure DevOps.
+    Ado,
     /// `Shift+Enter` / `Shift+O` / `Alt+Enter`, on the grid: fire the
     /// selected worktree's OPEN COMMAND — the project's **Open command**
     /// setting, else its `.nebula.json` `open` (`open http://localhost:3000`,
@@ -480,6 +484,15 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
         defaults: &["c"],
+    },
+    ActionSpec {
+        action: Action::Ado,
+        id: "azure_devops",
+        label: "Azure DevOps",
+        hint: "On a project whose remote is on Azure DevOps (the header shows an ado button): your sprint's tasks, the active pull requests and the branches. Enter opens a task or pull request in the browser and checks a branch out in a worktree; s twice starts a task (branch, worktree, agent)",
+        group: "PROJECTS & WORKTREES",
+        scope: Scope::Global,
+        defaults: &["shift+b"],
     },
     ActionSpec {
         action: Action::OpenWorktree,

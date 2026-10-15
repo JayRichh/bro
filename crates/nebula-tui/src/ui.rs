@@ -14,6 +14,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
 mod accounts_view;
+mod ado_view;
 mod attention_view;
 mod footer;
 mod launcher_view;

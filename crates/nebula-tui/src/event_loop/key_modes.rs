@@ -390,6 +390,8 @@ fn handle_global_action(
         // ⇧U: the ACCOUNTS OVERLAY.
         Action::Accounts => accounts::open(app),
         // The views ported from the desktop window.
+        // ⇧B: the AZURE DEVOPS OVERLAY.
+        Action::Ado => ado::open(app),
         Action::CommandPalette | Action::NavBack | Action::NavForward | Action::Subagents => {
             desk::handle_action(app, action, out)
         }

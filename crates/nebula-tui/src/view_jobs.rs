@@ -129,6 +129,8 @@ pub enum Answer {
         url: String,
         result: Result<std::path::PathBuf, String>,
     },
+    /// An AZURE DEVOPS OVERLAY read, or the remote probe behind its button.
+    Ado(crate::ado::AdoAnswer),
 }
 
 /// A view's way onto the blocking pool and back. Cheap to clone — the

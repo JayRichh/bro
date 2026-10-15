@@ -70,11 +70,43 @@ fn strip_part(app: &App, th: Theme, zeros: bool) -> Part {
     out
 }
 
-/// What the gap `r` holds: `‹ ›`, then the strip with its zeros, or
-/// without them, or not at all — the most of it that fits.
+/// `ado ⇧B` on a project whose remote is on Azure DevOps: the AZURE
+/// DEVOPS OVERLAY's button, with its key.
+fn ado_part(app: &App, th: Theme) -> Part {
+    let on = app
+        .selected_project()
+        .is_some_and(|p| app.desk.ado_remote.get(&p.id) == Some(&true));
+    if !on {
+        return Vec::new();
+    }
+    let hit = HitTarget::AdoButton;
+    let mut style = Style::default().fg(th.accent);
+    if app.launcher.hover_crumb.as_ref() == Some(&hit) {
+        style = style.add_modifier(Modifier::UNDERLINED);
+    }
+    vec![
+        (Span::raw("   "), None),
+        (Span::styled("ado", style), Some(hit)),
+        (
+            Span::styled(
+                format!(" {}", key_hint(app, Action::Ado)),
+                Style::default().fg(th.dim),
+            ),
+            None,
+        ),
+    ]
+}
+
+/// What the gap `r` holds: `‹ ›`, the `ado` button where the project has
+/// one, then the strip with its zeros, or without them, or not at all —
+/// the most of it that fits.
 pub(super) fn parts(app: &App, room: usize) -> Part {
     let th = app.chrome.theme;
-    let nav = nav_part(app, th);
+    let mut nav = nav_part(app, th);
+    let ado = ado_part(app, th);
+    if width(&nav) + width(&ado) <= room {
+        nav.extend(ado);
+    }
     if width(&nav) > room {
         return Vec::new();
     }
