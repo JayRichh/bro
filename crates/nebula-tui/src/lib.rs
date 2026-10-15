@@ -143,6 +143,11 @@ pub fn run_sessions(json: bool) -> Result<()> {
     runtime()?.block_on(ipc::list_sessions(json))
 }
 
+/// `kete session move-account <session> [<profile>]`.
+pub fn run_move_account(session: &str, profile: Option<String>) -> Result<()> {
+    runtime()?.block_on(ipc::move_session_account(session, profile))
+}
+
 pub fn run_read_session(session: &str, lines: u32) -> Result<()> {
     runtime()?.block_on(ipc::read_session(session, lines))
 }

@@ -303,17 +303,6 @@ pub fn login_args(harness: &str) -> Option<&'static [&'static str]> {
     }
 }
 
-/// The command that signs `profile` in, for a front end to show (never to
-/// run with credentials of its own): None for an adopted default login,
-/// which signs in as the CLI always does, or a harness with no known
-/// sign-in.
-pub fn login_hint(profile: &Profile) -> Option<String> {
-    if profile.use_default || login_args(&profile.harness).is_none() {
-        return None;
-    }
-    Some(format!("kete profile login {}", profile.name.trim()))
-}
-
 /// The harness's default profile: the first usable one flagged `default`.
 /// A disabled default is no default: a launch naming no profile runs on
 /// the CLI's own login, as when none is flagged.
@@ -662,6 +651,307 @@ pub fn layer_for(config: &Path, local: &Path, key: &str) -> Result<PathBuf, Stri
     })
 }
 
+/// Add `name` to the settings file at `path` as a copy of the profile
+/// `from`: its harness, its variables and its kind of login, but neither
+/// its default star nor its switch. The copy's home (made by the caller,
+/// [`Profile::prepare_in`]) starts empty: it signs in separately. What
+/// `kete profile duplicate` and both apps' Duplicate run.
+pub fn duplicate_in_file(path: &Path, from: &str, name: &str) -> Result<Profile, String> {
+    let held = crate::settings::read_object(path)
+        .map_err(|e| format!("{}: {e}", path.display()))?
+        .unwrap_or_default();
+    let Some(source) = from_settings(&held)
+        .into_iter()
+        .find(|p| p.name.trim() == from.trim())
+    else {
+        return Err(format!("no profile named `{}`", from.trim()));
+    };
+    let copy = Profile {
+        name: name.trim().to_string(),
+        harness: source.harness.trim().to_string(),
+        env: source.env,
+        default: false,
+        use_default: source.use_default,
+        disabled: false,
+    };
+    add_to_file(path, &copy)?;
+    Ok(copy)
+}
+
+/// What [`remove_in_file`] did with the profile's home.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Removed {
+    /// The PROFILE HOME, when there is one on disk (kept), or was
+    /// (purged). None for an adopted login, or a home never made.
+    pub home: Option<PathBuf>,
+    /// The home was deleted.
+    pub purged: bool,
+}
+
+/// Remove the profile `name` from the settings file at `path`, and with
+/// `purge` delete its PROFILE HOME under `root` (the login in it) too.
+/// Without, the home stays, so adding the name back signs nothing in
+/// again. An adopted login's config is the CLI's own and never touched.
+/// What `kete profile remove [--purge]` and both apps' Remove run.
+pub fn remove_in_file(
+    path: &Path,
+    root: &Path,
+    name: &str,
+    purge: bool,
+) -> Result<Removed, String> {
+    let held = crate::settings::read_object(path)
+        .map_err(|e| format!("{}: {e}", path.display()))?
+        .unwrap_or_default();
+    let home = from_settings(&held)
+        .into_iter()
+        .find(|p| p.name.trim() == name.trim())
+        .and_then(|p| p.home_in(root))
+        .filter(|h| h.exists());
+    if !remove_from_file(path, name)? {
+        return Err(format!("no profile named `{}`", name.trim()));
+    }
+    let mut purged = false;
+    if let (true, Some(home)) = (purge, &home) {
+        purge_home_in(root, home)
+            .map_err(|e| format!("removed `{}`, but its home stays: {e}", name.trim()))?;
+        purged = true;
+    }
+    Ok(Removed { home, purged })
+}
+
+/// Delete a PROFILE HOME: only ever a directory directly inside `root`,
+/// checked on the resolved paths, so a profile name can never reach
+/// outside it.
+pub fn purge_home_in(root: &Path, home: &Path) -> Result<(), String> {
+    if !home.exists() {
+        return Ok(());
+    }
+    let root =
+        crate::paths::canonical(root).map_err(|e| format!("resolve {}: {e}", root.display()))?;
+    let target =
+        crate::paths::canonical(home).map_err(|e| format!("resolve {}: {e}", home.display()))?;
+    if target.parent() != Some(root.as_path()) {
+        return Err(format!(
+            "refusing to delete {}: not a profile home under {}",
+            target.display(),
+            root.display()
+        ));
+    }
+    std::fs::remove_dir_all(&target).map_err(|e| format!("delete {}: {e}", target.display()))
+}
+
+/// Why the profile `name` cannot be renamed while these sessions exist,
+/// or None. Every unarchived session naming it blocks: a live one runs
+/// in its home, and a stopped one would fail to resume ("profile is no
+/// longer defined"), since only the daemon can change the name a session
+/// stores. Moving them to another account (or archiving them) first
+/// clears the way.
+pub fn rename_blocker(agents: &[crate::entities::Agent], name: &str) -> Option<String> {
+    let name = name.trim();
+    let on: Vec<&crate::entities::Agent> = agents
+        .iter()
+        .filter(|a| !a.archived && a.profile.as_deref().map(str::trim) == Some(name))
+        .collect();
+    if on.is_empty() {
+        return None;
+    }
+    let names = |live: bool| -> Vec<&str> {
+        on.iter()
+            .filter(|a| a.alive == live)
+            .map(|a| a.name.as_str())
+            .collect()
+    };
+    let (live, stopped) = (names(true), names(false));
+    let mut parts = Vec::new();
+    if !live.is_empty() {
+        parts.push(format!("{} running ({})", live.len(), live.join(", ")));
+    }
+    if !stopped.is_empty() {
+        parts.push(format!(
+            "{} stopped that would resume on it ({})",
+            stopped.len(),
+            stopped.join(", ")
+        ));
+    }
+    Some(format!(
+        "`{name}` has sessions: {}. Move them to another account or archive them, then rename",
+        parts.join("; ")
+    ))
+}
+
+/// What [`rename`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Renamed {
+    /// The profile under its new name.
+    pub profile: Profile,
+    /// The PROFILE HOME moved, from and to.
+    pub home: Option<(PathBuf, PathBuf)>,
+    /// The repos (as written) whose default account it was, now under the
+    /// new name.
+    pub projects: Vec<String>,
+    /// Archived sessions that still name the old one: restoring one means
+    /// moving it to an account.
+    pub archived: Vec<String>,
+}
+
+/// Rename the profile `old` to `new`, everywhere kete keys it by name: the
+/// `profiles` entry (in the layer in force, its position and every other
+/// field kept), its PROFILE HOME under `root`, each project's default
+/// account naming it (in the layer whose `projects` key is in force), and
+/// its kept usage reading. Refused while a session names it
+/// ([`rename_blocker`]), for a name already taken, or when a directory of
+/// the new name already sits in `root` (a home a remove left behind). The
+/// home moves first and is moved back when the settings cannot be
+/// written. Takes the settings locks itself: the caller holds none.
+///
+/// What `kete profile rename` and both apps' Rename run.
+pub fn rename(
+    config: &Path,
+    local: &Path,
+    root: &Path,
+    old: &str,
+    new: &str,
+    agents: &[crate::entities::Agent],
+) -> Result<Renamed, String> {
+    let (old, new) = (old.trim(), new.trim());
+    if old == new {
+        return Err(format!("`{old}` already has that name"));
+    }
+    if let Some(why) = rename_blocker(agents, old) {
+        return Err(why);
+    }
+    // config.json's lock covers both layers, as every settings writer
+    // takes it; the local layer's own is taken too when it is written.
+    let _base = crate::settings::lock(config).map_err(|e| e.to_string())?;
+    let profiles_at = layer_for(config, local, CONFIG_KEY)?;
+    let projects_at = layer_for(config, local, PROJECTS_KEY)?;
+    let _local = if profiles_at == local || projects_at == local {
+        Some(crate::settings::lock(local).map_err(|e| e.to_string())?)
+    } else {
+        None
+    };
+    let read = |path: &Path| {
+        crate::settings::read_object(path)
+            .map_err(|e| format!("{}: {e}", path.display()))
+            .map(Option::unwrap_or_default)
+    };
+    let mut profiles_obj = read(&profiles_at)?;
+    let all = from_settings(&profiles_obj);
+    let Some(current) = all.iter().find(|p| p.name.trim() == old) else {
+        return Err(format!("no profile named `{old}`"));
+    };
+    if all.iter().any(|p| p.name.trim() == new) {
+        return Err(format!("profile `{new}` already exists"));
+    }
+    let mut renamed = current.clone();
+    renamed.name = new.to_string();
+    if let Some(problem) = renamed.problem() {
+        return Err(problem);
+    }
+
+    // The settings, edited in memory: the entry's name, then (in the same
+    // object when one layer holds both) each project default naming it.
+    if let Some(Value::Array(entries)) = profiles_obj.get_mut(CONFIG_KEY) {
+        for entry in entries.iter_mut() {
+            if entry.get("name").and_then(Value::as_str).map(str::trim) == Some(old) {
+                if let Some(obj) = entry.as_object_mut() {
+                    obj.insert("name".into(), json!(new));
+                }
+            }
+        }
+    }
+    let same_layer = projects_at == profiles_at;
+    let mut projects_obj = if same_layer {
+        None
+    } else {
+        Some(read(&projects_at)?)
+    };
+    let projects = rename_project_defaults(
+        projects_obj.as_mut().unwrap_or(&mut profiles_obj),
+        &current.harness,
+        old,
+        new,
+    );
+
+    let home = match (current.home_in(root), renamed.home_in(root)) {
+        (Some(from), Some(to)) if from.exists() => {
+            if to.exists() {
+                return Err(format!(
+                    "{} already exists (a removed profile's home?): delete it or pick another name",
+                    to.display()
+                ));
+            }
+            std::fs::rename(&from, &to).map_err(|e| {
+                format!(
+                    "could not move {} to {}: {e} (is a program still using it?)",
+                    from.display(),
+                    to.display()
+                )
+            })?;
+            Some((from, to))
+        }
+        _ => None,
+    };
+    let write = |path: &Path, obj: serde_json::Map<String, Value>| {
+        crate::settings::write_json(path, &Value::Object(obj))
+            .map_err(|e| format!("write {}: {e}", path.display()))
+    };
+    let undo_home = |e: String| {
+        if let Some((from, to)) = &home {
+            let _ = std::fs::rename(to, from);
+        }
+        e
+    };
+    let profiles_before = read(&profiles_at).map_err(undo_home)?;
+    write(&profiles_at, profiles_obj).map_err(undo_home)?;
+    if let Some(obj) = projects_obj {
+        if let Err(e) = write(&projects_at, obj) {
+            let _ = write(&profiles_at, profiles_before);
+            return Err(undo_home(e));
+        }
+    }
+    // The reading follows the name; a failure here only loses the bars
+    // until the next session's turn.
+    let _ = std::fs::rename(usage_path_in(root, old), usage_path_in(root, new));
+    let archived = agents
+        .iter()
+        .filter(|a| a.archived && a.profile.as_deref().map(str::trim) == Some(old))
+        .map(|a| a.name.clone())
+        .collect();
+    Ok(Renamed {
+        profile: renamed,
+        home,
+        projects,
+        archived,
+    })
+}
+
+/// Point every project default of `harness` naming `old` at `new`, in a
+/// raw settings object; the repos changed.
+fn rename_project_defaults(
+    obj: &mut serde_json::Map<String, Value>,
+    harness: &str,
+    old: &str,
+    new: &str,
+) -> Vec<String> {
+    let mut changed = Vec::new();
+    let Some(Value::Object(projects)) = obj.get_mut(PROJECTS_KEY) else {
+        return changed;
+    };
+    for (repo, entry) in projects.iter_mut() {
+        let Some(Value::Object(defaults)) = entry.get_mut(PROJECT_DEFAULTS_KEY) else {
+            continue;
+        };
+        if let Some(value) = defaults.get_mut(harness.trim()) {
+            if value.as_str().map(str::trim) == Some(old) {
+                *value = json!(new);
+                changed.push(repo.clone());
+            }
+        }
+    }
+    changed
+}
+
 /// The latest PLAN USAGE a profile's sessions printed — Claude's
 /// `You've used 91% of your weekly limit · resets 2pm` — read off a
 /// session's screen by the daemon (`pty::usage`) and kept per profile, so
@@ -906,16 +1196,239 @@ mod tests {
     }
 
     #[test]
-    fn a_login_hint_names_the_cli_command_only_where_one_exists() {
+    fn the_login_command_covers_adopted_logins_too() {
+        use crate::accounts::login_command;
         assert_eq!(
-            login_hint(&profile("work", "claude")).as_deref(),
+            login_command(Some(&profile("work", "claude")), "claude").as_deref(),
             Some("kete profile login work")
         );
+        // An adopted login signs in under its profile's environment too.
         let mut adopted = profile("main", "codex");
         adopted.use_default = true;
-        assert_eq!(login_hint(&adopted), None);
-        assert_eq!(login_hint(&profile("x", "cursor")), None);
+        assert_eq!(
+            login_command(Some(&adopted), "codex").as_deref(),
+            Some("kete profile login main")
+        );
+        assert_eq!(login_command(Some(&profile("x", "cursor")), "cursor"), None);
         assert_eq!(login_args("copilot"), Some(&["login"][..]));
+    }
+
+    fn agent(name: &str, profile: Option<&str>, alive: bool, archived: bool) -> crate::Agent {
+        crate::Agent {
+            id: crate::AgentId(name.into()),
+            worktree_id: crate::WorktreeId("w".into()),
+            name: name.into(),
+            status: crate::AgentStatus::Finished,
+            archived,
+            archived_at: 0,
+            unseen: false,
+            status_changed_at: 0,
+            kind: crate::AgentKind::Claude,
+            custom_harness: None,
+            model: None,
+            effort: None,
+            session_id: None,
+            cloud_session_id: None,
+            issue_url: None,
+            role: crate::entities::AgentRole::Worker,
+            sort_order: 0,
+            alive,
+            recent_prompts: Vec::new(),
+            profile: profile.map(str::to_string),
+            parent: None,
+        }
+    }
+
+    /// config.json with `work` (claude, a home, a project default and a
+    /// kept reading) and `main` (adopted), in a temp dir.
+    fn rename_fixture() -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config.json");
+        let local = dir.path().join("config.local.json");
+        let root = dir.path().join("profiles");
+        std::fs::write(
+            &config,
+            r#"{"theme": "ocean",
+                "profiles": [
+                  {"name": "main", "harness": "claude", "use_default": true},
+                  {"name": "work", "harness": "claude", "default": true, "colour": "red"}
+                ],
+                "projects": {
+                  "C:/app": {"run_command": "x", "default_profiles": {"claude": "work", "codex": "work"}},
+                  "C:/other": {"default_profiles": {"claude": "main"}}
+                }}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("work").join("claude")).unwrap();
+        std::fs::write(
+            root.join("work").join("claude").join(".credentials.json"),
+            "{}",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join(".usage")).unwrap();
+        std::fs::write(usage_path_in(&root, "work"), "{}").unwrap();
+        (dir, config, local, root)
+    }
+
+    #[test]
+    fn a_rename_moves_the_home_the_entry_the_project_defaults_and_the_reading() {
+        let (_d, config, local, root) = rename_fixture();
+        let archived = agent("old-run", Some("work"), false, true);
+        let done = rename(&config, &local, &root, "work", "max2", &[archived]).unwrap();
+        assert_eq!(done.profile.name, "max2");
+        assert_eq!(done.projects, vec!["C:/app".to_string()]);
+        assert_eq!(done.archived, vec!["old-run".to_string()]);
+        assert_eq!(
+            done.home,
+            Some((root.join("work"), root.join("max2"))),
+            "the home moved"
+        );
+        assert!(root
+            .join("max2")
+            .join("claude")
+            .join(".credentials.json")
+            .is_file());
+        assert!(!root.join("work").exists());
+        assert!(usage_path_in(&root, "max2").is_file());
+        let raw: Value = serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        assert_eq!(raw["theme"], "ocean");
+        assert_eq!(raw["profiles"][1]["name"], "max2", "position kept");
+        assert_eq!(raw["profiles"][1]["colour"], "red", "unknown field kept");
+        assert_eq!(raw["profiles"][1]["default"], true);
+        let app = &raw["projects"]["C:/app"];
+        assert_eq!(app["default_profiles"]["claude"], "max2");
+        // A default of another harness that happens to share the name is
+        // not this profile's.
+        assert_eq!(app["default_profiles"]["codex"], "work");
+        assert_eq!(app["run_command"], "x");
+        assert_eq!(
+            raw["projects"]["C:/other"]["default_profiles"]["claude"],
+            "main"
+        );
+        assert!(!config.with_file_name("config.json.lock").exists());
+
+        // An adopted login has no home to move.
+        let done = rename(&config, &local, &root, "main", "mine", &[]).unwrap();
+        assert_eq!(done.home, None);
+        assert_eq!(done.projects, vec!["C:/other".to_string()]);
+    }
+
+    #[test]
+    fn a_rename_is_refused_before_anything_moves() {
+        let (_d, config, local, root) = rename_fixture();
+        let before = std::fs::read_to_string(&config).unwrap();
+        let refused = |new: &str, agents: &[crate::Agent]| {
+            rename(&config, &local, &root, "work", new, agents).unwrap_err()
+        };
+        let live = agent("fix-auth", Some("work"), true, false);
+        let stopped = agent("docs", Some("work"), false, false);
+        let why = refused("max2", &[live, stopped]);
+        assert!(why.contains("1 running (fix-auth)"), "{why}");
+        assert!(
+            why.contains("1 stopped that would resume on it (docs)"),
+            "{why}"
+        );
+        assert!(refused("main", &[]).contains("already exists"));
+        assert!(refused("bad name", &[]).contains("letters"));
+        assert!(refused("work", &[]).contains("already has"));
+        assert!(rename(&config, &local, &root, "gone", "x", &[]).is_err());
+        // A home a remove left behind under the new name is not taken over.
+        std::fs::create_dir_all(root.join("left")).unwrap();
+        assert!(refused("left", &[]).contains("already exists"));
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), before);
+        assert!(root.join("work").join("claude").is_dir(), "nothing moved");
+    }
+
+    #[test]
+    fn a_rename_edits_the_layers_in_force() {
+        let (_d, config, local, root) = rename_fixture();
+        std::fs::write(
+            &local,
+            r#"{"profiles": [{"name": "work", "harness": "claude"}]}"#,
+        )
+        .unwrap();
+        rename(&config, &local, &root, "work", "max2", &[]).unwrap();
+        let held: Value = serde_json::from_str(&std::fs::read_to_string(&local).unwrap()).unwrap();
+        assert_eq!(held["profiles"][0]["name"], "max2");
+        let base: Value = serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        assert_eq!(
+            base["profiles"][1]["name"], "work",
+            "the shadowed list stays"
+        );
+        assert_eq!(
+            base["projects"]["C:/app"]["default_profiles"]["claude"],
+            "max2"
+        );
+        assert!(!local.with_file_name("config.local.json.lock").exists());
+    }
+
+    #[test]
+    fn a_duplicate_copies_all_but_the_star_and_the_switch() {
+        let (_d, config, _local, _root) = rename_fixture();
+        let raw = std::fs::read_to_string(&config).unwrap();
+        std::fs::write(
+            &config,
+            raw.replace(
+                r#""default": true,"#,
+                r#""default": true, "disabled": true, "env": {"K": "v"},"#,
+            ),
+        )
+        .unwrap();
+        let copy = duplicate_in_file(&config, "work", "work-2").unwrap();
+        assert_eq!(copy.harness, "claude");
+        assert_eq!(copy.env.get("K").map(String::as_str), Some("v"));
+        assert!(!copy.default && !copy.disabled && !copy.use_default);
+        assert!(duplicate_in_file(&config, "work", "work-2")
+            .unwrap_err()
+            .contains("exists"));
+        assert!(duplicate_in_file(&config, "gone", "x").is_err());
+        assert!(
+            duplicate_in_file(&config, "main", "main-2")
+                .unwrap()
+                .use_default
+        );
+    }
+
+    #[test]
+    fn a_remove_keeps_the_home_unless_purged() {
+        let (_d, config, _local, root) = rename_fixture();
+        let kept = remove_in_file(&config, &root, "work", false).unwrap();
+        assert_eq!(
+            (kept.home.clone(), kept.purged),
+            (Some(root.join("work")), false)
+        );
+        assert!(root.join("work").is_dir());
+        assert!(
+            remove_in_file(&config, &root, "work", true).is_err(),
+            "gone already"
+        );
+
+        let (_d, config, _local, root) = rename_fixture();
+        let purged = remove_in_file(&config, &root, "work", true).unwrap();
+        assert_eq!(
+            (purged.home, purged.purged),
+            (Some(root.join("work")), true)
+        );
+        assert!(!root.join("work").exists());
+        assert!(root.join(".usage").is_dir(), "only the home goes");
+        // An adopted login's config is the CLI's own: never deleted.
+        let adopted = remove_in_file(&config, &root, "main", true).unwrap();
+        assert_eq!((adopted.home, adopted.purged), (None, false));
+    }
+
+    #[test]
+    fn a_purge_never_leaves_the_profiles_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("profiles");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(outside.join("deep")).unwrap();
+        assert!(purge_home_in(&root, &outside)
+            .unwrap_err()
+            .contains("refusing"));
+        assert!(purge_home_in(&root, &root.join("..").join("elsewhere")).is_err());
+        assert!(outside.join("deep").is_dir());
+        assert!(purge_home_in(&root, &root.join("never-made")).is_ok());
     }
 
     #[test]

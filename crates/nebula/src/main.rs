@@ -11,7 +11,9 @@ mod tunnel;
 mod upgrade;
 
 use anyhow::Result;
-use cli::{Command, ConfigCommand, OrchestratorCommand, ProfileCommand, SetupCommand};
+use cli::{
+    Command, ConfigCommand, OrchestratorCommand, ProfileCommand, SessionCommand, SetupCommand,
+};
 use std::path::Path;
 
 fn main() -> Result<()> {
@@ -66,6 +68,13 @@ fn main() -> Result<()> {
                 env,
             },
             ProfileCommand::Remove { name, purge } => profile::ProfileOp::Remove { name, purge },
+            ProfileCommand::Rename { old, new } => profile::ProfileOp::Rename { old, new },
+            ProfileCommand::Duplicate { from, name } => {
+                profile::ProfileOp::Duplicate { from, name }
+            }
+            ProfileCommand::Spread { mode, threshold } => {
+                profile::ProfileOp::Spread { mode, threshold }
+            }
             ProfileCommand::Edit {
                 name,
                 harness,
@@ -125,6 +134,13 @@ fn main() -> Result<()> {
         }) => nebula_tui::run_spawn(task.join(" "), kind, worktree, base),
         Some(Command::Open { files }) => nebula_tui::run_open(files),
         Some(Command::Sessions { json }) => nebula_tui::run_sessions(json),
+        Some(Command::Session { command }) => match command {
+            SessionCommand::MoveAccount {
+                session,
+                profile,
+                own_login: _,
+            } => nebula_tui::run_move_account(&session, profile),
+        },
         Some(Command::Read { session, lines }) => nebula_tui::run_read_session(&session, lines),
         Some(Command::Ask {
             session,

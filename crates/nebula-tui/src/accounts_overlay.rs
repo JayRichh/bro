@@ -204,16 +204,19 @@ pub fn build_rows(
     rows
 }
 
-/// What the add, edit and duplicate forms ask.
+/// What the add, edit, duplicate and rename forms ask.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FormKind {
     /// A new account: a harness, a name, whether to adopt the CLI's
-    /// current login, whether to make it the harness's default.
+    /// current login, whether to make it the harness's default, its
+    /// variables.
     Add,
     /// The profile `name`: its harness, its kind of login, its variables.
     Edit { name: String },
     /// A copy of the profile `from` under a new name.
     Duplicate { from: String },
+    /// The profile `from` under a new name (`profiles::rename`).
+    Rename { from: String },
 }
 
 /// One field of a form.
@@ -238,7 +241,7 @@ impl Field {
     }
 }
 
-/// The add / edit / duplicate form, in the overlay's place.
+/// The add / edit / duplicate / rename form, in the overlay's place.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AccountForm {
     pub kind: FormKind,
@@ -248,11 +251,15 @@ pub struct AccountForm {
     /// own.
     pub adopt: bool,
     pub make_default: bool,
-    /// Edit: `KEY=VALUE` pairs split by `;` that replace the variables;
-    /// empty keeps them (their values are never shown).
+    /// `KEY=VALUE` pairs split by `;`: a new account's variables, or an
+    /// edit's replacements; empty at edit keeps them (their values are
+    /// never shown) unless `clear_env`.
     pub env: String,
     /// Edit: the names of the variables it sets now.
     pub env_keys: Vec<String>,
+    /// Edit: `Delete` on the variables asked to drop them all; typing new
+    /// ones takes it back.
+    pub clear_env: bool,
     /// The field the keys type into.
     pub field: usize,
     /// The name was typed: a harness switch no longer suggests one.
@@ -263,10 +270,22 @@ pub struct AccountForm {
 impl AccountForm {
     pub fn fields(&self) -> &'static [Field] {
         match self.kind {
-            FormKind::Add => &[Field::Harness, Field::Name, Field::Adopt, Field::Default],
+            FormKind::Add => &[
+                Field::Harness,
+                Field::Name,
+                Field::Adopt,
+                Field::Default,
+                Field::Env,
+            ],
             FormKind::Edit { .. } => &[Field::Harness, Field::Adopt, Field::Env],
-            FormKind::Duplicate { .. } => &[Field::Name],
+            FormKind::Duplicate { .. } | FormKind::Rename { .. } => &[Field::Name],
         }
+    }
+
+    /// The edit form's variables can be cleared: it has some, and the
+    /// clear is not already asked.
+    pub fn can_clear_env(&self) -> bool {
+        matches!(self.kind, FormKind::Edit { .. }) && !self.env_keys.is_empty() && !self.clear_env
     }
 
     pub fn current(&self) -> Field {
@@ -279,6 +298,7 @@ impl AccountForm {
             FormKind::Add => "Add account".into(),
             FormKind::Edit { name } => format!("Edit {name}"),
             FormKind::Duplicate { from } => format!("Duplicate {from}"),
+            FormKind::Rename { from } => format!("Rename {from}"),
         }
     }
 
@@ -290,12 +310,16 @@ impl AccountForm {
             Field::Name => self.name.clone(),
             Field::Adopt => tick(self.adopt),
             Field::Default => tick(self.make_default),
+            Field::Env if self.clear_env && self.env.is_empty() => format!(
+                "clear: drops {} (type KEY=VALUE; ... to set new ones instead)",
+                self.env_keys.join(", ")
+            ),
             Field::Env if self.env.is_empty() && self.env_keys.is_empty() => {
                 "none (KEY=VALUE; KEY2=VALUE)".into()
             }
             Field::Env if self.env.is_empty() => {
                 format!(
-                    "keep {} (type KEY=VALUE; ... to replace)",
+                    "keep {} (type KEY=VALUE; ... to replace, Del clears)",
                     self.env_keys.join(", ")
                 )
             }
@@ -417,7 +441,7 @@ pub fn remove_warning(
     }
     if let Some(home) = home.filter(|h| h.exists()) {
         out.push_str(&format!(
-            " Its home stays at {} (kete profile remove --purge {name} deletes it).",
+            " Its home is {}: y keeps it there, p deletes it and the login in it.",
             home.display()
         ));
     }
@@ -430,10 +454,12 @@ pub enum Mode {
     #[default]
     List,
     Form(AccountForm),
-    /// The remove's confirm, its warning said.
+    /// The remove's confirm, its warning said. `home` is the PROFILE HOME
+    /// on disk, which `p` deletes with it.
     Remove {
         name: String,
         message: String,
+        home: Option<PathBuf>,
     },
     /// "Use for repo": the projects, the cursor on one; Enter makes the
     /// selected account its default for the harness, or clears it.
@@ -585,6 +611,7 @@ impl AccountsView {
             make_default: false,
             env: String::new(),
             env_keys: Vec::new(),
+            clear_env: false,
             field: 1,
             touched: false,
             error: None,
@@ -604,6 +631,7 @@ impl AccountsView {
             make_default: profile.default,
             env: String::new(),
             env_keys: profile.env.keys().cloned().collect(),
+            clear_env: false,
             field: 0,
             touched: true,
             error: None,
@@ -623,6 +651,7 @@ impl AccountsView {
             make_default: false,
             env: String::new(),
             env_keys: Vec::new(),
+            clear_env: false,
             field: 0,
             touched: false,
             error: None,
@@ -647,9 +676,37 @@ impl AccountsView {
             })
             .map(|(n, _)| n.clone())
             .collect();
-        let home = profile.home_in(&self.root);
+        let home = profile.home_in(&self.root).filter(|h| h.exists());
         let message = remove_warning(&name, agents, &repos, home.as_deref());
-        self.mode = Mode::Remove { name, message };
+        self.mode = Mode::Remove {
+            name,
+            message,
+            home,
+        };
+        Ok(())
+    }
+
+    /// `r`: the rename form on the selected profile, refused up front
+    /// while a session names it (`profiles::rename_blocker`).
+    pub fn open_rename(&mut self, agents: &[nebula_core::Agent]) -> Result<(), String> {
+        let profile = self.selected_profile()?;
+        let from = profile.name.trim().to_string();
+        if let Some(why) = profiles::rename_blocker(agents, &from) {
+            return Err(why);
+        }
+        self.mode = Mode::Form(AccountForm {
+            name: from.clone(),
+            kind: FormKind::Rename { from },
+            harness: profile.harness.trim().to_string(),
+            adopt: profile.use_default,
+            make_default: false,
+            env: String::new(),
+            env_keys: Vec::new(),
+            clear_env: false,
+            field: 0,
+            touched: true,
+            error: None,
+        });
         Ok(())
     }
 
@@ -699,9 +756,10 @@ impl AccountsView {
         Ok(home)
     }
 
-    /// Enter on a form: add, save or duplicate. The form stays up with
-    /// the error on a refusal.
-    pub fn submit_form(&mut self) -> Result<Outcome, String> {
+    /// Enter on a form: add, save, duplicate or rename. The form stays up
+    /// with the error on a refusal. `agents` are the sessions a rename
+    /// checks.
+    pub fn submit_form(&mut self, agents: &[nebula_core::Agent]) -> Result<Outcome, String> {
         let Mode::Form(form) = &self.mode else {
             return Err("no form open".into());
         };
@@ -710,6 +768,7 @@ impl AccountsView {
             FormKind::Add => self.add(&form),
             FormKind::Edit { name } => self.save_edit(name, &form),
             FormKind::Duplicate { from } => self.duplicate(from, &form),
+            FormKind::Rename { from } => self.rename(from, &form, agents),
         };
         match done {
             Ok(outcome) => {
@@ -725,12 +784,22 @@ impl AccountsView {
         }
     }
 
+    /// The account just made, signed in next when it needs it: a home of
+    /// its own always does; an adopted login only when it reads signed
+    /// out. None for a harness kete knows no sign-in for.
+    fn sign_in_next(profile: &Profile, home: Option<&std::path::Path>) -> Option<String> {
+        accounts::login_command(Some(profile), &profile.harness)?;
+        let needed = home.is_some()
+            || login_lookup(Some(profile), &profile.harness).state == LoginState::NeedsLogin;
+        needed.then(|| profile.name.trim().to_string())
+    }
+
     fn add(&mut self, form: &AccountForm) -> Result<Outcome, String> {
         self.check_harness(&form.harness)?;
         let profile = Profile {
             name: form.name.trim().to_string(),
             harness: form.harness.trim().to_string(),
-            env: Default::default(),
+            env: env_of(&form.env)?,
             default: form.make_default,
             use_default: form.adopt,
             disabled: false,
@@ -742,11 +811,11 @@ impl AccountsView {
         let home = self.prepare(&profile)?;
         self.focus_key(&profile.name);
         // Signing in is the point of adding one: it runs next, unless the
-        // profile adopted the login already there.
-        Ok(match profiles::login_hint(&profile) {
-            Some(_) => Outcome {
+        // profile adopted a login that is already there.
+        Ok(match Self::sign_in_next(&profile, home.as_deref()) {
+            Some(account) => Outcome {
                 message: format!("added {}: signing it in", profile.name),
-                sign_in: Some(profile.name.clone()),
+                sign_in: Some(account),
             },
             None if form.adopt => Outcome::said(format!(
                 "added {} on {}'s current login",
@@ -771,11 +840,15 @@ impl AccountsView {
         else {
             return Err(format!("no profile named `{name}`"));
         };
-        // The name and the switch stay; the rest is the form's.
+        // The name and the switch stay; the rest is the form's. Typed
+        // variables replace the old ones, a clear drops them, neither
+        // keeps them.
         profile.harness = form.harness.trim().to_string();
         profile.use_default = form.adopt;
         if !form.env.trim().is_empty() {
             profile.env = env_of(&form.env)?;
+        } else if form.clear_env {
+            profile.env.clear();
         }
         if let Some(problem) = profile.problem() {
             return Err(problem);
@@ -786,57 +859,72 @@ impl AccountsView {
     }
 
     fn duplicate(&mut self, from: &str, form: &AccountForm) -> Result<Outcome, String> {
-        let Some(source) = self
-            .all_profiles()
-            .into_iter()
-            .find(|p| p.name.trim() == from)
-        else {
-            return Err(format!("no profile named `{from}`"));
-        };
         // Its harness, variables and kind of login; neither its star nor
         // its switch, and a home of its own (it signs in separately).
-        let copy = Profile {
-            name: form.name.trim().to_string(),
-            harness: source.harness.trim().to_string(),
-            env: source.env,
-            default: false,
-            use_default: source.use_default,
-            disabled: false,
-        };
-        if let Some(problem) = copy.problem() {
-            return Err(problem);
-        }
-        self.on_profiles_layer(|layer| profiles::add_to_file(layer, &copy))?;
-        self.prepare(&copy)?;
+        let copy =
+            self.on_profiles_layer(|layer| profiles::duplicate_in_file(layer, from, &form.name))?;
+        let home = self.prepare(&copy)?;
         self.focus_key(&copy.name);
-        Ok(match profiles::login_hint(&copy) {
-            Some(_) => Outcome {
+        Ok(match Self::sign_in_next(&copy, home.as_deref()) {
+            Some(account) => Outcome {
                 message: format!("added {}: signing it in", copy.name),
-                sign_in: Some(copy.name.clone()),
+                sign_in: Some(account),
             },
             None => Outcome::said(format!("added {}", copy.name)),
         })
     }
 
-    /// The remove's yes.
-    pub fn confirm_remove(&mut self) -> Result<Outcome, String> {
+    /// The rename's Enter: `profiles::rename` moves the home and every
+    /// name in the settings (it takes the settings locks itself).
+    fn rename(
+        &mut self,
+        from: &str,
+        form: &AccountForm,
+        agents: &[nebula_core::Agent],
+    ) -> Result<Outcome, String> {
+        let done = profiles::rename(
+            &self.config,
+            &self.local,
+            &self.root,
+            from,
+            &form.name,
+            agents,
+        )?;
+        let new = done.profile.name.clone();
+        self.focus_key(&new);
+        let mut message = format!("renamed {from} to {new}");
+        if !done.projects.is_empty() {
+            message.push_str(&format!(
+                ", the default of {} repo{}",
+                done.projects.len(),
+                if done.projects.len() == 1 { "" } else { "s" }
+            ));
+        }
+        if !done.archived.is_empty() {
+            message.push_str(&format!(
+                "; {} archived session{} still name {from}",
+                done.archived.len(),
+                if done.archived.len() == 1 { "" } else { "s" }
+            ));
+        }
+        Ok(Outcome::said(message))
+    }
+
+    /// The remove's yes; with `purge` its home (the login) goes too. The
+    /// same core path as `kete profile remove [--purge]`.
+    pub fn confirm_remove(&mut self, purge: bool) -> Result<Outcome, String> {
         let Mode::Remove { name, .. } = &self.mode else {
             return Err("nothing to remove".into());
         };
         let name = name.clone();
-        let home = self
-            .all_profiles()
-            .into_iter()
-            .find(|p| p.name.trim() == name)
-            .and_then(|p| p.home_in(&self.root))
-            .filter(|h| h.exists());
         self.mode = Mode::List;
-        if !self.on_profiles_layer(|layer| profiles::remove_from_file(layer, &name))? {
-            return Err(format!("no profile named `{name}`"));
-        }
+        let root = self.root.clone();
+        let removed =
+            self.on_profiles_layer(|layer| profiles::remove_in_file(layer, &root, &name, purge))?;
         self.rows.retain(|r| r.key != name);
         self.cursor = self.cursor.min(self.rows.len().saturating_sub(1));
-        Ok(Outcome::said(match home {
+        Ok(Outcome::said(match removed.home {
+            Some(h) if removed.purged => format!("removed {name} and deleted {}", h.display()),
             Some(h) => format!("removed {name}: its home stays at {}", h.display()),
             None => format!("removed {name}"),
         }))

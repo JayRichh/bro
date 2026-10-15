@@ -214,12 +214,15 @@ fn overlay_footer_hint(app: &App, overlay: &Overlay, th: Theme) -> FooterHint {
         Overlay::Accounts(view) => dim_hint(
             match view.mode {
                 crate::accounts_overlay::Mode::List => {
-                    "↑/↓: move  a: add  Enter: edit  Space: on/off  d: default  l: sign in  x: remove  s: spread  Esc: close"
+                    "↑/↓: move  a: add  Enter: edit  Space: on/off  d: default  r: rename  l: sign in  x: remove  Esc: close"
                 }
                 crate::accounts_overlay::Mode::Form(_) => {
-                    "Tab/↑/↓: field  ←/→/Space: change  type: fill  Enter: save  Esc: back"
+                    "Tab/↑/↓: field  ←/→/Space: change  type: fill  Del: clear variables  Enter: save  Esc: back"
                 }
-                crate::accounts_overlay::Mode::Remove { .. } => "y/Enter: remove  n/Esc: keep it",
+                crate::accounts_overlay::Mode::Remove { home: None, .. } => "y/Enter: remove  n/Esc: keep it",
+                crate::accounts_overlay::Mode::Remove { .. } => {
+                    "y/Enter: remove, keep its home  p: remove and delete its home  n/Esc: keep it"
+                }
                 crate::accounts_overlay::Mode::UseFor { .. } => {
                     "↑/↓: move  Enter: set / clear the repo's default  Esc: back"
                 }

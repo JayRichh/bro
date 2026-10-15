@@ -571,6 +571,95 @@ pub async fn list_sessions(json: bool) -> Result<()> {
     Ok(())
 }
 
+/// The agent session `query` names among `sessions`: its id, else its name
+/// (any case), else the one name containing it. Two matches are refused
+/// with their names, so a move never lands on the wrong session.
+fn pick_agent_session<'a>(
+    sessions: &'a [SessionSummary],
+    query: &str,
+) -> Result<&'a SessionSummary> {
+    let q = query.trim();
+    if q.is_empty() {
+        bail!("session name or id is empty");
+    }
+    let agents: Vec<&SessionSummary> = sessions
+        .iter()
+        .filter(|s| matches!(s.session, SessionRef::Agent(_)))
+        .collect();
+    if let Some(s) = agents.iter().find(|s| s.id == q) {
+        return Ok(s);
+    }
+    let lower = q.to_lowercase();
+    for matches in [
+        |s: &SessionSummary, q: &str| s.name.to_lowercase() == q,
+        |s: &SessionSummary, q: &str| s.name.to_lowercase().contains(q),
+    ] {
+        let found: Vec<&&SessionSummary> = agents.iter().filter(|s| matches(s, &lower)).collect();
+        match found.as_slice() {
+            [one] => return Ok(one),
+            [] => continue,
+            many => bail!(
+                "`{q}` matches {} sessions ({}): give its id (kete sessions lists them)",
+                many.len(),
+                many.iter()
+                    .map(|s| s.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        }
+    }
+    bail!("no agent session named `{q}`: kete sessions lists them")
+}
+
+/// CLI: `kete session move-account <session> [<profile>]` — MOVE TO
+/// ACCOUNT (`SwitchAgentAccount`), as the apps' menus send it: the
+/// session restarts fresh on `profile` (None: its harness's own login) in
+/// the same worktree. The daemon refuses an undefined profile, one of
+/// another harness, and an archived or Cloud row, before killing anything.
+pub async fn move_session_account(session: &str, profile: Option<String>) -> Result<()> {
+    let mut conn = session_context_connection("session move-account").await?;
+    require_protocol(
+        &conn,
+        nebula_core::SWITCH_ACCOUNT_PROTOCOL,
+        "session move-account",
+    )?;
+    let sessions = fetch_sessions(&mut conn).await?;
+    let target = pick_agent_session(&sessions, session)?;
+    let SessionRef::Agent(id) = target.session.clone() else {
+        bail!("only agent sessions run on an account");
+    };
+    let profile = profile
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty());
+    if target.profile.as_deref().map(str::trim) == profile.as_deref() {
+        bail!(
+            "{} already runs on {}",
+            target.name,
+            profile.as_deref().unwrap_or("its own login")
+        );
+    }
+    let req_id = ONE_SHOT_REQ_ID;
+    write_frame(
+        &mut conn.stream,
+        &ClientRequest::SwitchAgentAccount {
+            req_id,
+            id,
+            profile: profile.clone(),
+        },
+    )
+    .await?;
+    await_ack(&mut conn, req_id).await?;
+    println!(
+        "{} restarted fresh on {} (its conversation stays with the old account)",
+        target.name,
+        match &profile {
+            Some(p) => format!("`{p}`"),
+            None => format!("{}'s own login", target.harness),
+        }
+    );
+    Ok(())
+}
+
 pub async fn read_session(session: &str, lines: u32) -> Result<()> {
     let mut conn = session_context_connection("read").await?;
     let req_id = ONE_SHOT_REQ_ID;
@@ -1727,6 +1816,32 @@ fn send_signal(pid: i32, sig: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_move_names_one_agent_session_or_refuses() {
+        let row = |id: &str, name: &str| attention_row(id, name, "main", 0).summary;
+        let mut term = row("t1", "fix shell");
+        term.session = SessionRef::Terminal(TerminalId("t1".into()));
+        let sessions = [
+            row("a1", "fix-auth"),
+            row("a2", "fix-auth-tests"),
+            row("a3", "Docs"),
+            term,
+        ];
+        let pick = |q: &str| pick_agent_session(&sessions, q).map(|s| s.id.clone());
+        assert_eq!(pick("a2").unwrap(), "a2", "by id");
+        assert_eq!(
+            pick("fix-auth").unwrap(),
+            "a1",
+            "an exact name beats a longer one"
+        );
+        assert_eq!(pick("docs").unwrap(), "a3", "any case");
+        assert_eq!(pick("tests").unwrap(), "a2", "the one name containing it");
+        let many = pick("fix").unwrap_err().to_string();
+        assert!(many.contains("matches 2 sessions"), "{many}");
+        assert!(pick("shell").is_err(), "a terminal runs on no account");
+        assert!(pick("  ").is_err());
+    }
 
     fn attention_row(id: &str, name: &str, branch: &str, attention: u32) -> OrchestratorSession {
         OrchestratorSession {
