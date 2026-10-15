@@ -17,7 +17,7 @@ import { worktreeApi, type CheckoutState } from './api';
 import { stateLines } from './offer';
 import { sweepCandidates, sweepReason, type Sweep, type WorktreeGroup } from './groups';
 import { refreshGit } from './rows.svelte';
-import { menuLabel } from '../verbs';
+import { menuLabel, wordOf } from '../verbs';
 
 /** A registry verb's words on a worktree: one set for both apps. */
 const say = (id: Parameters<typeof menuLabel>[0]) => menuLabel(id, 'worktree');
@@ -72,13 +72,14 @@ export type Verb = {
   danger?: boolean;
 };
 
-/** Narrow the window to this checkout (the header's chip), or, scoped to
- *  it already, widen back to its repo. */
+/** Focus here (the registry's `focus_scope`, as both apps' menus say
+ *  it): narrow the window to this checkout (the header's chip), or,
+ *  scoped to it already, widen back to its repo. */
 export function scopeVerb(w: Worktree): Verb {
   const s = app.model.scope ?? {};
   if (s.worktree === w.id)
-    return { id: 'scope', label: 'Widen the scope to the repo', short: 'unscope', run: () => setScope(dropPart(s, 'worktree')) };
-  return { id: 'scope', label: 'Scope to this worktree', short: 'scope', run: () => setScope(worktreeScope(app.model, s, w.id)) };
+    return { id: 'focus_scope', label: 'Widen the scope to the repo', short: 'widen', run: () => setScope(dropPart(s, 'worktree')) };
+  return { id: 'focus_scope', label: say('focus_scope'), short: wordOf('focus_scope'), run: () => setScope(worktreeScope(app.model, s, w.id)) };
 }
 
 export function verbsFor(w: Worktree): Verb[] {

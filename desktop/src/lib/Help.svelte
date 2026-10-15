@@ -14,6 +14,7 @@
     row: '',
     overview: '',
     board: '',
+    review: 'in a review',
   };
 
   // Take the keys when it opens, so Esc, ? and F1 reach it (the window's

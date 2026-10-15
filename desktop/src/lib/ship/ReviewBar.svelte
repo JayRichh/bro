@@ -3,12 +3,17 @@
   // Ship card, its worktree read against the base below. Reply, Open PR (or
   // View PR), Merge while a PR is open, Archive, Delete worktree. The row
   // is the session's (`data-target`), so its keys work from here too:
-  // Space replies, A archives, ? lists every verb.
+  // Space replies, A archives, ? lists every verb. The terminal app's
+  // review row's Alt chords work too, anywhere in the review (the diff
+  // editor included): Alt+P the pull request, Alt+M the merge, Alt+A the
+  // archive, Alt+W the worktree's delete.
   import type { Agent } from '../api';
   import { api } from '../api';
   import { app, toast } from '../store.svelte';
   import { archiveAgent, deleteWorktree, followUp } from '../actions';
-  import { withKey } from '../shortcuts';
+  import { keyLabel, keysOf, reviewKeyFor, withKey, type ShortcutId } from '../shortcuts';
+  import { nav } from '../shell/history.svelte';
+  import { layerOpen } from '../ui/ui.svelte';
   import { rows } from '../worktrees/rows.svelte';
   import { LANES, placeOf } from '../status';
   import { openComposer, openMerge } from './sheet.svelte';
@@ -27,9 +32,56 @@
     if (pr) api.openUrl(pr.url).catch((e) => toast(String(e)));
   }
 
+  /** The PR verb: its page with one open, the composer without. */
+  function prVerb() {
+    if (verbs.pr.kind === 'view') viewPr();
+    else if (verbs.pr.why) toast(verbs.pr.why);
+    else openComposer(agent.worktree_id, agent.id);
+  }
+
+  function mergeVerb() {
+    if (!verbs.merge) toast('No open pull request to merge.');
+    else if (verbs.merge.why) toast(verbs.merge.why);
+    else openMerge(agent.worktree_id, agent.id);
+  }
+
+  function deleteVerb() {
+    if (!verbs.deleteWorktree) toast('The project\u2019s own checkout is never deleted from here.');
+    else deleteWorktree(agent.worktree_id);
+  }
+
+  const RUN: Partial<Record<ShortcutId, () => unknown>> = {
+    review_pr: prVerb,
+    review_merge: mergeVerb,
+    review_archive: () => !agent.archived && archiveAgent(agent.id),
+    review_delete_worktree: deleteVerb,
+  };
+
+  // The Alt chords, read wherever the review has the keys: not in a field
+  // or a terminal, not under a menu or dialog.
+  function onKey(e: KeyboardEvent) {
+    if (nav.current.view !== 'diff' || layerOpen() || e.defaultPrevented) return;
+    const t = e.target instanceof Element ? e.target : null;
+    if (t?.closest('input, textarea, select, .xterm')) return;
+    const s = reviewKeyFor(e);
+    const run = s && RUN[s.id];
+    if (!run) return;
+    e.preventDefault();
+    run();
+  }
+
+  /** The key a verb's button names, as the help prints it. */
+  const keyOf = (id: ShortcutId) => {
+    const k = keysOf(id)[0];
+    return k ? keyLabel(k) : '';
+  };
+
   const btn =
     'inline-flex h-6 flex-none items-center gap-1.5 border border-rule bg-transparent px-2 text-[12px] text-ink enabled:hover:border-rule-strong disabled:text-faint focus-visible:border-ink';
+  const cap = 'font-mono text-[11px] text-faint @max-[560px]:hidden';
 </script>
+
+<svelte:window onkeydown={onKey} />
 
 <div
   class="@container flex min-h-9 flex-none flex-wrap items-center gap-x-3 gap-y-1 border-b border-rule bg-bg px-3 py-1.5 outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rule-strong"
@@ -48,35 +100,39 @@
   <span class="flex flex-none flex-wrap items-center gap-1.5">
     {#if !agent.archived}
       <button class={btn} title={withKey('Reply: the follow-up prompt', 'follow_up')} onclick={() => followUp(agent.id)}>
-        Reply<kbd class="font-mono text-[11px] text-faint">Space</kbd>
+        Reply<kbd class={cap}>Space</kbd>
       </button>
     {/if}
     {#if verbs.pr.kind === 'view'}
-      <button class={btn} title="Open #{pr?.number} on its forge (no key)" onclick={viewPr}>View PR</button>
+      <button class={btn} title={withKey(`View #${pr?.number} on its forge`, 'review_pr')} onclick={viewPr}>
+        View PR<kbd class={cap}>{keyOf('review_pr')}</kbd>
+      </button>
     {:else}
       <button
         class={btn}
         disabled={!!verbs.pr.why}
-        title={verbs.pr.why ?? 'Open a pull request for this worktree\u2019s branch (no key; or drop the card on Ship)'}
-        onclick={() => openComposer(agent.worktree_id, agent.id)}>Open PR&hellip;</button
+        title={verbs.pr.why ?? withKey('Open a pull request for this worktree\u2019s branch (or drop the card on Ship)', 'review_pr')}
+        onclick={() => openComposer(agent.worktree_id, agent.id)}>Open PR&hellip;<kbd class={cap}>{keyOf('review_pr')}</kbd></button
       >
     {/if}
     {#if verbs.merge}
       <button
         class={btn}
         disabled={!!verbs.merge.why}
-        title={verbs.merge.why ?? 'Merge its pull request, after a confirm (no key; or drop the card on Done)'}
-        onclick={() => openMerge(agent.worktree_id, agent.id)}>Merge&hellip;</button
+        title={verbs.merge.why ?? withKey('Merge its pull request, after a confirm (or drop the card on Done)', 'review_merge')}
+        onclick={() => openMerge(agent.worktree_id, agent.id)}>Merge&hellip;<kbd class={cap}>{keyOf('review_merge')}</kbd></button
       >
     {/if}
     {#if !agent.archived}
-      <button class={btn} title={withKey('Archive the session', 'archive')} onclick={() => archiveAgent(agent.id)}>Archive</button>
+      <button class={btn} title={withKey('Archive the session', ['archive', 'review_archive'])} onclick={() => archiveAgent(agent.id)}>
+        Archive<kbd class={cap}>{keyOf('review_archive')}</kbd>
+      </button>
     {/if}
     {#if verbs.deleteWorktree}
       <button
         class="{btn} text-fail enabled:hover:border-fail"
-        title="Delete worktree {where.branch}, behind a confirm that shows what it holds (no key)"
-        onclick={() => deleteWorktree(agent.worktree_id)}>Delete worktree&hellip;</button
+        title={withKey(`Delete worktree ${where.branch}, behind a confirm that shows what it holds`, 'review_delete_worktree')}
+        onclick={() => deleteWorktree(agent.worktree_id)}>Delete worktree&hellip;<kbd class={cap}>{keyOf('review_delete_worktree')}</kbd></button
       >
     {/if}
   </span>

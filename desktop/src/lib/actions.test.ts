@@ -12,6 +12,9 @@ vi.mock('./api', () => {
       archiveAgent: rec('archive'),
       unarchiveAgent: rec('unarchive'),
       deleteAgent: rec('delete'),
+      boardScope: async (s: { repo?: string; worktree?: string }) => {
+        calls.push(`scope ${s.repo}/${s.worktree}`);
+      },
       restartAgent: async (id: string) => {
         calls.push(`restart ${id}`);
         if (failRestart) throw 'gone';
@@ -131,6 +134,36 @@ describe('menus from the registry', () => {
     expect(repo[0]).toBe('New session\u2026');
     expect(repo).toContain('Remove from Kete\u2026');
     expect(repo.indexOf('Locate folder\u2026')).toBe(repo.indexOf('Remove from Kete\u2026') - 1);
+  });
+
+  it('offers the pull request verbs and Focus here under the shared ids, in the terminal app words', () => {
+    const base = {
+      ...app.model,
+      agents: [agent('a')],
+      terminals: [],
+      worktrees: [{ id: 'w1', project_id: 'p', path: '/p/w1', branch: 'feat', is_main: false, sort_order: 0 }],
+      projects: [{ id: 'p', name: 'demo', repo_path: '/p', sort_order: 0 }],
+      cards: {},
+    } as unknown as Model;
+    // No pull request yet: the composer, no page and no merge.
+    app.model = { ...base, prs: {} } as Model;
+    let w = words(actions.menuFor({ kind: 'agent', id: 'a' }));
+    expect(w).toContain('Create pull request\u2026');
+    expect(w).not.toContain('Open pull request');
+    expect(w).not.toContain('Merge pull request\u2026');
+    expect(w).toContain('Focus here');
+    // One open: its page and its merge, once each (no window-only extra).
+    const pr = { number: 7, url: 'https://x/7', title: 't', state: 'open', draft: false };
+    app.model = { ...base, prs: { w1: pr } } as unknown as Model;
+    w = words(actions.menuFor({ kind: 'agent', id: 'a' }));
+    expect(w).toContain('Open pull request');
+    expect(w).not.toContain('Create pull request\u2026');
+    expect(w.filter((l) => l.startsWith('Merge')).length).toBe(1);
+    expect(w.filter((l) => l === 'Focus here').length).toBe(1);
+    expect(w).not.toContain('Merge PR\u2026');
+    // Focus here narrows the chip to the checkout.
+    expect(actions.runVerb({ kind: 'worktree', id: 'w1' }, 'focus_scope')).toBe(true);
+    expect(calls).toEqual(['scope p/w1']);
   });
 
   it('runs a verb on its target as the menu row does, and refuses one that means nothing there', async () => {

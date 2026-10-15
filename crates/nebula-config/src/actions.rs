@@ -86,6 +86,10 @@ pub enum Action {
     /// the repo, worktree or card under the cursor: the board, the
     /// attention strip, `.`/`,` and the quick prompt follow it.
     FocusScope,
+    /// The SCOPE CHIP's account: a small picker of the accounts the
+    /// board's sessions run on, and Any account; the pick narrows the
+    /// scope to that account's sessions, the rest of the scope kept.
+    ScopeAccount,
     /// `Shift+←` on the KANBAN: the card under the cursor let go on the
     /// lane to its left, as a drop there does (core's `drop_verb`).
     MoveCardLeft,
@@ -273,7 +277,10 @@ pub enum Surface {
 /// `anywhere` even in a field or terminal, `fields` in a field but not a
 /// terminal, `global` with neither, `row` on a focused row or card, and
 /// `overview` / `board` for the home views' own walking keys (listed, not
-/// rebindable: those views handle them).
+/// rebindable: those views handle them), and `review` for the review
+/// row's ⌥ chords, which only count while a review's diff is up (the diff
+/// view handles them, as the terminal app's docked review does; not
+/// rebindable either).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DeskScope {
@@ -283,6 +290,7 @@ pub enum DeskScope {
     Row,
     Overview,
     Board,
+    Review,
 }
 
 /// One of the desktop window's key rows. A verb may have two when its
@@ -767,7 +775,8 @@ pub const ACTIONS: &[ActionSpec] = &[
         applies_to: &[AppliesTo::Worktree, AppliesTo::Repo],
         works_in: &[WorksIn::Grid, WorksIn::Board],
         surface: Surface::Both,
-        desktop: &[],
+        // The review row's, as the terminal app's docked review has it.
+        desktop: &[dk("review_delete_worktree", "Review: delete the worktree…", "Review", DeskScope::Review, &["alt+w"])],
     },
     ActionSpec {
         action: Action::RemoveProject,
@@ -831,9 +840,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         word: "PR",
         destructive: false,
         applies_to: &[AppliesTo::Worktree, AppliesTo::Session],
-        works_in: &[WorksIn::Grid, WorksIn::Board],
-        surface: Surface::Tui,
-        desktop: &[],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Diff],
+        surface: Surface::Both,
+        // ⌥P on a review: the pull request's page, or the composer while
+        // the branch has none, as the terminal app's review row does.
+        desktop: &[
+            dk("open_pr", "Open the pull request in the browser", "Sessions", DeskScope::Row, &["shift+v"]),
+            dk("review_pr", "Review: view the pull request, or open one…", "Review", DeskScope::Review, &["alt+p"]),
+        ],
     },
     ActionSpec {
         action: Action::CreatePullRequest,
@@ -863,7 +877,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         applies_to: &[AppliesTo::Session, AppliesTo::Worktree],
         works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Diff],
         surface: Surface::Both,
-        desktop: &[],
+        desktop: &[dk("review_merge", "Review: merge the pull request…", "Review", DeskScope::Review, &["alt+m"])],
     },
     ActionSpec {
         action: Action::FocusScope,
@@ -878,6 +892,21 @@ pub const ACTIONS: &[ActionSpec] = &[
         applies_to: &[AppliesTo::Repo, AppliesTo::Worktree, AppliesTo::Session],
         works_in: &[WorksIn::Grid, WorksIn::Board],
         surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::ScopeAccount,
+        id: "scope_account",
+        label: "Scope to an account…",
+        hint: "Narrow the scope chip to the sessions of one account, picked from those the board's sessions run on (or back to any account); the chip's @ does the same by click. The desktop's chip menu lists the accounts too",
+        group: "PROJECTS & WORKTREES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "account",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
         desktop: &[],
     },
     ActionSpec {
@@ -1132,6 +1161,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         surface: Surface::Both,
         desktop: &[
             dk("archive", "Archive", "Sessions", DeskScope::Row, &["a"]),
+            dk("review_archive", "Review: archive the session", "Review", DeskScope::Review, &["alt+a"]),
         ],
     },
     ActionSpec {
@@ -1910,6 +1940,7 @@ pub const DESKTOP_ORDER: &[&str] = &[
     "new_terminal",
     "open_editor",
     "open_remote",
+    "open_pr",
     "switch_branch",
     "row_menu",
     "move_up",
@@ -1918,6 +1949,10 @@ pub const DESKTOP_ORDER: &[&str] = &[
     "list_open",
     "overview_fold",
     "board_lanes",
+    "review_pr",
+    "review_merge",
+    "review_archive",
+    "review_delete_worktree",
 ];
 
 // ---- menus, the verbs menu and the verb bar ----
@@ -2306,7 +2341,10 @@ pub fn set_desktop_override(
         .into_iter()
         .find(|(_, k)| k.id == id)
         .ok_or_else(|| format!("no desktop key {id:?}"))?;
-    if matches!(key.scope, DeskScope::Overview | DeskScope::Board) {
+    if matches!(
+        key.scope,
+        DeskScope::Overview | DeskScope::Board | DeskScope::Review
+    ) {
         return Err(format!("{} is fixed: the view handles it", key.label));
     }
     let entry = format!("{DESKTOP_PREFIX}{id}");
@@ -2471,6 +2509,7 @@ pub fn render_ts() -> String {
         DeskScope::Row,
         DeskScope::Overview,
         DeskScope::Board,
+        DeskScope::Review,
     ];
     let alt = |names: Vec<String>| names.join(" | ");
     out.push_str(&format!(
@@ -2624,7 +2663,7 @@ mod tests {
         // jump, the window's Ctrl+K is `command_palette`; `move_up` walks
         // the cursor where the window's reorders, `reorder_up`): the
         // window's key ids are their own namespace.
-        assert_eq!(ACTIONS.len(), 86);
+        assert_eq!(ACTIONS.len(), 87);
         for id in [
             "palette",
             "move_up",

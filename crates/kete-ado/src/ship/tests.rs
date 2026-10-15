@@ -753,3 +753,33 @@ async fn the_default_branch_is_not_shipped() {
     assert!(e.message.contains("default branch"), "{e}");
     assert!(script.calls.lock().unwrap().is_empty());
 }
+
+/// A git push the remote refused for want of a sign-in (git never asks,
+/// `git_env`) comes back as SignIn, in git's words rather than gh's; any
+/// other push failure stays as it was.
+#[test]
+fn a_refused_push_sign_in_is_sign_in() {
+    use crate::client::AdoError;
+    for why in [
+        "fatal: Authentication failed for 'https://dev.azure.com/o/p/_git/r/'",
+        "git@github.com: Permission denied (publickey).",
+        "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+    ] {
+        let e = ShipError::from_ado(AdoError::Local(format!(
+            "The git push of feat to origin failed: {why}"
+        )));
+        assert_eq!(e.kind, ShipErrorKind::SignIn, "{why}");
+        assert!(e.message.contains(why), "{}", e.message);
+        assert!(!e.message.contains("The git push of"), "{}", e.message);
+        assert!(!e.message.contains("gh auth login"), "{}", e.message);
+    }
+    let e = ShipError::from_ado(AdoError::Local(
+        "The git push of feat to origin failed: ! [rejected] feat -> feat (non-fast-forward)"
+            .into(),
+    ));
+    assert_eq!(e.kind, ShipErrorKind::Other);
+    let e = ShipError::from_ado(AdoError::Local(
+        "The git push of feat to origin failed: Host key verification failed.".into(),
+    ));
+    assert_eq!(e.kind, ShipErrorKind::Other);
+}

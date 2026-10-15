@@ -694,10 +694,10 @@ const PUSH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 /// `git push --set-upstream <remote> <source>` in `repo`, killed after
 /// [`PUSH_TIMEOUT`].
 fn push(repo: &Path, remote: &str, source: &str) -> Result<(), AdoError> {
+    let args = ["push", "--set-upstream", remote, source];
     let mut cmd = git_command(repo);
-    cmd.args(["push", "--set-upstream", remote, source])
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
+    crate::git_env::quiet(&mut cmd, &crate::git_env::setup_for(repo, &args));
+    cmd.args(args).stdout(Stdio::null()).stderr(Stdio::piped());
     let out = crate::git::output_within(cmd, PUSH_TIMEOUT, "git push").map_err(|e| {
         AdoError::Local(format!("The git push of {source} to {remote} failed: {e}"))
     })?;
@@ -705,10 +705,16 @@ fn push(repo: &Path, remote: &str, source: &str) -> Result<(), AdoError> {
         return Ok(());
     }
     let stderr = String::from_utf8_lossy(&out.stderr);
-    let why = stderr
-        .lines()
-        .map(str::trim)
-        .find(|l| l.starts_with("error:") || l.starts_with("fatal:") || l.starts_with('!'))
+    // A refused sign-in says so on a line of its own (ssh's `Permission
+    // denied (publickey)` comes before git's `fatal:`): that line, so the
+    // caller can tell it from any other failure.
+    let why = crate::git_env::needs_sign_in(&stderr)
+        .or_else(|| {
+            stderr
+                .lines()
+                .map(str::trim)
+                .find(|l| l.starts_with("error:") || l.starts_with("fatal:") || l.starts_with('!'))
+        })
         .or_else(|| stderr.lines().map(str::trim).find(|l| !l.is_empty()))
         .unwrap_or("unknown error");
     Err(AdoError::Local(format!(

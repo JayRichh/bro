@@ -6,7 +6,7 @@
 // session has sessions nested under it (they go with it).
 
 import { api, type Agent, type Model, type TerminalTab, type Worktree } from './api';
-import { app, focusQuickPrompt, markSeen, openDiff, openSession, projectOf, toast } from './store.svelte';
+import { app, focusQuickPrompt, markSeen, openDiff, openSession, projectOf, setScope, toast } from './store.svelte';
 import { ask, type MenuEntry, type MenuItem } from './ui/ui.svelte';
 import type { ShortcutId } from './shortcuts';
 import { makeOrchestrator, orchestratorMenuItems, unpinOrchestrator } from './orch.svelte';
@@ -24,6 +24,7 @@ import { whileCutting } from './worktrees/rows.svelte';
 import { moveStep, stepInFor, type StepIn } from './reorder.svelte';
 import { openComposer, openMerge } from './ship/sheet.svelte';
 import { reviewVerbs } from './ship/ship';
+import { repoScope, worktreeScope } from './scope';
 
 export type Target =
   /** `viaSub`: picked from one of its subagents' rows, so it acts on
@@ -459,9 +460,30 @@ function rows(on: AppliesTo, table: VerbTable): MenuItem[] {
   });
 }
 
-/** A session's ship verbs (Open PR or View PR, Merge, the worktree delete). */
-function shipVerbs(a: Agent) {
-  return reviewVerbs(m().prs[a.worktree_id], m().cards[a.id]?.drops?.pr, !!worktreeOf(a.worktree_id)?.is_main);
+/** A checkout's pull request verbs, as the terminal app has them: its
+ *  page while it has one (open_pull_request), the composer while none is
+ *  open (create_pull_request), the merge while one is (merge_pull_request).
+ *  `session`: the card it is asked from, whose drop verdict on Ship says
+ *  whether the branch is the base. */
+function prVerbs(worktree: string, session?: string): VerbTable {
+  const pr = m().prs[worktree];
+  const rv = reviewVerbs(pr, session ? m().cards[session]?.drops?.pr : undefined, !!worktreeOf(worktree)?.is_main);
+  const t: VerbTable = {};
+  if (pr) t.open_pull_request = { run: () => api.openUrl(pr.url).catch((e) => toast(String(e))) };
+  if (rv.pr.kind === 'open') t.create_pull_request = { run: () => openComposer(worktree, session ?? null), disabled: !!rv.pr.why };
+  if (rv.merge) t.merge_pull_request = { run: () => openMerge(worktree, session ?? null), disabled: !!rv.merge.why };
+  return t;
+}
+
+/** Focus here: the scope chip narrowed to the checkout (a session's or a
+ *  worktree's) or the repo, the account narrowing kept. */
+function focusVerb(on: { worktree: string } | { repo: string }): VerbImpl {
+  return {
+    run: () => {
+      const s = m().scope ?? {};
+      setScope('repo' in on ? repoScope(s, on.repo) : worktreeScope(m(), s, on.worktree));
+    },
+  };
 }
 
 /** A session's verbs as the window runs them: none an archived one does
@@ -490,14 +512,9 @@ function agentVerbs(a: Agent, viaSub = false, where: StepIn = stepInFor()): Verb
     archive: { run: () => archiveAgent(a.id, viaSub), label: viaSub ? 'Archive parent session\u2026' : undefined },
     delete: { run: () => deleteAgent(a.id) },
   };
-  // Its worktree's pull request: the composer without one, the page with
-  // one open (the review row's Open PR / View PR).
-  const pr = m().prs[a.worktree_id];
-  const rv = shipVerbs(a);
-  t.open_pull_request =
-    rv.pr.kind === 'view' && pr
-      ? { run: () => api.openUrl(pr.url).catch((e) => toast(String(e))), label: `View PR #${pr.number}` }
-      : { run: () => openComposer(a.worktree_id, a.id), label: 'Open PR\u2026', disabled: !!rv.pr.why };
+  // Its worktree's pull request, and the scope chip on its checkout.
+  Object.assign(t, prVerbs(a.worktree_id, a.id));
+  t.focus_scope = focusVerb({ worktree: a.worktree_id });
   if (!viaSub) {
     t.reorder_up = { run: () => moveStep({ kind: 'agent', id: a.id }, -1, where) };
     t.reorder_down = { run: () => moveStep({ kind: 'agent', id: a.id }, 1, where) };
@@ -534,6 +551,8 @@ function worktreeVerbs(w: Worktree): VerbTable {
     git_diff: { run: () => openDiff(w.id) },
     open_worktree: { run: () => openEditor(w.id) },
     open_repo: { run: () => openRemote(w.id) },
+    ...prVerbs(w.id),
+    focus_scope: focusVerb({ worktree: w.id }),
   };
   if (w.is_main && canSwitchBranch(project)) t.switch_branch = { run: () => openBranchSwitch(project) };
   if (!w.is_main) {
@@ -554,6 +573,7 @@ function projectVerbs(project: string): VerbTable {
     open_worktree: { run: () => openEditor(main?.id) },
     open_repo: { run: () => openRemote(main?.id) },
     refresh_pull_requests: { run: refreshPrs },
+    focus_scope: focusVerb({ repo: project }),
     rename: { run: () => renameProject(project) },
     reorder_up: { run: () => moveStep({ kind: 'project', id: project }, -1) },
     reorder_down: { run: () => moveStep({ kind: 'project', id: project }, 1) },
@@ -612,15 +632,17 @@ export function agentMenu(a: Agent, viaSub = false, where: StepIn = stepInFor())
   const verbs = rows('session', agentVerbs(a, viaSub, where));
   if (a.archived) return [...head, ...verbs];
   // The window's own, ahead of the rows that take the session away.
-  const merge = shipVerbs(a).merge;
   const extra: MenuEntry[] = [
     ...(a.unseen ? [{ label: 'Mark seen', run: () => seeAgent(a.id) }] : []),
-    ...(merge ? [{ label: 'Merge PR\u2026', run: () => openMerge(a.worktree_id, a.id), ...(merge.why ? { disabled: true } : {}) }] : []),
     ...orchestratorMenuItems(a).filter((e) => typeof e === 'object' && 'label' in e && e.label === 'Review\u2026'),
   ];
   const at = verbs.findIndex((e) => e.danger || e.label === menuLabel('archive', 'session') || e.label === 'Archive parent session\u2026');
   const cut = at < 0 ? verbs.length : at;
-  return [...head, ...verbs.slice(0, cut), ...extra, ...verbs.slice(cut), 'sep', ...worktreeItems(w)];
+  // The checkout's rows go on after, less the verbs the session's already
+  // offered (its pull request, Focus here), as the terminal app's do.
+  const said = new Set(verbs.flatMap((e) => (typeof e === 'object' && 'label' in e ? [e.label] : [])));
+  const checkout = worktreeItems(w).filter((e) => !(typeof e === 'object' && 'label' in e && said.has(e.label)));
+  return [...head, ...verbs.slice(0, cut), ...extra, ...verbs.slice(cut), 'sep', ...checkout];
 }
 
 export function terminalMenu(t: TerminalTab): MenuEntry[] {
@@ -695,6 +717,12 @@ export function runRowKey(id: ShortcutId, t: Target): boolean {
       const p = m().worktrees.find((w) => w.id === wt)?.project_id;
       if (p && canSwitchBranch(p)) openBranchSwitch(p);
       else toast('Switch branch is for repos without an Azure DevOps remote: their branches live in the ADO views.');
+    },
+    // Shift+V, as in the terminal app: the checkout's pull request page.
+    open_pr: () => {
+      const pr = wt ? m().prs[wt] : undefined;
+      if (pr) api.openUrl(pr.url).catch((e) => toast(String(e)));
+      else toast('No pull request on this branch yet.');
     },
   });
   const f = table[id];

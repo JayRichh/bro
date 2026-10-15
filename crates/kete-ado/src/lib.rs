@@ -9,6 +9,7 @@ pub mod auth;
 pub mod branches;
 pub mod client;
 pub mod git;
+pub mod git_env;
 pub mod naming;
 pub mod prs;
 pub mod remote;
@@ -403,14 +404,17 @@ pub fn enc(seg: &str) -> String {
     out
 }
 
-/// Run git in `cwd` without a console window; stdout on success.
+/// Run git in `cwd` without a console window; stdout on success. It
+/// never asks for anything ([`git_env`]): no terminal prompt, no
+/// credential window, ssh in batch mode where that is safe.
 pub async fn git_out(cwd: &Path, args: &[&str]) -> Result<String, String> {
+    let ssh = git_env::setup_for_async(cwd, args).await;
     let mut cmd = tokio::process::Command::new("git");
     cmd.args(args)
         .current_dir(cwd)
-        .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(std::process::Stdio::null())
         .kill_on_drop(true);
+    git_env::quiet_tokio(&mut cmd, &ssh);
     #[cfg(windows)]
     cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     let out = cmd.output().await.map_err(|e| format!("git: {e}"))?;

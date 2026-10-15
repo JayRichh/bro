@@ -341,6 +341,10 @@ pub fn fetch(repo: &Path, remote: &str) -> Result<()> {
         bail!("this repo has no remote to fetch from");
     }
     let mut cmd = git_cmd(repo);
+    crate::git_env::quiet(
+        &mut cmd,
+        &crate::git_env::setup_for(repo, &["fetch", "--prune", remote]),
+    );
     cmd.args(["fetch", "--prune", remote])
         .stdout(Stdio::null())
         .stderr(Stdio::piped());

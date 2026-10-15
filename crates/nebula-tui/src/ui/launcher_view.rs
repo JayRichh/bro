@@ -940,9 +940,16 @@ fn scope_chip(app: &App, th: Theme) -> Vec<(Span<'static>, Option<HitTarget>)> {
     };
     out.push((Span::styled("all", lit(&all, all_style)), Some(all)));
     let last = segments.len();
+    let named = app.launcher.scope.account.is_some();
     for (i, (word, keep)) in segments.into_iter().enumerate() {
         out.push((Span::styled(" ▸ ", Style::default().fg(th.dim)), None));
-        let hit = HitTarget::ScopeChip(keep);
+        // The account's segment opens its picker; the rest widen to
+        // themselves.
+        let hit = if keep == 4 {
+            HitTarget::ScopeAccount
+        } else {
+            HitTarget::ScopeChip(keep)
+        };
         let style = if i + 1 == last {
             Style::default().fg(th.accent).add_modifier(Modifier::BOLD)
         } else {
@@ -950,6 +957,14 @@ fn scope_chip(app: &App, th: Theme) -> Vec<(Span<'static>, Option<HitTarget>)> {
         };
         out.push((
             Span::styled(truncate(&word, 18), lit(&hit, style)),
+            Some(hit),
+        ));
+    }
+    // No account in the scope: a bare `@` picks one.
+    if !named {
+        let hit = HitTarget::ScopeAccount;
+        out.push((
+            Span::styled(" @", lit(&hit, Style::default().fg(th.dim))),
             Some(hit),
         ));
     }

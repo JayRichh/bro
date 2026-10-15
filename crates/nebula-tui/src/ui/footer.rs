@@ -290,6 +290,15 @@ fn button_tooltip(app: &App, th: Theme) -> Option<FooterHint> {
                 th,
             ));
         }
+        HitTarget::ScopeAccount => {
+            return Some(dim_hint(
+                format!(
+                    "click: scope to one account's sessions, or any account · Scope to an account… in {} does the same",
+                    key_hint(app, Action::CommandPalette)
+                ),
+                th,
+            ));
+        }
         HitTarget::AccountChip(_) => {
             return Some(dim_hint(
                 format!(
