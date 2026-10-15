@@ -104,9 +104,14 @@ impl Daemon {
                         changed_at,
                         unseen,
                     });
-                    // A turn ended: what the checkout looks like now.
-                    if matches!(status, AgentStatus::Finished | AgentStatus::NeedsFeedback) {
-                        self.snapshot_turn_end(agent_id);
+                    // A turn's edges: what the checkout looks like now.
+                    match status {
+                        AgentStatus::Running => self.snapshot_turn_start(agent_id),
+                        AgentStatus::Finished | AgentStatus::NeedsFeedback => {
+                            self.snapshot_turn_end(agent_id, false)
+                        }
+                        AgentStatus::Terminated => self.snapshot_turn_end(agent_id, true),
+                        AgentStatus::Fresh | AgentStatus::Disconnected => {}
                     }
                 }
                 Effect::SaveSessionId(sid) => {

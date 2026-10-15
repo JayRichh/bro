@@ -389,6 +389,31 @@ const MIGRATIONS: &[&str] = &[
       last_at     INTEGER
     );
     ",
+    // 35: per-turn snapshots (`nebula_core::session_snapshot`, module
+    // doc): each turn's start and end trees, the session's folded base and
+    // tip, and this data dir's daemon id, which names the namespace its
+    // snapshot refs live under. A 0.51 session's start..last becomes its
+    // first base and tip, so what it did before the upgrade still shows.
+    "
+    ALTER TABLE session_snapshots ADD COLUMN base_tree TEXT;
+    ALTER TABLE session_snapshots ADD COLUMN tip_tree TEXT;
+    UPDATE session_snapshots SET base_tree = start_tree, tip_tree = last_tree
+      WHERE start_tree IS NOT NULL AND last_tree IS NOT NULL;
+    CREATE TABLE session_turns (
+      agent_id   TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      n          INTEGER NOT NULL,
+      start_tree TEXT,
+      end_tree   TEXT,
+      start_at   INTEGER NOT NULL,
+      end_at     INTEGER,
+      PRIMARY KEY (agent_id, n)
+    );
+    CREATE TABLE daemon_identity (
+      id  INTEGER PRIMARY KEY CHECK (id = 1),
+      daemon_id TEXT NOT NULL
+    );
+    INSERT INTO daemon_identity (id, daemon_id) VALUES (1, lower(hex(randomblob(8))));
+    ",
 ];
 
 pub struct Store {
@@ -401,6 +426,20 @@ pub struct SessionSnapshots {
     pub worktree: WorktreeId,
     pub start: SnapshotPoint,
     pub last: Option<SnapshotPoint>,
+    /// The folded base and tip (`session_snapshot` module doc); None until
+    /// a turn with both trees has ended.
+    pub base: Option<String>,
+    pub tip: Option<String>,
+}
+
+/// One of a session's turns: its start, and its end once it has ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionTurn {
+    pub n: u32,
+    pub start_tree: Option<String>,
+    pub end_tree: Option<String>,
+    pub start_at: i64,
+    pub end_at: Option<i64>,
 }
 
 pub type TreeRows = (Vec<Project>, Vec<Worktree>, Vec<Agent>, Vec<TerminalTab>);
@@ -1259,7 +1298,8 @@ impl Store {
         let conn = self.conn.lock();
         Ok(conn
             .query_row(
-                "SELECT worktree_id, start_head, start_tree, start_at, last_head, last_tree, last_at
+                "SELECT worktree_id, start_head, start_tree, start_at, last_head, last_tree, last_at,
+                        base_tree, tip_tree
                  FROM session_snapshots WHERE agent_id = ?1",
                 params![agent.as_str()],
                 |r| {
@@ -1279,6 +1319,8 @@ impl Store {
                             }),
                             None => None,
                         },
+                        base: r.get(7)?,
+                        tip: r.get(8)?,
                     })
                 },
             )
@@ -1287,14 +1329,16 @@ impl Store {
 
     /// `agent`'s start snapshot, taken in `worktree`: a new row, or one
     /// that replaces snapshots taken in another worktree (the session moved),
-    /// its last one dropped with it.
+    /// its last one, its base and tip and its turns dropped with it.
     pub fn set_snapshot_start(
         &self,
         agent: &AgentId,
         worktree: &WorktreeId,
         point: &SnapshotPoint,
     ) -> Result<()> {
-        self.conn.lock().execute(
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        tx.execute(
             "INSERT OR REPLACE INTO session_snapshots
                (agent_id, worktree_id, start_head, start_tree, start_at, last_head, last_tree, last_at)
              VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, NULL)",
@@ -1306,7 +1350,132 @@ impl Store {
                 point.at
             ],
         )?;
+        tx.execute(
+            "DELETE FROM session_turns WHERE agent_id = ?1",
+            params![agent.as_str()],
+        )?;
+        tx.commit()?;
         Ok(())
+    }
+
+    /// `agent`'s folded base and tip; no tip after a turn end that could
+    /// not be taken.
+    pub fn set_snapshot_view(&self, agent: &AgentId, base: &str, tip: Option<&str>) -> Result<()> {
+        self.conn.lock().execute(
+            "UPDATE session_snapshots SET base_tree = ?2, tip_tree = ?3 WHERE agent_id = ?1",
+            params![agent.as_str(), base, tip],
+        )?;
+        Ok(())
+    }
+
+    /// `agent`'s turn still open (started, not ended), the latest if
+    /// several.
+    pub fn open_turn(&self, agent: &AgentId) -> Result<Option<SessionTurn>> {
+        Ok(self
+            .session_turns(agent)?
+            .into_iter()
+            .rfind(|t| t.end_at.is_none()))
+    }
+
+    /// Open `agent`'s next turn at `point`; its number.
+    pub fn begin_turn(&self, agent: &AgentId, point: &SnapshotPoint) -> Result<u32> {
+        let conn = self.conn.lock();
+        let n: i64 = conn.query_row(
+            "SELECT COALESCE(MAX(n), 0) + 1 FROM session_turns WHERE agent_id = ?1",
+            params![agent.as_str()],
+            |r| r.get(0),
+        )?;
+        conn.execute(
+            "INSERT INTO session_turns (agent_id, n, start_tree, start_at) VALUES (?1, ?2, ?3, ?4)",
+            params![agent.as_str(), n, point.tree, point.at],
+        )?;
+        Ok(n as u32)
+    }
+
+    /// End `agent`'s turn `n` at `point`.
+    pub fn end_turn(&self, agent: &AgentId, n: u32, point: &SnapshotPoint) -> Result<()> {
+        self.conn.lock().execute(
+            "UPDATE session_turns SET end_tree = ?3, end_at = ?4 WHERE agent_id = ?1 AND n = ?2",
+            params![agent.as_str(), n, point.tree, point.at],
+        )?;
+        Ok(())
+    }
+
+    /// `agent`'s kept turns, oldest first.
+    pub fn session_turns(&self, agent: &AgentId) -> Result<Vec<SessionTurn>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT n, start_tree, end_tree, start_at, end_at FROM session_turns
+             WHERE agent_id = ?1 ORDER BY n",
+        )?;
+        let rows = stmt.query_map(params![agent.as_str()], |r| {
+            Ok(SessionTurn {
+                n: r.get::<_, i64>(0)? as u32,
+                start_tree: r.get(1)?,
+                end_tree: r.get(2)?,
+                start_at: r.get(3)?,
+                end_at: r.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Drop all but `agent`'s latest `keep` turns; the numbers dropped.
+    pub fn prune_turns(&self, agent: &AgentId, keep: u32) -> Result<Vec<u32>> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        let gone: Vec<u32> = {
+            let mut stmt = tx.prepare(
+                "SELECT n FROM session_turns WHERE agent_id = ?1
+                   AND n <= (SELECT MAX(n) FROM session_turns WHERE agent_id = ?1) - ?2
+                 ORDER BY n",
+            )?;
+            let rows = stmt.query_map(params![agent.as_str(), keep], |r| {
+                Ok(r.get::<_, i64>(0)? as u32)
+            })?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        if let Some(&max) = gone.last() {
+            tx.execute(
+                "DELETE FROM session_turns WHERE agent_id = ?1 AND n <= ?2",
+                params![agent.as_str(), max],
+            )?;
+        }
+        tx.commit()?;
+        Ok(gone)
+    }
+
+    /// This data dir's daemon id: the namespace its snapshot refs live
+    /// under. Made by migration 35; made here if that row is ever gone.
+    pub fn daemon_id(&self) -> Result<String> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT OR IGNORE INTO daemon_identity (id, daemon_id)
+             VALUES (1, lower(hex(randomblob(8))))",
+            [],
+        )?;
+        Ok(conn.query_row(
+            "SELECT daemon_id FROM daemon_identity WHERE id = 1",
+            [],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// Every agent id there is, archived ones included: the sessions whose
+    /// refs a sweep keeps.
+    pub fn agent_ids(&self) -> Result<std::collections::HashSet<String>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare("SELECT id FROM agents")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Every project's repo path: where a sweep looks.
+    pub fn project_repos(&self) -> Result<Vec<PathBuf>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare("SELECT repo_path FROM projects")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0).map(PathBuf::from))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     /// `agent`'s snapshot at its latest turn end. False when it has no
@@ -1839,6 +2008,102 @@ mod tests {
         };
         store.migrate().unwrap();
         assert_eq!(store.orchestrator().unwrap().unwrap().id.0, "b");
+    }
+
+    /// Migration 35 from a 0.51 database: a session with both snapshots
+    /// gets them as its base and tip, one with only a start gets neither,
+    /// no turns, and a daemon id that stays put.
+    #[test]
+    fn migration_35_turns_051_snapshots_into_a_base_and_tip() {
+        let conn = Connection::open_in_memory().unwrap();
+        for (i, migration) in MIGRATIONS.iter().take(34).enumerate() {
+            conn.execute_batch(&format!(
+                "BEGIN; {migration}; PRAGMA user_version = {}; COMMIT;",
+                i + 1
+            ))
+            .unwrap();
+        }
+        conn.execute_batch(
+            "INSERT INTO projects (id, name, repo_path, sort_order, created_at)
+               VALUES ('p', 'demo', '/tmp/demo', 0, 0);
+             INSERT INTO worktrees (id, project_id, path, branch, is_main, sort_order, created_at)
+               VALUES ('w', 'p', '/tmp/demo', 'main', 1, 0, 0);
+             INSERT INTO agents (id, worktree_id, name, created_at) VALUES ('a', 'w', 'a', 1);
+             INSERT INTO agents (id, worktree_id, name, created_at) VALUES ('b', 'w', 'b', 2);
+             INSERT INTO session_snapshots
+               (agent_id, worktree_id, start_head, start_tree, start_at, last_head, last_tree, last_at)
+               VALUES ('a', 'w', 'h', 't1', 1, 'h', 't2', 2);
+             INSERT INTO session_snapshots (agent_id, worktree_id, start_tree, start_at)
+               VALUES ('b', 'w', 't1', 1);",
+        )
+        .unwrap();
+        let store = Store {
+            conn: Mutex::new(conn),
+        };
+        store.migrate().unwrap();
+        let a = store
+            .session_snapshots(&AgentId("a".into()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (a.base.as_deref(), a.tip.as_deref()),
+            (Some("t1"), Some("t2"))
+        );
+        let b = store
+            .session_snapshots(&AgentId("b".into()))
+            .unwrap()
+            .unwrap();
+        assert_eq!((b.base, b.tip), (None, None));
+        assert!(store
+            .session_turns(&AgentId("a".into()))
+            .unwrap()
+            .is_empty());
+        let id = store.daemon_id().unwrap();
+        assert_eq!(id.len(), 16);
+        assert!(id.bytes().all(|c| c.is_ascii_hexdigit()));
+        assert_eq!(store.daemon_id().unwrap(), id);
+    }
+
+    /// Turns open, end, prune to the latest few, and go with the session's
+    /// row and with a new start (the session moved).
+    #[test]
+    fn session_turns_open_end_prune_and_cascade() {
+        let store = store_with_worktree();
+        let w = WorktreeId("w".into());
+        let a = AgentId("a".into());
+        store
+            .insert_agent(&role_agent("a", nebula_core::AgentRole::Worker))
+            .unwrap();
+        let point = |tree: &str, at| SnapshotPoint {
+            head: None,
+            tree: Some(tree.into()),
+            at,
+        };
+        store.set_snapshot_start(&a, &w, &point("s", 0)).unwrap();
+        for n in 1..=4u32 {
+            assert_eq!(store.begin_turn(&a, &point("x", n as i64)).unwrap(), n);
+            assert_eq!(store.open_turn(&a).unwrap().unwrap().n, n);
+            store.end_turn(&a, n, &point("y", n as i64)).unwrap();
+            assert_eq!(store.open_turn(&a).unwrap(), None);
+        }
+        assert_eq!(store.prune_turns(&a, 2).unwrap(), vec![1, 2]);
+        assert_eq!(store.prune_turns(&a, 2).unwrap(), Vec::<u32>::new());
+        let left: Vec<u32> = store
+            .session_turns(&a)
+            .unwrap()
+            .iter()
+            .map(|t| t.n)
+            .collect();
+        assert_eq!(left, vec![3, 4]);
+        assert_eq!(store.begin_turn(&a, &point("x", 5)).unwrap(), 5);
+        store.set_snapshot_view(&a, "b", Some("t")).unwrap();
+        store.set_snapshot_start(&a, &w, &point("s2", 9)).unwrap();
+        let moved = store.session_snapshots(&a).unwrap().unwrap();
+        assert_eq!((moved.base, moved.tip), (None, None));
+        assert!(store.session_turns(&a).unwrap().is_empty());
+        store.begin_turn(&a, &point("x", 10)).unwrap();
+        store.delete_agent(&a).unwrap();
+        assert!(store.session_turns(&a).unwrap().is_empty());
     }
 
     #[test]
@@ -2463,10 +2728,12 @@ mod tests {
     fn table_names_without_workspaces() -> Vec<String> {
         [
             "agents",
+            "daemon_identity",
             "links",
             "pr_seen",
             "projects",
             "session_snapshots",
+            "session_turns",
             "terminals",
             "ui_state",
             "worktree_bases",
