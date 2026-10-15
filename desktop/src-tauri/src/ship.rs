@@ -89,6 +89,20 @@ pub async fn ship_merge(
     Ship::new(&ado, false).merge_pr(&place, opts).await
 }
 
+/// GitHub's sign-in for a ship error of kind `signIn`: `gh auth login` in a
+/// new terminal in `worktree`, the way an account's login command runs (the
+/// window opens the terminal). ADO's has its own command, `ado_sign_in`.
+#[tauri::command]
+pub async fn ship_gh_sign_in(
+    client: State<'_, Arc<Client>>,
+    worktree: String,
+) -> Result<String, String> {
+    crate::accounts::run_in_new_terminal(&client, worktree, GH_SIGN_IN_LINE).await
+}
+
+/// What `ship_gh_sign_in` types: fixed here, never taken from the window.
+const GH_SIGN_IN_LINE: &str = "gh auth login";
+
 #[cfg(test)]
 mod tests {
     use super::*;

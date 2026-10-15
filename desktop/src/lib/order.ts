@@ -18,7 +18,6 @@
 //   Tauri side into `Model.lanes`).
 
 import type { Agent, Model, Worktree } from './api';
-import type { Lane } from './status';
 
 /** Whether a scope's rows carry a user order (nebula-core's
  *  `order::has_user_order`, kept here for the repo and worktree lists the
@@ -132,40 +131,8 @@ export function dropZone(offset: number, height: number, takes: { insert: boolea
   return f < 0.25 ? 'before' : f > 0.75 ? 'after' : 'onto';
 }
 
-/** What dropping a board card on a lane (or the Archived zone) does. */
-export type LaneDrop =
-  | { act: 'reorder' }
-  | { act: 'seen' }
-  | { act: 'archive' }
-  | { act: 'refuse'; reason: string };
-
-const OWNED: Partial<Record<Lane, string>> = {
-  needs: 'Needs you is the agent\u2019s: the card leaves it when you answer the session.',
-  running: 'Running is the agent\u2019s: the card lands in Done when the turn ends.',
-  pr: 'Its pull request is open: the card leaves Ship when the PR merges or closes.',
-};
-
-/** Only moves the user can cause: Review to Done marks the session seen,
- *  the Archived zone archives it, the same lane reorders. A status the
- *  agent (or the pull request) owns is refused with the reason.
- *  A subset of core's rule, which the model now carries per card
- *  (`Card.drops`: opening and merging a pull request, the worktree
- *  delete offer); the board moves onto that when it gains those verbs. */
-export function laneDrop(from: Lane, to: Lane | 'archived'): LaneDrop {
-  if (to === 'archived') return { act: 'archive' };
-  if (from === to) return { act: 'reorder' };
-  if (to === 'done') {
-    if (from === 'unseen') return { act: 'seen' };
-    return { act: 'refuse', reason: OWNED[from] ?? 'That card cannot be marked done.' };
-  }
-  const why: Record<Exclude<Lane, 'done'>, string> = {
-    needs: 'Only the agent puts a card in Needs you, by asking.',
-    running: 'Only the agent puts a card in Running, by starting a turn: send it a follow-up (Space).',
-    unseen: 'Review comes from a turn finishing or from new changes; a card cannot be sent back to it.',
-    pr: 'Ship follows the worktree\u2019s pull request: open one and the card moves.',
-  };
-  return { act: 'refuse', reason: why[to] };
-}
+// What a card dropped on a lane does is core's (`Card.drops`, snapshotted
+// at the drag's start); ship/ship.ts reads it for the board.
 
 /** A checkout's sessions as the board shows them, for a drop or a step
  *  there: the user's order, or newest first while it has none (the order

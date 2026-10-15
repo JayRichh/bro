@@ -2,7 +2,7 @@
 // (or move) a drop or a key sends. The rules are order.ts's; this file
 // reads the model and talks to the daemon.
 
-import { api, type ReorderScope } from './api';
+import { api, type DropTarget, type DropVerb, type ReorderScope } from './api';
 import { app, toast } from './store.svelte';
 import { ask } from './ui/ui.svelte';
 import { agentIds, boardIds, placeId, projectIds, rootFirst, stepId, treeSiblings, worktreeIds, type Place } from './order';
@@ -10,9 +10,11 @@ import { laneOf, lanes, type Lane } from './status';
 import { worktreeGroups } from './worktrees/groups';
 import { DRAG_PROJECT, DRAG_SESSION, DRAG_WORKTREE } from './overview/drag';
 
-/** What a drag carries. A session from the board knows its lane. */
+/** What a drag carries. A session from the board knows its lane, and
+ *  core's verdict for each target as the drag began (`Card.drops`), so a
+ *  card whose lane moves mid-drag keeps the verdicts it was picked up with. */
 export type Dragged =
-  | { kind: 'agent'; id: string; worktree: string; lane?: Lane }
+  | { kind: 'agent'; id: string; worktree: string; lane?: Lane; drops?: Partial<Record<DropTarget, DropVerb>> }
   | { kind: 'worktree'; id: string; project: string }
   | { kind: 'project'; id: string };
 

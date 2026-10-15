@@ -931,6 +931,7 @@ fn main() {
             ship::ship_status,
             ship::ship_create_pr,
             ship::ship_merge,
+            ship::ship_gh_sign_in,
             session_ask,
             ado::branches::ado_branches,
             ado::branches::ado_fetch,

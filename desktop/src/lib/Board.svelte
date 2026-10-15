@@ -1,18 +1,21 @@
 <script lang="ts">
-  import { app, markSeen, openSession, openDiff, toast } from './store.svelte';
-  import { LANES, lanes, toneOf, harnessLabel, lastPrompt, age, placeOf, prWord, type Lane } from './status';
+  import { app, markSeen, openReview, openSession, openDiff, setScope, toast } from './store.svelte';
+  import { LANES, lanes, toneOf, harnessLabel, lastPrompt, age, placeOf, type Lane } from './status';
   import Status from './Status.svelte';
   import { retract } from './motion';
   import Empty from './Empty.svelte';
-  import type { Agent } from './api';
-  import { agentMenu, archiveAgent, followUp, unarchiveAgent } from './actions';
+  import type { Agent, DropTarget } from './api';
+  import { agentMenu, archiveAgent, archiveAndOfferWorktree, followUp, unarchiveAgent } from './actions';
   import { layerOpen, openMenu } from './ui/ui.svelte';
   import { withKey } from './shortcuts';
   import Icon from './ui/Icon.svelte';
   import { drag, dropCard, endDrag, leftFor, offsetIn, startDrag } from './reorder.svelte';
-  import { dropZone, laneDrop, type Place } from './order';
+  import { dropZone, type Place } from './order';
   import { onMount } from 'svelte';
-  import { watchGit } from './worktrees/rows.svelte';
+  import { rows, watchGit } from './worktrees/rows.svelte';
+  import { commitsWord, dropHint, dropVerbOf, laneLook, prChip } from './ship/ship';
+  import { openComposer, openMerge } from './ship/sheet.svelte';
+  import { hiddenTotal } from './scope';
 
   // The Review lane reads each checkout's changes off the git reads the
   // overview already makes (src-tauri keeps the last one); keep them
@@ -21,24 +24,29 @@
 
   let { active = true }: { active?: boolean } = $props();
 
-  // Drags on the board. A card dropped on a lane does what the lane means
-  // where the user can cause it (order.ts `laneDrop`): Review to Done marks
-  // it seen, the Archived zone (shown while dragging) archives it, a drop
-  // beside a card of its own checkout reorders them; a status the agent or
-  // the pull request owns is refused with the reason. The keys: Alt+Up /
-  // Alt+Down reorder, A archives, the menu's Mark seen.
+  // Drags on the board. What a card let go on a lane does is core's
+  // (`Card.drops`, snapshotted as the drag starts): Review to Done marks it
+  // seen, Review to Ship opens the PR composer, Ship to Done the merge
+  // confirm, the Archived zone (shown while dragging) archives it, from
+  // Done offering its emptied worktree too; a drop beside a card of its own
+  // checkout reorders them. A lane that refuses dims while the card is over
+  // it and says why there, and takes no drop. The keys: Alt+Up / Alt+Down
+  // reorder, A archives, the menu's Mark seen, Open PR and Merge.
   /** The lane under the pointer, and the card it would land beside. */
-  let target = $state<{ lane: Lane | 'archived'; card?: { id: string; place: Place } } | null>(null);
+  let target = $state<{ lane: DropTarget; card?: { id: string; place: Place } } | null>(null);
   const dragged = $derived(drag.item?.kind === 'agent' && drag.item.lane ? drag.item : null);
   $effect(() => {
     if (!dragged) target = null;
   });
 
-  function overLane(e: DragEvent, lane: Lane | 'archived') {
+  function overLane(e: DragEvent, lane: DropTarget) {
     if (!dragged) return;
+    if (target?.lane !== lane || target.card) target = { lane };
+    // A refusing lane never takes the drop: the pointer says no, the lane
+    // says why.
+    if (laneLook(dragged.drops, dragged.lane!, lane) === 'refuse') return;
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-    if (target?.lane !== lane || target.card) target = { lane };
   }
 
   function overCard(e: DragEvent, lane: Lane, a: Agent) {
@@ -52,7 +60,7 @@
     target = { lane, card: { id: a.id, place: dropZone(y, h, { insert: true, onto: false }) as Place } };
   }
 
-  async function dropOn(e: DragEvent, lane: Lane | 'archived', over?: Agent) {
+  async function dropOn(e: DragEvent, lane: DropTarget, over?: Agent) {
     const d = dragged;
     const at = target;
     target = null;
@@ -60,13 +68,25 @@
     e.preventDefault();
     e.stopPropagation();
     endDrag();
-    const what = laneDrop(d.lane, lane);
-    if (what.act === 'refuse') return toast(what.reason);
-    if (what.act === 'seen') return markSeen({ Agent: d.id });
-    if (what.act === 'archive') return archiveAgent(d.id);
-    if (at?.card) return dropCard(d.worktree, d.id, at.card.id, at.card.place);
-    if (over && over.id !== d.id && over.worktree_id !== d.worktree)
-      toast(`Cards reorder beside cards of their own worktree (${placeOf(app.model, d.worktree).branch}); move the session (M) to change worktree.`);
+    const v = dropVerbOf(d.drops, lane);
+    switch (v.act) {
+      case 'refuse':
+        return;
+      case 'mark_seen':
+        return markSeen({ Agent: d.id });
+      case 'open_pr':
+        return openComposer(d.worktree, d.id);
+      case 'merge_pr':
+        return openMerge(d.worktree, d.id);
+      case 'archive':
+        return void archiveAgent(d.id);
+      case 'archive_and_offer_worktree_delete':
+        return archiveAndOfferWorktree(d.id);
+      case 'reorder':
+        if (at?.card) return dropCard(d.worktree, d.id, at.card.id, at.card.place);
+        if (over && over.id !== d.id && over.worktree_id !== d.worktree)
+          toast(`Cards reorder beside cards of their own worktree (${placeOf(app.model, d.worktree).branch}); move the session (M) to change worktree.`);
+    }
   }
 
   function endBoardDrag() {
@@ -74,19 +94,37 @@
     endDrag();
   }
 
-  /** A lane's look while a card is over it: ember for a drop that acts. */
-  function laneMark(lane: Lane): string {
-    if (!dragged || target?.lane !== lane || target.card || dragged.lane === lane) return '';
-    const act = laneDrop(dragged.lane!, lane).act;
-    return act === 'refuse' ? 'bg-surface' : 'outline-2 -outline-offset-2 outline-ember';
+  /** What a lane does while a card is dragged: `act` takes an ember rule
+   *  under the pointer, `refuse` dims with its reason. */
+  function lookOf(lane: DropTarget): 'act' | 'refuse' | 'none' {
+    if (!dragged) return 'none';
+    return laneLook(dragged.drops, dragged.lane!, lane);
   }
+  function laneMark(lane: Lane): string {
+    const look = lookOf(lane);
+    if (look === 'refuse') return 'opacity-55';
+    if (look === 'act' && target?.lane === lane && !target.card) return 'outline-2 -outline-offset-2 outline-ember';
+    return '';
+  }
+
   const board = $derived(lanes(app.model));
   const total = $derived(LANES.reduce((n, l) => n + board[l.id].length, 0));
-  let cursor = $state<{ lane: number; row: number } | null>(null);
+  const outside = $derived(hiddenTotal(app.model));
+
+  // The selected card, by id: opening one marks it seen, which can move it
+  // to another lane; the selection follows it there.
+  let selId = $state<string | null>(null);
+  const cursor = $derived.by(() => {
+    if (!selId) return null;
+    for (let lane = 0; lane < LANES.length; lane++) {
+      const row = board[LANES[lane].id].findIndex((a) => a.id === selId);
+      if (row >= 0) return { lane, row };
+    }
+    return null;
+  });
 
   function selectedAgent(): Agent | null {
-    if (!cursor) return null;
-    return board[LANES[cursor.lane].id][cursor.row] ?? null;
+    return cursor ? (board[LANES[cursor.lane].id][cursor.row] ?? null) : null;
   }
 
   /** Arrow-key step: across lanes (skipping empty ones) or down a lane. */
@@ -94,8 +132,8 @@
     const ids = LANES.map((l) => board[l.id]);
     if (!cursor) {
       const lane = ids.findIndex((l) => l.length);
-      if (lane >= 0) cursor = { lane, row: 0 };
-      return;
+      if (lane >= 0) selId = ids[lane][0].id;
+      return focusSel();
     }
     let { lane, row } = cursor;
     if (dx) {
@@ -108,8 +146,12 @@
     } else {
       row = Math.max(0, Math.min(ids[lane].length - 1, row + dy));
     }
-    cursor = { lane, row };
-    // The card takes the focus, so its row keys (r, a, Del\u2026) reach it.
+    selId = ids[lane][row]?.id ?? selId;
+    focusSel();
+  }
+
+  /** The card takes the focus, so its row keys (Space, A, Delete and the rest) reach it. */
+  function focusSel() {
     queueMicrotask(() => {
       const el = document.querySelector<HTMLElement>('[data-card-sel]');
       el?.focus();
@@ -117,10 +159,22 @@
     });
   }
 
+  /** Enter or a click: a Review or Ship card opens its review (the board
+   *  stays left, the worktree's diff against its base on the right, its
+   *  verbs above it); the rest open the session. */
+  function openCard(a: Agent, lane: Lane) {
+    selId = a.id;
+    if (lane === 'unseen' || lane === 'pr') openReview(a.id);
+    else openSession({ Agent: a.id });
+  }
+
   function onKey(e: KeyboardEvent) {
-    if (!active || layerOpen()) return;
+    if (layerOpen()) return;
     const t = e.target as HTMLElement;
-    if (t.closest('input, textarea, select, .xterm')) return;
+    // Beside an open session or diff the board still answers once the
+    // focus is in it.
+    if (!active && !t.closest('[data-board]')) return;
+    if (t.closest('input, textarea, select, .xterm, .monaco-editor')) return;
     const map: Record<string, [number, number]> = {
       ArrowLeft: [-1, 0], h: [-1, 0], ArrowRight: [1, 0], l: [1, 0],
       ArrowUp: [0, -1], k: [0, -1], ArrowDown: [0, 1], j: [0, 1],
@@ -132,7 +186,7 @@
       // A card's own action button takes its Enter itself.
       if (t.closest('[data-card-tools]')) return;
       const a = selectedAgent();
-      if (a) openSession({ Agent: a.id });
+      if (a && cursor) openCard(a, LANES[cursor.lane].id);
     }
   }
 
@@ -146,16 +200,14 @@
 
   const tool =
     'grid size-6 place-items-center border-0 border-l border-rule bg-transparent p-0 text-muted first:border-l-0 hover:bg-surface hover:text-ink';
-
-  function isSel(lane: Lane, row: number) {
-    return cursor !== null && LANES[cursor.lane].id === lane && cursor.row === row;
-  }
+  const chip = 'flex-none border px-1 font-mono text-[11px] leading-4';
+  const CHIP_TONE = { open: 'border-rule-strong text-ink', draft: 'border-rule text-muted', merged: 'border-merged text-merged', closed: 'border-rule text-faint line-through' };
 </script>
 
 <svelte:window onkeydown={onKey} />
 
 <!-- The alternate home: lanes are ruled columns, sessions are ruled rows. -->
-{#if total === 0}
+{#if total === 0 && outside === 0}
   <Empty />
 {:else}
   <div class="relative h-full min-h-0" data-board>
@@ -164,11 +216,15 @@
     role="grid"
     aria-label="Sessions by status"
   >
-    {#each LANES as lane, li (lane.id)}
+    {#each LANES as lane (lane.id)}
       {@const cards = board[lane.id]}
+      {@const look = lookOf(lane.id)}
+      {@const hidden = app.model.hidden?.[lane.id] ?? 0}
+      {@const why = dragged && look !== 'none' ? dropHint(dropVerbOf(dragged.drops, lane.id)) : ''}
       <section
-        class="flex min-h-0 min-w-0 flex-col border-r border-rule last:border-r-0 {laneMark(lane.id)}"
+        class="relative flex min-h-0 min-w-0 flex-col border-r border-rule last:border-r-0 {laneMark(lane.id)}"
         aria-label={lane.title}
+        title={look === 'refuse' ? why : undefined}
         ondragenter={(e) => overLane(e, lane.id)}
         ondragover={(e) => overLane(e, lane.id)}
         ondragleave={(e) => leftFor(e) && target?.lane === lane.id && (target = null)}
@@ -178,12 +234,22 @@
           <h2 class="m-0 text-[15px] font-semibold {lane.id === 'needs' && cards.length ? 'text-ember-ink' : 'text-ink'}">{lane.title}</h2>
           <span class="ml-auto font-mono text-[12px] font-bold {cards.length ? 'text-ink' : 'text-muted'}">{cards.length}</span>
         </header>
+        {#if why && target?.lane === lane.id}
+          <!-- While a card is over the lane: what letting go does, or why it can't. -->
+          <p
+            class="m-0 flex-none border-b px-4 py-1.5 text-[12px] {look === 'refuse' ? 'border-rule text-muted' : 'border-ember text-ember-ink'}"
+            role="status"
+          >
+            {why}
+          </p>
+        {/if}
         <div class="flex min-h-0 flex-col overflow-y-auto">
           {#each cards as a, ri (a.id)}
             {@const where = placeOf(app.model, a.worktree_id)}
             {@const prompt = lastPrompt(a)}
             {@const pr = app.model.prs[a.worktree_id]}
-            {@const sel = isSel(lane.id, ri)}
+            {@const commits = commitsWord(rows.git[a.worktree_id]?.ahead_of_base)}
+            {@const sel = cursor !== null && LANES[cursor.lane].id === lane.id && cursor.row === ri}
             {@const alert = lane.id === 'needs'}
             <!-- The card's verbs show on hover or focus; the card keys (Space, A,
                  D, Shift+F10) do the same from the card. -->
@@ -193,7 +259,7 @@
               data-target="agent:{a.id}"
               role="presentation"
               draggable="true"
-              ondragstart={(e) => startDrag(e, { kind: 'agent', id: a.id, worktree: a.worktree_id, lane: lane.id })}
+              ondragstart={(e) => startDrag(e, { kind: 'agent', id: a.id, worktree: a.worktree_id, lane: lane.id, drops: { ...app.model.cards[a.id]?.drops } })}
               ondragend={endBoardDrag}
               ondragenter={(e) => overCard(e, lane.id, a)}
               ondragover={(e) => overCard(e, lane.id, a)}
@@ -203,21 +269,18 @@
               <span class="pointer-events-none absolute inset-x-0 z-10 h-px bg-ember {mark === 'before' ? '-top-px' : '-bottom-px'}" aria-hidden="true"></span>
             {/if}
             <button
-              title="{a.name}: {withKey('drag to reorder beside cards of its worktree', ['move_up', 'move_down'])}, or onto a lane, Archived or a repo in the rail"
+              title="{a.name}: {lane.id === 'unseen' || lane.id === 'pr' ? 'Enter opens its review (the diff against its base, with its verbs); ' : ''}{withKey('drag to reorder beside cards of its worktree', ['move_up', 'move_down'])}, or onto a lane, Archived or a repo in the rail"
               data-card-sel={sel || undefined}
               oncontextmenu={(e) => {
                 e.preventDefault();
-                cursor = { lane: li, row: ri };
+                selId = a.id;
                 (e.currentTarget as HTMLElement).focus();
                 openMenu(agentMenu(a), { x: e.clientX, y: e.clientY }, a.name);
               }}
               class="relative flex w-full flex-col gap-1 border-0 border-b border-rule px-4 py-2.5 text-left focus-visible:-outline-offset-2
-                {sel ? 'bg-surface' : 'bg-transparent hover:bg-surface'}"
-              onclick={() => {
-                cursor = { lane: li, row: ri };
-                openSession({ Agent: a.id });
-              }}
-              onfocus={() => (cursor = { lane: li, row: ri })}
+                {sel ? 'bg-surface' : 'bg-transparent hover:bg-surface'} {app.review === a.id ? 'shadow-[inset_3px_0_0_var(--color-ink)]' : ''}"
+              onclick={() => openCard(a, lane.id)}
+              onfocus={() => (selId = a.id)}
             >
               {#if alert}<span class="absolute inset-y-0 left-0 w-[3px] origin-left bg-ember" out:retract|global aria-hidden="true"></span>{/if}
               <span class="flex min-w-0 items-baseline gap-2">
@@ -225,10 +288,17 @@
                 <span class="ml-auto font-mono text-[12px] text-muted">{age(a.status_changed_at, app.now)}</span>
               </span>
               <Status tone={lane.id === 'pr' ? 'pr' : lane.id === 'done' && pr?.state === 'merged' ? 'merged' : toneOf(a)} />
-              <span class="truncate text-[13px] text-muted">{harnessLabel(a)}{a.profile ? ` \u00b7 ${a.profile}` : ''}</span>
-              <span class="truncate font-mono text-[12px] text-muted"
-                >{where.project} / {where.branch}{#if pr}<span class="ml-2 {pr.state === 'merged' ? 'text-merged' : pr.state === 'closed' ? 'text-muted' : 'text-ink'}">{prWord(pr)} #{pr.number}</span>{/if}</span
-              >
+              <span class="truncate text-[13px] text-muted">{harnessLabel(a)}{a.profile ? ` \u00B7 ${a.profile}` : ''}</span>
+              <span class="truncate font-mono text-[12px] text-muted">{where.project} / {where.branch}</span>
+              {#if commits || pr}
+                <span class="flex min-w-0 flex-wrap items-center gap-1.5">
+                  {#if commits}<span class="{chip} border-rule text-muted" title="Commits on this branch since its base">{commits}</span>{/if}
+                  {#if pr}
+                    {@const c = prChip(pr)}
+                    <span class="{chip} {CHIP_TONE[c.tone]}" title="{pr.title}">{c.word}</span>
+                  {/if}
+                </span>
+              {/if}
               {#if prompt}<span class="line-clamp-2 text-[13px] text-muted">{prompt}</span>{/if}
             </button>
             <div
@@ -246,11 +316,11 @@
               {/if}
               <button
                 class={tool}
-                title={withKey('Actions: restart, move, rename, delete', 'row_menu')}
+                title={withKey('Actions: open PR, merge, restart, move, rename, delete', 'row_menu')}
                 aria-label="{a.name} actions"
                 aria-haspopup="menu"
                 onclick={(e) => {
-                  cursor = { lane: li, row: ri };
+                  selId = a.id;
                   openMenu(agentMenu(a), e.currentTarget as HTMLElement, a.name);
                 }}><Icon name="dots" size={12} /></button
               >
@@ -262,14 +332,23 @@
               {lane.id === 'needs' ? 'Nothing needs you.' : 'Nothing here.'}
             </p>
           {/if}
+          {#if hidden}
+            <!-- The scope hides these: a click shows everything again. -->
+            <button
+              class="m-0 border-0 border-b border-rule bg-transparent px-4 py-2 text-left font-mono text-[12px] text-muted hover:bg-surface hover:text-ink"
+              title="Clear the scope: show every repo, worktree and account"
+              onclick={() => setScope({})}>{hidden} more outside scope</button
+            >
+          {/if}
         </div>
       </section>
     {/each}
   </div>
   {#if dragged}
+    {@const look = lookOf('archived')}
     <!-- Only while a card is dragged: drop it here to archive it (A on the card). -->
     <div
-      class="absolute inset-x-4 bottom-4 z-20 flex h-12 items-center justify-center gap-2 border bg-bg text-[13px] {target?.lane === 'archived'
+      class="absolute inset-x-4 bottom-4 z-20 flex h-12 items-center justify-center gap-2 border bg-bg text-[13px] {target?.lane === 'archived' && look === 'act'
         ? 'border-ember text-ink'
         : 'border-rule-strong text-muted'}"
       role="region"
@@ -279,9 +358,8 @@
       ondragleave={(e) => leftFor(e) && target?.lane === 'archived' && (target = null)}
       ondrop={(e) => dropOn(e, 'archived')}
     >
-      <Icon name="archive" size={12} />Drop here to archive
+      <Icon name="archive" size={12} />{dropHint(dropVerbOf(dragged.drops, 'archived')) || 'Drop here to archive'}
     </div>
   {/if}
   </div>
 {/if}
-

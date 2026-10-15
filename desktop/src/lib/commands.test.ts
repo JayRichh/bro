@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('./api', () => ({ api: {} }));
+vi.mock('./api', () => ({ api: { boardScope: vi.fn(() => Promise.resolve()) } }));
+
+const { api } = await import('./api');
 
 const { app } = await import('./store.svelte');
 const { nav } = await import('./shell/history.svelte');
@@ -73,6 +75,8 @@ describe('the shared keys', () => {
     ] as never;
     expect(runShortcut('repo_1')).toBe(true);
     expect(nav.current.repo).toBe('p2');
+    // It narrows the window's scope to that repo too (the header's chip).
+    expect(api.boardScope).toHaveBeenLastCalledWith({ repo: 'p2' });
     expect(runShortcut('repo_2')).toBe(true);
     expect(nav.current.repo).toBe('p1');
     expect(runShortcut('repo_3')).toBe(false);

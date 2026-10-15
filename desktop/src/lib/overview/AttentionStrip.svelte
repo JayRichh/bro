@@ -1,9 +1,12 @@
 <script lang="ts">
   import { app, openSession } from '../store.svelte';
   import { repoRows, tally } from './repos';
+  import { isEverything, scopeModel } from '../scope';
   import type { Node, Status } from './tree';
 
-  const counts = $derived(tally(repoRows(app.model)));
+  // What the scope admits (cards' `in_scope`; subagents with their parent).
+  const counts = $derived(tally(repoRows(scopeModel(app.model))));
+  const everything = $derived(isEverything(app.model.scope));
   const ITEMS: { status: Status; word: (n: number) => string }[] = [
     { status: 'needs', word: (n) => (n === 1 ? 'needs you' : 'need you') },
     { status: 'failed', word: () => 'failed' },
@@ -28,7 +31,7 @@
   }
 </script>
 
-<div class="flex flex-none items-center gap-4 whitespace-nowrap" role="group" aria-label="Across all repos">
+<div class="flex flex-none items-center gap-4 whitespace-nowrap" role="group" aria-label={everything ? 'Across all repos' : 'In the scope'}>
   {#each shown as it, i (it.status)}
     {@const n = counts[it.status]?.length ?? 0}
     {@const hot = n > 0 && (it.status === 'needs' || it.status === 'failed')}

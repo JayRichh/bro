@@ -35,6 +35,7 @@ import { openAccounts } from './accounts/actions';
 import { openAddAccount } from './accounts/add.svelte';
 import { moveStep, rootOf, stepInFor } from './reorder.svelte';
 import { railOrder, repoRows } from './overview/repos';
+import { scopedRepo, scopedWorktree } from './scope';
 
 /** F10: the orchestrator, or the Start form when there is none. */
 function orchestratorKey() {
@@ -64,9 +65,10 @@ export function jumpAttention(step: 1 | -1) {
   else toast('No sessions to jump to.');
 }
 
-/** The repo the window is on: the one in view, else the open session's. */
+/** The repo the window is on: the one in view, else the scope's, else the
+ *  open session's. */
 export function currentRepo(): string | undefined {
-  return nav.current.repo ?? projectOf(sessionWorktree(app.session));
+  return nav.current.repo ?? scopedRepo(app.model) ?? projectOf(sessionWorktree(app.session));
 }
 
 /** The session row or card with the focus, if any. */
@@ -126,7 +128,11 @@ export function diffTarget(): string | null {
   if (v === 'session' || v === 'orchestrator') return sessionWorktree(app.session) ?? app.diffWorktree;
   const repo = nav.current.repo;
   if (repo && v !== 'overview' && v !== 'board' && v !== 'diff') return rootOf(repo) ?? null;
-  return app.diffWorktree ?? sessionWorktree(app.session) ?? (repo ? (rootOf(repo) ?? null) : null);
+  // The scope's checkout (or its repo's root) before the last one diffed.
+  const scoped = scopedWorktree(app.model);
+  if (scoped && v !== 'diff') return scoped;
+  const scopeRepo = scopedRepo(app.model);
+  return app.diffWorktree ?? sessionWorktree(app.session) ?? (repo ? (rootOf(repo) ?? null) : scopeRepo ? (rootOf(scopeRepo) ?? null) : null);
 }
 
 /** D, Ctrl+Shift+D and the header's Diff: the diff for the checkout in

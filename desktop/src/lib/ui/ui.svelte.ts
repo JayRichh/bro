@@ -4,6 +4,7 @@
 
 import { sheet as files } from '../files/files.svelte';
 import { addSheet } from '../accounts/add.svelte';
+import { shipSheet } from '../ship/state.svelte';
 
 export type MenuItem = {
   label: string;
@@ -120,6 +121,7 @@ export function layerOpen(): boolean {
     ui.startOrchestrator ||
     ui.branchSwitch ||
     files.open ||
-    addSheet.phase === 'form'
+    addSheet.phase === 'form' ||
+    !!shipSheet.mode
   );
 }

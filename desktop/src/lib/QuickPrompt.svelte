@@ -5,6 +5,7 @@
   import { projectAccount } from './accounts/view';
   import { nav } from './shell/history.svelte';
   import { ORCH_TARGET, orchestratorOf, quickPromptTarget } from './orchestrator';
+  import { scopedRepo, scopedWorktree } from './scope';
   import { sendToOrchestrator } from './orch.svelte';
   import { whileCutting } from './worktrees/rows.svelte';
 
@@ -104,7 +105,19 @@
     const left = lastView === 'orchestrator' && view !== 'orchestrator';
     lastView = view;
     const fallback = projectOf(sessionWorktree(app.session)) ?? app.model.projects[0]?.id ?? '';
-    project = quickPromptTarget(project, { repo: nav.current.repo, view, left, picked, hasOrchestrator: !!orch, fallback });
+    // The repo in view, else the scope's.
+    const repo = nav.current.repo ?? scopedRepo(app.model) ?? undefined;
+    project = quickPromptTarget(project, { repo, view, left, picked, hasOrchestrator: !!orch, fallback });
+  });
+  // A scope on one worktree (or session) starts the prompt there, in its
+  // repo, each time the scope or the repo changes.
+  let scopedFor = '';
+  $effect(() => {
+    const wt = scopedWorktree(app.model);
+    const key = `${wt ?? ''}|${project}`;
+    if (key === scopedFor) return;
+    scopedFor = key;
+    if (wt && worktrees.some((w) => w.id === wt)) worktree = wt;
   });
   $effect(() => {
     if (app.model.projects.find((p) => p.id === project) || (project === ORCH && orch)) return;

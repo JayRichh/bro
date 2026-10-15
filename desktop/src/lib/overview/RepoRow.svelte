@@ -14,14 +14,16 @@
   import { prWord } from '../status';
   import { drag, dropProject, endDrag, leftFor, offsetIn, startDrag } from '../reorder.svelte';
   import { dropZone, type Place } from '../order';
+  import { scopeModel } from '../scope';
 
   let { row }: { row: RepoRow } = $props();
 
   const others = $derived(row.worktrees.length - 1);
   // A group per checkout, as the terminal app's bands: the root first,
   // then the most recently worked in; empty ones with Show all worktrees.
+  // Only what the scope admits.
   const groups = $derived(
-    worktreeGroups(app.model, row.project.id, { archived: app.showArchived, showAll: app.launch.show_all_worktrees !== false }),
+    worktreeGroups(scopeModel(app.model), row.project.id, { archived: app.showArchived, showAll: app.launch.show_all_worktrees !== false }),
   );
   const cutting = $derived(rows.pending.filter((p) => p.project === row.project.id));
   const folded = $derived(isCollapsed(repoKey(row.project.id)));

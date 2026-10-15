@@ -477,6 +477,8 @@
     // F7 inside this pane's own editors never gets here (onPaneKey).
     const t = e.target as HTMLElement;
     if (t.closest('input, textarea, select, .monaco-editor, .xterm')) return;
+    // The board beside a review keeps its own arrows and j/k.
+    if (t.closest('[data-board]')) return;
     if (e.key === 'F7' && !e.ctrlKey && !e.altKey && !e.metaKey) {
       e.preventDefault();
       return step(e.shiftKey ? -1 : 1);
