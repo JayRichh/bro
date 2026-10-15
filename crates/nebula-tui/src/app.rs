@@ -83,6 +83,17 @@ pub enum HitTarget {
     /// A session card on the KANBAN, by its session: a click lands the
     /// cursor on it, a second one goes down into the pane.
     KanbanCard(nebula_core::AgentId),
+    /// A KANBAN lane's column, by its place in `Lane::ALL`, registered
+    /// after its cards so they win: where a held board card is let go.
+    KanbanLane(usize),
+    /// The ARCHIVED zone along the board's foot, drawn only while a card
+    /// is held: let go there, the session is archived.
+    KanbanArchive,
+    /// A CARD BUTTON on the board card under the cursor, by its session
+    /// and action: the cursor onto the card, then the action as its key.
+    KanbanButton(nebula_core::AgentId, crate::keymap::Action),
+    /// The `⋯` at the end of those: the card's CONTEXT MENU.
+    KanbanMenu(nebula_core::AgentId),
     /// A BAND's rule on the grid — the checkout's own row over its cards,
     /// by the band's place in `launcher::bands`: a click puts the cursor
     /// on the band, as `j`/`k` walking onto it do.
@@ -532,6 +543,52 @@ pub struct CardDrag {
     /// The PROJECT TAB under the pointer instead: `over` is then that
     /// project's first checkout, its root unless the card is already there.
     pub over_tab: Option<ProjectId>,
+    /// Over another session card of its own band instead: the release
+    /// puts the card on that side of it, in the user's order — not a
+    /// move, a reorder (`crate::order::drop_agent`).
+    pub slot: Option<(AgentId, crate::order::Place)>,
+}
+
+/// What an [`OrderDrag`] holds: a BAND by its checkout, a PROJECT TAB, or
+/// a card on the KANBAN, with the lane it was picked up from.
+#[derive(Debug, Clone, PartialEq)]
+pub enum OrderItem {
+    Band(WorktreeId),
+    Tab(ProjectId),
+    Board {
+        agent: AgentId,
+        worktree: WorktreeId,
+        lane: crate::launcher::Lane,
+    },
+}
+
+/// Where an [`OrderDrag`] would land if let go now.
+#[derive(Debug, Clone, PartialEq)]
+pub enum OrderOver {
+    /// Beside another band of the project.
+    Band(WorktreeId, crate::order::Place),
+    /// Beside another tab.
+    Tab(ProjectId, crate::order::Place),
+    /// A lane of the board, or the ARCHIVED zone, and — in its own lane —
+    /// the card of its checkout it would land beside.
+    Lane(
+        crate::order::DropLane,
+        Option<(AgentId, crate::order::Place)>,
+    ),
+}
+
+/// A band's rule, a project tab or a board card held under the pressed
+/// mouse button to put it elsewhere ([`App::order_drag`]): the BANDS and
+/// the tabs reorder, a board card acts on the lane it is let go on
+/// (`crate::order::lane_drop`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct OrderDrag {
+    pub item: OrderItem,
+    /// The cell the press landed on: the drag starts once the pointer
+    /// leaves it, so a plain click never becomes one.
+    pub from: (u16, u16),
+    pub active: bool,
+    pub over: Option<OrderOver>,
 }
 
 #[derive(Debug, Clone)]
@@ -4185,6 +4242,9 @@ pub struct LauncherState {
     /// A session card pressed on the grid, which a drag carries onto
     /// another band to move the session there (`MoveAgent`).
     pub card_drag: Option<CardDrag>,
+    /// A band, a project tab or a board card pressed, which a drag puts
+    /// elsewhere in the user's order or (a board card) drops on a lane.
+    pub order_drag: Option<OrderDrag>,
     /// That edge is under the mouse, or being dragged: its grip lights up.
     /// Only ever set in terminals that report plain mouse motion;
     /// elsewhere the grip rests until a drag takes hold.
@@ -5473,6 +5533,7 @@ impl App {
     pub fn mouse_held(&self) -> bool {
         let splitter = self.launcher.launcher_pane_drag.is_some()
             || self.launcher.card_drag.is_some()
+            || self.launcher.order_drag.is_some()
             || match &self.modals.overlay {
                 Some(Overlay::Diff(view)) => view.files_drag.is_some(),
                 Some(Overlay::Tree(view)) => view.files_drag.is_some(),

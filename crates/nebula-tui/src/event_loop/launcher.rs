@@ -1032,6 +1032,31 @@ pub(super) fn click_kanban(app: &mut App, id: &AgentId, out: &mut Vec<ClientRequ
     app.chrome.dirty = true;
 }
 
+/// A click on a board card's CARD BUTTON (`HitTarget::KanbanButton`): the
+/// cursor onto the card, the keys back from the pane, and the action as
+/// its key runs it — the band card's [`click_card_button`], on the board.
+pub(super) fn click_kanban_button(
+    app: &mut App,
+    id: &AgentId,
+    action: Action,
+    out: &mut Vec<ClientRequest>,
+) {
+    select(app, id.clone(), out);
+    keys_to_cards(app);
+    super::run_action(app, action, out);
+}
+
+/// A click on a board card's `⋯`: the cursor onto it, then its menu hung
+/// under the button.
+pub(super) fn click_kanban_menu(app: &mut App, id: &AgentId, out: &mut Vec<ClientRequest>) {
+    let anchor = crumb_anchor(app, &HitTarget::KanbanMenu(id.clone()));
+    select(app, id.clone(), out);
+    keys_to_cards(app);
+    if let Some(items) = super::context_menu_items(app, Focus::Sessions) {
+        super::open_menu(app, items, anchor);
+    }
+}
+
 /// Space on a card, and **Follow-up prompt** in its menu: the FOLLOW-UP
 /// MODAL for the session under the cursor — a small box floating over the
 /// grid, where the SESSIONS PANEL expands the card itself. Enter there
@@ -2200,6 +2225,7 @@ pub(super) fn press_card(app: &mut App, at: CardRef, from: (u16, u16)) {
             active: false,
             over: None,
             over_tab: None,
+            slot: None,
         }),
         _ => None,
     };
@@ -2215,9 +2241,32 @@ pub(super) fn drag_card(app: &mut App, pos: (u16, u16)) {
     if !drag.active && pos == drag.from {
         return;
     }
-    let band = |i: usize| view::bands(app).get(i).map(|b| b.worktree.clone());
+    let bands = view::bands(app);
+    let band = |i: usize| bands.get(i).map(|b| b.worktree.clone());
     let mut over_tab = None;
-    let over = match app.hit_at(pos.0, pos.1) {
+    let hit = app.hit_at(pos.0, pos.1);
+    // Over another session card of the band it stands in: a reorder,
+    // before or after that card by the half of it under the pointer.
+    let slot = match &hit {
+        Some(target @ HitTarget::LauncherCard(at)) => match view::card_at(&bands, *at) {
+            Some(view::Card::Session(row))
+                if row.agent.id != drag.agent
+                    && bands[at.band]
+                        .position(&SessionRef::Agent(drag.agent.clone()))
+                        .is_some() =>
+            {
+                app.hit_rect(target).map(|r| {
+                    (
+                        row.agent.id.clone(),
+                        crate::order::Place::of(pos.0.saturating_sub(r.x), r.width),
+                    )
+                })
+            }
+            _ => None,
+        },
+        _ => None,
+    };
+    let over = match hit {
         Some(HitTarget::LauncherCard(at)) => band(at.band),
         Some(
             HitTarget::LauncherBand(i)
@@ -2262,6 +2311,7 @@ pub(super) fn drag_card(app: &mut App, pos: (u16, u16)) {
         drag.active = true;
         drag.over = over;
         drag.over_tab = over_tab;
+        drag.slot = slot;
     }
     app.chrome.dirty = true;
 }
@@ -2280,12 +2330,230 @@ pub(super) fn drop_card(app: &mut App, out: &mut Vec<ClientRequest>) {
     // A drag is not the first half of a double-click on the card.
     app.pane.last_session_click = None;
     app.chrome.dirty = true;
+    if let Some((target, place)) = drag.slot {
+        let worktree = app
+            .tree
+            .agents
+            .iter()
+            .find(|a| a.id == drag.agent)
+            .map(|a| a.worktree_id.clone());
+        if let Some(worktree) = worktree {
+            let shown = crate::order::band_shown(app, &worktree);
+            crate::order::drop_agent(app, &drag.agent, &target, place, &shown, out);
+        }
+        return;
+    }
     if let Some(worktree) = drag.over {
         if crate::config::Config::load().confirm_drag_move {
             confirm_move(app, drag.agent, worktree);
         } else {
             move_agent(app, drag.agent, worktree, out);
         }
+    }
+}
+
+// ---- dragging a band, a tab or a board card ----
+
+/// A press on a BAND's rule arms a drag of the band: carried over another
+/// band of the project and let go, it takes that place in the user's
+/// order ([`drop_order`]). The root's band, and a NESTED thread of it,
+/// stay where they are: the root is always first.
+pub(super) fn press_band(app: &mut App, index: usize, from: (u16, u16)) {
+    let bands = view::bands(app);
+    app.launcher.order_drag =
+        bands
+            .get(index)
+            .filter(|b| !b.is_main && !b.solo)
+            .map(|b| crate::app::OrderDrag {
+                item: crate::app::OrderItem::Band(b.worktree.clone()),
+                from,
+                active: false,
+                over: None,
+            });
+}
+
+/// A press on a PROJECT TAB arms a drag of the tab along the header.
+pub(super) fn press_tab(app: &mut App, id: &ProjectId, from: (u16, u16)) {
+    app.launcher.order_drag = Some(crate::app::OrderDrag {
+        item: crate::app::OrderItem::Tab(id.clone()),
+        from,
+        active: false,
+        over: None,
+    });
+}
+
+/// A press on a KANBAN card arms a drag of it: let go on a lane, it does
+/// what that lane means where the user can cause it
+/// (`crate::order::lane_drop`), and the ARCHIVED zone shows along the
+/// board's foot while it is held.
+pub(super) fn press_kanban(app: &mut App, id: &AgentId, from: (u16, u16)) {
+    let lanes = view::kanban(app, app.launcher.kanban_all);
+    app.launcher.order_drag = view::kanban_find(&lanes, id).map(|(lane, row)| {
+        let card = &lanes[lane][row];
+        crate::app::OrderDrag {
+            item: crate::app::OrderItem::Board {
+                agent: id.clone(),
+                worktree: card.agent.worktree_id.clone(),
+                lane: view::Lane::ALL[lane],
+            },
+            from,
+            active: false,
+            over: None,
+        }
+    });
+}
+
+/// The held band, tab or board card moved to `pos`: what is under the
+/// pointer becomes where it would land.
+pub(super) fn drag_order(app: &mut App, pos: (u16, u16)) {
+    use crate::app::{OrderItem, OrderOver};
+    use crate::order::{DropLane, Place};
+    let Some(drag) = app.launcher.order_drag.clone() else {
+        return;
+    };
+    if !drag.active && pos == drag.from {
+        return;
+    }
+    let hit = app.hit_at(pos.0, pos.1);
+    let rect = |t: &HitTarget| app.hit_rect(t).unwrap_or_default();
+    let over = match &drag.item {
+        OrderItem::Band(own) => {
+            let bands = view::bands(app);
+            let index = match &hit {
+                Some(
+                    HitTarget::LauncherBand(i)
+                    | HitTarget::LauncherBandMore(i)
+                    | HitTarget::LauncherStripLeft(i)
+                    | HitTarget::LauncherStripRight(i)
+                    | HitTarget::LauncherBandNew(i)
+                    | HitTarget::LauncherBandFold(i),
+                ) => Some(*i),
+                Some(HitTarget::LauncherCard(at)) => Some(at.band),
+                _ => None,
+            };
+            let mine = bands.iter().position(|b| &b.worktree == own);
+            index
+                .zip(mine)
+                .and_then(|(i, mine)| Some((i, mine, bands.get(i)?)))
+                .filter(|(_, _, b)| &b.worktree != own)
+                .map(|(i, mine, b)| {
+                    // Over a band above it, before that band; below, after.
+                    // The root stays first: over it, the card lands just
+                    // after it.
+                    let place = if b.is_main || i > mine {
+                        Place::After
+                    } else {
+                        Place::Before
+                    };
+                    OrderOver::Band(b.worktree.clone(), place)
+                })
+        }
+        OrderItem::Tab(own) => match &hit {
+            Some(t @ HitTarget::LauncherTab(id)) if id != own => {
+                let r = rect(t);
+                Some(OrderOver::Tab(
+                    id.clone(),
+                    Place::of(pos.0.saturating_sub(r.x), r.width),
+                ))
+            }
+            _ => None,
+        },
+        OrderItem::Board {
+            agent,
+            worktree,
+            lane,
+        } => {
+            let lanes = view::kanban(app, app.launcher.kanban_all);
+            match &hit {
+                Some(HitTarget::KanbanArchive) => Some(OrderOver::Lane(DropLane::Archived, None)),
+                Some(HitTarget::KanbanLane(i)) => {
+                    Some(OrderOver::Lane(DropLane::Lane(view::Lane::ALL[*i]), None))
+                }
+                Some(
+                    t @ (HitTarget::KanbanCard(id)
+                    | HitTarget::KanbanButton(id, _)
+                    | HitTarget::KanbanMenu(id)),
+                ) => {
+                    view::kanban_find(&lanes, id).map(|(l, row)| {
+                        let to = view::Lane::ALL[l];
+                        let card = &lanes[l][row];
+                        // Beside a card of its own checkout in its own lane:
+                        // a reorder, by the half of that card under the
+                        // pointer. Anywhere else on a lane, the lane.
+                        let beside =
+                            (to == *lane && id != agent && &card.agent.worktree_id == worktree)
+                                .then(|| {
+                                    let r = app
+                                        .hit_rect(&HitTarget::KanbanCard(id.clone()))
+                                        .unwrap_or_else(|| rect(t));
+                                    (id.clone(), Place::of(pos.1.saturating_sub(r.y), r.height))
+                                });
+                        OrderOver::Lane(DropLane::Lane(to), beside)
+                    })
+                }
+                _ => None,
+            }
+        }
+    };
+    if let Some(d) = &mut app.launcher.order_drag {
+        d.active = true;
+        d.over = over;
+    }
+    app.chrome.dirty = true;
+}
+
+/// The button let go on a held band, tab or board card: the reorder, or
+/// what the lane it was let go on means. Nothing for a press that never
+/// left its cell: that was the click it already ran as.
+pub(super) fn drop_order(app: &mut App, out: &mut Vec<ClientRequest>) {
+    use crate::app::{OrderItem, OrderOver};
+    use crate::order::{lane_drop, DropLane, LaneDrop};
+    let Some(drag) = app.launcher.order_drag.take() else {
+        return;
+    };
+    app.chrome.dirty = true;
+    if !drag.active {
+        return;
+    }
+    app.pane.last_session_click = None;
+    match (drag.item, drag.over) {
+        (OrderItem::Band(id), Some(OrderOver::Band(target, place))) => {
+            crate::order::drop_worktree(app, &id, &target, place, out);
+        }
+        (OrderItem::Tab(id), Some(OrderOver::Tab(target, place))) => {
+            crate::order::drop_project(app, &id, &target, place, out);
+        }
+        (
+            OrderItem::Board {
+                agent,
+                worktree,
+                lane,
+            },
+            Some(OrderOver::Lane(to, beside)),
+        ) => match lane_drop(lane, to) {
+            LaneDrop::Refuse(why) => app.chrome.flash = Some(why.into()),
+            LaneDrop::Seen => {
+                super::mark_agent_seen(app, &agent, out);
+                app.chrome.flash = Some("marked seen: the card is done".into());
+            }
+            LaneDrop::Archive => {
+                super::archive_agent(app, agent, out);
+            }
+            LaneDrop::Reorder => match beside {
+                Some((target, place)) => {
+                    let shown = crate::order::board_order(app, &worktree);
+                    crate::order::drop_agent(app, &agent, &target, place, &shown, out);
+                }
+                None if to != DropLane::Archived => {
+                    app.chrome.flash = Some(
+                        "cards reorder beside cards of their own worktree; m moves the session to another"
+                            .into(),
+                    );
+                }
+                None => {}
+            },
+        },
+        _ => {}
     }
 }
 

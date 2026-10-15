@@ -98,6 +98,8 @@ pub(super) fn land_click_focus(app: &mut App, column: u16, row: u16, out: &mut V
         Some(
             HitTarget::LauncherCard(_)
             | HitTarget::KanbanCard(_)
+            | HitTarget::KanbanLane(_)
+            | HitTarget::KanbanArchive
             | HitTarget::LauncherBand(_)
             | HitTarget::LauncherBandPr(_)
             | HitTarget::LauncherCardIssue(_)
@@ -147,6 +149,8 @@ pub(super) fn land_click_focus(app: &mut App, column: u16, row: u16, out: &mut V
             | HitTarget::Button(_)
             | HitTarget::FooterHint(_)
             | HitTarget::CardButton(..)
+            | HitTarget::KanbanButton(..)
+            | HitTarget::KanbanMenu(_)
             | HitTarget::CardMenu(_)
             | HitTarget::LauncherBandNew(_)
             | HitTarget::LauncherPaneMenu,
