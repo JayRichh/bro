@@ -2421,6 +2421,68 @@
           "overridden": false
         },
         {
+          "id": "create_pull_request",
+          "label": "Create pull request…",
+          "hint": "The pull request composer for the checkout under the cursor: title, body, base branch and draft, prefilled from the session and its commits; Enter pushes the branch and opens it. Dropping a Review card on Ship does the same",
+          "group": "PROJECTS & WORKTREES",
+          "defaults": [],
+          "bound": [],
+          "overridden": false
+        },
+        {
+          "id": "merge_pull_request",
+          "label": "Merge pull request…",
+          "hint": "Merge the open pull request of the checkout under the cursor, after a confirm that picks the method and whether the remote branch goes. Dropping a Ship card on Done does the same",
+          "group": "PROJECTS & WORKTREES",
+          "defaults": [],
+          "bound": [],
+          "overridden": false
+        },
+        {
+          "id": "focus_scope",
+          "label": "Focus here",
+          "hint": "Narrow the scope chip in the header to the repo, worktree or card under the cursor: the board, the attention strip, . and , and the quick prompt follow it. The chip's ✕ widens it back to everything, as Esc does once the cursor has let go of the card",
+          "group": "PROJECTS & WORKTREES",
+          "defaults": [],
+          "bound": [],
+          "overridden": false
+        },
+        {
+          "id": "scope_account",
+          "label": "Scope to an account…",
+          "hint": "Narrow the scope chip to the sessions of one account, picked from those the board's sessions run on (or back to any account); the chip's @ does the same by click. The desktop's chip menu lists the accounts too",
+          "group": "PROJECTS & WORKTREES",
+          "defaults": [],
+          "bound": [],
+          "overridden": false
+        },
+        {
+          "id": "move_card_left",
+          "label": "Move card to the lane on the left",
+          "hint": "On the board: let the card under the cursor go on the lane to its left, as dropping it there does. A lane the agent owns refuses, saying why",
+          "group": "PROJECTS & WORKTREES",
+          "defaults": [
+            "shift+left"
+          ],
+          "bound": [
+            "shift+left"
+          ],
+          "overridden": false
+        },
+        {
+          "id": "move_card_right",
+          "label": "Move card to the lane on the right",
+          "hint": "On the board: let the card under the cursor go on the lane to its right, as dropping it there does: Review to Ship opens the pull request composer, Ship to Done merges, and past Done archives (offering the worktree's safe delete)",
+          "group": "PROJECTS & WORKTREES",
+          "defaults": [
+            "shift+right"
+          ],
+          "bound": [
+            "shift+right"
+          ],
+          "overridden": false
+        },
+        {
           "id": "open_issue",
           "label": "Open issue in browser",
           "hint": "Send the GitHub issue the session card under the cursor was started from to your browser. i lists the issues in kete; ⇧I goes to GitHub",

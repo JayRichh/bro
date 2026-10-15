@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.50.0
+
+The board now follows the work from start to merge: scope it to what you're working on, review an agent's changes beside the board, and open or merge the PR without leaving either app.
+
+- **Board lanes follow the work.** Running → Needs you → Review → Ship → Done.
+  - **Review** holds sessions that finished unread, or that left changes no PR carries yet: uncommitted work or commits ahead of the base.
+  - **Ship** holds sessions with an open or draft PR.
+  - **Done** holds the rest. Cards show "N commits" and the PR state.
+  - Both apps use the same rules, computed once in the shared core.
+- **Drops do what the lane means.** Review → Ship opens the PR form. Ship → Done merges after a confirm (squash, merge or rebase, with an option to delete the remote branch). Review → Done marks the card seen. Done → Archived archives it and offers the safe worktree delete (linked worktrees only, when it held the last session). A drop that can't happen dims the lane and shows the reason while you're still dragging; on the base branch it says so instead of offering a PR.
+- **Scope chip.** `all ▸ repo ▸ worktree @account` sits in both apps' headers. The board, the attention strip and next-attention keys, the overview, the quick prompt's target and the diff's default worktree all follow it. Set it with a rail repo or a digit, or with "Focus here" on a repo, worktree or card. Each lane foot says "N more outside scope", and ✕ (or Esc in the terminal app) clears it. In the terminal app `Tab` still flips between this project and every project.
+- **Review beside the board.** Open a Review or Ship card to dock its worktree's diff against the base next to the board. A row above the diff has Reply (`Space`), Open or Create pull request (`⌥P`), Merge (`⌥M`), Archive (`⌥A`) and Delete worktree (`⌥W`), the same in both apps. Closing it returns you to the same card.
+- **Pull requests from the app.** The PR form starts from the session's name, prompt and commits since the base, for GitHub (via `gh`) or Azure DevOps. If something fails it shows the fix as a button: sign in, install `gh`, or open the PR in ADO when a policy blocks the merge. The same verbs are on `?`, the menus and the palette. New CLI: `kete ship status|pr|merge`.
+- **No credential pop-ups.** Kete's own pushes and fetches never open a Git Credential Manager window or an ssh passphrase prompt. A sign-in failure shows as "sign in" with a button.
+- **`kete spawn --profile <name>`** starts a sibling session on another account. It needs a 0.50 daemon (protocol 58); older clients and daemons still connect.
+
 ## 0.49.0
 
 Both apps now share one list of verbs and one key table. You learn by pointing at a thing instead of memorising keys, and the diff keeps an agent's committed work.
