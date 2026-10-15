@@ -111,7 +111,7 @@
               aria-label="{r.name} {v.label}"
               aria-current={cur ? 'page' : undefined}
             >
-              <span aria-hidden="true">{v.view === 'worktrees' ? '↳' : v.view === 'prs' ? 'PR' : v.label.slice(0, 2)}</span>
+              <span aria-hidden="true">{v.view === 'worktrees' ? '\u21b3' : v.view === 'prs' ? 'PR' : v.label.slice(0, 2)}</span>
             </button>
           {/each}
         {/if}
