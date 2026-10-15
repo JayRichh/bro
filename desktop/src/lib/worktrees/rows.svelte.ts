@@ -1,14 +1,17 @@
 // The window-side state behind the overview's worktree groups and the
 // Worktrees view: which groups are folded (saved under `desktop` in
 // config.json), each checkout's git state (read in the background,
-// cached, again on focus and every so often while a view shows it), and
+// cached, again on focus, as a session's turn ends there, and every so
+// often while a view shows it), and
 // the checkouts git is still cutting, drawn as placeholders until the
 // daemon lists them.
 
+import { untrack } from 'svelte';
 import { api } from '../api';
 import { app, toast } from '../store.svelte';
 import { worktreeApi, type WorktreeGit } from './api';
 import { pruneKeys, repoKey, setKey } from './groups';
+import { turnMarks, turnedWorktrees, type TurnMarks } from './turns';
 
 export const rows = $state({
   /** Folded groups: `repo:<id>`, `wt:<id>`. */
@@ -55,12 +58,18 @@ const MIN_GAP_MS = 4_000;
 const POLL_MS = 30_000;
 const readAt = new Map<string, number>();
 let reading = false;
+/** Forced reads asked for during one: run as it ends. */
+const queued = new Set<string>();
 
 /** Read the checkouts' git state, skipping any read in the last few
  *  seconds unless `force`. One read at a time; a call during one waits
- *  for the next tick of the poll. */
+ *  for the next tick of the poll, or, forced, for that read to end. */
 export async function refreshGit(ids: string[], force = false) {
-  if (reading || !ids.length) return;
+  if (!ids.length) return;
+  if (reading) {
+    if (force) for (const id of ids) queued.add(id);
+    return;
+  }
   const now = Date.now();
   const due = ids.filter((id) => force || now - (readAt.get(id) ?? 0) >= MIN_GAP_MS);
   if (!due.length) return;
@@ -73,6 +82,11 @@ export async function refreshGit(ids: string[], force = false) {
     /* the next poll tries again */
   } finally {
     reading = false;
+  }
+  if (queued.size) {
+    const next = [...queued];
+    queued.clear();
+    await refreshGit(next, true);
   }
 }
 
@@ -95,8 +109,28 @@ export function shownIds(): string[] {
 }
 const onFocus = () => refreshGit(shownIds(), true);
 
+let stopTurns: (() => void) | undefined;
+/** Read a checkout again as soon as a session there changes status (a
+ *  turn that ends has usually committed): the Review card's commit count
+ *  and what Ship takes come off that read, and the poll is half a minute
+ *  away. */
+function watchTurns(): () => void {
+  let marks: TurnMarks | null = null;
+  return $effect.root(() => {
+    $effect(() => {
+      const agents = app.model.agents;
+      const turned = turnedWorktrees(marks, agents);
+      marks = turnMarks(agents);
+      const shown = new Set(untrack(shownIds));
+      const ids = turned.filter((id) => shown.has(id));
+      if (ids.length) refreshGit(ids, true);
+    });
+  });
+}
+
 /** Keep the git state fresh while a view that shows it is mounted: at
- *  once, on window focus, and every half minute. Returns the stop. */
+ *  once, on window focus, as a session's turn ends, and every half
+ *  minute. Returns the stop. */
 export function watchGit(): () => void {
   watchers += 1;
   if (watchers === 1) {
@@ -104,6 +138,7 @@ export function watchGit(): () => void {
     timer = setInterval(() => {
       if (document.hasFocus()) refreshGit(shownIds());
     }, POLL_MS);
+    stopTurns = watchTurns();
   }
   refreshGit(shownIds());
   return () => {
@@ -111,6 +146,8 @@ export function watchGit(): () => void {
     if (watchers === 0) {
       window.removeEventListener('focus', onFocus);
       clearInterval(timer);
+      stopTurns?.();
+      stopTurns = undefined;
     }
   };
 }
