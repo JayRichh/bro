@@ -177,6 +177,17 @@ impl ShipError {
     }
 
     fn from_ado(e: AdoError) -> Self {
+        // A git push or fetch the remote refused for want of a sign-in:
+        // git never asks (`git_env`), so it is said here, with a button.
+        if let AdoError::Local(msg) = &e {
+            if let Some(line) = crate::git_env::needs_sign_in(msg) {
+                return Self::new(
+                    ShipErrorKind::SignIn,
+                    Some(ForgeKind::Ado),
+                    git_sign_in(line),
+                );
+            }
+        }
         let kind = match e.kind() {
             ErrorKind::Auth => ShipErrorKind::SignIn,
             ErrorKind::Offline => ShipErrorKind::Offline,
@@ -193,6 +204,17 @@ impl fmt::Display for ShipError {
 }
 
 impl std::error::Error for ShipError {}
+
+/// What to tell someone whose git push was refused for want of a sign-in.
+fn git_sign_in(line: &str) -> String {
+    let line = line
+        .strip_prefix("The git push of ")
+        .and_then(|rest| rest.split_once(" failed: ").map(|(_, why)| why))
+        .unwrap_or(line);
+    format!(
+        "The remote refused git's sign-in ({line}). Sign in with Git Credential Manager, or add your SSH key to the forge, then try again."
+    )
+}
 
 /// What to tell someone `gh` refused for want of a sign-in.
 pub const GH_SIGN_IN: &str = "GitHub sign-in needed: run `gh auth login`, then try again.";
@@ -278,6 +300,13 @@ impl Runner for ProcessRunner {
     ) -> std::io::Result<RunOut> {
         use std::process::Stdio;
         use tokio::io::AsyncWriteExt;
+        // git (the remote branch's delete) never asks for a sign-in.
+        let ssh = if program == "git" {
+            let words: Vec<&str> = args.iter().map(String::as_str).collect();
+            crate::git_env::setup_for_async(cwd, &words).await
+        } else {
+            crate::git_env::SshSetup::from_env()
+        };
         let mut cmd = tokio::process::Command::new(program);
         cmd.args(args)
             .current_dir(cwd)
@@ -291,9 +320,8 @@ impl Runner for ProcessRunner {
             .env("GH_PROMPT_DISABLED", "1")
             .env("GH_NO_UPDATE_NOTIFIER", "1")
             .env("NO_COLOR", "1")
-            .env("GIT_TERMINAL_PROMPT", "0")
-            .env("GCM_INTERACTIVE", "never")
             .kill_on_drop(true);
+        crate::git_env::quiet_tokio(&mut cmd, &ssh);
         #[cfg(windows)]
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
         let mut child = cmd.spawn()?;
