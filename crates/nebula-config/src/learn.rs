@@ -304,7 +304,12 @@ pub const EMPTY: &[Empty] = &[
     },
     Empty {
         id: "no_sessions",
-        text: "No sessions here yet.",
+        text: "No sessions in this worktree yet.",
+        verb: Some("quick_prompt"),
+    },
+    Empty {
+        id: "overview",
+        text: "Every session you start shows here under its repo, the ones waiting on you first.",
         verb: Some("quick_prompt"),
     },
     Empty {

@@ -411,6 +411,14 @@ export interface ImportPreview {
   changes: boolean;
 }
 
+/** The tips' state and whether What's new is due (src-tauri learn.rs). */
+export interface LearnState {
+  showTips: boolean;
+  seen: string[];
+  whatsNew: boolean;
+  version: string;
+}
+
 export interface DesktopPrefs {
   theme: string;
   diff_mode: string;
@@ -614,6 +622,10 @@ export const api = {
    *  null put it back to its default. Answers every binding now. */
   desktopKeySet: (id: string, chords: string[] | null) => invoke<Record<string, string[]>>('desktop_key_set', { id, chords }),
   desktopSetCollapsed: (keys: string[]) => invoke<void>('desktop_set_collapsed', { keys }),
+  /** First-use tips and What's new: the shared seen-state (src-tauri learn.rs). */
+  learnState: () => invoke<LearnState>('learn_state'),
+  learnSeen: (id: string) => invoke<void>('learn_seen', { id }),
+  learnTips: (on: boolean) => invoke<void>('learn_tips', { on }),
   /** Why config.json can't be written (it can't be parsed); null: fine. */
   configProblem: () => invoke<string | null>('config_problem'),
   diffFiles: (worktree: string) => invoke<DiffFile[]>('diff_files', { worktree }),

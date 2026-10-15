@@ -1705,11 +1705,11 @@ export const PRIMARY_SHOWN = 4;
 
 /** First-use tips (nebula-config learn.rs): `{verb}` / `{verb|words}` name a key. */
 export const TIPS: readonly { id: string; text: string }[] = [
-  { id: "verbs", text: "{verbs|The verbs menu} lists everything you can do with the selection, each with its key." },
-  { id: "scope", text: "The scope chip narrows the board, attention and quick prompt to one repo or worktree; clear it to see everything." },
-  { id: "lanes", text: "Review holds finished work no PR carries yet; open a card to see its diff, drag it to Ship to open the PR." },
-  { id: "drag", text: "Drag a card between lanes: to Ship opens a PR, to Done merges it. {verbs|The verbs menu} on a card has the same moves." },
-  { id: "review", text: "The row above the diff replies, opens or merges the PR, archives, or deletes the worktree; each names its key." },
+  { id: "verbs", text: "{verbs|The verbs menu} lists what you can do here, with keys." },
+  { id: "scope", text: "The scope chip narrows the board; clear it to see all." },
+  { id: "lanes", text: "Review: finished work. Drag it to Ship to open a PR." },
+  { id: "drag", text: "Drag cards across lanes: Ship opens a PR, Done merges." },
+  { id: "review", text: "The row above the diff: reply, PR, merge, archive." },
 ];
 
 /** The What's new page, newest release first. */
@@ -1741,7 +1741,8 @@ export const EMPTY: readonly { id: string; text: string; verb: ActionId | null }
   { id: "lane_done", text: "Merged and read work rests here.", verb: null },
   { id: "board", text: "No sessions yet: start one and it shows on the board.", verb: "quick_prompt" },
   { id: "no_repos", text: "Add a repo to start: its worktrees and sessions show here.", verb: "add_project" },
-  { id: "no_sessions", text: "No sessions here yet.", verb: "quick_prompt" },
+  { id: "no_sessions", text: "No sessions in this worktree yet.", verb: "quick_prompt" },
+  { id: "overview", text: "Every session you start shows here under its repo, the ones waiting on you first.", verb: "quick_prompt" },
   { id: "accounts", text: "No accounts yet: add one to run sessions on another login.", verb: "accounts" },
   { id: "search", text: "Nothing matches. Try fewer letters.", verb: null },
 ];

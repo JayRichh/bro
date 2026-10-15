@@ -1,5 +1,8 @@
 <script lang="ts">
-  import { app, markSeen, openReview, openSession, openDiff, setScope, toast } from './store.svelte';
+  import { app, focusQuickPrompt, markSeen, openReview, openSession, openDiff, setScope, toast } from './store.svelte';
+  import { offerTip } from './learn.svelte';
+  import { LANE_EMPTY, emptyCopy } from './learn';
+  import { verbKeys } from './verbs';
   import { LANES, lanes, toneOf, harnessLabel, lastPrompt, age, placeOf, type Lane } from './status';
   import Status from './Status.svelte';
   import { retract } from './motion';
@@ -7,7 +10,7 @@
   import type { Agent, DropTarget } from './api';
   import { agentMenu, archiveAgent, archiveAndOfferWorktree, followUp, unarchiveAgent } from './actions';
   import { layerOpen, openMenu } from './ui/ui.svelte';
-  import { withKey } from './shortcuts';
+  import { keyLabel, withKey } from './shortcuts';
   import Icon from './ui/Icon.svelte';
   import { drag, dropCard, endDrag, leftFor, offsetIn, startDrag } from './reorder.svelte';
   import { dropZone, type Place } from './order';
@@ -110,6 +113,20 @@
   const board = $derived(lanes(app.model));
   const total = $derived(LANES.reduce((n, l) => n + board[l.id].length, 0));
   const outside = $derived(hiddenTotal(app.model));
+
+  // First-use tips for the board's own concepts, while it is the one up:
+  // a card reaching Review (the lanes), then two cards to drag.
+  $effect(() => {
+    if (!active) return;
+    if (board.unseen.length) offerTip('lanes');
+    if (total >= 2) offerTip('drag');
+  });
+  /** An empty lane's line and the verb that fills it, with its key. */
+  function emptyOf(lane: Lane) {
+    const e = emptyCopy(LANE_EMPTY[lane]);
+    const key = e.verb ? verbKeys(e.verb)[0] : undefined;
+    return { ...e, key: key ? keyLabel(key) : null };
+  }
 
   // The selected card, by id: opening one marks it seen, which can move it
   // to another lane; the selection follows it there.
@@ -334,9 +351,19 @@
             </div>
           {/each}
           {#if !cards.length}
-            <p class="m-0 px-4 py-3 text-[13px] text-muted">
-              {lane.id === 'needs' ? 'Nothing needs you.' : 'Nothing here.'}
-            </p>
+            <!-- What lands in this lane, and the one thing to do about it. -->
+            {@const e = emptyOf(lane.id)}
+            <div class="flex flex-col items-start gap-2 px-4 py-3">
+              <p class="m-0 text-[13px] text-muted">{e.text}</p>
+              {#if e.verb === 'quick_prompt'}
+                <button
+                  class="inline-flex h-6 items-center gap-1.5 border border-rule bg-transparent px-2 text-[12px] text-ink hover:border-rule-strong"
+                  title={withKey('New session: the quick prompt', ['quick_prompt', 'quick_prompt_alt'])}
+                  onclick={() => focusQuickPrompt()}
+                  >New session{#if e.key}<kbd class="font-mono text-[11px] text-faint">{e.key}</kbd>{/if}</button
+                >
+              {/if}
+            </div>
           {/if}
           {#if hidden}
             <!-- The scope hides these: a click shows everything again. -->

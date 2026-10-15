@@ -9,6 +9,7 @@
   import { buildItems, labelMarks, search, type PaletteItem } from './palette';
   import { paletteCommands } from './commands';
   import { keyLabel } from './shortcuts';
+  import { emptyCopy } from './learn';
 
   let query = $state('');
   let at = $state(0);
@@ -121,7 +122,7 @@
           </button>
         </li>
       {:else}
-        <li class="px-4 py-3 text-[13px] text-muted">Nothing matches.</li>
+        <li class="px-4 py-3 text-[13px] text-muted">{emptyCopy('search').text}</li>
       {/each}
     </ul>
     <div class="flex flex-none items-center gap-4 border-t border-rule px-4 py-1.5 font-mono text-[11px] text-muted">

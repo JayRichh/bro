@@ -13,6 +13,7 @@
     type SettingsTab,
   } from '../api';
   import { app, refreshLaunchables, refreshRunCommands, toast } from '../store.svelte';
+  import { setShowTips } from '../learn.svelte';
   import { isDiffMode } from '../diff-api';
   import { nav } from '../shell/history.svelte';
   import { chordLabel, hotkeyGroups, matches, segmented, sequence, targetKey } from './settings';
@@ -96,6 +97,7 @@
     if (t.scope === 'agent' || (t.scope === 'global' && (t.key === 'quick_prompt_kind' || t.key === 'hide_uninstalled_harnesses' || t.key === 'show_all_worktrees')))
       refreshLaunchables();
     if (t.scope === 'project' && t.field === 'run_command') refreshRunCommands();
+    if (t.scope === 'global' && t.key === 'show_tips' && typeof value === 'boolean') setShowTips(value);
   }
 
   async function write(row: SettingRow, value: boolean | string, el?: HTMLInputElement) {

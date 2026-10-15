@@ -44,7 +44,8 @@ describe('the shortcut table', () => {
     // The digits are repos and Shift+R is refresh: these keep their rows
     // for a user's own key, with none by default. `?` is the verbs menu's
     // now: help keeps F1 (help_f1) and its own row for a user's key.
-    const unbound = ['go_home', 'go_session', 'go_diff', 'orchestrator', 'restart', 'help'];
+    // What's new is in Help and the palette, a key only if the user wants one.
+    const unbound = ['go_home', 'go_session', 'go_diff', 'orchestrator', 'restart', 'help', 'whats_new'];
     const ids = SHORTCUTS.map((s) => s.id);
     expect(new Set(ids).size).toBe(ids.length);
     for (const s of SHORTCUTS) {
