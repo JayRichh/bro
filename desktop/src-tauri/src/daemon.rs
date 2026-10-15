@@ -60,6 +60,12 @@ pub struct Model {
     /// Each session's context window, keyed by agent id
     /// (`ServerEvent::SessionContexts`).
     pub contexts: HashMap<String, nebula_core::usage::ContextUsage>,
+    /// Each session's lane and attention tier by agent id, archived ones
+    /// too: nebula-core's rule, filled in by [`Client::snapshot`]
+    /// ([`crate::board::fill`]), never by the window.
+    pub cards: HashMap<String, crate::board::Card>,
+    /// The board's cards, lane by lane, each in the order it shows them.
+    pub lanes: HashMap<nebula_core::board::Lane, Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -204,8 +210,11 @@ impl Client {
         })
     }
 
+    /// The model as the window draws it, the board worked out.
     pub fn snapshot(&self) -> Model {
-        self.model.lock().expect("model lock").clone()
+        let mut model = self.model.lock().expect("model lock").clone();
+        crate::board::fill(&mut model);
+        model
     }
 
     fn touch(&self) {

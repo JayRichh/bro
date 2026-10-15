@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Agent, Model } from './api';
+import type { Agent, Card, Model } from './api';
 import { attentionSessions, buildItems, labelMarks, scattered, search, stepRing } from './palette';
 
 const agent = (id: string, worktree: string, status: Agent['status'], extra: Partial<Agent> = {}): Agent => ({
@@ -21,6 +21,10 @@ const agent = (id: string, worktree: string, status: Agent['status'], extra: Par
   parent: null,
   ...extra,
 });
+
+/** The model's tiers, as the Tauri side fills them (nebula-core's rule). */
+const cards = (tiers: Record<string, number>): Record<string, Card> =>
+  Object.fromEntries(Object.entries(tiers).map(([id, tier]) => [id, { lane: 'done', tier }]));
 
 const model: Model = {
   connected: true,
@@ -49,6 +53,8 @@ const model: Model = {
   ports: [],
   prs: { w2: { number: 42, url: 'https://x/pr/42', title: 'Round GST per invoice', draft: false } },
   subagents: [],
+  cards: cards({ 'old-done': 3, 'new-done': 3, busy: 1, asks: 0, unread: 2, gone: 3 }),
+  lanes: { needs: [], running: [], unseen: [], done: [], pr: [] },
 };
 
 const commands = [
@@ -87,6 +93,23 @@ describe('the palette', () => {
     expect([...labelMarks(top.item, top.positions)].sort((a, b) => a - b)).toEqual([5, 6, 7, 8, 9]);
   });
 
+  it('sorts and words a session by the tier the model gives it, not its own flags', () => {
+    // Stopped but still flagged unseen: core says it is not unread.
+    const m: Model = {
+      ...model,
+      agents: [
+        agent('stopped', 'w1', 'terminated', { unseen: true, status_changed_at: 99 }),
+        agent('unread', 'w1', 'finished', { unseen: true }),
+      ],
+      cards: cards({ stopped: 3, unread: 2 }),
+    };
+    const rows = search(buildItems(m, []), '').map((r) => [r.item.label, r.item.hint]);
+    expect(rows).toEqual([
+      ['unread', 'unread'],
+      ['stopped', 'session'],
+    ]);
+  });
+
   it('marks only the label part of a path row', () => {
     const [top] = search(items, 'asks');
     expect([...labelMarks(top.item, top.positions)]).toEqual([0, 1, 2, 3]);
@@ -103,6 +126,7 @@ describe('palette ranking', () => {
         agent('ledger-recon-test', 'w2', 'running', { status_changed_at: 90 }),
         agent('gst-rounding', 'w2', 'finished', { status_changed_at: 10 }),
       ],
+      cards: cards({ 'ledger-recon-test': 1, 'gst-rounding': 3 }),
     };
     const rows = search(buildItems(m, []), 'gst').filter((r) => r.item.target.kind === 'session');
     expect(rows.map((r) => r.item.label)).toEqual(['gst-rounding', 'ledger-recon-test']);
@@ -130,6 +154,7 @@ describe('the . and , ring', () => {
       agent('ask', 'w1', 'needs_feedback', { status_changed_at: 1 }),
       agent('gone', 'w1', 'needs_feedback', { archived: true, status_changed_at: 9000 }),
     ],
+    cards: cards({ fresh: 3, read: 3, unread: 2, run: 1, ask: 0, gone: 0 }),
   };
 
   it('is every live session in attention order', () => {

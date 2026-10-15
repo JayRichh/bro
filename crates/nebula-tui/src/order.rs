@@ -4,7 +4,7 @@
 //! the tree folds in like any other; nothing is reordered here first.
 //!
 //! The rule every client lays rows out by is `nebula_core::ReorderScope`'s,
-//! and the desktop's (`desktop/src/lib/order.ts`), so the two apps agree:
+//! written once in `nebula_core::order` and read by the desktop too:
 //! a scope the user has ordered lays out by `sort_order`; one never
 //! ordered keeps each view's own order. A scope has a user order once some
 //! row's `sort_order` is above 0 ([`has_user_order`]): the daemon leaves
@@ -22,10 +22,7 @@ use crate::launcher::{Lane, LauncherRow};
 use nebula_core::{AgentId, ClientRequest, ProjectId, ReorderScope, WorktreeId, REORDER_PROTOCOL};
 use std::collections::HashSet;
 
-/// Whether a scope's rows carry a user order.
-pub fn has_user_order(orders: impl IntoIterator<Item = i64>) -> bool {
-    orders.into_iter().any(|o| o > 0)
-}
+pub use nebula_core::order::has_user_order;
 
 /// Whether the projects are in a user order (the PROJECT TABS, the
 /// Projects column).
@@ -46,12 +43,7 @@ pub fn worktrees_ordered(app: &App, project: &ProjectId) -> bool {
 
 /// The checkouts whose sessions carry a user order, archived ones counted.
 pub fn ordered_worktrees(app: &App) -> HashSet<WorktreeId> {
-    app.tree
-        .agents
-        .iter()
-        .filter(|a| a.sort_order > 0)
-        .map(|a| a.worktree_id.clone())
-        .collect()
+    nebula_core::order::ordered_worktrees(&app.tree.agents)
 }
 
 /// Which side of a row a drop lands on.
@@ -161,26 +153,10 @@ pub fn agent_ids(app: &App, worktree: &WorktreeId, shown: &[AgentId]) -> Vec<Age
 /// checkouts), and the user's order among the cards of a checkout that has
 /// one. Each such checkout's cards take back the slots they hold, in
 /// `sort_order`, so the checkouts stay interleaved by age.
-pub fn refill(mut cards: Vec<LauncherRow>, ordered: &HashSet<WorktreeId>) -> Vec<LauncherRow> {
-    let mut slots: Vec<(WorktreeId, Vec<usize>)> = Vec::new();
-    for (i, row) in cards.iter().enumerate() {
-        let w = &row.agent.worktree_id;
-        if !ordered.contains(w) {
-            continue;
-        }
-        match slots.iter_mut().find(|(id, _)| id == w) {
-            Some((_, at)) => at.push(i),
-            None => slots.push((w.clone(), vec![i])),
-        }
-    }
-    for (_, at) in slots {
-        let mut mine: Vec<LauncherRow> = at.iter().map(|&i| cards[i].clone()).collect();
-        mine.sort_by_key(|r| r.agent.sort_order);
-        for (i, row) in at.into_iter().zip(mine) {
-            cards[i] = row;
-        }
-    }
-    cards
+pub fn refill(cards: Vec<LauncherRow>, ordered: &HashSet<WorktreeId>) -> Vec<LauncherRow> {
+    nebula_core::order::refill(cards, ordered, |r| {
+        (&r.agent.worktree_id, r.agent.sort_order)
+    })
 }
 
 /// Where a board card is dropped: a lane, or the ARCHIVED zone the board

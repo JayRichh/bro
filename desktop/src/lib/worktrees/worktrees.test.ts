@@ -128,13 +128,10 @@ describe('the branch switcher', () => {
 describe('pull request states', () => {
   const pr = (state?: PrInfo['state'], draft = false): PrInfo => ({ number: 1, url: '', title: '', draft, state });
 
-  it('keeps merged and closed PRs out of the PR open lane', () => {
+  it('reads each card lane from the model, which works it out (src-tauri board.rs)', () => {
     const a = agent('a', 'w');
-    expect(laneOf(a, pr('open'))).toBe('pr');
-    expect(laneOf(a, pr(undefined))).toBe('pr');
-    expect(laneOf(a, pr('open', true))).toBe('pr');
-    expect(laneOf(a, pr('merged'))).toBe('done');
-    expect(laneOf(a, pr('closed'))).toBe('done');
+    expect(laneOf(model({ cards: { a: { lane: 'pr', tier: 3 } } }), a)).toBe('pr');
+    expect(laneOf(model({ cards: {} }), a)).toBe('done');
   });
 
   it('names the state', () => {

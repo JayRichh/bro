@@ -8,6 +8,7 @@
 mod accounts;
 mod ado;
 mod alerts;
+mod board;
 mod branches;
 mod daemon;
 mod files;
