@@ -305,6 +305,11 @@ async fn serve(opts: DaemonOpts) -> Result<()> {
         });
     }
 
+    // SESSION SNAPSHOTS: this daemon's sessions' 0.51 refs moved into its
+    // namespace, and its refs for sessions it no longer has swept (on the
+    // snapshot worker, never another daemon's).
+    daemon.sweep_snapshot_refs();
+
     // Learn which agent CLIs are installed before anyone asks, so a create
     // that has to refuse ("codex was not found on your PATH") answers at once
     // instead of stalling on a login-shell probe.

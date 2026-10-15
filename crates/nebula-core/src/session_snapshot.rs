@@ -1,16 +1,55 @@
 //! Which session made which change, when several share a worktree. The
-//! daemon snapshots a session's checkout when the session starts and again
-//! at each turn boundary (finished, needs feedback): HEAD, and a git tree
-//! of the whole working tree as it stands, untracked files included and
-//! ignored ones not. A session's changes are the diff from its start
-//! snapshot to its last one ([`SessionChanges::trees`]).
+//! daemon snapshots a session's checkout when the session starts, when
+//! each of its turns starts (status to running) and when each ends
+//! (finished, needs feedback, terminated): HEAD, and a git tree of the
+//! whole working tree as it stands, untracked files included and ignored
+//! ones not.
+//!
+//! A session's changes are what changed inside its own turns. The daemon
+//! keeps two trees per session, a base `B` and a tip `T`, and folds each
+//! turn `(s, e)` in as it ends:
+//!
+//! - the first turn: `B = s`, `T = e`;
+//! - a later one: `B = merge(T → s onto B)`, `T = e`. The gap between the
+//!   previous turn's end and this one's start (`T → s`) is other people's
+//!   work; [`fold_gap`] replays it onto `B` with a three-way merge, so it
+//!   lands on both sides of the diff and drops out of it.
+//!
+//! `diff(B, T)` ([`SessionChanges::trees`]) is then exactly the sum of the
+//! session's turns, files another session touched between them included:
+//! a hunk of theirs sits in both trees, the session's own hunks only in
+//! `T`. The limits, all on the side of showing too much rather than too
+//! little:
+//!
+//! - edits another session makes *during* this one's turn are inside
+//!   `s → e` and count as this session's: a turn is a window of time;
+//! - where a gap edit overlaps lines this session had already changed, the
+//!   merge keeps the session's version (`-X ours`), so the other edit shows
+//!   as part of this session's diff;
+//! - a turn whose start tree could not be taken (unavailable), or a merge
+//!   git refuses, leaves `B` where it was: the gap counts as the session's;
+//! - snapshots run in order on one worker, so one taken late (another
+//!   session's add ahead of it) can move a turn's edge.
+//!
+//! Turns are kept per session ([`Slot::TurnStart`], [`Slot::TurnEnd`]) for
+//! the last few only: `B` and `T` already hold the effect of every turn,
+//! so pruning old ones loses nothing.
 //!
 //! The tree is built without touching the checkout: a copy of the index
 //! (`GIT_INDEX_FILE` at a temp file, so git's stat cache spares re-hashing
 //! what has not changed), `git add -A` into the copy, `git write-tree`.
 //! The real index, the files and HEAD are left alone; the only writes are
-//! objects in the object store and the `refs/kete/sessions/<id>/…` refs
-//! that keep the trees from `git gc` ([`keep`], [`drop_refs`]).
+//! objects in the object store and the refs that keep the trees from
+//! `git gc` ([`keep`], [`drop_refs`]).
+//!
+//! The refs live under the writing daemon's own id
+//! (`refs/kete/d/<daemon>/sessions/<agent>/…`, [`ref_name`]), stable per
+//! data dir, so a daemon can sweep refs for sessions it no longer has
+//! ([`sweep`]) without touching those of another daemon (a test's, WSL's
+//! beside Windows') that shares the repo. 0.51 wrote
+//! `refs/kete/sessions/<agent>/{start,last}` with no owner; a daemon moves
+//! those of its own sessions into its namespace ([`adopt_legacy`]) and
+//! never deletes one by absence.
 //!
 //! A working tree whose untracked files are too many or too big, or an
 //! add that runs past [`Limits::timeout`], records no tree ("unavailable")
@@ -64,35 +103,61 @@ impl SessionChanges {
     }
 }
 
-/// Which of a session's two snapshots.
+/// Which of a session's kept trees.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Which {
+pub enum Slot {
+    /// The checkout when the session started.
     Start,
+    /// The checkout at its latest turn end.
     Last,
+    /// The folded base `B` (module doc).
+    Base,
+    /// The folded tip `T`.
+    Tip,
+    /// Turn `n`'s start (`t<n>/s`).
+    TurnStart(u32),
+    /// Turn `n`'s end (`t<n>/e`).
+    TurnEnd(u32),
 }
 
-impl Which {
-    pub fn as_str(self) -> &'static str {
+impl Slot {
+    pub fn suffix(self) -> String {
         match self {
-            Which::Start => "start",
-            Which::Last => "last",
+            Slot::Start => "start".into(),
+            Slot::Last => "last".into(),
+            Slot::Base => "base".into(),
+            Slot::Tip => "tip".into(),
+            Slot::TurnStart(n) => format!("t{n}/s"),
+            Slot::TurnEnd(n) => format!("t{n}/e"),
         }
     }
 }
 
-/// Where a session's snapshot trees are kept from `git gc`. Shared by
+/// Where 0.51 kept a session's two snapshot trees, owner unknown. Shared by
 /// every checkout of the repo (refs outside `HEAD` are per repo, not per
-/// worktree).
-pub const REF_PREFIX: &str = "refs/kete/sessions/";
+/// worktree), as are the namespaced ones.
+pub const LEGACY_PREFIX: &str = "refs/kete/sessions/";
 
-/// `refs/kete/sessions/<agent>/<which>`; None for an id that would not
-/// make a safe refname (agent ids are ULIDs, so never in practice).
-pub fn ref_name(agent: &str, which: Which) -> Option<String> {
-    let safe = !agent.is_empty()
-        && agent
+/// An id fit for one refname component: agent ids are ULIDs and daemon
+/// ids hex, so anything else is refused rather than escaped.
+fn safe_component(id: &str) -> bool {
+    !id.is_empty()
+        && id
             .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
-    safe.then(|| format!("{REF_PREFIX}{agent}/{}", which.as_str()))
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+/// `refs/kete/d/<daemon>/sessions/`: everything `daemon` keeps in a repo.
+/// The `d/` segment keeps any daemon id clear of the 0.51 `sessions/`.
+pub fn namespace(daemon: &str) -> Option<String> {
+    safe_component(daemon).then(|| format!("refs/kete/d/{daemon}/sessions/"))
+}
+
+/// `refs/kete/d/<daemon>/sessions/<agent>/<slot>`; None for an id that
+/// would not make a safe refname.
+pub fn ref_name(daemon: &str, agent: &str, slot: Slot) -> Option<String> {
+    let ns = namespace(daemon)?;
+    safe_component(agent).then(|| format!("{ns}{agent}/{}", slot.suffix()))
 }
 
 /// How much a snapshot may cost before it is skipped.
@@ -266,55 +331,245 @@ fn tree_of(root: &Path, has_head: bool, limits: &Limits) -> Option<String> {
     (out.status.success() && !tree.is_empty()).then_some(tree)
 }
 
-/// Point `refs/kete/sessions/<agent>/<which>` at `tree` in the repo at
-/// `repo` (any of its checkouts), so `git gc` keeps it.
-pub fn keep(repo: &Path, agent: &str, which: Which, tree: &str) -> bool {
-    let Some(name) = ref_name(agent, which) else {
+/// Run git with `input` on its stdin; its stdout when it exits 0.
+fn git_fed(mut cmd: Command, input: &[u8]) -> Option<Vec<u8>> {
+    cmd.stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = cmd.spawn().ok()?;
+    let mut stdin = child.stdin.take()?;
+    let input = input.to_vec();
+    // Written from a thread: a large script must not fill the pipe while
+    // git's stdout, unread, fills the other one.
+    let writer = std::thread::spawn(move || {
+        use std::io::Write as _;
+        let _ = stdin.write_all(&input);
+    });
+    let out = child.wait_with_output().ok()?;
+    let _ = writer.join();
+    out.status.success().then_some(out.stdout)
+}
+
+/// Apply `script` (`git update-ref --stdin` lines) as one transaction.
+fn update_refs(repo: &Path, script: &str) -> bool {
+    if script.is_empty() {
+        return true;
+    }
+    git_fed(command(repo, &["update-ref", "--stdin"]), script.as_bytes()).is_some()
+}
+
+/// Every ref under `prefix` in the repo at `repo`, with what it points at.
+fn refs_under(repo: &Path, prefix: &str) -> Vec<(String, String)> {
+    let Some(out) = git_ok(
+        repo,
+        &["for-each-ref", "--format=%(refname) %(objectname)", prefix],
+    ) else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&out)
+        .lines()
+        .filter_map(|l| {
+            let (name, oid) = l.split_once(' ')?;
+            Some((name.to_string(), oid.to_string()))
+        })
+        .collect()
+}
+
+/// The distinct first components under `prefix` (agent ids), sorted.
+fn agents_under(repo: &Path, prefix: &str) -> Vec<String> {
+    let mut ids: Vec<String> = refs_under(repo, prefix)
+        .into_iter()
+        .filter_map(|(name, _)| Some(name.strip_prefix(prefix)?.split('/').next()?.to_string()))
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+/// Point `daemon`'s `<agent>/<slot>` ref at `tree` in the repo at `repo`
+/// (any of its checkouts), so `git gc` keeps it.
+pub fn keep(repo: &Path, daemon: &str, agent: &str, slot: Slot, tree: &str) -> bool {
+    let Some(name) = ref_name(daemon, agent, slot) else {
         return false;
     };
     git_ok(repo, &["update-ref", &name, tree]).is_some()
 }
 
-/// Delete both snapshot refs of each of `agents` in the repo at `repo`.
-/// One transaction; refs that are not there are not an error.
-pub fn drop_refs(repo: &Path, agents: &[String]) -> bool {
+/// Delete every ref `daemon` keeps for each of `agents` in the repo at
+/// `repo`, and their 0.51 refs (the caller owns these sessions). One
+/// transaction; none there is not an error.
+pub fn drop_refs(repo: &Path, daemon: &str, agents: &[String]) -> bool {
+    let Some(ns) = namespace(daemon) else {
+        return false;
+    };
     let mut script = String::new();
-    for agent in agents {
-        for which in [Which::Start, Which::Last] {
-            if let Some(name) = ref_name(agent, which) {
+    for agent in agents.iter().filter(|a| safe_component(a)) {
+        for prefix in [format!("{ns}{agent}/"), format!("{LEGACY_PREFIX}{agent}/")] {
+            for (name, _) in refs_under(repo, &prefix) {
                 script.push_str(&format!("delete {name}\n"));
             }
         }
     }
-    if script.is_empty() {
-        return true;
-    }
-    let mut cmd = command(repo, &["update-ref", "--stdin"]);
-    cmd.stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let Ok(mut child) = cmd.spawn() else {
-        return false;
-    };
-    if let Some(mut stdin) = child.stdin.take() {
-        use std::io::Write as _;
-        let _ = stdin.write_all(script.as_bytes());
-    }
-    child.wait().is_ok_and(|s| s.success())
+    update_refs(repo, &script)
 }
 
-/// The agent ids that have snapshot refs in the repo at `repo`.
-pub fn kept_agents(repo: &Path) -> Vec<String> {
-    let Some(out) = git_ok(repo, &["for-each-ref", "--format=%(refname)", REF_PREFIX]) else {
+/// Delete `daemon`'s refs for turns `turns` of `agent`.
+pub fn drop_turns(repo: &Path, daemon: &str, agent: &str, turns: &[u32]) -> bool {
+    let mut script = String::new();
+    for &n in turns {
+        for slot in [Slot::TurnStart(n), Slot::TurnEnd(n)] {
+            if let Some(name) = ref_name(daemon, agent, slot) {
+                script.push_str(&format!("delete {name}\n"));
+            }
+        }
+    }
+    update_refs(repo, &script)
+}
+
+/// The agent ids `daemon` keeps refs for in the repo at `repo`.
+pub fn kept_agents(repo: &Path, daemon: &str) -> Vec<String> {
+    namespace(daemon).map_or_else(Vec::new, |ns| agents_under(repo, &ns))
+}
+
+/// The agent ids with 0.51 refs (no owner) in the repo at `repo`.
+pub fn legacy_agents(repo: &Path) -> Vec<String> {
+    agents_under(repo, LEGACY_PREFIX)
+}
+
+/// Move the 0.51 refs of `agents` (sessions the caller owns) into
+/// `daemon`'s namespace, same slot names. One transaction per call; a
+/// session with none is skipped. Only ever called with ids from the
+/// caller's own database: the refs of a session it does not know are
+/// another daemon's to move.
+pub fn adopt_legacy(repo: &Path, daemon: &str, agents: &[String]) -> bool {
+    let mut script = String::new();
+    for agent in agents.iter().filter(|a| safe_component(a)) {
+        let prefix = format!("{LEGACY_PREFIX}{agent}/");
+        for (old, oid) in refs_under(repo, &prefix) {
+            let Some(slot) = old.strip_prefix(&prefix) else {
+                continue;
+            };
+            let Some(ns) = namespace(daemon) else {
+                return false;
+            };
+            script.push_str(&format!("update {ns}{agent}/{slot} {oid}\n"));
+            script.push_str(&format!("delete {old} {oid}\n"));
+        }
+    }
+    update_refs(repo, &script)
+}
+
+/// Delete `daemon`'s refs for every session not in `live` in the repo at
+/// `repo`: what a crash between a row's delete and its refs' left behind.
+/// Only `daemon`'s namespace is read; 0.51 refs and other daemons' are
+/// never swept. Returns the ids swept.
+pub fn sweep(repo: &Path, daemon: &str, live: &std::collections::HashSet<String>) -> Vec<String> {
+    let gone: Vec<String> = kept_agents(repo, daemon)
+        .into_iter()
+        .filter(|a| !live.contains(a))
+        .collect();
+    let Some(ns) = namespace(daemon) else {
         return Vec::new();
     };
-    let mut ids: Vec<String> = String::from_utf8_lossy(&out)
-        .lines()
-        .filter_map(|r| r.strip_prefix(REF_PREFIX)?.split('/').next())
-        .map(str::to_string)
+    let mut script = String::new();
+    for agent in &gone {
+        for (name, _) in refs_under(repo, &format!("{ns}{agent}/")) {
+            script.push_str(&format!("delete {name}\n"));
+        }
+    }
+    if update_refs(repo, &script) {
+        gone
+    } else {
+        Vec::new()
+    }
+}
+
+/// Replay the gap `prev_end → next_start` (others' work between two of a
+/// session's turns) onto its base `base`: a three-way merge with
+/// `prev_end` as the merge base, written as a tree. Lines both changed
+/// keep `base`'s (`-X ours`); a path git still cannot merge (one side
+/// deleted it, a file met a directory) is put back as `base` has it. None
+/// when git refuses the merge altogether: the caller keeps `base`.
+pub fn fold_gap(root: &Path, prev_end: &str, base: &str, next_start: &str) -> Option<String> {
+    let merge_base = format!("--merge-base={prev_end}");
+    let out = command(
+        root,
+        &[
+            "merge-tree",
+            "--write-tree",
+            "-z",
+            "--name-only",
+            "-X",
+            "ours",
+            &merge_base,
+            base,
+            next_start,
+        ],
+    )
+    .output()
+    .ok()?;
+    // 0 clean, 1 conflicted (the tree is still written); anything else is
+    // a refusal (a git too old to take bare trees among them).
+    let clean = match out.status.code() {
+        Some(0) => true,
+        Some(1) => false,
+        _ => return None,
+    };
+    let mut fields = out.stdout.split(|b| *b == 0);
+    let tree = String::from_utf8_lossy(fields.next()?).trim().to_string();
+    if tree.is_empty() {
+        return None;
+    }
+    if clean {
+        return Some(tree);
+    }
+    // `--name-only`: the conflicted paths follow the tree, up to an empty
+    // field before the messages.
+    let paths: Vec<String> = fields
+        .take_while(|f| !f.is_empty())
+        .map(|f| String::from_utf8_lossy(f).into_owned())
         .collect();
-    ids.dedup();
-    ids
+    restore_paths(root, &tree, base, &paths)
+}
+
+/// `tree` with each of `paths` as `from` has it (gone where `from` has
+/// none), built in a temp index.
+fn restore_paths(root: &Path, tree: &str, from: &str, paths: &[String]) -> Option<String> {
+    let temp = TempIndex::new();
+    let in_temp = |args: &[&str]| {
+        let mut cmd = command(root, args);
+        cmd.env("GIT_INDEX_FILE", &temp.0);
+        cmd
+    };
+    let ok = |mut cmd: Command| {
+        cmd.stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    };
+    if !ok(in_temp(&["read-tree", tree])) {
+        return None;
+    }
+    if !paths.is_empty() {
+        let mut list = Vec::new();
+        for p in paths {
+            list.extend_from_slice(p.as_bytes());
+            list.push(0);
+        }
+        git_fed(
+            in_temp(&["update-index", "-z", "--force-remove", "--stdin"]),
+            &list,
+        )?;
+        let mut ls = vec!["ls-tree", "-r", "-z", "--full-tree", from, "--"];
+        ls.extend(paths.iter().map(String::as_str));
+        let entries = git_ok(root, &ls)?;
+        if !entries.is_empty() {
+            git_fed(in_temp(&["update-index", "-z", "--index-info"]), &entries)?;
+        }
+    }
+    let out = in_temp(&["write-tree"]).output().ok()?;
+    let tree = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (out.status.success() && !tree.is_empty()).then_some(tree)
 }
 
 /// Every path that differs between trees (or commits) `from` and `to`, as
@@ -491,28 +746,171 @@ mod tests {
     }
 
     /// The trees survive gc while their refs are there; dropping a
-    /// session's refs leaves the others' alone.
+    /// session's refs (every slot, turns included) leaves the others'
+    /// alone, and another daemon's.
     #[test]
     fn refs_keep_trees_and_go_with_their_session() {
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         std::fs::write(repo.join("loose.txt"), "only in a snapshot\n").unwrap();
         let tree = take(&repo).tree.unwrap();
-        assert!(keep(&repo, "A1", Which::Start, &tree));
-        assert!(keep(&repo, "A1", Which::Last, &tree));
-        assert!(keep(&repo, "B2", Which::Last, &tree));
-        assert!(!keep(&repo, "../evil", Which::Start, &tree));
-        assert_eq!(kept_agents(&repo), vec!["A1".to_string(), "B2".to_string()]);
+        assert!(keep(&repo, "d1", "A1", Slot::Start, &tree));
+        assert!(keep(&repo, "d1", "A1", Slot::TurnEnd(3), &tree));
+        assert!(keep(&repo, "d1", "B2", Slot::Last, &tree));
+        assert!(keep(&repo, "d2", "A1", Slot::Base, &tree));
+        assert!(!keep(&repo, "d1", "../evil", Slot::Start, &tree));
+        assert!(!keep(&repo, "d/1", "A1", Slot::Start, &tree));
+        assert_eq!(
+            kept_agents(&repo, "d1"),
+            vec!["A1".to_string(), "B2".to_string()]
+        );
         run(&repo, &["gc", "-q", "--prune=now"]);
         assert_eq!(run(&repo, &["cat-file", "-t", &tree]), "tree");
-        // A missing ref in the batch is not an error.
-        assert!(drop_refs(&repo, &["A1".into(), "C3".into()]));
-        assert_eq!(kept_agents(&repo), vec!["B2".to_string()]);
-        assert!(drop_refs(&repo, &[]));
+        // A missing session in the batch is not an error.
+        assert!(drop_refs(&repo, "d1", &["A1".into(), "C3".into()]));
+        assert_eq!(kept_agents(&repo, "d1"), vec!["B2".to_string()]);
+        assert_eq!(kept_agents(&repo, "d2"), vec!["A1".to_string()]);
+        assert!(drop_refs(&repo, "d1", &[]));
         assert_eq!(
-            ref_name("A1", Which::Last).unwrap(),
-            "refs/kete/sessions/A1/last"
+            ref_name("d1", "A1", Slot::TurnStart(7)).unwrap(),
+            "refs/kete/d/d1/sessions/A1/t7/s"
         );
-        assert_eq!(ref_name("", Which::Last), None);
+        assert_eq!(ref_name("d1", "", Slot::Last), None);
+    }
+
+    /// Turn refs go by number; the rest of the session's stay.
+    #[test]
+    fn turn_refs_prune_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = repo(&dir);
+        let tree = take(&repo).tree.unwrap();
+        for n in 1..=3 {
+            keep(&repo, "d1", "A1", Slot::TurnStart(n), &tree);
+            keep(&repo, "d1", "A1", Slot::TurnEnd(n), &tree);
+        }
+        keep(&repo, "d1", "A1", Slot::Base, &tree);
+        assert!(drop_turns(&repo, "d1", "A1", &[1, 2]));
+        let left: Vec<String> = refs_under(&repo, "refs/kete/")
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        assert_eq!(
+            left,
+            vec![
+                "refs/kete/d/d1/sessions/A1/base",
+                "refs/kete/d/d1/sessions/A1/t3/e",
+                "refs/kete/d/d1/sessions/A1/t3/s",
+            ]
+        );
+    }
+
+    /// The sweep takes only its own daemon's refs for sessions it no
+    /// longer has: another daemon's, and 0.51's, stay whatever their ids.
+    #[test]
+    fn a_sweep_never_touches_another_daemons_refs() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = repo(&dir);
+        let tree = take(&repo).tree.unwrap();
+        keep(&repo, "mine", "live", Slot::Start, &tree);
+        keep(&repo, "mine", "dead", Slot::Start, &tree);
+        keep(&repo, "mine", "dead", Slot::TurnEnd(1), &tree);
+        keep(&repo, "theirs", "other", Slot::Start, &tree);
+        keep(&repo, "theirs", "dead", Slot::Start, &tree);
+        run(
+            &repo,
+            &["update-ref", "refs/kete/sessions/old/start", &tree],
+        );
+        let live: std::collections::HashSet<String> = ["live".to_string()].into();
+        assert_eq!(sweep(&repo, "mine", &live), vec!["dead".to_string()]);
+        assert_eq!(kept_agents(&repo, "mine"), vec!["live".to_string()]);
+        assert_eq!(
+            kept_agents(&repo, "theirs"),
+            vec!["dead".to_string(), "other".to_string()]
+        );
+        assert_eq!(legacy_agents(&repo), vec!["old".to_string()]);
+        // The other daemon's sweep, knowing none of mine, leaves mine.
+        assert_eq!(
+            sweep(&repo, "theirs", &["other".to_string()].into()),
+            vec!["dead".to_string()]
+        );
+        assert_eq!(kept_agents(&repo, "mine"), vec!["live".to_string()]);
+    }
+
+    /// 0.51 refs move into the namespace for the sessions named, same
+    /// trees, and the rest stay where they were.
+    #[test]
+    fn legacy_refs_are_adopted_only_for_known_sessions() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = repo(&dir);
+        let tree = take(&repo).tree.unwrap();
+        run(&repo, &["update-ref", "refs/kete/sessions/A1/start", &tree]);
+        run(&repo, &["update-ref", "refs/kete/sessions/A1/last", &tree]);
+        run(&repo, &["update-ref", "refs/kete/sessions/B2/start", &tree]);
+        assert!(adopt_legacy(&repo, "d1", &["A1".into(), "Z9".into()]));
+        assert_eq!(legacy_agents(&repo), vec!["B2".to_string()]);
+        let mine = refs_under(&repo, "refs/kete/d/d1/sessions/");
+        assert_eq!(
+            mine,
+            vec![
+                ("refs/kete/d/d1/sessions/A1/last".to_string(), tree.clone()),
+                ("refs/kete/d/d1/sessions/A1/start".to_string(), tree.clone()),
+            ]
+        );
+        // Nothing to move is not an error.
+        assert!(adopt_legacy(&repo, "d1", &["A1".into()]));
+    }
+
+    fn tree_with(repo: &Path, files: &[(&str, &str)]) -> String {
+        for (path, body) in files {
+            std::fs::write(repo.join(path), body).unwrap();
+        }
+        take(repo).tree.unwrap()
+    }
+
+    fn blob(repo: &Path, tree: &str, path: &str) -> Option<String> {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(["cat-file", "-p", &format!("{tree}:{path}")])
+            .output()
+            .unwrap();
+        out.status
+            .success()
+            .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
+    /// A gap edit in a file the session touched lands on the base, so the
+    /// diff to the tip shows only the session's own lines; a gap edit to a
+    /// file it never touched lands too and drops out.
+    #[test]
+    fn a_gap_folds_into_the_base_and_out_of_the_diff() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = repo(&dir);
+        let lines = |top: &str, bottom: &str| format!("{top}\n2\n3\n4\n5\n6\n7\n{bottom}\n");
+        let s1 = tree_with(&repo, &[("f.txt", &lines("1", "8")), ("o.txt", "x\n")]);
+        let e1 = tree_with(&repo, &[("f.txt", &lines("MINE", "8"))]);
+        // Someone else, between the turns: the bottom of f, all of o.
+        let s2 = tree_with(
+            &repo,
+            &[("f.txt", &lines("MINE", "THEIRS")), ("o.txt", "y\n")],
+        );
+        let base = fold_gap(&repo, &e1, &s1, &s2).expect("a merge");
+        assert_eq!(blob(&repo, &base, "f.txt").unwrap(), lines("1", "THEIRS"));
+        assert_eq!(blob(&repo, &base, "o.txt").unwrap(), "y\n");
+        let files = files_between(&repo, &base, &s2).unwrap();
+        assert_eq!(names(&files), vec![('M', "f.txt")]);
+        // Overlap: they rewrote the line the session had changed. The
+        // session's version is kept on the base: their line shows as the
+        // session's (too much, never too little).
+        let s3 = tree_with(&repo, &[("f.txt", &lines("OVER", "THEIRS"))]);
+        let base3 = fold_gap(&repo, &s2, &base, &s3).expect("a merge");
+        assert_eq!(blob(&repo, &base3, "f.txt").unwrap(), lines("1", "THEIRS"));
+        // They deleted a file the session had edited: kept as the base had
+        // it, so the delete shows as the session's.
+        std::fs::remove_file(repo.join("f.txt")).unwrap();
+        let s4 = take(&repo).tree.unwrap();
+        let base4 = fold_gap(&repo, &s3, &base3, &s4).expect("a merge");
+        assert_eq!(blob(&repo, &base4, "f.txt").unwrap(), lines("1", "THEIRS"));
+        assert_eq!(fold_gap(&repo, "nope", &base, &s2), None);
     }
 }

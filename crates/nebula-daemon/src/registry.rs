@@ -5293,6 +5293,7 @@ pub(crate) mod tests {
     fn session_snapshots_attribute_a_turn_and_their_refs_go_with_the_rows() {
         use nebula_core::session_snapshot::{files_between, kept_agents};
         let daemon = test_daemon();
+        let ns = daemon.store.daemon_id().unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let repo = init_repo(tmp.path());
         let project = project_at(&daemon, &repo);
@@ -5329,14 +5330,17 @@ pub(crate) mod tests {
         let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(paths, vec!["mine.txt"], "only what changed in its turn");
         assert_eq!(daemon.session_changes(&a2).unwrap().last, None);
-        assert_eq!(kept_agents(&repo), vec!["a1".to_string(), "a2".to_string()]);
+        assert_eq!(
+            kept_agents(&repo, &ns),
+            vec!["a1".to_string(), "a2".to_string()]
+        );
 
         daemon.delete_agent(&a1).unwrap();
         daemon.settle_snapshots();
-        assert_eq!(kept_agents(&repo), vec!["a2".to_string()]);
+        assert_eq!(kept_agents(&repo, &ns), vec!["a2".to_string()]);
         daemon.remove_project(&project.id).unwrap();
         daemon.settle_snapshots();
-        assert!(kept_agents(&repo).is_empty());
+        assert!(kept_agents(&repo, &ns).is_empty());
     }
 
     /// A worktree cut from a named ref records it and where it forked, and
@@ -5393,6 +5397,7 @@ pub(crate) mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let repo = init_repo(tmp.path());
         let daemon = test_daemon();
+        let ns = daemon.store.daemon_id().unwrap();
         let project = project_at(&daemon, &repo);
         let EntityId::Worktree(id) = daemon
             .create_worktree(&project.id, "feat", Some("main"))
@@ -5407,11 +5412,306 @@ pub(crate) mod tests {
         daemon.snapshot_session_start(&AgentId("keep".into()));
         daemon.settle_snapshots();
         assert_eq!(
-            kept_agents(&repo),
+            kept_agents(&repo, &ns),
             vec!["a1".to_string(), "keep".to_string()]
         );
         daemon.delete_worktree(&id, true).await.unwrap();
         daemon.settle_snapshots();
-        assert_eq!(kept_agents(&repo), vec!["keep".to_string()]);
+        assert_eq!(kept_agents(&repo, &ns), vec!["keep".to_string()]);
+    }
+
+    /// `git <args>` in `repo`, its stdout.
+    fn git_out(repo: &Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    /// One status edge, its snapshot settled before the next file write.
+    fn edge(daemon: &Daemon, id: &str, status: AgentStatus) {
+        daemon.apply_status_effects(&AgentId(id.into()), vec![Effect::SetStatus(status)]);
+        daemon.settle_snapshots();
+    }
+
+    /// One turn of `id`'s: running, `work`, finished.
+    fn turn(daemon: &Daemon, id: &str, work: impl FnOnce()) {
+        edge(daemon, id, AgentStatus::Running);
+        work();
+        edge(daemon, id, AgentStatus::Finished);
+    }
+
+    /// The paths `id`'s review shows, and the diff text of `path` in it.
+    fn session_diff(daemon: &Daemon, repo: &Path, id: &str, path: &str) -> (Vec<String>, String) {
+        let changes = daemon.session_changes(&AgentId(id.into())).unwrap();
+        let (from, to) = changes.trees().expect("both trees");
+        let files = nebula_core::session_snapshot::files_between(repo, from, to).unwrap();
+        let path = if path.is_empty() { "." } else { path };
+        let diff = git_out(repo, &["diff", "-U0", "--no-color", from, to, "--", path]);
+        (files.into_iter().map(|f| f.path).collect(), diff)
+    }
+
+    /// The changed lines (`+`/`-`, not the headers) of a diff.
+    fn changed_lines(diff: &str) -> Vec<&str> {
+        diff.lines()
+            .filter(|l| {
+                (l.starts_with('+') || l.starts_with('-'))
+                    && !l.starts_with("+++")
+                    && !l.starts_with("---")
+            })
+            .map(str::trim_end)
+            .collect()
+    }
+
+    fn session_refs(repo: &Path, ns: &str, agent: &str) -> String {
+        let prefix = format!("refs/kete/d/{ns}/sessions/{agent}/");
+        git_out(repo, &["for-each-ref", "--format=%(refname)", &prefix])
+    }
+
+    /// TURN ATTRIBUTION: two sessions in one checkout, turns interleaved;
+    /// each review shows exactly its own turns' files, where 0.51's
+    /// start..last gave a1 a2's file too. The turns and their refs are
+    /// recorded per session.
+    #[test]
+    fn interleaved_turns_attribute_each_session_exactly() {
+        let daemon = test_daemon();
+        let ns = daemon.store.daemon_id().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = init_repo(tmp.path());
+        project_at(&daemon, &repo);
+        seed_agent(&daemon, "a1", "rt", None);
+        seed_agent(&daemon, "a2", "rt", None);
+        daemon.snapshot_session_start(&AgentId("a1".into()));
+        daemon.snapshot_session_start(&AgentId("a2".into()));
+        let write = |p: &str, body: &str| std::fs::write(repo.join(p), body).unwrap();
+
+        turn(&daemon, "a1", || write("one.txt", "a1 first\n"));
+        turn(&daemon, "a2", || write("two.txt", "a2's\n"));
+        // Someone with no session at all, between a1's turns.
+        write("loose.txt", "by hand\n");
+        turn(&daemon, "a1", || write("three.txt", "a1 again\n"));
+
+        assert_eq!(
+            session_diff(&daemon, &repo, "a1", "").0,
+            vec!["one.txt", "three.txt"]
+        );
+        assert_eq!(session_diff(&daemon, &repo, "a2", "").0, vec!["two.txt"]);
+        let a1 = AgentId("a1".into());
+        let turns = daemon.store.session_turns(&a1).unwrap();
+        assert_eq!(turns.iter().map(|t| t.n).collect::<Vec<_>>(), vec![1, 2]);
+        assert!(turns.iter().all(|t| t.end_at.is_some()));
+        let refs = session_refs(&repo, &ns, "a1");
+        for slot in [
+            "base", "last", "start", "t1/e", "t1/s", "t2/e", "t2/s", "tip",
+        ] {
+            assert!(
+                refs.contains(&format!("sessions/a1/{slot}\n")),
+                "{slot} kept: {refs}"
+            );
+        }
+        // The reply keeps its shape: the session's start and last points,
+        // carrying the base and tip.
+        let changes = daemon.session_changes(&a1).unwrap();
+        assert_eq!(changes.sessions, 2);
+        let snaps = daemon.store.session_snapshots(&a1).unwrap().unwrap();
+        assert_eq!(changes.start.unwrap().tree, snaps.base);
+        assert_eq!(changes.last.unwrap().tree, snaps.tip);
+    }
+
+    /// Two sessions on the same file: each review shows its own hunks
+    /// only, the other's lines in both trees. A needs-feedback wait is a
+    /// turn boundary, so an edit made during it is not the session's.
+    #[test]
+    fn sessions_editing_one_file_see_only_their_own_hunks() {
+        let daemon = test_daemon();
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = init_repo(tmp.path());
+        project_at(&daemon, &repo);
+        seed_agent(&daemon, "a1", "rt", None);
+        seed_agent(&daemon, "a2", "rt", None);
+        let lines = |l: [&str; 8]| l.join("\n") + "\n";
+        std::fs::write(
+            repo.join("f.txt"),
+            lines(["1", "2", "3", "4", "5", "6", "7", "8"]),
+        )
+        .unwrap();
+        git_in(&repo, &["add", "f.txt"]);
+        git_in(&repo, &["commit", "-m", "f"]);
+        daemon.snapshot_session_start(&AgentId("a1".into()));
+        daemon.snapshot_session_start(&AgentId("a2".into()));
+        let write = |l: [&str; 8]| std::fs::write(repo.join("f.txt"), lines(l)).unwrap();
+
+        turn(&daemon, "a1", || {
+            write(["A1", "2", "3", "4", "5", "6", "7", "8"])
+        });
+        turn(&daemon, "a2", || {
+            write(["A1", "2", "3", "4", "5", "6", "7", "B2"])
+        });
+        edge(&daemon, "a1", AgentStatus::Running);
+        write(["A1", "2", "3", "A1b", "5", "6", "7", "B2"]);
+        edge(&daemon, "a1", AgentStatus::NeedsFeedback);
+        // a2 while a1 waits on the user.
+        turn(&daemon, "a2", || {
+            write(["A1", "2", "3", "A1b", "5", "B2b", "7", "B2"])
+        });
+        edge(&daemon, "a1", AgentStatus::Running);
+        edge(&daemon, "a1", AgentStatus::Finished);
+
+        let (files, diff) = session_diff(&daemon, &repo, "a1", "f.txt");
+        assert_eq!(files, vec!["f.txt"]);
+        assert_eq!(
+            changed_lines(&diff),
+            vec!["-1", "+A1", "-4", "+A1b"],
+            "{diff}"
+        );
+        let (_, diff) = session_diff(&daemon, &repo, "a2", "f.txt");
+        assert_eq!(
+            changed_lines(&diff),
+            vec!["-6", "+B2b", "-8", "+B2"],
+            "{diff}"
+        );
+    }
+
+    /// Turns past the cap go, rows and refs, and what they did stays in
+    /// the review: the base and tip already hold it.
+    #[test]
+    fn old_turns_are_pruned_and_their_work_still_shows() {
+        let daemon = test_daemon();
+        let ns = daemon.store.daemon_id().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = init_repo(tmp.path());
+        project_at(&daemon, &repo);
+        seed_agent(&daemon, "a1", "rt", None);
+        seed_agent(&daemon, "a2", "rt", None);
+        let write = |p: &str| std::fs::write(repo.join(p), p).unwrap();
+        turn(&daemon, "a1", || write("first.txt"));
+        let total = snapshots::KEEP_TURNS + 2;
+        for n in 2..=total {
+            turn(&daemon, "a2", || write(&format!("other{n}.txt")));
+            turn(&daemon, "a1", || write(&format!("a1-{n}.txt")));
+        }
+        let a1 = AgentId("a1".into());
+        let kept: Vec<u32> = daemon
+            .store
+            .session_turns(&a1)
+            .unwrap()
+            .iter()
+            .map(|t| t.n)
+            .collect();
+        let want: Vec<u32> = ((total - snapshots::KEEP_TURNS + 1)..=total).collect();
+        assert_eq!(kept, want);
+        let refs = session_refs(&repo, &ns, "a1");
+        assert!(!refs.contains("/t1/"), "turn 1's refs pruned: {refs}");
+        assert!(refs.contains(&format!("/t{total}/e")));
+        let (files, _) = session_diff(&daemon, &repo, "a1", "");
+        let mut want = vec!["first.txt".to_string()];
+        want.extend((2..=total).map(|n| format!("a1-{n}.txt")));
+        want.sort();
+        assert_eq!(files, want);
+    }
+
+    /// The startup sweep deletes this daemon's refs for sessions it does
+    /// not have, and nothing of another daemon's in the same repo: not
+    /// its namespace, not 0.51 refs of sessions this one never had.
+    #[test]
+    fn the_sweep_spares_another_daemons_refs() {
+        let daemon = test_daemon();
+        let ns = daemon.store.daemon_id().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = init_repo(tmp.path());
+        project_at(&daemon, &repo);
+        seed_agent(&daemon, "a1", "rt", None);
+        daemon.snapshot_session_start(&AgentId("a1".into()));
+        daemon.settle_snapshots();
+        let tree = git_out(&repo, &["rev-parse", "HEAD^{tree}"]);
+        let tree = tree.trim();
+        for name in [
+            format!("refs/kete/d/{ns}/sessions/ghost/start"),
+            format!("refs/kete/d/{ns}/sessions/ghost/t4/e"),
+            "refs/kete/d/0th3r/sessions/ghost/start".to_string(),
+            "refs/kete/d/0th3r/sessions/a9/last".to_string(),
+            "refs/kete/sessions/stranger/start".to_string(),
+        ] {
+            git_in(&repo, &["update-ref", &name, tree]);
+        }
+        daemon.sweep_snapshot_refs();
+        daemon.settle_snapshots();
+        let refs = git_out(
+            &repo,
+            &["for-each-ref", "--format=%(refname)", "refs/kete/"],
+        );
+        let mut want = vec![
+            "refs/kete/d/0th3r/sessions/a9/last".to_string(),
+            "refs/kete/d/0th3r/sessions/ghost/start".to_string(),
+            format!("refs/kete/d/{ns}/sessions/a1/start"),
+            "refs/kete/sessions/stranger/start".to_string(),
+        ];
+        want.sort();
+        assert_eq!(refs.lines().collect::<Vec<_>>(), want);
+        // A second daemon on its own data dir has its own id; one data
+        // dir keeps its.
+        assert_ne!(test_daemon().store.daemon_id().unwrap(), ns);
+        assert_eq!(daemon.store.daemon_id().unwrap(), ns);
+    }
+
+    /// A session from 0.51 (start and last, refs in the old namespace):
+    /// the startup sweep moves its refs into this daemon's namespace, its
+    /// review still shows what it did before the upgrade, and a 0.52 turn
+    /// folds onto that, others' work between left out.
+    #[test]
+    fn a_051_session_keeps_its_changes_and_moves_its_refs() {
+        use nebula_core::session_snapshot::take;
+        let daemon = test_daemon();
+        let ns = daemon.store.daemon_id().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = init_repo(tmp.path());
+        project_at(&daemon, &repo);
+        seed_agent(&daemon, "a1", "rt", None);
+        let a1 = AgentId("a1".into());
+        // What 0.51 left: a start, a last, both refs, and migration 35's
+        // base and tip from them.
+        let start = take(&repo);
+        std::fs::write(repo.join("before.txt"), "pre-upgrade work\n").unwrap();
+        let last = take(&repo);
+        let (s, l) = (start.tree.clone().unwrap(), last.tree.clone().unwrap());
+        let store = &daemon.store;
+        store
+            .set_snapshot_start(&a1, &WorktreeId("rt".into()), &start)
+            .unwrap();
+        store.set_snapshot_last(&a1, &last).unwrap();
+        store.set_snapshot_view(&a1, &s, Some(&l)).unwrap();
+        git_in(&repo, &["update-ref", "refs/kete/sessions/a1/start", &s]);
+        git_in(&repo, &["update-ref", "refs/kete/sessions/a1/last", &l]);
+
+        daemon.sweep_snapshot_refs();
+        daemon.settle_snapshots();
+        let refs = git_out(
+            &repo,
+            &[
+                "for-each-ref",
+                "--format=%(refname) %(objectname)",
+                "refs/kete/",
+            ],
+        );
+        assert_eq!(
+            refs.trim(),
+            format!(
+                "refs/kete/d/{ns}/sessions/a1/last {l}\nrefs/kete/d/{ns}/sessions/a1/start {s}"
+            )
+        );
+        assert_eq!(session_diff(&daemon, &repo, "a1", "").0, vec!["before.txt"]);
+
+        std::fs::write(repo.join("between.txt"), "someone else\n").unwrap();
+        turn(&daemon, "a1", || {
+            std::fs::write(repo.join("after.txt"), "post-upgrade work\n").unwrap()
+        });
+        assert_eq!(
+            session_diff(&daemon, &repo, "a1", "").0,
+            vec!["after.txt", "before.txt"]
+        );
     }
 }
