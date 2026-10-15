@@ -79,6 +79,11 @@ pub struct Model {
     /// those reads, never by a read of its own.
     #[serde(skip)]
     pub worktree_changes: HashMap<String, nebula_core::board::CardFacts>,
+    /// The base each worktree Kete cut was cut from, by worktree id
+    /// (`ServerEvent::WorktreeBases`, a 59+ daemon): what the diff and the
+    /// board read against before deriving one.
+    #[serde(skip)]
+    pub bases: HashMap<String, nebula_core::review_base::RecordedBase>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -122,6 +127,10 @@ type Pending = HashMap<u64, oneshot::Sender<Result<Option<EntityId>, String>>>;
 /// `AskSession` and `ReadSession` waiters: answered by `SessionAnswer` or
 /// `SessionText`, not `Ack`.
 type Answers = HashMap<u64, oneshot::Sender<Result<String, String>>>;
+
+/// `SessionChanges` requests waiting on their reply.
+type Changes =
+    HashMap<u64, oneshot::Sender<Result<nebula_core::session_snapshot::SessionChanges, String>>>;
 
 /// The orchestrator asked for a review (`kete orchestrator review`): the
 /// daemon's `ReviewOpened` broadcast, as the window hears it.
@@ -194,6 +203,7 @@ pub struct Client {
     tx: Mutex<Option<mpsc::UnboundedSender<ClientRequest>>>,
     pending: Mutex<Pending>,
     answers: Mutex<Answers>,
+    changes: Mutex<Changes>,
     panes: Mutex<HashMap<SessionRef, Channel<PtyEvent>>>,
     reviews: Mutex<Option<ReviewSink>>,
     notices: Mutex<Option<NoticeSink>>,
@@ -216,6 +226,7 @@ impl Client {
             tx: Mutex::new(None),
             pending: Mutex::new(HashMap::new()),
             answers: Mutex::new(HashMap::new()),
+            changes: Mutex::new(HashMap::new()),
             panes: Mutex::new(HashMap::new()),
             reviews: Mutex::new(None),
             notices: Mutex::new(None),
@@ -316,6 +327,52 @@ impl Client {
                 bail!("the session did not answer in time")
             }
         }
+    }
+
+    /// A session's snapshots (`SessionChanges`), for the review's "this
+    /// session" filter. None from a daemon older than
+    /// `SESSION_CHANGES_PROTOCOL`, which would drop the connection on the
+    /// request: it is never sent one.
+    pub async fn session_changes(
+        &self,
+        agent: &str,
+    ) -> Result<Option<nebula_core::session_snapshot::SessionChanges>> {
+        if self.daemon_protocol() < nebula_core::SESSION_CHANGES_PROTOCOL {
+            return Ok(None);
+        }
+        let req_id = self.req_id();
+        let (done_tx, done_rx) = oneshot::channel();
+        self.changes
+            .lock()
+            .expect("changes lock")
+            .insert(req_id, done_tx);
+        let req = ClientRequest::SessionChanges {
+            req_id,
+            agent: nebula_core::AgentId(agent.to_string()),
+        };
+        if let Err(e) = self.send(req) {
+            self.changes.lock().expect("changes lock").remove(&req_id);
+            return Err(e);
+        }
+        match tokio::time::timeout(RPC_TIMEOUT, done_rx).await {
+            Ok(Ok(Ok(changes))) => Ok(Some(changes)),
+            Ok(Ok(Err(message))) => Err(anyhow!(message)),
+            Ok(Err(_)) => bail!("the daemon connection closed before it answered"),
+            Err(_) => {
+                self.changes.lock().expect("changes lock").remove(&req_id);
+                bail!("the daemon did not answer in time")
+            }
+        }
+    }
+
+    /// The base Kete recorded for worktree `id` when it cut it.
+    pub fn recorded_base(&self, id: &str) -> Option<nebula_core::review_base::RecordedBase> {
+        self.model
+            .lock()
+            .expect("model lock")
+            .bases
+            .get(id)
+            .cloned()
     }
 
     /// A session's recent context (`ReadSession`): its transcript when the
@@ -504,6 +561,9 @@ impl Client {
                 m.agents = agents;
                 m.terminals = terminals;
                 m.subagents = subagents;
+                // A 59+ daemon sends its recorded bases after this; an
+                // older one never does, and none of these may outlive it.
+                m.bases.clear();
                 drop(m);
                 self.touch();
             }
@@ -576,6 +636,20 @@ impl Client {
                 self.model.lock().expect("model lock").ports = ports;
                 self.touch();
             }
+            ServerEvent::WorktreeBases { bases } => {
+                self.model.lock().expect("model lock").bases = bases
+                    .into_iter()
+                    .map(|b| (b.worktree.0.clone(), b))
+                    .collect();
+                // Kept board bases were derived: read them again.
+                *self.bases.lock().expect("bases lock") = Default::default();
+                self.touch();
+            }
+            ServerEvent::SessionChanges { req_id, changes } => {
+                if let Some(w) = self.changes.lock().expect("changes lock").remove(&req_id) {
+                    let _ = w.send(Ok(changes));
+                }
+            }
             ServerEvent::AccountUsage { accounts } => {
                 self.model.lock().expect("model lock").accounts = accounts
                     .into_iter()
@@ -603,6 +677,8 @@ impl Client {
                 if let Some(w) = self.pending.lock().expect("pending lock").remove(&req_id) {
                     let _ = w.send(Err(message));
                 } else if let Some(w) = self.answers.lock().expect("answers lock").remove(&req_id) {
+                    let _ = w.send(Err(message));
+                } else if let Some(w) = self.changes.lock().expect("changes lock").remove(&req_id) {
                     let _ = w.send(Err(message));
                 }
             }
@@ -1248,5 +1324,80 @@ mod tests {
         assert!(list.iter().any(|s| s.id == "other"));
         assert!(!list.iter().any(|s| s.id == "s2"), "the oldest ended go");
         assert!(list.iter().any(|s| s.id == "s3"));
+    }
+
+    /// `SessionChanges` goes only to a 59+ daemon (an older one would drop
+    /// the connection); its reply, or an Error, reaches the asker.
+    #[tokio::test]
+    async fn session_changes_are_asked_only_of_a_daemon_that_answers() {
+        use nebula_core::session_snapshot::SessionChanges;
+        let (client, mut rx) = Client::connected_for_test();
+        client.set_model(|m| m.protocol_version = nebula_core::SESSION_CHANGES_PROTOCOL - 1);
+        assert_eq!(client.session_changes("a1").await.unwrap(), None);
+        assert!(rx.try_recv().is_err(), "nothing went out");
+
+        client.set_model(|m| m.protocol_version = nebula_core::SESSION_CHANGES_PROTOCOL);
+        let asking = {
+            let client = client.clone();
+            tokio::spawn(async move { client.session_changes("a1").await })
+        };
+        let Some(ClientRequest::SessionChanges { req_id, agent }) = rx.recv().await else {
+            panic!("a SessionChanges request");
+        };
+        assert_eq!(agent.0, "a1");
+        let changes = SessionChanges {
+            agent,
+            worktree: Some(WorktreeId("w".into())),
+            start: None,
+            last: None,
+            sessions: 3,
+        };
+        client.answer(ServerEvent::SessionChanges {
+            req_id,
+            changes: changes.clone(),
+        });
+        assert_eq!(asking.await.unwrap().unwrap(), Some(changes));
+
+        let asking = {
+            let client = client.clone();
+            tokio::spawn(async move { client.session_changes("gone").await })
+        };
+        let Some(ClientRequest::SessionChanges { req_id, .. }) = rx.recv().await else {
+            panic!("a SessionChanges request");
+        };
+        client.answer(ServerEvent::Error {
+            req_id: Some(req_id),
+            message: "session not found".into(),
+        });
+        let err = asking.await.unwrap().unwrap_err();
+        assert!(err.to_string().contains("not found"), "{err}");
+    }
+
+    /// The recorded bases land by worktree, and a Snapshot (a reconnect,
+    /// maybe to an older daemon) clears them until the next list.
+    #[test]
+    fn recorded_bases_are_kept_by_worktree_until_the_next_snapshot() {
+        let client = Client::new();
+        let base = nebula_core::review_base::RecordedBase {
+            worktree: WorktreeId("w".into()),
+            refname: "origin/main".into(),
+            sha: "abc".into(),
+        };
+        client.handle(ServerEvent::WorktreeBases {
+            bases: vec![base.clone()],
+        });
+        assert_eq!(client.recorded_base("w"), Some(base));
+        assert_eq!(client.recorded_base("x"), None);
+        client.handle(ServerEvent::Snapshot {
+            projects: Vec::new(),
+            worktrees: Vec::new(),
+            agents: Vec::new(),
+            terminals: Vec::new(),
+            links: Vec::new(),
+            pr_seen: Vec::new(),
+            ui_state: None,
+            subagents: Vec::new(),
+        });
+        assert_eq!(client.recorded_base("w"), None);
     }
 }

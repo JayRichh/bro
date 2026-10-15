@@ -345,9 +345,11 @@ pub fn blob(root: &Path, side: &DiffSide, path: &str) -> Result<Blob, String> {
             }
         }
         DiffSide::Commit(rev) => {
-            let commit = resolve_commit(root, rev)?;
+            // A commit's tree, or a tree itself: a session's snapshots are
+            // trees (`nebula_core::session_snapshot`).
+            let tree = resolve_tree(root, rev)?;
             // `<mode> <type> <object>\t<path>\0`.
-            let raw = git(root, &["ls-tree", "-z", &commit, "--", &path])?;
+            let raw = git(root, &["ls-tree", "-z", &tree, "--", &path])?;
             match raw.split(|b| *b == 0).find_map(|e| parse_entry(e, &path)) {
                 Some(meta) if meta.len() >= 3 => (meta[1].clone(), meta[2].clone()),
                 _ => return Ok(Blob::Missing),
@@ -392,6 +394,13 @@ fn worktree_blob(file: &Path) -> Result<Blob, String> {
 }
 
 /// The commit `rev` names, as a full SHA.
+/// `rev` as a tree: a commit's, or a tree object named directly.
+pub fn resolve_tree(root: &Path, rev: &str) -> Result<String, String> {
+    let tree = format!("{rev}^{{tree}}");
+    git_text(root, &["rev-parse", "--verify", "--quiet", &tree])
+        .map_err(|_| format!("{rev} is not in this clone; fetch it first"))
+}
+
 pub fn resolve_commit(root: &Path, rev: &str) -> Result<String, String> {
     let commit = format!("{rev}^{{commit}}");
     git_text(root, &["rev-parse", "--verify", "--quiet", &commit])
@@ -1176,6 +1185,12 @@ pub(crate) mod tests {
         let sha = repo.commit("one");
         let side = DiffSide::Commit(sha);
         assert_eq!(blob(&repo.0, &side, "nope.txt").unwrap(), Blob::Missing);
+        // A tree reads the same way: a session's snapshots are trees.
+        let tree = resolve_tree(&repo.0, "HEAD").unwrap();
+        assert_eq!(
+            blob(&repo.0, &DiffSide::Commit(tree), "a.txt").unwrap(),
+            Blob::Text("hello\n".into())
+        );
         assert_eq!(
             blob(&repo.0, &side, "a.txt").unwrap(),
             Blob::Text("hello\n".into())

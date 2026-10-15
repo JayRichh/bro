@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Model } from './api';
-import { againstLabel, againstTitle, canStage, groupWorktrees } from './diff-base';
+import { againstLabel, againstTitle, canStage, groupWorktrees, sessionOffered, sessionReadable, sessionTitle, type SessionDiff } from './diff-base';
 
 const base = { sha: '0123456789abcdef', short: '0123456', branch: 'main' };
 
@@ -42,5 +42,33 @@ describe('groupWorktrees', () => {
     const g = groupWorktrees(model);
     expect(g.map((x) => x.name)).toEqual(['api', 'web']);
     expect(g[1].worktrees.map((w) => w.branch)).toEqual(['main', 'feat']);
+  });
+});
+
+describe('session filter', () => {
+  const diff = (sessions: number, start: string | null, last: string | null, note: string | null = null): SessionDiff => ({
+    sessions,
+    start,
+    last,
+    note,
+    files: [],
+  });
+
+  it('is offered only where more than one session worked', () => {
+    expect(sessionOffered(null)).toBe(false);
+    expect(sessionOffered(diff(1, 'a', 'b'))).toBe(false);
+    expect(sessionOffered(diff(2, 'a', 'b'))).toBe(true);
+  });
+
+  it('reads a pair only when both snapshots are there', () => {
+    expect(sessionReadable(diff(2, 'a', 'b'))).toBe(true);
+    expect(sessionReadable(diff(2, 'a', null))).toBe(false);
+    expect(sessionReadable(null)).toBe(false);
+  });
+
+  it('names its key, and why it cannot narrow', () => {
+    expect(sessionTitle('all', null)).toMatch(/\(L\)$/);
+    expect(sessionTitle('session', diff(2, 'a', 'b'))).toMatch(/start and its last turn \(L\)/);
+    expect(sessionTitle('session', diff(2, 'a', null, 'No turn of this session has ended yet.'))).toMatch(/No turn/);
   });
 });

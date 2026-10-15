@@ -447,6 +447,23 @@ impl BaseRefs {
         self.insert(root, branch, base.clone());
         base
     }
+
+    /// [`Self::get`], resolving a miss with the base Kete `recorded` at
+    /// the cut preferred ([`base_ref_with`]).
+    pub fn get_with(
+        &mut self,
+        root: &Path,
+        branch: &str,
+        configured: impl FnOnce() -> String,
+        recorded: Option<&RecordedBase>,
+    ) -> BaseRef {
+        if let Some(base) = self.cached(root, branch) {
+            return base;
+        }
+        let base = base_ref_with(root, &configured(), recorded);
+        self.insert(root, branch, base.clone());
+        base
+    }
 }
 
 /// One commit made since the base.
