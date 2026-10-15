@@ -575,6 +575,7 @@ mod tests {
             terminals: Vec::new(),
             links: Vec::new(),
             ports: Default::default(),
+            bases: Default::default(),
         }
     }
 

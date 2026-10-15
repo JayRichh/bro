@@ -57,6 +57,9 @@ pub struct DiffListing {
     pub against: nebula_core::review_base::Against,
     pub base: Option<nebula_core::review_base::ReviewBase>,
     pub commits: Vec<nebula_core::review_base::CommitLine>,
+    /// The files are one session's own, between its snapshots
+    /// (`git_diff::read_session_listing`), not the worktree's.
+    pub session: bool,
 }
 
 #[derive(Debug)]

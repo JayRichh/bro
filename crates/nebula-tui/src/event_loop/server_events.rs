@@ -32,6 +32,21 @@ pub(crate) fn handle_server_event(app: &mut App, event: ServerEvent, out: &mut V
         ServerEvent::AccountUsage { accounts } => accounts::on_account_usage(app, accounts),
         ServerEvent::SessionContexts { contexts } => accounts::on_session_contexts(app, contexts),
         ServerEvent::SubagentChanged { sub } => desk::on_subagent_changed(app, sub),
+        ServerEvent::WorktreeBases { bases } => {
+            app.tree.bases = bases
+                .into_iter()
+                .map(|base| (base.worktree.clone(), base))
+                .collect();
+            // Bases kept from before were derived: read them again.
+            app.jobs.base_refs = Default::default();
+        }
+        ServerEvent::SessionChanges { req_id, changes } => {
+            app.requests.pending.remove(&req_id);
+            if let Some(Overlay::Diff(view)) = &mut app.modals.overlay {
+                crate::git_diff::land_session_changes(view, changes);
+                app.chrome.dirty = true;
+            }
+        }
         _ => {}
     }
 }
