@@ -816,6 +816,7 @@ fn main() {
             accounts::account_switch,
             accounts::project_set_account,
             profiles::profile_duplicate,
+            profiles::profile_rename,
             accounts::profile_set_enabled,
             accounts::account_login_run,
             settings::settings_schema,

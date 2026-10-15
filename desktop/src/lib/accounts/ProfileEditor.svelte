@@ -1,7 +1,7 @@
 <script lang="ts">
   // A profile's add or edit form: name (fixed once made: it names the
-  // home), harness, which login, default, environment. Settings, Profiles
-  // and the Accounts view both draw it; the save goes through the same
+  // home: Rename moves it), harness, which login, default, environment. The
+  // Accounts view draws it; the save goes through the same
   // commands `kete profile` uses.
   import { api, type ProfileForm, type ProfileSaved } from '../api';
   import { nameProblem } from './view';
@@ -30,6 +30,8 @@
   let f = $state<ProfileForm>({ ...initial });
   // svelte-ignore state_referenced_locally
   let replaceEnv = $state(isNew);
+  /** Edit: drop every variable on save (Clear). */
+  let clearEnv = $state(false);
   let error = $state<string | null>(null);
   let saving = $state(false);
   const nameError = $derived(isNew && f.name ? nameProblem(f.name, taken) : null);
@@ -41,7 +43,7 @@
     }
     saving = true;
     try {
-      const out = isNew ? await api.profileAdd(f) : await api.profileUpdate(f, !replaceEnv);
+      const out = isNew ? await api.profileAdd(f) : await api.profileUpdate(f, !replaceEnv && !clearEnv);
       error = null;
       onsaved(out, { ...f });
     } catch (err) {
@@ -69,7 +71,7 @@
     <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
       <input class="{field} w-64 max-w-full font-mono text-[12px]" bind:value={f.name} disabled={!isNew} placeholder="work" spellcheck="false" aria-label="Name" />
       <span class="text-[12px] {nameError ? 'text-fail' : 'text-muted'}"
-        >{nameError ?? (isNew ? 'letters, digits, - and _' : 'the name names its home, so it stays')}</span
+        >{nameError ?? (isNew ? 'letters, digits, - and _' : 'Rename (in the row) moves its home with it')}</span
       >
     </div>
     <span class={label}>harness</span>
@@ -94,11 +96,26 @@
     </label>
     <span class="{label} self-start pt-1.5">environment</span>
     <div class="flex flex-col gap-1.5">
-      {#if !isNew && !replaceEnv}
+      {#if !isNew && !replaceEnv && !clearEnv}
         <div class="flex items-center gap-3 text-[13px] text-muted">
           {envKeys.length ? `Keeps ${envKeys.join(', ')}` : 'None set.'}
           <button class="border-0 bg-transparent p-0 text-[13px] text-ink underline underline-offset-4" onclick={() => (replaceEnv = true)}
             >{envKeys.length ? 'Replace' : 'Add variables'}</button
+          >
+          {#if envKeys.length}
+            <button
+              class="border-0 bg-transparent p-0 text-[13px] text-fail underline underline-offset-4"
+              onclick={() => ((f.env = ''), (clearEnv = true))}
+              title="Drop {envKeys.join(', ')} when this is saved">Clear</button
+            >
+          {/if}
+        </div>
+      {:else if clearEnv && !f.env.trim()}
+        <div class="flex items-center gap-3 text-[13px] text-fail">
+          Saving drops {envKeys.join(', ')}.
+          <button class="border-0 bg-transparent p-0 text-[13px] text-ink underline underline-offset-4" onclick={() => (clearEnv = false)}>Undo</button>
+          <button class="border-0 bg-transparent p-0 text-[13px] text-ink underline underline-offset-4" onclick={() => ((clearEnv = false), (replaceEnv = true))}
+            >Type new ones</button
           >
         </div>
       {:else}

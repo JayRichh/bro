@@ -28,7 +28,7 @@
     windowLabel,
   } from './usage';
   import { removeWarning } from './pick';
-  import { nameProblem, projectAccount, projectsDefaultingTo, SPREADS, suggestName, THRESHOLDS, viewRows } from './view';
+  import { nameProblem, projectAccount, projectsDefaultingTo, renameBlocker, SPREADS, suggestName, THRESHOLDS, viewRows } from './view';
   import { runLogin, setProjectAccount } from './actions';
   import { openAddAccount } from './add.svelte';
 
@@ -139,7 +139,7 @@
   async function remove(r: AccountRow) {
     const projects = projectsDefaultingTo(app.launch, app.model.projects, r.harness, r.name);
     const detail = [
-      ...(r.home ? [`Its home stays at ${r.home} (kete profile remove --purge ${r.name} deletes it).`] : []),
+      ...(r.home ? [`Its home is ${r.home}: it stays unless you tick the box below.`] : []),
       ...(projects.length ? [`Default account of ${projects.map((p) => p.name).join(', ')}: those fall back to the spread.`] : []),
     ];
     const ok = await ask.confirm({
@@ -148,16 +148,59 @@
       detail: detail.length ? detail : undefined,
       confirm: 'Remove',
       danger: true,
+      // The purge `kete profile remove --purge` does: the login goes too.
+      check: r.home ? `Also delete ${r.home} and the login in it` : undefined,
     });
     if (!ok.ok) return;
     try {
-      const out = await api.profileRemove(r.name);
-      toast(out.home ? `Removed ${r.name}. Its home stays at ${out.home}.` : `Removed ${r.name}.`);
+      const out = await api.profileRemove(r.name, !!r.home && ok.checked);
+      toast(
+        out.purged ? `Removed ${r.name} and deleted ${out.home}.` : out.home ? `Removed ${r.name}. Its home stays at ${out.home}.` : `Removed ${r.name}.`,
+      );
       if (editing?.key === r.key) editing = null;
       refreshLaunchables();
     } catch (e) {
       toast(String(e));
     }
+  }
+
+  /** Rename: refused while a session names it; the home, the repos it is
+   *  the default of and its reading move with the name. */
+  async function rename(r: AccountRow) {
+    const blocked = renameBlocker(r.name, app.model.agents);
+    if (blocked) return toast(blocked);
+    const taken = app.accounts.filter((x) => x.profile && x.key !== r.key).map((x) => x.name);
+    const v = await ask.prompt({
+      title: `Rename ${r.name}`,
+      note: r.home
+        ? `Its home moves from ${r.home} to the new name; repos that start on it follow.`
+        : `Repos that start on it follow the new name.`,
+      fields: [{ key: 'name', label: 'New name', value: r.name, mono: true }],
+      confirm: 'Rename',
+    });
+    if (!v || v.name.trim() === r.name) return;
+    const why = nameProblem(v.name, taken);
+    if (why) return toast(why);
+    try {
+      const out = await api.profileRename(r.name, v.name.trim());
+      const repos = out.projects.length ? `, the default of ${out.projects.length} ${out.projects.length === 1 ? 'repo' : 'repos'}` : '';
+      const archived = out.archived.length ? ` ${out.archived.length} archived ${out.archived.length === 1 ? 'session still names' : 'sessions still name'} ${r.name}.` : '';
+      toast(`Renamed ${r.name} to ${out.name}${repos}.${archived}`);
+      if (editing?.key === r.key) editing = null;
+      refreshLaunchables();
+      refreshAccounts();
+    } catch (e) {
+      toast(String(e));
+    }
+  }
+
+  /** A row's keys while focus is in it: R renames, Delete removes. */
+  function rowKey(e: KeyboardEvent, r: AccountRow) {
+    if (!r.profile || e.ctrlKey || e.metaKey || e.altKey) return;
+    const t = e.target as HTMLElement;
+    if (t.closest('input, textarea, select, [contenteditable="true"]')) return;
+    if (e.key === 'r' || e.key === 'R') (e.preventDefault(), rename(r));
+    else if (e.key === 'Delete') (e.preventDefault(), remove(r));
   }
 
   async function signIn(r: AccountRow) {
@@ -257,7 +300,9 @@
         {@const projects = r.profile ? projectsDefaultingTo(app.launch, app.model.projects, r.harness, r.name) : []}
         {@const dimStar = !r.default && !!r.flaggedDefault && r.disabled}
         <li class="border-b border-rule py-3">
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
+            onkeydown={(e) => rowKey(e, r)}
             class="grid items-start gap-x-5 gap-y-2.5 lg:grid-cols-[minmax(200px,1.3fr)_minmax(150px,1fr)_minmax(220px,1.3fr)_minmax(250px,auto)] {r.disabled &&
             !r.problem
               ? 'opacity-60'
@@ -376,7 +421,7 @@
                 >
               {/if}
               {#if r.profile}
-                <button class={btn} onclick={() => edit(r)} aria-expanded={editing?.key === r.key} disabled={!!r.problem} title={r.problem ? 'Fix this entry in config.json or Settings, Profiles' : `Edit ${r.name}`}
+                <button class={btn} onclick={() => edit(r)} aria-expanded={editing?.key === r.key} disabled={!!r.problem} title={r.problem ? 'Fix this entry in config.json, or rename it (R)' : `Edit ${r.name}`}
                   >Edit</button
                 >
                 {#if !r.problem}
@@ -385,7 +430,16 @@
                     >Use for&hellip;</button
                   >
                 {/if}
-                <button class="{btn} text-fail hover:border-fail" onclick={() => remove(r)} title="Remove {r.name} (its home stays on disk)">Remove</button>
+                {#if r.name !== '(no name)'}
+                  {@const blocked = renameBlocker(r.name, app.model.agents)}
+                  <button
+                    class="{btn} {blocked ? 'text-faint' : ''}"
+                    onclick={() => rename(r)}
+                    aria-disabled={!!blocked}
+                    title={blocked ?? `Rename ${r.name}: its home and repo defaults follow (R)`}>Rename</button
+                  >
+                {/if}
+                <button class="{btn} text-fail hover:border-fail" onclick={() => remove(r)} title="Remove {r.name}, its home kept or deleted as you choose (Delete)">Remove</button>
               {:else}
                 <button
                   class={btn}

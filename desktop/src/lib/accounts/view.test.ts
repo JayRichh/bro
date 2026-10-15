@@ -6,6 +6,7 @@ import {
   nameProblem,
   projectAccount,
   projectsDefaultingTo,
+  renameBlocker,
   sessionCounts,
   signedIn,
   suggestName,
@@ -151,5 +152,16 @@ describe('the table', () => {
     const agents = [agent({ profile: 'work' }), agent({ profile: 'work', archived: true }), agent()];
     expect(sessionCounts({ key: 'work' }, agents)).toEqual({ live: 1, all: 2 });
     expect(sessionCounts({ key: '@claude' }, agents)).toEqual({ live: 1, all: 1 });
+  });
+});
+
+describe('renameBlocker', () => {
+  const a = (name: string, profile: string | null, alive: boolean, archived = false) => ({ name, profile, alive, archived });
+  it('names the running and stopped sessions on the account', () => {
+    expect(renameBlocker('work', [])).toBeNull();
+    expect(renameBlocker('work', [a('old', 'work', false, true), a('x', 'home', true)])).toBeNull();
+    const why = renameBlocker('work', [a('fix', 'work', true), a('docs', ' work ', false)]);
+    expect(why).toContain('1 running (fix)');
+    expect(why).toContain('1 stopped that would resume on it (docs)');
   });
 });

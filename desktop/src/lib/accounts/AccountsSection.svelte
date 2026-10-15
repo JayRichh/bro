@@ -7,7 +7,7 @@
   // The heading opens the Accounts view, where everything else lives.
   import { onMount } from 'svelte';
   import { api, type AccountRow } from '../api';
-  import { app, focusQuickPrompt, openSession, openSettings, refreshAccounts, refreshLaunchables, toast } from '../store.svelte';
+  import { app, focusQuickPrompt, openSession, refreshAccounts, refreshLaunchables, toast } from '../store.svelte';
   import { nav } from '../shell/history.svelte';
   import { openAccounts, runLogin as startLogin } from './actions';
   import { openAddAccount } from './add.svelte';
@@ -132,12 +132,12 @@
           >
           <button
             class="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[13px] text-ink hover:underline hover:underline-offset-4"
-            onclick={() => openSettings('profiles')}
+            onclick={openAccounts}
             title={r.problem
-              ? `Fix ${r.name} in Settings, Profiles`
+              ? `Fix ${r.name} in Accounts`
               : r.profile
-                ? `Edit ${r.name} in Settings, Profiles\n${loginTitle(r)}`
-                : `${r.harness}'s own login. Add a profile in Settings, Profiles\n${loginTitle(r)}`}
+                ? `Edit ${r.name} in Accounts\n${loginTitle(r)}`
+                : `${r.harness}'s own login. Add it as an account in Accounts\n${loginTitle(r)}`}
             >{r.name}{#if !r.profile}<span class="ml-1 text-faint">own login</span>{/if}</button
           >
           {#if on.length}
@@ -207,7 +207,7 @@
             <p class="m-0 min-w-0 flex-1 text-[11px] leading-[15px] text-fail">{r.problem}</p>
             <button
               class="flex-none border border-rule bg-bg px-1.5 text-[11px] text-ink hover:border-rule-strong"
-              onclick={() => openSettings('profiles')}>Fix</button
+              onclick={openAccounts}>Fix</button
             >
           </div>
         {:else}

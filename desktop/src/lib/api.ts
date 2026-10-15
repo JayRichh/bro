@@ -276,6 +276,17 @@ export interface ProfileSaved {
   rows: ProfileRow[];
   login: string | null;
   home: string | null;
+  /** The remove deleted the home. */
+  purged: boolean;
+}
+/** What a rename did. */
+export interface ProfileRenamed {
+  name: string;
+  home: string | null;
+  /** Repos whose default account it is. */
+  projects: string[];
+  /** Archived sessions still naming the old name. */
+  archived: string[];
 }
 export interface QuickLaunch {
   project: string;
@@ -413,11 +424,13 @@ export const api = {
   presets: () => invoke<Preset[]>('presets_list'),
   presetSave: (original: string | null, preset: Preset) => invoke<Preset[]>('preset_save', { original, preset }),
   presetDelete: (name: string) => invoke<Preset[]>('preset_delete', { name }),
-  profiles: () => invoke<ProfileRow[]>('profiles_list'),
   profileHarnesses: () => invoke<string[]>('profile_harnesses'),
   profileAdd: (form: ProfileForm) => invoke<ProfileSaved>('profile_add', { form }),
   profileUpdate: (form: ProfileForm, keepEnv: boolean) => invoke<ProfileSaved>('profile_update', { form, keepEnv }),
-  profileRemove: (name: string) => invoke<ProfileSaved>('profile_remove', { name }),
+  /** Remove an account; `purge` deletes its home (the login) too. */
+  profileRemove: (name: string, purge = false) => invoke<ProfileSaved>('profile_remove', { name, purge }),
+  /** Rename an account: its home, repo defaults and reading follow; refused while a session names it. */
+  profileRename: (old: string, name: string) => invoke<ProfileRenamed>('profile_rename', { old, new: name }),
   profileSetDefault: (name: string) => invoke<ProfileRow[]>('profile_set_default', { name }),
   accounts: () => invoke<AccountRow[]>('accounts_list'),
   profileSetEnabled: (name: string, enabled: boolean) => invoke<null>('profile_set_enabled', { name, enabled }),

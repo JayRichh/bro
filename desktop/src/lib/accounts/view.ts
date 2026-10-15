@@ -165,3 +165,19 @@ export function sessionCounts(row: Pick<AccountRow, 'key'>, agents: Agent[]): { 
   const on = agents.filter((a) => accountKey(a.profile, sessionHarness(a)) === row.key);
   return { live: on.filter((a) => !a.archived).length, all: on.length };
 }
+
+/** Why the profile `name` cannot be renamed now, or null: every
+ *  unarchived session naming it blocks (`profiles::rename_blocker`): a
+ *  running one lives in its home, a stopped one would fail to resume, and
+ *  only the daemon could change the name a session stores. */
+export function renameBlocker(name: string, agents: Pick<Agent, 'name' | 'profile' | 'archived' | 'alive'>[]): string | null {
+  const on = agents.filter((a) => !a.archived && a.profile?.trim() === name.trim());
+  if (!on.length) return null;
+  const live = on.filter((a) => a.alive).map((a) => a.name);
+  const stopped = on.filter((a) => !a.alive).map((a) => a.name);
+  const parts = [
+    live.length ? `${live.length} running (${live.join(', ')})` : '',
+    stopped.length ? `${stopped.length} stopped that would resume on it (${stopped.join(', ')})` : '',
+  ].filter(Boolean);
+  return `${name} has sessions: ${parts.join('; ')}. Move them to another account (or archive them), then rename.`;
+}
