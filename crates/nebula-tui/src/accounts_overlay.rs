@@ -186,7 +186,293 @@ pub fn build_rows(
             harness,
         });
     }
+    // The desktop's order: grouped by harness in first-seen order, each
+    // harness's profiles before its own login (a stable sort keeps the
+    // config order inside a group).
+    let mut seen: Vec<String> = Vec::new();
+    for r in &rows {
+        if !seen.contains(&r.harness) {
+            seen.push(r.harness.clone());
+        }
+    }
+    rows.sort_by_key(|r| {
+        (
+            seen.iter().position(|h| *h == r.harness),
+            r.profile.is_none(),
+        )
+    });
     rows
+}
+
+/// What the add, edit and duplicate forms ask.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FormKind {
+    /// A new account: a harness, a name, whether to adopt the CLI's
+    /// current login, whether to make it the harness's default.
+    Add,
+    /// The profile `name`: its harness, its kind of login, its variables.
+    Edit { name: String },
+    /// A copy of the profile `from` under a new name.
+    Duplicate { from: String },
+}
+
+/// One field of a form.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Field {
+    Harness,
+    Name,
+    Adopt,
+    Default,
+    Env,
+}
+
+impl Field {
+    pub fn label(self) -> &'static str {
+        match self {
+            Field::Harness => "Harness",
+            Field::Name => "Name",
+            Field::Adopt => "Adopt current login",
+            Field::Default => "Make default",
+            Field::Env => "Variables",
+        }
+    }
+}
+
+/// The add / edit / duplicate form, in the overlay's place.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AccountForm {
+    pub kind: FormKind,
+    pub harness: String,
+    pub name: String,
+    /// `use_default`: run on the CLI's own login instead of a home of its
+    /// own.
+    pub adopt: bool,
+    pub make_default: bool,
+    /// Edit: `KEY=VALUE` pairs split by `;` that replace the variables;
+    /// empty keeps them (their values are never shown).
+    pub env: String,
+    /// Edit: the names of the variables it sets now.
+    pub env_keys: Vec<String>,
+    /// The field the keys type into.
+    pub field: usize,
+    /// The name was typed: a harness switch no longer suggests one.
+    pub touched: bool,
+    pub error: Option<String>,
+}
+
+impl AccountForm {
+    pub fn fields(&self) -> &'static [Field] {
+        match self.kind {
+            FormKind::Add => &[Field::Harness, Field::Name, Field::Adopt, Field::Default],
+            FormKind::Edit { .. } => &[Field::Harness, Field::Adopt, Field::Env],
+            FormKind::Duplicate { .. } => &[Field::Name],
+        }
+    }
+
+    pub fn current(&self) -> Field {
+        let fields = self.fields();
+        fields[self.field.min(fields.len() - 1)]
+    }
+
+    pub fn title(&self) -> String {
+        match &self.kind {
+            FormKind::Add => "Add account".into(),
+            FormKind::Edit { name } => format!("Edit {name}"),
+            FormKind::Duplicate { from } => format!("Duplicate {from}"),
+        }
+    }
+
+    /// The field's value as the form draws it.
+    pub fn value(&self, field: Field) -> String {
+        let tick = |on: bool| if on { "[x]" } else { "[ ]" }.to_string();
+        match field {
+            Field::Harness => format!("\u{2039} {} \u{203a}", self.harness),
+            Field::Name => self.name.clone(),
+            Field::Adopt => tick(self.adopt),
+            Field::Default => tick(self.make_default),
+            Field::Env if self.env.is_empty() && self.env_keys.is_empty() => {
+                "none (KEY=VALUE; KEY2=VALUE)".into()
+            }
+            Field::Env if self.env.is_empty() => {
+                format!(
+                    "keep {} (type KEY=VALUE; ... to replace)",
+                    self.env_keys.join(", ")
+                )
+            }
+            Field::Env => self.env.clone(),
+        }
+    }
+
+    /// Does the field take typing?
+    pub fn is_text(field: Field) -> bool {
+        matches!(field, Field::Name | Field::Env)
+    }
+}
+
+/// A free name to start the add form on: `claude-2`, `claude-3`, ...
+pub fn suggest_name(base: &str, taken: &[String]) -> String {
+    let base: String = base
+        .trim()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    let base = if base.is_empty() {
+        "account".into()
+    } else {
+        base
+    };
+    (2..)
+        .map(|i| format!("{base}-{i}"))
+        .find(|n| !taken.iter().any(|t| t.trim() == n))
+        .expect("a free name")
+}
+
+/// What an ACCOUNT SPREAD does to a launch naming no account, in words
+/// (the desktop's `SPREADS`).
+pub fn spread_text(word: &str) -> &'static str {
+    match accounts::Spread::parse(word) {
+        accounts::Spread::Manual => {
+            "manual: each harness runs on its starred default, or its own login when none is starred"
+        }
+        accounts::Spread::Failover => {
+            "failover: the default until its 5h or weekly use reaches the threshold, then the next account switched on"
+        }
+        accounts::Spread::LeastUsed => {
+            "least used: whichever switched-on account has used the least; one never measured counts as unused"
+        }
+    }
+}
+
+/// `KEY=VALUE; KEY2=VALUE` as a map, by `kete profile add --env`'s rules.
+pub fn env_of(text: &str) -> Result<std::collections::BTreeMap<String, String>, String> {
+    let mut vars = std::collections::BTreeMap::new();
+    for pair in text.split(';').map(str::trim).filter(|p| !p.is_empty()) {
+        let Some((key, value)) = pair.split_once('=') else {
+            return Err(format!("variables are KEY=VALUE, not `{pair}`"));
+        };
+        if key.trim().is_empty() {
+            return Err(format!("`{pair}` names no variable"));
+        }
+        vars.insert(key.trim().to_string(), value.trim().to_string());
+    }
+    Ok(vars)
+}
+
+/// The warning a remove asks under: the sessions that name the profile
+/// (`desktop/src/lib/accounts/pick.ts`'s `removeWarning`), the repos that
+/// start on it, and where its home stays.
+pub fn remove_warning(
+    name: &str,
+    agents: &[nebula_core::Agent],
+    repos: &[String],
+    home: Option<&std::path::Path>,
+) -> String {
+    let under: Vec<&nebula_core::Agent> = agents
+        .iter()
+        .filter(|a| a.profile.as_deref().map(str::trim) == Some(name))
+        .collect();
+    let live: Vec<&str> = under
+        .iter()
+        .filter(|a| !a.archived)
+        .map(|a| a.name.as_str())
+        .collect();
+    let archived = under.len() - live.len();
+    let mut out = format!("Remove the profile \"{name}\"?");
+    if under.is_empty() {
+        out.push_str(" No session runs under it.");
+    } else {
+        let mut count = Vec::new();
+        if !live.is_empty() {
+            count.push(format!(
+                "{} {} under it ({})",
+                live.len(),
+                if live.len() == 1 {
+                    "session runs"
+                } else {
+                    "sessions run"
+                },
+                live.join(", ")
+            ));
+        }
+        if archived > 0 {
+            count.push(format!(
+                "{archived} archived {} it",
+                if archived == 1 {
+                    "one names"
+                } else {
+                    "ones name"
+                }
+            ));
+        }
+        out.push_str(&format!(
+            " {}. A running session keeps going, but none of them can start again (resume, restart): kete refuses with \"profile `{name}` is no longer defined\" until a profile of that name is added back.",
+            count.join(", ")
+        ));
+    }
+    if !repos.is_empty() {
+        out.push_str(&format!(
+            " Default account of {}: those fall back to the spread.",
+            repos.join(", ")
+        ));
+    }
+    if let Some(home) = home.filter(|h| h.exists()) {
+        out.push_str(&format!(
+            " Its home stays at {} (kete profile remove --purge {name} deletes it).",
+            home.display()
+        ));
+    }
+    out
+}
+
+/// What the overlay is doing.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum Mode {
+    #[default]
+    List,
+    Form(AccountForm),
+    /// The remove's confirm, its warning said.
+    Remove {
+        name: String,
+        message: String,
+    },
+    /// "Use for repo": the projects, the cursor on one; Enter makes the
+    /// selected account its default for the harness, or clears it.
+    UseFor {
+        cursor: usize,
+    },
+}
+
+/// A clickable spot on the overlay, written at draw time: a click on a
+/// key's button is that key, pressed, so the click and the key can never
+/// do different things.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountsHit {
+    Key(crossterm::event::KeyCode),
+    /// An account's row: the cursor goes there.
+    Row(usize),
+    /// A form's field: the form's cursor goes there.
+    Field(usize),
+    /// A project in "use for repo".
+    Project(usize),
+    /// A spread, by its place in `accounts::SPREADS`.
+    Spread(usize),
+}
+
+/// What an edit did, for the footer, and the account to sign in next.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Outcome {
+    pub message: String,
+    /// The account key whose login runs next, in a new terminal.
+    pub sign_in: Option<String>,
+}
+
+impl Outcome {
+    fn said(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            sign_in: None,
+        }
+    }
 }
 
 /// The overlay's state.
@@ -198,8 +484,42 @@ pub struct AccountsView {
     /// layer whose `profiles` list is in force (`Self::on_profiles_layer`).
     pub config: PathBuf,
     pub local: PathBuf,
+    /// Where PROFILE HOMES are made (`profiles::profiles_root`); a temp
+    /// dir beside the routed config under unit tests.
+    pub root: PathBuf,
+    /// What the overlay is doing: the list, a form, a confirm, a picker.
+    pub mode: Mode,
+    /// Every harness id a profile can be for (the registry's).
+    pub harnesses: Vec<String>,
+    /// The projects, `(name, repo path)`, for "use for repo" and the
+    /// remove's warning.
+    pub projects: Vec<(String, PathBuf)>,
+    /// Each project's default accounts (repo → harness → profile).
+    pub project_accounts:
+        std::collections::BTreeMap<PathBuf, std::collections::BTreeMap<String, String>>,
+    /// The ACCOUNT SPREAD and its failover threshold, as config.json
+    /// spells them.
+    pub spread: String,
+    pub threshold: String,
+    /// The buttons and rows drawn, for clicks.
+    pub hits: Vec<(Rect, AccountsHit)>,
+    /// An account just added: the cursor lands on it once the rows are
+    /// read again.
+    pub pending_focus: Option<String>,
     /// Drawn rect, for click-outside.
     pub area: Rect,
+}
+
+/// Where profile homes go for an overlay editing `config`: the real
+/// profiles root, except under unit tests, which never touch it.
+fn root_for(config: &std::path::Path) -> PathBuf {
+    if cfg!(test) {
+        return config
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .join("profiles");
+    }
+    profiles::profiles_root()
 }
 
 impl AccountsView {
@@ -207,10 +527,405 @@ impl AccountsView {
         Self {
             rows,
             cursor: 0,
+            root: root_for(&config),
             config,
             local,
+            mode: Mode::List,
+            harnesses: Vec::new(),
+            projects: Vec::new(),
+            project_accounts: Default::default(),
+            spread: accounts::SPREADS[0].into(),
+            threshold: accounts::DEFAULT_THRESHOLD.to_string(),
+            hits: Vec::new(),
+            pending_focus: None,
             area: Rect::default(),
         }
+    }
+
+    /// New rows (a push, an edit): the cursor stays, or lands on the
+    /// account just added.
+    pub fn set_rows(&mut self, rows: Vec<AccountRow>) {
+        self.rows = rows;
+        if let Some(key) = self.pending_focus.take() {
+            match self.rows.iter().position(|r| r.key == key) {
+                Some(i) => self.cursor = i,
+                None => self.pending_focus = Some(key),
+            }
+        }
+        self.cursor = self.cursor.min(self.rows.len().saturating_sub(1));
+    }
+
+    /// Every profile's name, across harnesses (names are unique there).
+    fn taken(&self) -> Vec<String> {
+        self.rows
+            .iter()
+            .filter_map(|r| r.profile.as_ref().map(|p| p.name.trim().to_string()))
+            .collect()
+    }
+
+    fn all_profiles(&self) -> Vec<Profile> {
+        self.rows.iter().filter_map(|r| r.profile.clone()).collect()
+    }
+
+    /// `a`: the add form, on the selected row's harness (else the first
+    /// one the registry lists), its name suggested.
+    pub fn open_add(&mut self) {
+        let harness = self
+            .selected()
+            .map(|r| r.harness.clone())
+            .filter(|h| self.harnesses.contains(h))
+            .or_else(|| self.harnesses.first().cloned())
+            .unwrap_or_else(|| "claude".into());
+        let name = suggest_name(&harness, &self.taken());
+        self.mode = Mode::Form(AccountForm {
+            kind: FormKind::Add,
+            harness,
+            name,
+            adopt: false,
+            make_default: false,
+            env: String::new(),
+            env_keys: Vec::new(),
+            field: 1,
+            touched: false,
+            error: None,
+        });
+    }
+
+    /// `Enter`: the edit form on the selected profile.
+    pub fn open_edit(&mut self) -> Result<(), String> {
+        let profile = self.selected_profile()?;
+        self.mode = Mode::Form(AccountForm {
+            kind: FormKind::Edit {
+                name: profile.name.trim().to_string(),
+            },
+            harness: profile.harness.trim().to_string(),
+            name: profile.name.trim().to_string(),
+            adopt: profile.use_default,
+            make_default: profile.default,
+            env: String::new(),
+            env_keys: profile.env.keys().cloned().collect(),
+            field: 0,
+            touched: true,
+            error: None,
+        });
+        Ok(())
+    }
+
+    /// `c`: the duplicate form on the selected profile.
+    pub fn open_duplicate(&mut self) -> Result<(), String> {
+        let profile = self.selected_profile()?;
+        let from = profile.name.trim().to_string();
+        self.mode = Mode::Form(AccountForm {
+            name: suggest_name(&from, &self.taken()),
+            kind: FormKind::Duplicate { from },
+            harness: profile.harness.trim().to_string(),
+            adopt: profile.use_default,
+            make_default: false,
+            env: String::new(),
+            env_keys: Vec::new(),
+            field: 0,
+            touched: false,
+            error: None,
+        });
+        Ok(())
+    }
+
+    /// `x`: the remove's confirm, warning of the sessions and repos that
+    /// use the account.
+    pub fn open_remove(&mut self, agents: &[nebula_core::Agent]) -> Result<(), String> {
+        let profile = self.selected_profile()?;
+        let name = profile.name.trim().to_string();
+        let harness = profile.harness.trim().to_string();
+        let repos: Vec<String> = self
+            .projects
+            .iter()
+            .filter(|(_, repo)| {
+                self.project_accounts
+                    .get(repo)
+                    .and_then(|m| m.get(&harness))
+                    .is_some_and(|n| n.trim() == name)
+            })
+            .map(|(n, _)| n.clone())
+            .collect();
+        let home = profile.home_in(&self.root);
+        let message = remove_warning(&name, agents, &repos, home.as_deref());
+        self.mode = Mode::Remove { name, message };
+        Ok(())
+    }
+
+    /// `p`: "use for repo", the projects listed.
+    pub fn open_use_for(&mut self) -> Result<(), String> {
+        let profile = self.selected_profile()?;
+        if let Some(problem) = profile.problem() {
+            return Err(format!("{}: {problem}", profile.name.trim()));
+        }
+        if self.projects.is_empty() {
+            return Err("no repos yet: add one first".into());
+        }
+        self.mode = Mode::UseFor { cursor: 0 };
+        Ok(())
+    }
+
+    fn selected_profile(&self) -> Result<Profile, String> {
+        let row = self.selected().ok_or("no account selected")?;
+        row.profile.clone().ok_or_else(|| {
+            format!(
+                "{} is the CLI's own login: add it as a profile first (a: add, adopt current login)",
+                row.label()
+            )
+        })
+    }
+
+    /// The registry check `kete profile add` makes.
+    fn check_harness(&self, harness: &str) -> Result<(), String> {
+        if self.harnesses.is_empty() || self.harnesses.iter().any(|h| h == harness.trim()) {
+            return Ok(());
+        }
+        Err(format!(
+            "unknown harness `{}`: expected one of {}",
+            harness.trim(),
+            self.harnesses.join(", ")
+        ))
+    }
+
+    /// Make the profile's home, as `kete profile add` does.
+    fn prepare(&self, profile: &Profile) -> Result<Option<PathBuf>, String> {
+        let home = profile.home_in(&self.root);
+        if let Some(home) = &home {
+            profile
+                .prepare_in(&self.root, None)
+                .map_err(|e| format!("added, but could not make {}: {e}", home.display()))?;
+        }
+        Ok(home)
+    }
+
+    /// Enter on a form: add, save or duplicate. The form stays up with
+    /// the error on a refusal.
+    pub fn submit_form(&mut self) -> Result<Outcome, String> {
+        let Mode::Form(form) = &self.mode else {
+            return Err("no form open".into());
+        };
+        let form = form.clone();
+        let done = match &form.kind {
+            FormKind::Add => self.add(&form),
+            FormKind::Edit { name } => self.save_edit(name, &form),
+            FormKind::Duplicate { from } => self.duplicate(from, &form),
+        };
+        match done {
+            Ok(outcome) => {
+                self.mode = Mode::List;
+                Ok(outcome)
+            }
+            Err(e) => {
+                if let Mode::Form(f) = &mut self.mode {
+                    f.error = Some(e.clone());
+                }
+                Err(e)
+            }
+        }
+    }
+
+    fn add(&mut self, form: &AccountForm) -> Result<Outcome, String> {
+        self.check_harness(&form.harness)?;
+        let profile = Profile {
+            name: form.name.trim().to_string(),
+            harness: form.harness.trim().to_string(),
+            env: Default::default(),
+            default: form.make_default,
+            use_default: form.adopt,
+            disabled: false,
+        };
+        if let Some(problem) = profile.problem() {
+            return Err(problem);
+        }
+        self.on_profiles_layer(|layer| profiles::add_to_file(layer, &profile))?;
+        let home = self.prepare(&profile)?;
+        self.focus_key(&profile.name);
+        // Signing in is the point of adding one: it runs next, unless the
+        // profile adopted the login already there.
+        Ok(match profiles::login_hint(&profile) {
+            Some(_) => Outcome {
+                message: format!("added {}: signing it in", profile.name),
+                sign_in: Some(profile.name.clone()),
+            },
+            None if form.adopt => Outcome::said(format!(
+                "added {} on {}'s current login",
+                profile.name, profile.harness
+            )),
+            None => Outcome::said(format!(
+                "added {}{}: kete knows no sign-in for {}, sign in from a session under it",
+                profile.name,
+                home.map(|h| format!(", home {}", h.display()))
+                    .unwrap_or_default(),
+                profile.harness
+            )),
+        })
+    }
+
+    fn save_edit(&mut self, name: &str, form: &AccountForm) -> Result<Outcome, String> {
+        self.check_harness(&form.harness)?;
+        let Some(mut profile) = self
+            .all_profiles()
+            .into_iter()
+            .find(|p| p.name.trim() == name)
+        else {
+            return Err(format!("no profile named `{name}`"));
+        };
+        // The name and the switch stay; the rest is the form's.
+        profile.harness = form.harness.trim().to_string();
+        profile.use_default = form.adopt;
+        if !form.env.trim().is_empty() {
+            profile.env = env_of(&form.env)?;
+        }
+        if let Some(problem) = profile.problem() {
+            return Err(problem);
+        }
+        self.on_profiles_layer(|layer| profiles::update_in_file(layer, &profile))?;
+        self.prepare(&profile)?;
+        Ok(Outcome::said(format!("saved {name}")))
+    }
+
+    fn duplicate(&mut self, from: &str, form: &AccountForm) -> Result<Outcome, String> {
+        let Some(source) = self
+            .all_profiles()
+            .into_iter()
+            .find(|p| p.name.trim() == from)
+        else {
+            return Err(format!("no profile named `{from}`"));
+        };
+        // Its harness, variables and kind of login; neither its star nor
+        // its switch, and a home of its own (it signs in separately).
+        let copy = Profile {
+            name: form.name.trim().to_string(),
+            harness: source.harness.trim().to_string(),
+            env: source.env,
+            default: false,
+            use_default: source.use_default,
+            disabled: false,
+        };
+        if let Some(problem) = copy.problem() {
+            return Err(problem);
+        }
+        self.on_profiles_layer(|layer| profiles::add_to_file(layer, &copy))?;
+        self.prepare(&copy)?;
+        self.focus_key(&copy.name);
+        Ok(match profiles::login_hint(&copy) {
+            Some(_) => Outcome {
+                message: format!("added {}: signing it in", copy.name),
+                sign_in: Some(copy.name.clone()),
+            },
+            None => Outcome::said(format!("added {}", copy.name)),
+        })
+    }
+
+    /// The remove's yes.
+    pub fn confirm_remove(&mut self) -> Result<Outcome, String> {
+        let Mode::Remove { name, .. } = &self.mode else {
+            return Err("nothing to remove".into());
+        };
+        let name = name.clone();
+        let home = self
+            .all_profiles()
+            .into_iter()
+            .find(|p| p.name.trim() == name)
+            .and_then(|p| p.home_in(&self.root))
+            .filter(|h| h.exists());
+        self.mode = Mode::List;
+        if !self.on_profiles_layer(|layer| profiles::remove_from_file(layer, &name))? {
+            return Err(format!("no profile named `{name}`"));
+        }
+        self.rows.retain(|r| r.key != name);
+        self.cursor = self.cursor.min(self.rows.len().saturating_sub(1));
+        Ok(Outcome::said(match home {
+            Some(h) => format!("removed {name}: its home stays at {}", h.display()),
+            None => format!("removed {name}"),
+        }))
+    }
+
+    /// Enter in "use for repo": the selected account becomes the picked
+    /// project's default for its harness, or, already it, is cleared.
+    pub fn toggle_use_for(&mut self) -> Result<Outcome, String> {
+        let Mode::UseFor { cursor } = self.mode else {
+            return Err("no repo picked".into());
+        };
+        let profile = self.selected_profile()?;
+        let (project, repo) = self.projects.get(cursor).cloned().ok_or("no repo picked")?;
+        let name = profile.name.trim().to_string();
+        let harness = profiles::project_default_harness(&self.all_profiles(), &name)?;
+        let mine = self
+            .project_accounts
+            .get(&repo)
+            .and_then(|m| m.get(&harness))
+            .is_some_and(|n| n.trim() == name);
+        let set = (!mine).then_some(name.as_str());
+        let repo_key = repo.to_string_lossy().into_owned();
+        let layer = profiles::layer_for(&self.config, &self.local, profiles::PROJECTS_KEY)?;
+        {
+            let _lock = if layer == self.local {
+                Some(nebula_core::settings::lock(&self.config).map_err(|e| e.to_string())?)
+            } else {
+                None
+            };
+            profiles::set_project_default_in_file(&layer, &repo_key, &harness, set)?;
+        }
+        let entry = self.project_accounts.entry(repo).or_default();
+        match set {
+            Some(n) => {
+                entry.insert(harness.clone(), n.to_string());
+            }
+            None => {
+                entry.remove(&harness);
+            }
+        }
+        Ok(Outcome::said(match set {
+            Some(n) => {
+                format!("{harness} sessions started in {project} without a pick now run on {n}")
+            }
+            None => format!("{project} has no default {harness} account now: the spread picks"),
+        }))
+    }
+
+    /// `s` / a click on a spread: the ACCOUNT SPREAD set to `word`.
+    pub fn set_spread(&mut self, word: &str) -> Result<Outcome, String> {
+        let word = accounts::Spread::parse(word).as_str();
+        crate::config::Config::update_in(&self.config, &self.local, |c| {
+            c.account_spread = word.to_string()
+        })
+        .map_err(|e| format!("couldn't save the spread: {e}"))?;
+        self.spread = word.to_string();
+        Ok(Outcome::said(format!(
+            "account spread: {}",
+            spread_text(word)
+        )))
+    }
+
+    /// `s`: the next spread.
+    pub fn cycle_spread(&mut self) -> Result<Outcome, String> {
+        let at = accounts::SPREADS
+            .iter()
+            .position(|s| *s == accounts::Spread::parse(&self.spread).as_str())
+            .unwrap_or(0);
+        self.set_spread(accounts::SPREADS[(at + 1) % accounts::SPREADS.len()])
+    }
+
+    /// `t`: the next failover threshold.
+    pub fn cycle_threshold(&mut self) -> Result<Outcome, String> {
+        let at = accounts::THRESHOLDS
+            .iter()
+            .position(|t| *t == self.threshold.trim())
+            .map_or(0, |i| (i + 1) % accounts::THRESHOLDS.len());
+        let next = accounts::THRESHOLDS[at];
+        crate::config::Config::update_in(&self.config, &self.local, |c| {
+            c.account_spread_threshold = next.to_string()
+        })
+        .map_err(|e| format!("couldn't save the threshold: {e}"))?;
+        self.threshold = next.to_string();
+        Ok(Outcome::said(format!("failover threshold: {next}%")))
+    }
+
+    /// Put the cursor on the account `key` once the rows hold it.
+    fn focus_key(&mut self, key: &str) {
+        self.pending_focus = Some(key.trim().to_string());
     }
 
     pub fn selected(&self) -> Option<&AccountRow> {
@@ -232,10 +947,10 @@ impl AccountsView {
     /// settings writers take that one for both layers). A local layer that
     /// is there but unreadable is refused: there is no telling which list
     /// is in force.
-    fn on_profiles_layer(
+    fn on_profiles_layer<T>(
         &self,
-        edit: impl FnOnce(&std::path::Path) -> Result<(), String>,
-    ) -> Result<(), String> {
+        edit: impl FnOnce(&std::path::Path) -> Result<T, String>,
+    ) -> Result<T, String> {
         let held = nebula_core::settings::read_object(&self.local)
             .map_err(|e| format!("{}: {e}: fix it, then try again", self.local.display()))?;
         if held.is_some_and(|obj| obj.contains_key(profiles::CONFIG_KEY)) {

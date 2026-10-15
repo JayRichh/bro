@@ -76,7 +76,8 @@ pub(super) fn submit(
     // the pane, as a picker-walked launch (`n`) does.
     let focus_pane = !stay && cfg.quick_prompt_focus;
     // A spread that chose the account says which and why.
-    if let Some(said) = spread_note(&cfg, &launch) {
+    let project = crate::quick_prompt::project_default(app, &launch.target, launch.harness_id());
+    if let Some(said) = spread_note(&cfg, &launch, project.as_deref()) {
         app.chrome.flash = Some(match app.chrome.flash.take() {
             Some(before) => format!("{before} · {said}"),
             None => said,
@@ -138,18 +139,33 @@ pub(super) fn submit(
 
 /// The ACCOUNT SPREAD's word on this launch: `claude: home (failover:
 /// work at 92%)` when a non-manual spread picked the account the box is
-/// on. None under `manual` (the default profile is no news) and for a
-/// harness without profiles.
-fn spread_note(cfg: &crate::config::Config, launch: &QuickLaunch) -> Option<String> {
+/// on, or `claude: work (project default)` when the project's default
+/// account did. None under `manual` with no project default (the default
+/// profile is no news) and for a harness without profiles.
+fn spread_note(
+    cfg: &crate::config::Config,
+    launch: &QuickLaunch,
+    project_default: Option<&str>,
+) -> Option<String> {
     let policy = crate::quick_prompt::spread_policy(cfg);
-    if policy.spread == nebula_core::accounts::Spread::Manual {
-        return None;
-    }
     let harness = launch.harness_id();
     if nebula_core::profiles::enabled_for(&cfg.profiles, harness).is_empty() {
         return None;
     }
-    let pick = nebula_core::accounts::pick_now(&cfg.profiles, harness, policy);
+    // The daemon's order: the project's default account, else the spread.
+    let pick = nebula_core::accounts::pick_for_project(
+        &cfg.profiles,
+        harness,
+        project_default,
+        policy,
+        nebula_core::clock::now_secs() as i64,
+        nebula_core::usage::read_account,
+    );
+    if policy.spread == nebula_core::accounts::Spread::Manual
+        && pick.reason != nebula_core::accounts::Reason::ProjectDefault
+    {
+        return None;
+    }
     let picked = pick.profile.map(|p| p.name.trim().to_string());
     // "auto" (no profile named) is the spread's pick; so is a named one
     // that happens to be what it would pick.

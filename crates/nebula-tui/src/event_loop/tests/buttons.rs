@@ -59,6 +59,7 @@ fn is_button(h: &HitTarget) -> bool {
             | HitTarget::CardMenu(_)
             | HitTarget::LauncherBandNew(_)
             | HitTarget::LauncherPaneMenu
+            | HitTarget::AccountChip(_)
     )
 }
 
@@ -335,6 +336,49 @@ fn the_pane_header_has_a_menu_and_gives_its_extras_up_first() {
             }
         }
     });
+}
+
+/// The pane header's account chip — what the session runs on — is MOVE
+/// TO ACCOUNT: a click lists the other accounts of its harness, a pick
+/// asks first (fresh, same worktree), and yes sends the switch.
+#[test]
+fn the_pane_headers_account_chip_moves_the_session_to_another_account() {
+    with_config_json(
+        r#"{"profiles":[{"name":"work","harness":"claude"}]}"#,
+        || {
+            let mut app = grid(160);
+            // The pane reads the card under the cursor.
+            let chip = hits_where(&app, |h| matches!(h, HitTarget::AccountChip(_)))
+                .first()
+                .map(|(_, h)| h.clone())
+                .expect("the chip is drawn");
+            let mut out = Vec::new();
+            click_hit(&mut app, &chip, &mut out);
+            let Some(Overlay::Menu(menu)) = &app.modals.overlay else {
+                panic!("{:?}", app.modals.overlay);
+            };
+            assert_eq!(menu.items.len(), 1, "{:?}", menu.items);
+            assert_eq!(menu.items[0].label, "Restart on work…");
+            press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
+            let Some(Overlay::Confirm(confirm)) = &app.modals.overlay else {
+                panic!("{:?}", app.modals.overlay);
+            };
+            assert!(
+                confirm.message.contains("same worktree"),
+                "{}",
+                confirm.message
+            );
+            assert!(out.is_empty(), "nothing before the yes");
+            press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
+            assert!(
+                matches!(
+                    out.as_slice(),
+                    [ClientRequest::SwitchAgentAccount { profile: Some(p), .. }] if p == "work"
+                ),
+                "{out:?}"
+            );
+        },
+    );
 }
 
 /// A help row is a button: the help closes and the action runs.

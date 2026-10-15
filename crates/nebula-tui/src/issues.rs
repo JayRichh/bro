@@ -1484,7 +1484,12 @@ fn launch_for_selected(app: &mut App) -> Option<QuickLaunch> {
         app.chrome.flash = Some("issues: the project has no worktree to launch into".into());
         return None;
     };
-    Some(QuickLaunch::from_config(target, &crate::config::Config::load()).with_issue(Some(issue)))
+    let cfg = crate::config::Config::load();
+    Some(
+        QuickLaunch::from_config(target, &cfg)
+            .in_project(app, &cfg)
+            .with_issue(Some(issue)),
+    )
 }
 
 /// `Enter`: the QUICK PROMPT for the issue. The box goes up over the
@@ -1519,7 +1524,12 @@ fn launch_for_row(app: &mut App) -> Option<QuickLaunch> {
         app.chrome.flash = Some("issues: the project has no worktree to launch into".into());
         return None;
     };
-    Some(QuickLaunch::from_config(target, &crate::config::Config::load()).with_issue(Some(issue)))
+    let cfg = crate::config::Config::load();
+    Some(
+        QuickLaunch::from_config(target, &cfg)
+            .in_project(app, &cfg)
+            .with_issue(Some(issue)),
+    )
 }
 
 /// `p` on a PROJECT ISSUES GROUP row: the QUICK PROMPT for that issue —

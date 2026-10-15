@@ -337,6 +337,9 @@ pub(crate) fn run_pending_action(
         }
         PendingAction::DeleteAgent(id) => delete_agent(app, id, out),
         PendingAction::MoveAgent { id, worktree } => launcher::move_agent(app, id, worktree, out),
+        PendingAction::SwitchAccount { id, profile } => {
+            crate::account_switch::send(app, id, profile, out);
+        }
         PendingAction::CloseTerminal(id) => close_terminal(app, id, out),
         PendingAction::DeleteLink(id) => {
             send(app, out, |req_id| ClientRequest::DeleteLink { req_id, id });
@@ -608,6 +611,10 @@ pub(crate) fn run_menu_action(app: &mut App, action: MenuAction, out: &mut Vec<C
         MenuAction::SendCloudMessage(id) => open_prompt(app, PromptKind::CloudMessage { id }),
         MenuAction::DuplicateAgent(id) => launcher::duplicate_agent(app, id),
         MenuAction::MoveAgentPicker(id) => launcher::open_move_picker(app, id),
+        MenuAction::SwitchAccountPicker(id) => crate::account_switch::open_picker(app, id),
+        MenuAction::SwitchAccount { id, profile } => {
+            crate::account_switch::confirm(app, id, profile)
+        }
         MenuAction::MoveAgent { id, worktree } => launcher::move_agent(app, id, worktree, out),
         MenuAction::RenameAgent(id) => open_prompt(app, PromptKind::RenameAgent { id }),
         MenuAction::ArchiveAgent(id) => {
@@ -646,14 +653,16 @@ pub(crate) fn run_menu_action(app: &mut App, action: MenuAction, out: &mut Vec<C
             if let Some(back) = quick {
                 // The picker's `worktree` is only what its menu was built
                 // against; where the launch lands is the box's own target.
+                let cfg = crate::config::Config::load();
                 let launch = crate::quick_prompt::QuickLaunch::of_kind(
                     back.launch.target.clone(),
                     kind,
                     custom.clone(),
                     model.filter(|m| m != crate::config::DEFAULT_CHOICE),
                     effort.filter(|e| e != crate::config::DEFAULT_CHOICE),
-                    &crate::config::Config::load(),
+                    &cfg,
                 )
+                .in_project(app, &cfg)
                 .with_issue(back.launch.issue.clone())
                 .with_pr(back.launch.pr.clone())
                 // The Claude row's `Tab` toggle rides the pick: the box

@@ -932,6 +932,19 @@ fn append_setting_value_row(
                 (field.label().to_string(), cfg.agent_value(&id, field), "")
             }
         }
+    } else if let Some(harness) = (tab == crate::config::project_tab())
+        .then(|| cfg.project_account_row(i))
+        .flatten()
+    {
+        // A PROJECT TAB **Default account** row: the project's account
+        // for the harness, or the spread's pick when it names none.
+        let value = project_settings
+            .map(|s| {
+                s.default_profile(&harness)
+                    .unwrap_or_else(|| "none (the spread picks)".into())
+            })
+            .unwrap_or_else(|| "n/a".into());
+        (harness, value, "")
     } else {
         let spec =
             crate::config::setting_at(tab, i).expect("settings_rows indexes this tab's settings");

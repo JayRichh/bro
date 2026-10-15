@@ -547,6 +547,10 @@ pub(crate) fn menu_items_for_session(a: &nebula_core::Agent) -> Vec<MenuItem> {
             MenuItem::new("Restart", MenuAction::RestartAgent(a.id.clone())),
             MenuItem::new("Duplicate", MenuAction::DuplicateAgent(a.id.clone())),
             MenuItem::new("Move to…", MenuAction::MoveAgentPicker(a.id.clone())),
+            MenuItem::new(
+                "Move to account…",
+                MenuAction::SwitchAccountPicker(a.id.clone()),
+            ),
             MenuItem::new("Rename", MenuAction::RenameAgent(a.id.clone())),
             if a.role.is_orchestrator() {
                 MenuItem::new("Unpin orchestrator", MenuAction::ClearOrchestrator)

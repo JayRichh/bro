@@ -228,6 +228,10 @@ pub enum HitTarget {
     /// The `⑂ 2` SUBAGENT CHIP on a session's card, or in the PANE's
     /// header, by the session: a click opens the SUBAGENTS OVERLAY on it.
     SubagentChip(AgentId),
+    /// The ACCOUNT CHIP in the PANE's header — what the session runs on,
+    /// `claude@max2 opus` — by the session: a click opens MOVE TO ACCOUNT
+    /// on it (`account_switch::open_picker`).
+    AccountChip(AgentId),
     /// A count on the header's ATTENTION STRIP: a click opens the next
     /// session in that state, round and round.
     Attention(crate::subagents::Tone),
@@ -387,6 +391,16 @@ pub enum MenuAction {
     /// A card menu's **Move to…**: the MOVE PICKER of the checkouts
     /// session `id` can move to, what `m` on the card opens.
     MoveAgentPicker(AgentId),
+    /// A card menu's (or the pane header's account chip's) **Move to
+    /// account…**: the accounts session `id` can restart on
+    /// (`account_switch::open_picker`).
+    SwitchAccountPicker(AgentId),
+    /// A row of that picker: confirm, then restart session `id` fresh on
+    /// `profile` (None: its harness's own login).
+    SwitchAccount {
+        id: AgentId,
+        profile: Option<String>,
+    },
     /// A MOVE PICKER row, or a card dropped on another band: move the
     /// session into `worktree` (`ClientRequest::MoveAgent`).
     MoveAgent {
@@ -747,6 +761,12 @@ pub enum PendingAction {
         terminals: Vec<TerminalId>,
     },
     DeleteAgent(AgentId),
+    /// MOVE TO ACCOUNT, confirmed: `ClientRequest::SwitchAgentAccount`
+    /// (`account_switch::send`).
+    SwitchAccount {
+        id: AgentId,
+        profile: Option<String>,
+    },
     /// A session card dropped on another band or PROJECT TAB, with the
     /// **Confirm drag move** SETTING on: move it once the dialog is
     /// answered.
@@ -2716,6 +2736,12 @@ pub enum PendingIntent {
     /// Flash this once the DAEMON has done it (an Error flashes its own
     /// reason instead).
     FlashOnAck(String),
+    /// The ACCOUNTS OVERLAY's sign-in: the terminal created for it gets
+    /// `line` (an account's login command) typed in, Enter pressed, and
+    /// is attached, so the login runs in front of the user.
+    SignIn {
+        line: String,
+    },
     /// The NEW WORKTREE modal's create. The stand-in row `placeholder`
     /// went up and took the cursor when Enter was pressed, exactly as the
     /// Ack used to leave the real row: the Ack only swaps the real id in.
@@ -4247,6 +4273,12 @@ pub struct LauncherState {
     /// The ACCOUNT SPREAD the config sets, mirrored beside `profiles`:
     /// whether a launch's profile field offers "auto".
     pub spread: nebula_core::accounts::Policy,
+    /// Each project's DEFAULT ACCOUNTS (repo path → harness → profile),
+    /// mirrored beside `profiles` from the projects' settings
+    /// (`ProjectSettings::default_profiles`): what a launch naming no
+    /// profile runs on in that project, ahead of the spread.
+    pub project_accounts:
+        std::collections::BTreeMap<std::path::PathBuf, std::collections::BTreeMap<String, String>>,
     /// Every ACCOUNT's latest plan usage (`nebula_core::usage`): pushed
     /// by a 55+ daemon (`ServerEvent::AccountUsage`), else read from the
     /// kept files as a box opens (`quick_prompt::refresh_profiles`).

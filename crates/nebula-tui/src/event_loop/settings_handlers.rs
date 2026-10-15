@@ -348,7 +348,78 @@ pub(crate) fn rekey_project_config(
     }
 }
 
+/// A PROJECT TAB **Default account** row, stepped `delta` (Enter: one on)
+/// through none (the spread picks) and each usable profile of `harness`,
+/// written in place under the project's repo path, as the desktop and
+/// `kete profile set-project` write it.
+fn step_project_account(app: &mut App, harness: &str, delta: i32) {
+    let Some(repo) = app.selected_project().map(|p| p.repo_path.clone()) else {
+        if let Some(view) = settings_mut(app) {
+            view.warn("no project selected, this tab edits the one under the cursor");
+        }
+        return;
+    };
+    let cfg = crate::config::Config::load();
+    let mut choices: Vec<Option<String>> = vec![None];
+    choices.extend(
+        nebula_core::profiles::for_harness(&cfg.profiles, harness)
+            .iter()
+            .map(|p| Some(p.name.trim().to_string())),
+    );
+    let now = cfg.project(&repo).default_profile(harness);
+    let at = choices.iter().position(|c| *c == now).unwrap_or(0) as i32;
+    let step = if delta == 0 { 1 } else { delta };
+    let n = choices.len() as i32;
+    let next = choices[(at + step).rem_euclid(n) as usize].clone();
+    let (config, local) = crate::config::Config::layer_paths();
+    let repo_key = repo.to_string_lossy().into_owned();
+    let written = app.chrome.config_watch.own_write(|| {
+        if let Some(name) = next.as_deref() {
+            let of = nebula_core::profiles::project_default_harness(&cfg.profiles, name)?;
+            if of != harness {
+                return Err(format!("{name} is a {of} account, not {harness}"));
+            }
+        }
+        let layer =
+            nebula_core::profiles::layer_for(&config, &local, nebula_core::profiles::PROJECTS_KEY)?;
+        let _lock = if layer == local {
+            Some(nebula_core::settings::lock(&config).map_err(|e| e.to_string())?)
+        } else {
+            None
+        };
+        nebula_core::profiles::set_project_default_in_file(
+            &layer,
+            &repo_key,
+            harness,
+            next.as_deref(),
+        )
+    });
+    match written {
+        Ok(()) => {
+            crate::quick_prompt::mirror_accounts(app, &crate::config::Config::load());
+            if let Some(view) = settings_mut(app) {
+                view.info(match next {
+                    Some(name) => format!("{harness} launches here that pick none run on {name}"),
+                    None => format!("no {harness} default here: the account spread picks"),
+                });
+            }
+        }
+        Err(e) => {
+            if let Some(view) = settings_mut(app) {
+                view.warn(format!("couldn't save it: {e}"));
+            }
+        }
+    }
+    app.chrome.dirty = true;
+}
+
 pub(crate) fn apply_setting_at(app: &mut App, tab: usize, index: usize, delta: i32) {
+    if tab == crate::config::project_tab() {
+        if let Some(harness) = crate::config::Config::load().project_account_row(index) {
+            step_project_account(app, &harness, delta);
+            return;
+        }
+    }
     if let Some(spec) = crate::config::setting_at(tab, index) {
         // A PROJECT TAB row edits the selected project's entry — every
         // one of them typed. With no project to edit — an empty tree —
@@ -462,8 +533,7 @@ pub(crate) fn apply_config(app: &mut App, cfg: &crate::config::Config) {
     app.launcher.auto_cleanup_merged = cfg.auto_cleanup_merged;
     app.launcher.hide_card_marks = cfg.hide_card_marks;
     app.launcher.highlight_current_card = cfg.highlight_current_card;
-    app.launcher.profiles = cfg.profiles.clone();
-    app.launcher.spread = crate::quick_prompt::spread_policy(cfg);
+    crate::quick_prompt::mirror_accounts(app, cfg);
     app.launcher.launcher_pane_at = cfg.pane_side();
     app.launcher.launcher_list = cfg.list_layout();
     app.launcher.launcher_nested = cfg.nested_layout();

@@ -911,7 +911,12 @@ pub fn tab_settings(tab: usize) -> &'static [SettingSpec] {
 /// registry, so a new CLI grows it without a code change.
 pub fn tab_len(tab: usize) -> usize {
     match SETTINGS_TABS.get(tab).map(|t| t.body) {
-        Some(TabBody::Values(settings) | TabBody::Project(settings)) => settings.len(),
+        Some(TabBody::Values(settings)) => settings.len(),
+        // The declared rows, then a **Default account** row per harness
+        // with profiles ([`Config::project_account_harnesses`]).
+        Some(TabBody::Project(settings)) => {
+            settings.len() + Config::load().project_account_harnesses().len()
+        }
         Some(TabBody::Hotkeys) => crate::actions::ACTIONS.len(),
         Some(TabBody::Agents) => AGENTS_HEAD.len() + Config::load().agent_rows().len(),
         None => 0,
@@ -960,11 +965,22 @@ pub fn all_settings() -> impl Iterator<Item = (usize, usize, &'static SettingSpe
 /// The Agents tab reads the registry for its harness rows.
 pub fn hint_at(tab: usize, index: usize) -> String {
     match SETTINGS_TABS.get(tab).map(|t| t.body) {
-        Some(TabBody::Values(settings) | TabBody::Project(settings)) => settings
+        Some(TabBody::Values(settings)) => settings
             .get(index)
             .map(|s| s.hint)
             .unwrap_or("")
             .to_string(),
+        Some(TabBody::Project(settings)) => match settings.get(index) {
+            Some(spec) => spec.hint.to_string(),
+            None => Config::load()
+                .project_account_row(index)
+                .map(|h| {
+                    format!(
+                        "The {h} account a launch in this project naming none runs on, ahead of the account spread and the {h} default (←/→ or Enter: the next account; none: the spread picks)"
+                    )
+                })
+                .unwrap_or_default(),
+        },
         Some(TabBody::Hotkeys) => crate::actions::spec_at(index)
             .map(|s| s.hint)
             .unwrap_or("")
@@ -1013,6 +1029,14 @@ pub fn settings_rows(tab: usize) -> Vec<SettingsRow> {
                 settings.iter().map(|s| s.group.to_string()),
                 SettingsRow::Setting,
             ));
+            // A **Default account** row per harness with profiles, under
+            // its own header ([`Config::project_account_row`]).
+            let harnesses = Config::load().project_account_harnesses();
+            if !harnesses.is_empty() {
+                rows.push(SettingsRow::Blank);
+                rows.push(SettingsRow::Header(PROJECT_ACCOUNTS_HEADER.into()));
+                rows.extend((0..harnesses.len()).map(|i| SettingsRow::Setting(settings.len() + i)));
+            }
             rows
         }
         Some(TabBody::Hotkeys) => grouped(
@@ -1633,6 +1657,30 @@ impl ProjectSettings {
             }
             _ => false,
         }
+    }
+
+    /// The PROJECT DEFAULT ACCOUNTS: harness id to profile name, as the
+    /// entry's `default_profiles` holds them
+    /// (`nebula_core::profiles::PROJECT_DEFAULTS_KEY`), carried in
+    /// [`ProjectSettings::other`] so a save writes them back untouched.
+    /// They are written in place by `profiles::set_project_default_in_file`,
+    /// never through this struct.
+    pub fn default_profiles(&self) -> BTreeMap<String, String> {
+        let mut obj = serde_json::Map::new();
+        if let Some(v) = self.other.get(nebula_core::profiles::PROJECT_DEFAULTS_KEY) {
+            obj.insert(
+                nebula_core::profiles::PROJECTS_KEY.into(),
+                serde_json::json!({ "_": { nebula_core::profiles::PROJECT_DEFAULTS_KEY: v } }),
+            );
+        }
+        nebula_core::profiles::project_defaults_from(&obj)
+            .remove("_")
+            .unwrap_or_default()
+    }
+
+    /// The project's default account for `harness`, if it names one.
+    pub fn default_profile(&self, harness: &str) -> Option<String> {
+        self.default_profiles().remove(harness.trim())
     }
 }
 
@@ -2715,6 +2763,29 @@ impl Config {
         changed
     }
 
+    /// The harnesses the PROJECT TAB offers a **Default account** row
+    /// for: each one a usable PROFILE is for, in the order the profiles
+    /// list them.
+    pub fn project_account_harnesses(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for p in self.profiles.iter().filter(|p| p.problem().is_none()) {
+            let h = p.harness.trim().to_string();
+            if !out.contains(&h) {
+                out.push(h);
+            }
+        }
+        out
+    }
+
+    /// The harness a PROJECT TAB row past the declared ones is the
+    /// **Default account** row of; None for a declared row or none at all.
+    pub fn project_account_row(&self, index: usize) -> Option<String> {
+        let declared = tab_settings(project_tab()).len();
+        index
+            .checked_sub(declared)
+            .and_then(|i| self.project_account_harnesses().into_iter().nth(i))
+    }
+
     /// The settings of the project checked out at `repo_path`: its
     /// `projects` entry, else the defaults every project without one gets.
     pub fn project(&self, repo_path: &Path) -> ProjectSettings {
@@ -3369,7 +3440,9 @@ pub fn locate(kind: SettingKind) -> Option<(usize, usize)> {
     })
 }
 
-#[cfg(any(test, feature = "test-support"))]
+/// The PROJECT TAB's header over its **Default account** rows.
+pub const PROJECT_ACCOUNTS_HEADER: &str = "Default account";
+
 /// Index of the Project tab, whose rows are the selected project's.
 pub fn project_tab() -> usize {
     SETTINGS_TABS
@@ -3485,6 +3558,61 @@ mod update_tests {
             json!({"editor": "nvim", "someone_elses": [1], "kanban": true}),
             "no defaults materialised, unknown keys kept"
         );
+    }
+
+    /// A project's default accounts, as `profiles::set_project_default_in_file`
+    /// writes them, read back through the loaded config and kept by an
+    /// unrelated save.
+    #[test]
+    fn project_default_accounts_read_back_and_survive_a_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let (path, local) = layers(&dir);
+        std::fs::write(&path, r#"{"projects": {"/repo": {"run_command": "make"}}}"#).unwrap();
+        nebula_core::profiles::set_project_default_in_file(&path, "/repo", "claude", Some("work"))
+            .unwrap();
+        nebula_core::profiles::set_project_default_in_file(&path, "/repo", "codex", Some("gpt"))
+            .unwrap();
+        let cfg = Config::load_at(&path, &local);
+        let repo = cfg.project(Path::new("/repo"));
+        assert_eq!(repo.default_profile("claude").as_deref(), Some("work"));
+        assert_eq!(repo.default_profile(" codex ").as_deref(), Some("gpt"));
+        assert_eq!(repo.default_profile("cursor"), None);
+        assert!(cfg
+            .project(Path::new("/other"))
+            .default_profiles()
+            .is_empty());
+        Config::update_in(&path, &local, |cfg| cfg.kanban = true).unwrap();
+        let cfg = Config::load_at(&path, &local);
+        assert_eq!(
+            cfg.project(Path::new("/repo"))
+                .default_profile("claude")
+                .as_deref(),
+            Some("work")
+        );
+        assert_eq!(cfg.project(Path::new("/repo")).run_command, "make");
+    }
+
+    /// The PROJECT TAB's Default account rows: one per harness a usable
+    /// profile is for, after the declared rows.
+    #[test]
+    fn project_account_rows_follow_the_usable_profiles() {
+        let dir = tempfile::tempdir().unwrap();
+        let (path, local) = layers(&dir);
+        std::fs::write(
+            &path,
+            r#"{"profiles":[{"name":"gpt","harness":"codex"},{"name":"bad name","harness":"cursor"},{"name":"work","harness":"claude"},{"name":"home","harness":"codex"}]}"#,
+        )
+        .unwrap();
+        let cfg = Config::load_at(&path, &local);
+        assert_eq!(cfg.project_account_harnesses(), ["codex", "claude"]);
+        let declared = tab_settings(project_tab()).len();
+        assert_eq!(cfg.project_account_row(0), None, "a declared row");
+        assert_eq!(cfg.project_account_row(declared).as_deref(), Some("codex"));
+        assert_eq!(
+            cfg.project_account_row(declared + 1).as_deref(),
+            Some("claude")
+        );
+        assert_eq!(cfg.project_account_row(declared + 2), None);
     }
 
     #[test]

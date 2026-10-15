@@ -1,3 +1,4 @@
+pub mod account_switch;
 pub mod accounts_overlay;
 pub mod ado;
 pub mod agent_picker;

@@ -1687,13 +1687,12 @@ mod tests {
         let tab = project_tab();
         assert_eq!(SETTINGS_TABS[tab].title, "Project");
         assert!(tab < hotkeys_tab());
-        let rows = settings_rows(tab);
+        // No profiles, so no Default account rows: the declared ones alone.
+        let (rows, len) = with_empty_config(|| (settings_rows(tab), tab_len(tab)));
         assert_eq!(rows[0], SettingsRow::Project);
         assert_eq!(
             rows[1..],
-            (0..tab_len(tab))
-                .map(SettingsRow::Setting)
-                .collect::<Vec<_>>()[..]
+            (0..len).map(SettingsRow::Setting).collect::<Vec<_>>()[..]
         );
         for (t, _, spec) in all_settings() {
             assert_eq!(

@@ -37,7 +37,7 @@ pub(crate) fn handle_overlay_key(app: &mut App, key: KeyEvent, out: &mut Vec<Cli
             crate::review_modal::handle_key(app, key);
         }
         Overlay::OrchestratorStart(_) => orchestrator::handle_start_key(app, key, out),
-        Overlay::Accounts(_) => accounts::handle_key(app, key),
+        Overlay::Accounts(_) => accounts::handle_key(app, key, out),
         Overlay::Subagents(_) => desk::handle_subagents_key(app, key, out),
         Overlay::Ado(_) => ado::handle_key(app, key, out),
         Overlay::ProjectPicker(_) => launcher::handle_picker_key(app, key),

@@ -3,7 +3,9 @@
 //! in `crate::accounts_overlay`.
 
 use super::*;
-use crate::accounts_overlay::{build_rows, AccountsView};
+use crate::accounts_overlay::{
+    build_rows, AccountForm, AccountsHit, AccountsView, Field, FormKind, Mode, Outcome,
+};
 
 /// The accounts to show: the pushed list, or the kept files when the
 /// daemon is too old to push one.
@@ -14,23 +16,46 @@ fn readings(app: &mut App) -> Vec<nebula_core::usage::AccountUsage> {
     app.launcher.account_usage.clone()
 }
 
+/// The rows, and every setting the overlay mirrors, read again: the
+/// profiles, the spread, each project's default accounts.
 fn rows(app: &mut App) -> Vec<crate::accounts_overlay::AccountRow> {
-    let profiles = crate::config::Config::load().profiles;
-    app.launcher.profiles = profiles.clone();
+    let cfg = crate::config::Config::load();
+    crate::quick_prompt::mirror_accounts(app, &cfg);
     let usage = readings(app);
     build_rows(
-        &profiles,
+        &cfg.profiles,
         &usage,
         &app.tree.agents,
         crate::accounts_overlay::login_lookup,
     )
 }
 
+/// Fill the view's mirrors from the app and the config.
+fn mirror(app: &App, view: &mut AccountsView) {
+    let cfg = crate::config::Config::load();
+    view.harnesses = cfg
+        .harness_registry()
+        .iter()
+        .map(|h| h.id.clone())
+        .collect();
+    view.spread = cfg.account_spread.clone();
+    view.threshold = cfg.account_spread_threshold.clone();
+    view.projects = app
+        .tree
+        .projects
+        .iter()
+        .map(|p| (p.name.clone(), p.repo_path.clone()))
+        .collect();
+    view.project_accounts = app.launcher.project_accounts.clone();
+}
+
 /// `⇧U`: open the overlay.
 pub(crate) fn open(app: &mut App) {
     let rows = rows(app);
     let (config, local) = crate::config::Config::layer_paths();
-    app.modals.overlay = Some(Overlay::Accounts(AccountsView::new(rows, config, local)));
+    let mut view = AccountsView::new(rows, config, local);
+    mirror(app, &mut view);
+    app.modals.overlay = Some(Overlay::Accounts(view));
     app.chrome.dirty = true;
 }
 
@@ -40,19 +65,33 @@ pub(crate) fn refresh(app: &mut App) {
         return;
     }
     let rows = rows(app);
-    if let Some(Overlay::Accounts(view)) = &mut app.modals.overlay {
-        view.rows = rows;
-        view.cursor = view.cursor.min(view.rows.len().saturating_sub(1));
-    }
-}
-
-/// j/k move, Space/e switch a profile on or off, d/* make it the default,
-/// Esc (or q) closes.
-pub(crate) fn handle_key(app: &mut App, key: KeyEvent) {
-    let Some(Overlay::Accounts(view)) = &mut app.modals.overlay else {
+    let Some(Overlay::Accounts(mut view)) = app.modals.overlay.take() else {
         return;
     };
-    let result = match key.code {
+    view.set_rows(rows);
+    mirror(app, &mut view);
+    app.modals.overlay = Some(Overlay::Accounts(view));
+}
+
+/// What a key did: a message for the footer, an account to sign in.
+type Done = Option<Result<Outcome, String>>;
+
+/// The list's keys: j/k move, Space/e switch a profile on or off, d/*
+/// make it the default, a add, Enter edit, c duplicate, x/Delete remove,
+/// l sign in, p use for a repo, m move the grid's session onto it, s/t
+/// the spread and its threshold, Esc (or q) closes.
+fn list_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) -> Done {
+    let agents = app.tree.agents.clone();
+    let Some(Overlay::Accounts(view)) = &mut app.modals.overlay else {
+        return None;
+    };
+    let said = |r: Result<String, String>| {
+        Some(r.map(|m| Outcome {
+            message: m,
+            sign_in: None,
+        }))
+    };
+    match key.code {
         KeyCode::Esc | KeyCode::Char('q') => {
             app.modals.overlay = None;
             None
@@ -65,19 +104,316 @@ pub(crate) fn handle_key(app: &mut App, key: KeyEvent) {
             view.step(-1);
             None
         }
-        KeyCode::Char(' ') | KeyCode::Char('e') => Some(view.toggle_enabled()),
-        KeyCode::Char('d') | KeyCode::Char('*') => Some(view.set_default()),
+        KeyCode::Char(' ') | KeyCode::Char('e') => said(view.toggle_enabled()),
+        KeyCode::Char('d') | KeyCode::Char('*') => said(view.set_default()),
+        KeyCode::Char('a') => {
+            view.open_add();
+            None
+        }
+        KeyCode::Enter => view.open_edit().err().map(Err),
+        KeyCode::Char('c') => view.open_duplicate().err().map(Err),
+        KeyCode::Char('x') | KeyCode::Delete => view.open_remove(&agents).err().map(Err),
+        KeyCode::Char('p') => view.open_use_for().err().map(Err),
+        KeyCode::Char('s') => Some(view.cycle_spread()),
+        KeyCode::Char('t') => Some(view.cycle_threshold()),
+        KeyCode::Char('l') => {
+            let key = view.selected().map(|r| r.key.clone());
+            if let Some(key) = key {
+                sign_in(app, &key, out);
+            }
+            None
+        }
+        KeyCode::Char('m') => {
+            move_session_here(app);
+            None
+        }
         _ => None,
+    }
+}
+
+/// A form's keys: Tab / ↓ / ↑ walk the fields, ←/→ (or Space) step the
+/// harness and flip a box, typing fills a text field, Enter saves, Esc
+/// goes back to the list.
+fn form_key(app: &mut App, key: KeyEvent) -> Done {
+    let Some(Overlay::Accounts(view)) = &mut app.modals.overlay else {
+        return None;
     };
-    match result {
-        Some(Ok(message)) => {
-            app.chrome.flash = Some(message);
+    let taken: Vec<String> = view
+        .rows
+        .iter()
+        .filter_map(|r| r.profile.as_ref().map(|p| p.name.trim().to_string()))
+        .collect();
+    let harnesses = view.harnesses.clone();
+    if key.code == KeyCode::Enter {
+        return Some(view.submit_form());
+    }
+    let Mode::Form(form) = &mut view.mode else {
+        return None;
+    };
+    let n = form.fields().len();
+    let field = form.current();
+    match key.code {
+        KeyCode::Esc => view.mode = Mode::List,
+        KeyCode::Tab | KeyCode::Down => form.field = (form.field + 1) % n,
+        KeyCode::BackTab | KeyCode::Up => form.field = (form.field + n - 1) % n,
+        KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if field == Field::Harness => {
+            if !harnesses.is_empty() {
+                let at = harnesses
+                    .iter()
+                    .position(|h| *h == form.harness)
+                    .unwrap_or(0);
+                let next = if key.code == KeyCode::Left {
+                    (at + harnesses.len() - 1) % harnesses.len()
+                } else {
+                    (at + 1) % harnesses.len()
+                };
+                form.harness = harnesses[next].clone();
+                if form.kind == FormKind::Add && !form.touched {
+                    form.name = crate::accounts_overlay::suggest_name(&form.harness, &taken);
+                }
+            }
+        }
+        KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if field == Field::Adopt => {
+            form.adopt = !form.adopt;
+        }
+        KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if field == Field::Default => {
+            form.make_default = !form.make_default;
+        }
+        KeyCode::Backspace if AccountForm::is_text(field) => {
+            let text = if field == Field::Name {
+                &mut form.name
+            } else {
+                &mut form.env
+            };
+            text.pop();
+            form.touched = true;
+        }
+        KeyCode::Char(c)
+            if AccountForm::is_text(field)
+                && !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            if field == Field::Name {
+                form.name.push(c);
+            } else {
+                form.env.push(c);
+            }
+            form.touched = true;
+        }
+        _ => {}
+    }
+    if let Mode::Form(form) = &mut view.mode {
+        form.error = None;
+    }
+    None
+}
+
+/// The remove's keys: y / Enter remove, n / Esc keep.
+fn remove_key(app: &mut App, key: KeyEvent) -> Done {
+    let Some(Overlay::Accounts(view)) = &mut app.modals.overlay else {
+        return None;
+    };
+    match key.code {
+        KeyCode::Char('y') | KeyCode::Enter => Some(view.confirm_remove()),
+        KeyCode::Char('n') | KeyCode::Esc => {
+            view.mode = Mode::List;
+            None
+        }
+        _ => None,
+    }
+}
+
+/// "Use for repo"'s keys: j/k walk the repos, Enter sets or clears, Esc
+/// goes back.
+fn use_for_key(app: &mut App, key: KeyEvent) -> Done {
+    let Some(Overlay::Accounts(view)) = &mut app.modals.overlay else {
+        return None;
+    };
+    let n = view.projects.len();
+    let Mode::UseFor { cursor } = &mut view.mode else {
+        return None;
+    };
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => view.mode = Mode::List,
+        KeyCode::Down | KeyCode::Char('j') => *cursor = (*cursor + 1).min(n.saturating_sub(1)),
+        KeyCode::Up | KeyCode::Char('k') => *cursor = cursor.saturating_sub(1),
+        KeyCode::Enter | KeyCode::Char(' ') => return Some(view.toggle_use_for()),
+        _ => {}
+    }
+    None
+}
+
+pub(crate) fn handle_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) {
+    let Some(Overlay::Accounts(view)) = &app.modals.overlay else {
+        return;
+    };
+    let done = match view.mode {
+        Mode::List => list_key(app, key, out),
+        Mode::Form(_) => form_key(app, key),
+        Mode::Remove { .. } => remove_key(app, key),
+        Mode::UseFor { .. } => use_for_key(app, key),
+    };
+    match done {
+        Some(Ok(outcome)) => {
+            app.chrome.flash = Some(outcome.message);
             refresh(app);
+            if let Some(account) = outcome.sign_in {
+                sign_in(app, &account, out);
+            }
         }
         Some(Err(message)) => app.chrome.flash = Some(message),
         None => {}
     }
     app.chrome.dirty = true;
+}
+
+/// A click: a button is its key, pressed; a row puts the cursor there; a
+/// form's field takes the form's cursor; a repo in "use for" is picked
+/// (a second click sets it). The wheel walks the rows.
+pub(crate) fn handle_mouse(app: &mut App, mouse: MouseEvent, out: &mut Vec<ClientRequest>) -> bool {
+    let Some(Overlay::Accounts(view)) = &mut app.modals.overlay else {
+        return false;
+    };
+    app.chrome.dirty = true;
+    let pos = ratatui::layout::Position::new(mouse.column, mouse.row);
+    match mouse.kind {
+        MouseEventKind::ScrollDown if view.mode == Mode::List => view.step(1),
+        MouseEventKind::ScrollUp if view.mode == Mode::List => view.step(-1),
+        MouseEventKind::Down(MouseButton::Left) => {
+            let Some(hit) = view
+                .hits
+                .iter()
+                .find(|(r, _)| r.contains(pos))
+                .map(|(_, h)| *h)
+            else {
+                return true;
+            };
+            match hit {
+                AccountsHit::Key(code) => {
+                    handle_key(app, KeyEvent::new(code, KeyModifiers::NONE), out);
+                }
+                AccountsHit::Row(i) => view.cursor = i.min(view.rows.len().saturating_sub(1)),
+                AccountsHit::Field(i) => {
+                    if let Mode::Form(form) = &mut view.mode {
+                        form.field = i.min(form.fields().len().saturating_sub(1));
+                    }
+                }
+                AccountsHit::Project(i) => {
+                    if let Mode::UseFor { cursor } = &mut view.mode {
+                        if *cursor == i {
+                            handle_key(app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), out);
+                        } else {
+                            *cursor = i;
+                        }
+                    }
+                }
+                AccountsHit::Spread(i) => {
+                    let word = nebula_core::accounts::SPREADS[i.min(2)];
+                    let done = view.set_spread(word);
+                    match done {
+                        Ok(o) => {
+                            app.chrome.flash = Some(o.message);
+                            refresh(app);
+                        }
+                        Err(e) => app.chrome.flash = Some(e),
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    true
+}
+
+/// The checkout a login terminal opens in: the selected one, else the
+/// first project's root.
+fn login_worktree(app: &App) -> Option<WorktreeId> {
+    app.selected_worktree()
+        .map(|w| w.id.clone())
+        .filter(|id| !app.is_placeholder_worktree(id))
+        .or_else(|| {
+            app.tree
+                .projects
+                .first()
+                .and_then(|p| app.root_worktree(&p.id))
+        })
+}
+
+/// Sign the account `key` in: its login command (looked up here, never
+/// typed by anyone) run in a new terminal session, which the pane shows.
+/// With no checkout to open one in, the footer says the command instead.
+pub(crate) fn sign_in(app: &mut App, key: &str, out: &mut Vec<ClientRequest>) {
+    let row = match &app.modals.overlay {
+        Some(Overlay::Accounts(view)) => view.rows.iter().find(|r| r.key == key).cloned(),
+        _ => None,
+    };
+    let Some(row) = row else {
+        app.chrome.flash = Some(format!("no account `{key}`"));
+        return;
+    };
+    if let Some(problem) = &row.problem {
+        app.chrome.flash = Some(format!("{}: {problem}", row.label()));
+        return;
+    }
+    let Some(line) = nebula_core::accounts::login_command(row.profile.as_ref(), &row.harness)
+    else {
+        app.chrome.flash = Some(format!(
+            "kete knows no sign-in for {}: sign in from a session under it",
+            row.harness
+        ));
+        return;
+    };
+    let Some(worktree) = login_worktree(app) else {
+        app.chrome.flash = Some(format!("add a repo first, or run it yourself: {line}"));
+        return;
+    };
+    app.modals.overlay = None;
+    app.chrome.flash = Some(format!(
+        "signing {} in: finish in the terminal, then ⇧U shows it signed in",
+        row.label()
+    ));
+    send_with(app, out, PendingIntent::SignIn { line }, |req_id| {
+        ClientRequest::CreateTerminal {
+            req_id,
+            worktree,
+            name: Some(format!("sign in {}", row.key.trim_start_matches('@'))),
+        }
+    });
+}
+
+/// `m`: the session under the grid's cursor moved onto the selected
+/// account, through MOVE TO ACCOUNT's confirm.
+fn move_session_here(app: &mut App) {
+    let Some(Overlay::Accounts(view)) = &app.modals.overlay else {
+        return;
+    };
+    let Some(row) = view.selected().cloned() else {
+        return;
+    };
+    let session = match app.selected_session_row() {
+        Some(crate::app::SessionRow::Agent(a)) => a,
+        _ => {
+            app.chrome.flash = Some("no session under the cursor to move".into());
+            return;
+        }
+    };
+    let harness = nebula_core::accounts::session_harness(&session);
+    if harness != row.harness {
+        app.chrome.flash = Some(format!(
+            "{} is a {} account: {} runs {harness}",
+            row.label(),
+            row.harness,
+            session.name
+        ));
+        return;
+    }
+    if nebula_core::accounts::session_account(&session) == row.key {
+        app.chrome.flash = Some(format!("{} already runs on {}", session.name, row.label()));
+        return;
+    }
+    let profile = row.profile.as_ref().map(|p| p.name.trim().to_string());
+    crate::account_switch::confirm(app, session.id.clone(), profile);
 }
 
 /// A 55+ daemon's account list: replaces what was known.
@@ -263,6 +599,105 @@ mod tests {
         });
     }
 
+    /// The settings the launch-order tests stand on: `main` the harness
+    /// default, `proj` the seeded project's default account, `spare` a third.
+    fn launch_json(spread: &str, proj_disabled: bool) -> String {
+        format!(
+            r#"{{"account_spread":"{spread}","profiles":[{{"name":"main","harness":"claude","default":true}},{{"name":"spare","harness":"claude"}},{{"name":"proj","harness":"claude","disabled":{proj_disabled}}}],"projects":{{"/tmp/demo":{{"default_profiles":{{"claude":"proj"}}}}}}}}"#
+        )
+    }
+
+    fn box_launch(app: &App) -> crate::quick_prompt::QuickLaunch {
+        match &app.modals.overlay {
+            Some(Overlay::Prompt(p)) => match &p.kind {
+                PromptKind::QuickPrompt(launch) => launch.clone(),
+                other => panic!("{other:?}"),
+            },
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// The box and the `n` picker preselect what the daemon would pick for
+    /// a launch naming none: the project's default account ahead of the
+    /// harness default (named under `manual`, "auto" under a spread), and
+    /// the harness default again once the project's is switched off.
+    #[test]
+    fn a_launch_preselects_the_project_default_account() {
+        let worktree = || crate::quick_prompt::QuickTarget::Worktree(WorktreeId("w1".into()));
+        with_config_json(&launch_json("manual", false), || {
+            let mut app = App::new();
+            seed_tree(&mut app);
+            crate::quick_prompt::open_for(&mut app, worktree());
+            let launch = box_launch(&app);
+            assert_eq!(launch.profile.as_deref(), Some("proj"));
+            let label = crate::quick_prompt::profile_choice_label(
+                launch.profile.as_deref(),
+                &app.launcher.profiles,
+                "claude",
+                app.launcher.spread,
+                &[],
+                crate::quick_prompt::project_default(&app, &launch.target, "claude").as_deref(),
+            );
+            assert_eq!(label, "proj (project default)");
+            assert_eq!(
+                launch.profile_choices(&app.launcher.profiles, app.launcher.spread, Some("proj")),
+                vec![
+                    Some("proj".to_string()),
+                    Some("main".to_string()),
+                    Some("spare".to_string())
+                ],
+                "the project's leads; no \"none\" while a default stands"
+            );
+            // `n`: the Claude rows lead with the project's account.
+            app.modals.overlay = None;
+            super::super::tests::open_picker(&mut app);
+            let Some(Overlay::Menu(menu)) = &app.modals.overlay else {
+                panic!("{:?}", app.modals.overlay);
+            };
+            let first = menu
+                .items
+                .iter()
+                .find_map(|i| match &i.action {
+                    MenuAction::NewAgentOfKind {
+                        kind: nebula_core::AgentKind::Claude,
+                        custom: None,
+                        profile,
+                        ..
+                    } => Some((i.label.clone(), profile.clone())),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(first.1.as_deref(), Some("proj"), "{first:?}");
+            assert!(first.0.contains("proj (project default)"), "{first:?}");
+        });
+        with_config_json(&launch_json("least_used", false), || {
+            let mut app = App::new();
+            seed_tree(&mut app);
+            crate::quick_prompt::open_for(&mut app, worktree());
+            let launch = box_launch(&app);
+            assert_eq!(launch.profile, None, "auto: the daemon picks");
+            let label = crate::quick_prompt::profile_choice_label(
+                None,
+                &app.launcher.profiles,
+                "claude",
+                app.launcher.spread,
+                &[],
+                Some("proj"),
+            );
+            assert_eq!(label, "auto → proj (project default)");
+        });
+        with_config_json(&launch_json("manual", true), || {
+            let mut app = App::new();
+            seed_tree(&mut app);
+            crate::quick_prompt::open_for(&mut app, worktree());
+            assert_eq!(
+                box_launch(&app).profile.as_deref(),
+                Some("main"),
+                "a switched-off project default falls through to the harness default"
+            );
+        });
+    }
+
     /// The overlay edits the layers the test override (or a real override)
     /// routes to, never the data dir's config.json behind its back.
     #[test]
@@ -278,5 +713,469 @@ mod tests {
             assert_eq!((&view.config, &view.local), (&config, &local));
             assert_ne!(view.config, nebula_core::paths::config_path());
         });
+    }
+
+    // ---- the overlay's verbs ----
+
+    fn view(app: &App) -> &AccountsView {
+        match &app.modals.overlay {
+            Some(Overlay::Accounts(v)) => v,
+            other => panic!("the accounts overlay is not up: {other:?}"),
+        }
+    }
+
+    fn saved() -> serde_json::Value {
+        let (config, _) = crate::config::Config::layer_paths();
+        serde_json::from_str(&std::fs::read_to_string(config).unwrap()).unwrap()
+    }
+
+    fn key(app: &mut App, code: KeyCode, out: &mut Vec<ClientRequest>) {
+        press(app, code, KeyModifiers::NONE, out);
+    }
+
+    fn typed(app: &mut App, text: &str, out: &mut Vec<ClientRequest>) {
+        for c in text.chars() {
+            key(app, KeyCode::Char(c), out);
+        }
+    }
+
+    fn draw(app: &mut App) -> String {
+        let mut terminal = ratatui::Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal.draw(|f| crate::ui::draw(f, app)).unwrap();
+        buffer_text(&terminal)
+    }
+
+    /// Click the overlay's spot `hit`, as drawn, through the app's own
+    /// mouse handling.
+    fn click(app: &mut App, hit: AccountsHit, out: &mut Vec<ClientRequest>) {
+        draw(app);
+        let rect = view(app)
+            .hits
+            .iter()
+            .find(|(_, h)| *h == hit)
+            .map(|(r, _)| *r)
+            .unwrap_or_else(|| panic!("{hit:?} not drawn"));
+        let event = crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: rect.x + rect.width / 2,
+            row: rect.y,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_terminal_event(app, crossterm::event::Event::Mouse(event), out);
+    }
+
+    fn open_overlay(app: &mut App, out: &mut Vec<ClientRequest>) {
+        press(app, KeyCode::Char('U'), KeyModifiers::SHIFT, out);
+        assert!(matches!(app.modals.overlay, Some(Overlay::Accounts(_))));
+    }
+
+    /// `a`: a harness and a name, checked as `kete profile add` checks
+    /// them; the profile is written, its home made, and its sign-in runs
+    /// in a new terminal session that gets the login command typed in.
+    #[test]
+    fn add_writes_the_profile_and_runs_its_sign_in_in_a_new_terminal() {
+        with_config_json("{}", || {
+            let mut app = App::new();
+            seed_tree(&mut app);
+            let mut out = Vec::new();
+            open_overlay(&mut app, &mut out);
+            key(&mut app, KeyCode::Char('a'), &mut out);
+            let Mode::Form(form) = &view(&app).mode else {
+                panic!("no form");
+            };
+            assert_eq!(form.kind, FormKind::Add);
+            assert_eq!(
+                form.name,
+                format!("{}-2", form.harness),
+                "a name is offered"
+            );
+            let offered = form.name.len();
+            assert!(draw(&mut app).contains("Add account"));
+            // A bad name is refused where it was typed.
+            for _ in 0..offered {
+                key(&mut app, KeyCode::Backspace, &mut out);
+            }
+            typed(&mut app, "bad name", &mut out);
+            key(&mut app, KeyCode::Enter, &mut out);
+            let Mode::Form(form) = &view(&app).mode else {
+                panic!("the form stays up on a refusal");
+            };
+            assert!(form.error.is_some(), "{form:?}");
+            assert!(saved().get("profiles").is_none(), "nothing written");
+            for _ in 0.."bad name".len() {
+                key(&mut app, KeyCode::Backspace, &mut out);
+            }
+            // The harness steps with →, back to claude with ←.
+            key(&mut app, KeyCode::BackTab, &mut out);
+            key(&mut app, KeyCode::Right, &mut out);
+            key(&mut app, KeyCode::Left, &mut out);
+            key(&mut app, KeyCode::Tab, &mut out);
+            typed(&mut app, "work", &mut out);
+            click(&mut app, AccountsHit::Key(KeyCode::Enter), &mut out);
+            let s = saved();
+            assert_eq!(s["profiles"][0]["name"], "work");
+            assert_eq!(s["profiles"][0]["harness"], "claude");
+            let (config, _) = crate::config::Config::layer_paths();
+            assert!(
+                config
+                    .parent()
+                    .unwrap()
+                    .join("profiles")
+                    .join("work")
+                    .exists(),
+                "its home is made beside the routed config"
+            );
+            // The sign-in: a terminal in the selected checkout, then the
+            // command typed into it once the daemon made it.
+            assert!(
+                app.modals.overlay.is_none(),
+                "the terminal takes the screen"
+            );
+            let req_id = match out.as_slice() {
+                [ClientRequest::CreateTerminal { req_id, name, .. }] => {
+                    assert_eq!(name.as_deref(), Some("sign in work"));
+                    *req_id
+                }
+                other => panic!("expected a CreateTerminal, got {other:?}"),
+            };
+            out.clear();
+            handle_server_event(
+                &mut app,
+                ServerEvent::Ack {
+                    req_id,
+                    created: Some(nebula_core::EntityId::Terminal(nebula_core::TerminalId(
+                        "t9".into(),
+                    ))),
+                },
+                &mut out,
+            );
+            assert!(
+                out.iter().any(|r| matches!(r,
+                    ClientRequest::Input { data, .. } if data == b"kete profile login work\r")),
+                "{out:?}"
+            );
+        });
+    }
+
+    /// Adopting the current login makes no home and runs no sign-in; a
+    /// name already taken is refused.
+    #[test]
+    fn add_adopting_the_login_signs_nothing_in_and_a_taken_name_is_refused() {
+        with_config_json(
+            r#"{"profiles":[{"name":"work","harness":"claude"}]}"#,
+            || {
+                let mut app = App::new();
+                seed_tree(&mut app);
+                let mut out = Vec::new();
+                open_overlay(&mut app, &mut out);
+                key(&mut app, KeyCode::Char('a'), &mut out);
+                let n = match &view(&app).mode {
+                    Mode::Form(f) => f.name.len(),
+                    _ => panic!(),
+                };
+                for _ in 0..n {
+                    key(&mut app, KeyCode::Backspace, &mut out);
+                }
+                typed(&mut app, "work", &mut out);
+                key(&mut app, KeyCode::Enter, &mut out);
+                assert!(
+                    app.chrome.flash.as_deref().unwrap_or("").contains("exists"),
+                    "{:?}",
+                    app.chrome.flash
+                );
+                typed(&mut app, "2", &mut out);
+                key(&mut app, KeyCode::Tab, &mut out);
+                key(&mut app, KeyCode::Char(' '), &mut out);
+                key(&mut app, KeyCode::Tab, &mut out);
+                key(&mut app, KeyCode::Char(' '), &mut out);
+                key(&mut app, KeyCode::Enter, &mut out);
+                let s = saved();
+                assert_eq!(s["profiles"][1]["name"], "work2");
+                assert_eq!(s["profiles"][1]["use_default"], true);
+                assert_eq!(s["profiles"][1]["default"], true);
+                assert!(out.is_empty(), "no sign-in for an adopted login: {out:?}");
+                assert_eq!(view(&app).mode, Mode::List);
+                assert_eq!(
+                    view(&app).selected().map(|r| r.key.as_str()),
+                    Some("work2"),
+                    "the cursor lands on the new account"
+                );
+            },
+        );
+    }
+
+    /// Enter edits the harness, the kind of login and the variables (the
+    /// name and the switch stay); `c` duplicates under a new name.
+    #[test]
+    fn edit_and_duplicate_write_the_settings() {
+        with_config_json(
+            r#"{"profiles":[{"name":"work","harness":"claude","env":{"K":"old"},"disabled":true}]}"#,
+            || {
+                let mut app = App::new();
+                let mut out = Vec::new();
+                open_overlay(&mut app, &mut out);
+                click(&mut app, AccountsHit::Key(KeyCode::Enter), &mut out);
+                let Mode::Form(form) = &view(&app).mode else {
+                    panic!("no form");
+                };
+                assert_eq!(form.env_keys, ["K"]);
+                assert!(draw(&mut app).contains("keep K"), "values never shown");
+                key(&mut app, KeyCode::Tab, &mut out);
+                key(&mut app, KeyCode::Char(' '), &mut out);
+                key(&mut app, KeyCode::Tab, &mut out);
+                typed(&mut app, "A=1; B=two", &mut out);
+                key(&mut app, KeyCode::Enter, &mut out);
+                let p = &saved()["profiles"][0];
+                assert_eq!(p["use_default"], true);
+                assert_eq!(p["env"], serde_json::json!({"A": "1", "B": "two"}));
+                assert_eq!(p["disabled"], true, "the switch stays");
+
+                key(&mut app, KeyCode::Char('c'), &mut out);
+                let Mode::Form(form) = &view(&app).mode else {
+                    panic!("no form");
+                };
+                assert_eq!(form.name, "work-2");
+                key(&mut app, KeyCode::Enter, &mut out);
+                let copy = &saved()["profiles"][1];
+                assert_eq!(copy["name"], "work-2");
+                assert_eq!(copy["env"]["B"], "two", "the variables come along");
+                assert!(copy.get("disabled").is_none(), "but not the switch");
+            },
+        );
+    }
+
+    /// `x` warns of the sessions and repos that use the account before
+    /// it goes; `n` keeps it, `y` removes it.
+    #[test]
+    fn remove_warns_of_the_sessions_and_repos_on_the_account() {
+        with_config_json(
+            r#"{"profiles":[{"name":"work","harness":"claude"}],"projects":{"/tmp/demo":{"default_profiles":{"claude":"work"}}}}"#,
+            || {
+                let mut app = App::new();
+                seed_tree(&mut app);
+                app.tree.agents[0].profile = Some("work".into());
+                let mut out = Vec::new();
+                open_overlay(&mut app, &mut out);
+                key(&mut app, KeyCode::Char('x'), &mut out);
+                let Mode::Remove { message, .. } = &view(&app).mode else {
+                    panic!("no confirm");
+                };
+                assert!(
+                    message.contains("1 session runs under it (agent-1)"),
+                    "{message}"
+                );
+                assert!(message.contains("Default account of demo"), "{message}");
+                key(&mut app, KeyCode::Char('n'), &mut out);
+                assert_eq!(view(&app).mode, Mode::List);
+                assert_eq!(saved()["profiles"][0]["name"], "work", "kept");
+                key(&mut app, KeyCode::Delete, &mut out);
+                click(&mut app, AccountsHit::Key(KeyCode::Char('y')), &mut out);
+                assert_eq!(saved()["profiles"], serde_json::json!([]));
+                assert!(view(&app).rows.iter().all(|r| r.key != "work"));
+            },
+        );
+    }
+
+    /// The switch and the star are buttons as well as keys.
+    #[test]
+    fn toggle_and_default_are_buttons_too() {
+        with_config_json(
+            r#"{"profiles":[{"name":"work","harness":"claude","default":true},{"name":"home","harness":"claude"}]}"#,
+            || {
+                let mut app = App::new();
+                let mut out = Vec::new();
+                open_overlay(&mut app, &mut out);
+                click(&mut app, AccountsHit::Row(1), &mut out);
+                assert_eq!(view(&app).cursor, 1);
+                click(&mut app, AccountsHit::Key(KeyCode::Char('d')), &mut out);
+                assert_eq!(saved()["profiles"][1]["default"], true);
+                click(&mut app, AccountsHit::Key(KeyCode::Char(' ')), &mut out);
+                assert_eq!(saved()["profiles"][1]["disabled"], true);
+                key(&mut app, KeyCode::Char(' '), &mut out);
+                assert!(saved()["profiles"][1].get("disabled").is_none());
+            },
+        );
+    }
+
+    /// `p` makes the account a repo's default for its harness, and again
+    /// clears it; the spread is set from the top, by click or `s` / `t`.
+    #[test]
+    fn use_for_repo_and_the_spread_write_the_settings() {
+        with_config_json(
+            r#"{"profiles":[{"name":"work","harness":"claude"}]}"#,
+            || {
+                let mut app = App::new();
+                seed_tree(&mut app);
+                let mut out = Vec::new();
+                open_overlay(&mut app, &mut out);
+                key(&mut app, KeyCode::Char('p'), &mut out);
+                assert!(matches!(view(&app).mode, Mode::UseFor { cursor: 0 }));
+                assert!(draw(&mut app).contains("demo"));
+                key(&mut app, KeyCode::Enter, &mut out);
+                assert_eq!(
+                    saved()["projects"]["/tmp/demo"]["default_profiles"]["claude"],
+                    "work"
+                );
+                assert_eq!(
+                    app.launcher.project_accounts[std::path::Path::new("/tmp/demo")]["claude"],
+                    "work",
+                    "launches see it at once"
+                );
+                click(&mut app, AccountsHit::Project(0), &mut out);
+                assert!(saved().get("projects").is_none(), "cleared without a trace");
+                key(&mut app, KeyCode::Esc, &mut out);
+
+                click(&mut app, AccountsHit::Spread(2), &mut out);
+                assert_eq!(saved()["account_spread"], "least_used");
+                assert_eq!(
+                    app.launcher.spread.spread,
+                    nebula_core::accounts::Spread::LeastUsed
+                );
+                key(&mut app, KeyCode::Char('s'), &mut out);
+                assert_eq!(saved()["account_spread"], "manual");
+                click(&mut app, AccountsHit::Key(KeyCode::Char('t')), &mut out);
+                assert_eq!(saved()["account_spread_threshold"], "95");
+            },
+        );
+    }
+
+    /// `m` moves the session under the grid's cursor onto the selected
+    /// account, through MOVE TO ACCOUNT's confirm; one of another harness
+    /// is refused.
+    #[test]
+    fn m_moves_the_cursors_session_onto_the_account() {
+        with_config_json(
+            r#"{"profiles":[{"name":"work","harness":"claude"},{"name":"gpt","harness":"codex"}]}"#,
+            || {
+                let mut app = App::new();
+                seed_tree(&mut app);
+                app.nav.focus = Focus::Sessions;
+                app.nav.sel_session = 0;
+                let mut out = Vec::new();
+                open_overlay(&mut app, &mut out);
+                let at = view(&app).rows.iter().position(|r| r.key == "gpt").unwrap();
+                click(&mut app, AccountsHit::Row(at), &mut out);
+                key(&mut app, KeyCode::Char('m'), &mut out);
+                assert!(
+                    app.chrome
+                        .flash
+                        .as_deref()
+                        .unwrap_or("")
+                        .contains("codex account"),
+                    "{:?}",
+                    app.chrome.flash
+                );
+                let at = view(&app)
+                    .rows
+                    .iter()
+                    .position(|r| r.key == "work")
+                    .unwrap();
+                click(&mut app, AccountsHit::Row(at), &mut out);
+                click(&mut app, AccountsHit::Key(KeyCode::Char('m')), &mut out);
+                let Some(Overlay::Confirm(confirm)) = &app.modals.overlay else {
+                    panic!("{:?}", app.modals.overlay);
+                };
+                assert!(
+                    confirm.message.contains("fresh on work"),
+                    "{}",
+                    confirm.message
+                );
+                assert!(out.is_empty());
+            },
+        );
+    }
+
+    /// Every form and confirm draws, in a roomy terminal and a tiny one.
+    #[test]
+    fn every_mode_draws_at_any_size() {
+        with_config_json(
+            r#"{"profiles":[{"name":"work","harness":"claude"}]}"#,
+            || {
+                let mut app = App::new();
+                seed_tree(&mut app);
+                let mut out = Vec::new();
+                open_overlay(&mut app, &mut out);
+                let text = draw(&mut app);
+                for word in ["Spread [s]", "[a] add", "[l] sign in", "[p] use for repo"] {
+                    assert!(text.contains(word), "{word}: {text}");
+                }
+                for (open, back) in [
+                    ('a', KeyCode::Esc),
+                    ('c', KeyCode::Esc),
+                    ('x', KeyCode::Char('n')),
+                    ('p', KeyCode::Esc),
+                ] {
+                    key(&mut app, KeyCode::Char(open), &mut out);
+                    for (w, h) in [(120u16, 40u16), (40, 6), (20, 3)] {
+                        let mut terminal = ratatui::Terminal::new(TestBackend::new(w, h)).unwrap();
+                        terminal.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+                    }
+                    key(&mut app, back, &mut out);
+                    assert_eq!(view(&app).mode, Mode::List);
+                }
+            },
+        );
+    }
+
+    /// Settings → Project: a **Default account** row per harness with
+    /// profiles; Enter steps it through the harness's accounts and back to
+    /// none, written under the project's repo path, and a launch sees it.
+    #[test]
+    fn the_project_tab_sets_a_default_account_per_harness() {
+        with_config_json(
+            r#"{"profiles":[{"name":"work","harness":"claude"},{"name":"home","harness":"claude"},{"name":"gpt","harness":"codex"}]}"#,
+            || {
+                let mut app = App::new();
+                seed_tree(&mut app);
+                let mut out = Vec::new();
+                let tab = crate::config::project_tab();
+                let declared = crate::config::tab_settings(tab).len();
+                assert_eq!(
+                    crate::config::tab_len(tab),
+                    declared + 2,
+                    "claude and codex"
+                );
+                let rows = crate::config::settings_rows(tab);
+                assert!(rows.contains(&crate::config::SettingsRow::Header(
+                    crate::config::PROJECT_ACCOUNTS_HEADER.into()
+                )));
+                press(&mut app, KeyCode::Char('s'), KeyModifiers::NONE, &mut out);
+                let digit = char::from_digit(tab as u32 + 1, 10).unwrap();
+                press(&mut app, KeyCode::Char(digit), KeyModifiers::NONE, &mut out);
+                let text = draw(&mut app);
+                assert!(text.contains("Default account"), "{text}");
+                assert!(text.contains("none (the spread picks)"), "{text}");
+
+                let claude =
+                    || saved()["projects"]["/tmp/demo"]["default_profiles"]["claude"].clone();
+                apply_setting_at(&mut app, tab, declared, 0);
+                assert_eq!(claude(), "work");
+                apply_setting_at(&mut app, tab, declared, 1);
+                assert_eq!(claude(), "home");
+                assert_eq!(
+                    crate::quick_prompt::project_default(
+                        &app,
+                        &crate::quick_prompt::QuickTarget::Worktree(WorktreeId("w1".into())),
+                        "claude"
+                    )
+                    .as_deref(),
+                    Some("home"),
+                    "the launch mirror follows"
+                );
+                assert!(draw(&mut app).contains("[home]"));
+                apply_setting_at(&mut app, tab, declared + 1, 0);
+                assert_eq!(
+                    saved()["projects"]["/tmp/demo"]["default_profiles"]["codex"],
+                    "gpt",
+                    "one entry per harness"
+                );
+                apply_setting_at(&mut app, tab, declared, 1);
+                apply_setting_at(&mut app, tab, declared + 1, -1);
+                assert!(
+                    saved().get("projects").is_none(),
+                    "none again, no trace left"
+                );
+            },
+        );
     }
 }
