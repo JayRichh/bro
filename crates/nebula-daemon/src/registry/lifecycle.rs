@@ -480,6 +480,67 @@ impl Daemon {
         Ok(())
     }
 
+    /// `SwitchAgentAccount`: the agent boots again on another ACCOUNT in
+    /// the same worktree — `profile` (None: its harness's own login). The
+    /// restart is fresh: each profile is its own config home, so the
+    /// conversation the stored session id names lives in the old one and a
+    /// resume would find nothing. Everything that can refuse does so before
+    /// the kill, so a refused switch leaves the session running as it was.
+    pub async fn switch_agent_account(
+        self: &Arc<Self>,
+        id: &AgentId,
+        profile: Option<&str>,
+    ) -> Result<()> {
+        let agent = self.store.get_agent(id)?.context("agent not found")?;
+        if agent.archived {
+            bail!("agent is archived: unarchive it first");
+        }
+        if agent.cloud_session_id.is_some() {
+            bail!("{CLOUD_ROW_NO_LOCAL_SESSION}");
+        }
+        let harness = resolve_harness(agent.kind, agent.custom_harness.as_deref())?;
+        let profile = match profile.map(str::trim).filter(|p| !p.is_empty()) {
+            Some(name) => {
+                let config = crate::config::Config::load();
+                nebula_core::profiles::resolve(&config.profiles, &harness.id, Some(name))
+                    .map_err(anyhow::Error::msg)?
+                    .map(|p| p.name.trim().to_string())
+            }
+            None => None,
+        };
+        let current = agent
+            .profile
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .map(str::to_string);
+        if current == profile {
+            bail!(
+                "{} already runs on {}",
+                agent.name,
+                profile.as_deref().unwrap_or("its harness's own login")
+            );
+        }
+        let worktree_lookup = agent.worktree_id.clone();
+        let worktree = self
+            .store_blocking(move |store| store.get_worktree(&worktree_lookup))
+            .await?
+            .context("worktree not found")?;
+        require_checkout(&worktree)?;
+        self.kill_session(&SessionRef::Agent(id.clone()));
+        self.store.set_agent_profile(id, profile.as_deref())?;
+        self.store.set_agent_session_id(id, None)?;
+        // The old account's context bar says nothing about the new session.
+        self.forget_context(id);
+        let mut moved = agent;
+        moved.profile = profile.clone();
+        moved.session_id = None;
+        tracing::info!(agent = %id, from = ?current, to = ?profile, "switching account: fresh restart");
+        self.spawn_agent_session(&moved, &worktree, DEFAULT_COLS, DEFAULT_ROWS)?;
+        self.broadcast_agent(id)?;
+        Ok(())
+    }
+
     /// Queue a message on a Cloud session without leaving nebula.
     /// `claude -p <msg> --cloud <id>` is fire-and-forget — the CLI prints
     /// "Sent to cloud session." and returns, and the reply only ever shows

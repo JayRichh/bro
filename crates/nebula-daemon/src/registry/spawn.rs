@@ -78,10 +78,6 @@ impl Daemon {
         // way at boot.
         let harness = resolve_harness(kind, custom_harness.as_deref())?;
         let program = harness.program.trim().to_string();
-        // The account it runs on: the PROFILE the launch named, else its
-        // harness's default — resolved now and stored with the row, so a
-        // later change of default never moves a session to another login.
-        let profile = resolve_profile_name(&harness, profile.as_deref())?;
         // A launch that hands the CLI a first prompt is working from the
         // moment it spawns, so the row says so now instead of staying gray
         // until the CLI has booted and its first hook has landed — seconds
@@ -100,6 +96,17 @@ impl Daemon {
                     .context("worktree not found")
             })
             .await?;
+        // The account it runs on: the PROFILE the launch named, else its
+        // project's default account for the harness, else the spread's
+        // pick (or the harness's default) — resolved now and stored with
+        // the row, so a later change of default never moves a session to
+        // another login.
+        let project_lookup = worktree.project_id.clone();
+        let repo = self
+            .store_blocking(move |store| store.get_project(&project_lookup))
+            .await?
+            .map(|p| p.repo_path);
+        let profile = resolve_profile_name(&harness, profile.as_deref(), repo.as_deref())?;
         // A warm session for this (worktree, kind) hands over its PTY and
         // its pre-generated id — the CLI booted while the user typed the
         // name, so the create feels instant. A starting prompt rides the

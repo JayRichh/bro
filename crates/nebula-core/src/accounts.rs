@@ -123,6 +123,9 @@ pub enum Reason {
     AllOver { percent: f32 },
     /// `least_used`.
     LeastUsed { percent: Option<f32> },
+    /// The launch's project names this account its harness's default
+    /// (`profiles::PROJECT_DEFAULTS_KEY`).
+    ProjectDefault,
 }
 
 /// A spread's choice.
@@ -159,6 +162,7 @@ impl Pick<'_> {
             Reason::LeastUsed { percent } => {
                 format!("least used, {}", crate::usage::pct_text(*percent))
             }
+            Reason::ProjectDefault => "project default".to_string(),
         };
         format!("{harness}: {who} ({why})")
     }
@@ -246,6 +250,65 @@ pub fn pick<'a>(
             }
         }
     }
+}
+
+/// The profile a launch on `harness` naming none runs under in a project
+/// whose default account for that harness is `project_default`: that
+/// profile when it is usable, enabled and an account for `harness`, else
+/// the spread's [`pick`]. A project default that is switched off, removed
+/// or for another harness falls through rather than refusing the launch:
+/// the project's setting is a preference, not a pin.
+pub fn pick_for_project<'a>(
+    all: &'a [Profile],
+    harness: &str,
+    project_default: Option<&str>,
+    policy: Policy,
+    now_secs: i64,
+    usage: impl Fn(&str) -> Option<AccountUsage>,
+) -> Pick<'a> {
+    if let Some(name) = project_default.map(str::trim).filter(|n| !n.is_empty()) {
+        if let Some(p) = profiles::enabled_for(all, harness)
+            .into_iter()
+            .find(|p| p.name.trim() == name)
+        {
+            return Pick {
+                profile: Some(p),
+                reason: Reason::ProjectDefault,
+            };
+        }
+    }
+    pick(all, harness, policy, now_secs, usage)
+}
+
+/// The account a launch on `harness` runs under, in the one order every
+/// launch path keeps: the profile it names (`asked`; it must exist and be
+/// for `harness`, switched off or not), else the project's default account
+/// for the harness, else the ACCOUNT SPREAD's pick, which under `manual` is
+/// the harness's default profile, else none (the CLI's own login). `Err`
+/// says why a named profile cannot be used.
+pub fn resolve_launch<'a>(
+    all: &'a [Profile],
+    harness: &str,
+    asked: Option<&str>,
+    project_default: Option<&str>,
+    policy: Policy,
+    now_secs: i64,
+    usage: impl Fn(&str) -> Option<AccountUsage>,
+) -> Result<Pick<'a>, String> {
+    if asked.map(str::trim).is_some_and(|a| !a.is_empty()) {
+        return profiles::resolve(all, harness, asked).map(|profile| Pick {
+            profile,
+            reason: Reason::Named,
+        });
+    }
+    Ok(pick_for_project(
+        all,
+        harness,
+        project_default,
+        policy,
+        now_secs,
+        usage,
+    ))
 }
 
 /// Whether an account has a login, as far as its files say: credentials
@@ -508,6 +571,25 @@ pub fn pick_now<'a>(all: &'a [Profile], harness: &str, policy: Policy) -> Pick<'
     )
 }
 
+/// [`resolve_launch`] under the policy `config.json` sets, against the
+/// kept readings, now.
+pub fn resolve_launch_now<'a>(
+    all: &'a [Profile],
+    harness: &str,
+    asked: Option<&str>,
+    project_default: Option<&str>,
+) -> Result<Pick<'a>, String> {
+    resolve_launch(
+        all,
+        harness,
+        asked,
+        project_default,
+        load_policy(),
+        crate::clock::now_secs() as i64,
+        crate::usage::read_account,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -627,6 +709,67 @@ mod tests {
         let u = usage(&[("main", 0.0, 99.0)]);
         let p = pick(&all, "claude", policy(Spread::Failover), 2000, &u);
         assert_eq!(p.profile.unwrap().name, "main");
+    }
+
+    /// The order every launch keeps: named > project default > spread >
+    /// harness default > own login.
+    #[test]
+    fn a_launch_takes_the_named_then_the_project_then_the_spread_then_the_default() {
+        let mut off = profile("off", false);
+        off.disabled = true;
+        let mut codex = profile("gpt", false);
+        codex.harness = "codex".into();
+        let all = vec![
+            profile("main", true),
+            profile("proj", false),
+            profile("spare", false),
+            off,
+            codex,
+        ];
+        let u = usage(&[("main", 99.0, 99.0), ("proj", 50.0, 50.0)]);
+        let manual = policy(Spread::Manual);
+        let launch = |asked, project, policy| {
+            resolve_launch(&all, "claude", asked, project, policy, 0, &u)
+                .map(|p| (p.profile.map(|p| p.name.clone()), p.reason))
+        };
+        // Named wins over everything, a switched-off one too.
+        assert_eq!(
+            launch(Some("off"), Some("proj"), manual).unwrap(),
+            (Some("off".into()), Reason::Named)
+        );
+        assert!(launch(Some("gone"), Some("proj"), manual).is_err());
+        assert!(
+            launch(Some("gpt"), None, manual).is_err(),
+            "named on another harness"
+        );
+        // The project's default beats the spread and the harness default.
+        assert_eq!(
+            launch(None, Some("proj"), policy(Spread::LeastUsed)).unwrap(),
+            (Some("proj".into()), Reason::ProjectDefault)
+        );
+        assert_eq!(
+            launch(None, Some("proj"), manual).unwrap(),
+            (Some("proj".into()), Reason::ProjectDefault)
+        );
+        // A project default that cannot run falls through, never refuses.
+        for unusable in ["off", "gone", "gpt", "  "] {
+            assert_eq!(
+                launch(None, Some(unusable), manual).unwrap(),
+                (Some("main".into()), Reason::Default),
+                "{unusable}"
+            );
+        }
+        // No project default: the spread, else the harness default.
+        assert_eq!(
+            launch(None, None, policy(Spread::LeastUsed)).unwrap().0,
+            Some("spare".into())
+        );
+        assert_eq!(
+            launch(None, None, manual).unwrap(),
+            (Some("main".into()), Reason::Default)
+        );
+        let p = pick_for_project(&all, "claude", Some("proj"), manual, 0, &u);
+        assert_eq!(p.describe("claude"), "claude: proj (project default)");
     }
 
     /// A reading with no reset time that has aged past its window no longer

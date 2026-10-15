@@ -30,10 +30,17 @@ impl Daemon {
             return Ok(());
         };
         // A spare boots on the PROFILE a create naming none resolves to
-        // now (the harness's default, or the ACCOUNT SPREAD's pick), and
-        // only a create on that same account adopts it (`take_prewarmed`).
+        // now (the project's default account, the ACCOUNT SPREAD's pick or
+        // the harness's default), and only a create on that same account
+        // adopts it (`take_prewarmed`).
+        let repo = self
+            .store
+            .get_project(&worktree.project_id)
+            .ok()
+            .flatten()
+            .map(|p| p.repo_path);
         let profile = match resolve_harness(kind, None) {
-            Ok(harness) => resolve_profile_name(&harness, None).unwrap_or(None),
+            Ok(harness) => resolve_profile_name(&harness, None, repo.as_deref()).unwrap_or(None),
             Err(_) => None,
         };
         let stale = {

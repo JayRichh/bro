@@ -874,6 +874,16 @@ impl Store {
         Ok(())
     }
 
+    /// The account the agent runs under (`SwitchAgentAccount`): a profile
+    /// name, or None for its harness's own login.
+    pub fn set_agent_profile(&self, id: &AgentId, profile: Option<&str>) -> Result<()> {
+        self.conn.lock().execute(
+            "UPDATE agents SET profile = ?2 WHERE id = ?1",
+            params![id.as_str(), profile],
+        )?;
+        Ok(())
+    }
+
     pub fn set_agent_model(&self, id: &AgentId, model: Option<&str>) -> Result<()> {
         self.conn.lock().execute(
             "UPDATE agents SET model = ?2 WHERE id = ?1",

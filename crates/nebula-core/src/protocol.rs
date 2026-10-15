@@ -10,7 +10,7 @@ use std::path::PathBuf;
 ///
 /// Bump on every protocol change. Additive changes keep
 /// [`MIN_COMPATIBLE_PROTOCOL`] where it is; breaking changes bump both.
-pub const PROTOCOL_VERSION: u32 = 55;
+pub const PROTOCOL_VERSION: u32 = 56;
 
 /// Oldest IPC protocol this build can safely talk to.
 ///
@@ -55,6 +55,11 @@ impl ServerEvent {
         }
     }
 }
+
+/// The first protocol whose daemon takes [`ClientRequest::SwitchAgentAccount`].
+/// A client sends it only to a daemon that said this or later at Hello: an
+/// older one fails to decode the unknown variant and drops the connection.
+pub const SWITCH_ACCOUNT_PROTOCOL: u32 = 56;
 
 /// Max IPC frame size (length prefix sanity bound).
 pub const MAX_FRAME_LEN: u32 = 4 * 1024 * 1024;
@@ -430,6 +435,20 @@ pub enum ClientRequest {
     RestartAgent {
         req_id: u64,
         id: AgentId,
+    },
+    /// Restart the agent on another ACCOUNT: the row's profile becomes
+    /// `profile` (None: the harness's own login, no profile) and the CLI
+    /// boots again in the same worktree, FRESH. A harness keeps its
+    /// conversations in its config home and each profile has its own
+    /// (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, ...), so the stored session id
+    /// would not be found there: it is dropped. Refused for an archived or
+    /// Cloud row, a checkout gone from disk, or a profile that is undefined
+    /// or for another harness, before anything is killed. Answered with
+    /// `Ack`. Protocol [`SWITCH_ACCOUNT_PROTOCOL`] and later.
+    SwitchAgentAccount {
+        req_id: u64,
+        id: AgentId,
+        profile: Option<String>,
     },
     /// The user moved a session's card onto another checkout, of its own
     /// project or another one: the card menu's **Move to…**, or a drag
@@ -1084,6 +1103,38 @@ mod tests {
         assert!(ServerEvent::WorktreePorts { ports: Vec::new() }.decodable_by(53));
         assert_eq!(MIN_COMPATIBLE_PROTOCOL, 53, "55 is additive");
         assert!(protocol_compatible_with(54));
+    }
+
+    /// 56 adds one request a client sends only to a 56 daemon: older peers
+    /// stay in range, and the request round-trips with and without a
+    /// profile (None: the harness's own login).
+    #[test]
+    fn protocol_56_is_additive_and_switch_account_round_trips() {
+        assert!(protocol_compatible_with(55));
+        assert!(protocol_ranges_overlap(
+            MIN_COMPATIBLE_PROTOCOL,
+            PROTOCOL_VERSION,
+            53,
+            55
+        ));
+        assert!(SWITCH_ACCOUNT_PROTOCOL <= PROTOCOL_VERSION);
+        for profile in [Some("work".to_string()), None] {
+            let req = ClientRequest::SwitchAgentAccount {
+                req_id: 9,
+                id: AgentId("a1".into()),
+                profile: profile.clone(),
+            };
+            let back: ClientRequest = rmp_serde::from_slice(&encode(&req)).unwrap();
+            let ClientRequest::SwitchAgentAccount {
+                req_id,
+                id,
+                profile: got,
+            } = back
+            else {
+                panic!("not a SwitchAgentAccount");
+            };
+            assert_eq!((req_id, id.0.as_str(), got), (9, "a1", profile));
+        }
     }
 
     #[test]

@@ -80,6 +80,12 @@ pub struct ProjectConfig {
     /// worktrees, typed into Settings → Project. Empty means the checkout's `.nebula.json`
     /// `run`, as before the row existed.
     pub run_command: String,
+    /// PROJECT DEFAULT ACCOUNTS (`default_profiles`): harness id to the
+    /// profile a launch in this project naming none runs under, ahead of
+    /// the ACCOUNT SPREAD. Kept as raw JSON and read entry by entry, so a
+    /// value this build cannot read costs that entry, never the
+    /// project's run command.
+    pub default_profiles: serde_json::Value,
 }
 
 impl Default for Config {
@@ -143,6 +149,19 @@ impl Config {
             .get(repo_path)
             .map(|p| p.run_command.trim())
             .filter(|c| !c.is_empty())
+    }
+
+    /// The default account the project at `repo_path` sets for `harness`
+    /// (`nebula_core::profiles::PROJECT_DEFAULTS_KEY`), trimmed; None when
+    /// it sets none.
+    pub fn project_default_profile(&self, repo_path: &Path, harness: &str) -> Option<&str> {
+        self.projects
+            .get(repo_path)?
+            .default_profiles
+            .get(harness.trim())?
+            .as_str()
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
     }
 }
 
@@ -266,6 +285,32 @@ mod tests {
         assert_eq!(base("origin/"), None);
         let cfg: Config = serde_json::from_str("{}").unwrap();
         assert_eq!(cfg.worktree_base_branch(), None);
+    }
+
+    /// A project's default accounts, per harness: a value this build
+    /// cannot read costs that entry only, never the run command beside it.
+    #[test]
+    fn a_project_default_account_is_read_per_harness() {
+        let cfg: Config = serde_json::from_str(
+            r#"{"projects": {
+                "/tmp/demo": { "run_command": "make", "default_profiles": { "claude": " work ", "codex": 3, "pi": "" } },
+                "/tmp/odd": { "default_profiles": "work" }
+            }}"#,
+        )
+        .unwrap();
+        let demo = Path::new("/tmp/demo");
+        assert_eq!(cfg.project_default_profile(demo, "claude"), Some("work"));
+        assert_eq!(cfg.project_default_profile(demo, "codex"), None);
+        assert_eq!(cfg.project_default_profile(demo, "pi"), None);
+        assert_eq!(cfg.run_command(demo), Some("make"));
+        assert_eq!(
+            cfg.project_default_profile(Path::new("/tmp/odd"), "claude"),
+            None
+        );
+        assert_eq!(
+            cfg.project_default_profile(Path::new("/nope"), "claude"),
+            None
+        );
     }
 
     /// The Project tab's `run_command`, under the project's repo path:
