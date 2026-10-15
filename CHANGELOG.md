@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.51.0
+
+See which session made a change, paste large text quickly on Windows, and do the rest of the command line's jobs from either app.
+
+- **Which session made which change.** Kete snapshots a session's worktree when the session starts and at the end of each turn, without touching your index or files, and keeps the snapshots under `refs/kete/sessions/`. In the review, "This session / All in this worktree" switches the diff (`Ctrl+l` in the terminal app). "This session" means the changes between the session's start and its latest turn, so another session's edits made during its turn are counted too. Needs a 0.51 daemon (protocol 59).
+- **A worktree remembers its base.** Kete records the branch and commit a worktree was cut from. The review diff and the Review/Ship lanes use the recorded base, even after the base branch moves on or the setting changes. Older worktrees still work it out as before.
+- **Large pastes on Windows arrive quickly.** The terminal app now reads console input in bulk. A 110 KB paste reaches the agent in about 3 seconds instead of about 15, and the status bar shows "pasting… N KB" meanwhile. Characters not on your keyboard (`—`, curly quotes) no longer drop out of pastes.
+- **Command-line jobs, now in the apps:**
+  - Vote on and reply to Azure DevOps PRs in the terminal app (`⇧B`, then `v` or `c`).
+  - Start the orchestrator with a model, effort, project and name in both apps.
+  - "Delete merged & clean worktrees…" in both apps' repo menus.
+  - Export and import settings from Settings in both apps (`⇧E` / `⇧I` in the terminal app); import shows what will change first. New: `kete config import --dry-run`.
+  - Rename an account that sessions still use; the sessions follow the new name (protocol 60). A running session keeps its old sign-in folder until it restarts.
+- **Narrow windows and small terminals.** The desktop's quick prompt, breadcrumb, header, review bar, diff toolbar, verb bar, worktree rows, Accounts and Settings no longer clip or scroll sideways at 640–900px. The terminal app's status bar drops a hint whole instead of cutting it mid-word. Below about 150 columns, the docked review takes the whole board.
+- **Desktop:** Create pull request is greyed on the base branch, with the reason.
+
 ## 0.50.0
 
 The board now follows the work from start to merge: scope it to what you're working on, review an agent's changes beside the board, and open or merge the PR without leaving either app.

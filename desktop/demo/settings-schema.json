@@ -2563,7 +2563,7 @@
         {
           "id": "azure_devops",
           "label": "Azure DevOps",
-          "hint": "On a project whose remote is on Azure DevOps (the header shows an ado button): your sprint's tasks, the active pull requests and the branches. Enter opens a task or pull request in the browser and checks a branch out in a worktree; s twice starts a task (branch, worktree, agent)",
+          "hint": "On a project whose remote is on Azure DevOps (the header shows an ado button): your sprint's tasks, the active pull requests and the branches. Enter opens a task or pull request in the browser and checks a branch out in a worktree; s twice starts a task (branch, worktree, agent); on a pull request v votes and c reads its threads to reply",
           "group": "PROJECTS & WORKTREES",
           "defaults": [
             "shift+b"
@@ -3075,6 +3075,33 @@
             "q",
             "ctrl+c"
           ],
+          "overridden": false
+        },
+        {
+          "id": "sweep_worktrees",
+          "label": "Delete merged & clean worktrees",
+          "hint": "Delete the project's worktrees with no session, terminal or uncommitted work whose PR merged or whose commits are all on a remote, after one confirm listing them; never forced, so git keeps any that picked up work",
+          "group": "PROJECTS & WORKTREES",
+          "defaults": [],
+          "bound": [],
+          "overridden": false
+        },
+        {
+          "id": "export_settings",
+          "label": "Export settings",
+          "hint": "Write config.json, the agent presets and the ssh hosts to one file, as kete config export does (never config.local.json)",
+          "group": "GENERAL",
+          "defaults": [],
+          "bound": [],
+          "overridden": false
+        },
+        {
+          "id": "import_settings",
+          "label": "Import settings",
+          "hint": "Merge a settings file in, as kete config import does: what it would change is shown first and nothing is written until you say so",
+          "group": "GENERAL",
+          "defaults": [],
+          "bound": [],
           "overridden": false
         }
       ]
