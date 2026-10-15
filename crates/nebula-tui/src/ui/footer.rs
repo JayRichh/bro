@@ -211,8 +211,19 @@ fn overlay_footer_hint(app: &App, overlay: &Overlay, th: Theme) -> FooterHint {
         Overlay::Prompt(p) if matches!(p.kind, crate::app::PromptKind::QuickPrompt(_)) => {
             quick_prompt_footer_hint(app, th)
         }
-        Overlay::Accounts(_) => dim_hint(
-            "↑/↓: move  Space: on/off  d: default  Esc: close  (logins: kete profile login <name>)",
+        Overlay::Accounts(view) => dim_hint(
+            match view.mode {
+                crate::accounts_overlay::Mode::List => {
+                    "↑/↓: move  a: add  Enter: edit  Space: on/off  d: default  l: sign in  x: remove  s: spread  Esc: close"
+                }
+                crate::accounts_overlay::Mode::Form(_) => {
+                    "Tab/↑/↓: field  ←/→/Space: change  type: fill  Enter: save  Esc: back"
+                }
+                crate::accounts_overlay::Mode::Remove { .. } => "y/Enter: remove  n/Esc: keep it",
+                crate::accounts_overlay::Mode::UseFor { .. } => {
+                    "↑/↓: move  Enter: set / clear the repo's default  Esc: back"
+                }
+            },
             th,
         ),
         Overlay::ProjectPicker(_) => dim_hint(

@@ -210,15 +210,21 @@ pub fn confirm(app: &mut App, id: AgentId, profile: Option<String>) {
     let Some(agent) = app.tree.agents.iter().find(|a| a.id == id).cloned() else {
         return;
     };
-    let target = switch_targets(&agent, &rows(app))
+    // Only an account the session can move to: one of its harness's, not
+    // the one it is on, not broken.
+    let Some(target) = switch_targets(&agent, &rows(app))
         .into_iter()
         .find(|t| t.profile == profile)
-        .unwrap_or_else(|| SwitchTarget {
-            label: profile.clone().unwrap_or_default(),
-            profile: profile.clone(),
-            off: false,
-            needs_login: false,
-        });
+    else {
+        app.chrome.flash = Some(format!(
+            "{} cannot move to {}: pick another {} account",
+            agent.name,
+            profile.as_deref().unwrap_or("its own login"),
+            session_harness(&agent)
+        ));
+        app.chrome.dirty = true;
+        return;
+    };
     let (title, message) = confirm_text(&agent, &target);
     app.modals.overlay = Some(Overlay::Confirm(ConfirmDialog {
         title,

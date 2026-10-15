@@ -3,7 +3,9 @@
 //! in `crate::accounts_overlay`.
 
 use super::*;
-use crate::accounts_overlay::{build_rows, AccountsView};
+use crate::accounts_overlay::{
+    build_rows, AccountForm, AccountsHit, AccountsView, Field, FormKind, Mode, Outcome,
+};
 
 /// The accounts to show: the pushed list, or the kept files when the
 /// daemon is too old to push one.
@@ -14,23 +16,46 @@ fn readings(app: &mut App) -> Vec<nebula_core::usage::AccountUsage> {
     app.launcher.account_usage.clone()
 }
 
+/// The rows, and every setting the overlay mirrors, read again: the
+/// profiles, the spread, each project's default accounts.
 fn rows(app: &mut App) -> Vec<crate::accounts_overlay::AccountRow> {
-    let profiles = crate::config::Config::load().profiles;
-    app.launcher.profiles = profiles.clone();
+    let cfg = crate::config::Config::load();
+    crate::quick_prompt::mirror_accounts(app, &cfg);
     let usage = readings(app);
     build_rows(
-        &profiles,
+        &cfg.profiles,
         &usage,
         &app.tree.agents,
         crate::accounts_overlay::login_lookup,
     )
 }
 
+/// Fill the view's mirrors from the app and the config.
+fn mirror(app: &App, view: &mut AccountsView) {
+    let cfg = crate::config::Config::load();
+    view.harnesses = cfg
+        .harness_registry()
+        .iter()
+        .map(|h| h.id.clone())
+        .collect();
+    view.spread = cfg.account_spread.clone();
+    view.threshold = cfg.account_spread_threshold.clone();
+    view.projects = app
+        .tree
+        .projects
+        .iter()
+        .map(|p| (p.name.clone(), p.repo_path.clone()))
+        .collect();
+    view.project_accounts = app.launcher.project_accounts.clone();
+}
+
 /// `⇧U`: open the overlay.
 pub(crate) fn open(app: &mut App) {
     let rows = rows(app);
     let (config, local) = crate::config::Config::layer_paths();
-    app.modals.overlay = Some(Overlay::Accounts(AccountsView::new(rows, config, local)));
+    let mut view = AccountsView::new(rows, config, local);
+    mirror(app, &mut view);
+    app.modals.overlay = Some(Overlay::Accounts(view));
     app.chrome.dirty = true;
 }
 
@@ -40,19 +65,33 @@ pub(crate) fn refresh(app: &mut App) {
         return;
     }
     let rows = rows(app);
-    if let Some(Overlay::Accounts(view)) = &mut app.modals.overlay {
-        view.rows = rows;
-        view.cursor = view.cursor.min(view.rows.len().saturating_sub(1));
-    }
-}
-
-/// j/k move, Space/e switch a profile on or off, d/* make it the default,
-/// Esc (or q) closes.
-pub(crate) fn handle_key(app: &mut App, key: KeyEvent) {
-    let Some(Overlay::Accounts(view)) = &mut app.modals.overlay else {
+    let Some(Overlay::Accounts(mut view)) = app.modals.overlay.take() else {
         return;
     };
-    let result = match key.code {
+    view.set_rows(rows);
+    mirror(app, &mut view);
+    app.modals.overlay = Some(Overlay::Accounts(view));
+}
+
+/// What a key did: a message for the footer, an account to sign in.
+type Done = Option<Result<Outcome, String>>;
+
+/// The list's keys: j/k move, Space/e switch a profile on or off, d/*
+/// make it the default, a add, Enter edit, c duplicate, x/Delete remove,
+/// l sign in, p use for a repo, m move the grid's session onto it, s/t
+/// the spread and its threshold, Esc (or q) closes.
+fn list_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) -> Done {
+    let agents = app.tree.agents.clone();
+    let Some(Overlay::Accounts(view)) = &mut app.modals.overlay else {
+        return None;
+    };
+    let said = |r: Result<String, String>| {
+        Some(r.map(|m| Outcome {
+            message: m,
+            sign_in: None,
+        }))
+    };
+    match key.code {
         KeyCode::Esc | KeyCode::Char('q') => {
             app.modals.overlay = None;
             None
@@ -65,19 +104,316 @@ pub(crate) fn handle_key(app: &mut App, key: KeyEvent) {
             view.step(-1);
             None
         }
-        KeyCode::Char(' ') | KeyCode::Char('e') => Some(view.toggle_enabled()),
-        KeyCode::Char('d') | KeyCode::Char('*') => Some(view.set_default()),
+        KeyCode::Char(' ') | KeyCode::Char('e') => said(view.toggle_enabled()),
+        KeyCode::Char('d') | KeyCode::Char('*') => said(view.set_default()),
+        KeyCode::Char('a') => {
+            view.open_add();
+            None
+        }
+        KeyCode::Enter => view.open_edit().err().map(Err),
+        KeyCode::Char('c') => view.open_duplicate().err().map(Err),
+        KeyCode::Char('x') | KeyCode::Delete => view.open_remove(&agents).err().map(Err),
+        KeyCode::Char('p') => view.open_use_for().err().map(Err),
+        KeyCode::Char('s') => Some(view.cycle_spread()),
+        KeyCode::Char('t') => Some(view.cycle_threshold()),
+        KeyCode::Char('l') => {
+            let key = view.selected().map(|r| r.key.clone());
+            if let Some(key) = key {
+                sign_in(app, &key, out);
+            }
+            None
+        }
+        KeyCode::Char('m') => {
+            move_session_here(app);
+            None
+        }
         _ => None,
+    }
+}
+
+/// A form's keys: Tab / ↓ / ↑ walk the fields, ←/→ (or Space) step the
+/// harness and flip a box, typing fills a text field, Enter saves, Esc
+/// goes back to the list.
+fn form_key(app: &mut App, key: KeyEvent) -> Done {
+    let Some(Overlay::Accounts(view)) = &mut app.modals.overlay else {
+        return None;
     };
-    match result {
-        Some(Ok(message)) => {
-            app.chrome.flash = Some(message);
+    let taken: Vec<String> = view
+        .rows
+        .iter()
+        .filter_map(|r| r.profile.as_ref().map(|p| p.name.trim().to_string()))
+        .collect();
+    let harnesses = view.harnesses.clone();
+    if key.code == KeyCode::Enter {
+        return Some(view.submit_form());
+    }
+    let Mode::Form(form) = &mut view.mode else {
+        return None;
+    };
+    let n = form.fields().len();
+    let field = form.current();
+    match key.code {
+        KeyCode::Esc => view.mode = Mode::List,
+        KeyCode::Tab | KeyCode::Down => form.field = (form.field + 1) % n,
+        KeyCode::BackTab | KeyCode::Up => form.field = (form.field + n - 1) % n,
+        KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if field == Field::Harness => {
+            if !harnesses.is_empty() {
+                let at = harnesses
+                    .iter()
+                    .position(|h| *h == form.harness)
+                    .unwrap_or(0);
+                let next = if key.code == KeyCode::Left {
+                    (at + harnesses.len() - 1) % harnesses.len()
+                } else {
+                    (at + 1) % harnesses.len()
+                };
+                form.harness = harnesses[next].clone();
+                if form.kind == FormKind::Add && !form.touched {
+                    form.name = crate::accounts_overlay::suggest_name(&form.harness, &taken);
+                }
+            }
+        }
+        KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if field == Field::Adopt => {
+            form.adopt = !form.adopt;
+        }
+        KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if field == Field::Default => {
+            form.make_default = !form.make_default;
+        }
+        KeyCode::Backspace if AccountForm::is_text(field) => {
+            let text = if field == Field::Name {
+                &mut form.name
+            } else {
+                &mut form.env
+            };
+            text.pop();
+            form.touched = true;
+        }
+        KeyCode::Char(c)
+            if AccountForm::is_text(field)
+                && !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            if field == Field::Name {
+                form.name.push(c);
+            } else {
+                form.env.push(c);
+            }
+            form.touched = true;
+        }
+        _ => {}
+    }
+    if let Mode::Form(form) = &mut view.mode {
+        form.error = None;
+    }
+    None
+}
+
+/// The remove's keys: y / Enter remove, n / Esc keep.
+fn remove_key(app: &mut App, key: KeyEvent) -> Done {
+    let Some(Overlay::Accounts(view)) = &mut app.modals.overlay else {
+        return None;
+    };
+    match key.code {
+        KeyCode::Char('y') | KeyCode::Enter => Some(view.confirm_remove()),
+        KeyCode::Char('n') | KeyCode::Esc => {
+            view.mode = Mode::List;
+            None
+        }
+        _ => None,
+    }
+}
+
+/// "Use for repo"'s keys: j/k walk the repos, Enter sets or clears, Esc
+/// goes back.
+fn use_for_key(app: &mut App, key: KeyEvent) -> Done {
+    let Some(Overlay::Accounts(view)) = &mut app.modals.overlay else {
+        return None;
+    };
+    let n = view.projects.len();
+    let Mode::UseFor { cursor } = &mut view.mode else {
+        return None;
+    };
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => view.mode = Mode::List,
+        KeyCode::Down | KeyCode::Char('j') => *cursor = (*cursor + 1).min(n.saturating_sub(1)),
+        KeyCode::Up | KeyCode::Char('k') => *cursor = cursor.saturating_sub(1),
+        KeyCode::Enter | KeyCode::Char(' ') => return Some(view.toggle_use_for()),
+        _ => {}
+    }
+    None
+}
+
+pub(crate) fn handle_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) {
+    let Some(Overlay::Accounts(view)) = &app.modals.overlay else {
+        return;
+    };
+    let done = match view.mode {
+        Mode::List => list_key(app, key, out),
+        Mode::Form(_) => form_key(app, key),
+        Mode::Remove { .. } => remove_key(app, key),
+        Mode::UseFor { .. } => use_for_key(app, key),
+    };
+    match done {
+        Some(Ok(outcome)) => {
+            app.chrome.flash = Some(outcome.message);
             refresh(app);
+            if let Some(account) = outcome.sign_in {
+                sign_in(app, &account, out);
+            }
         }
         Some(Err(message)) => app.chrome.flash = Some(message),
         None => {}
     }
     app.chrome.dirty = true;
+}
+
+/// A click: a button is its key, pressed; a row puts the cursor there; a
+/// form's field takes the form's cursor; a repo in "use for" is picked
+/// (a second click sets it). The wheel walks the rows.
+pub(crate) fn handle_mouse(app: &mut App, mouse: MouseEvent, out: &mut Vec<ClientRequest>) -> bool {
+    let Some(Overlay::Accounts(view)) = &mut app.modals.overlay else {
+        return false;
+    };
+    app.chrome.dirty = true;
+    let pos = ratatui::layout::Position::new(mouse.column, mouse.row);
+    match mouse.kind {
+        MouseEventKind::ScrollDown if view.mode == Mode::List => view.step(1),
+        MouseEventKind::ScrollUp if view.mode == Mode::List => view.step(-1),
+        MouseEventKind::Down(MouseButton::Left) => {
+            let Some(hit) = view
+                .hits
+                .iter()
+                .find(|(r, _)| r.contains(pos))
+                .map(|(_, h)| *h)
+            else {
+                return true;
+            };
+            match hit {
+                AccountsHit::Key(code) => {
+                    handle_key(app, KeyEvent::new(code, KeyModifiers::NONE), out);
+                }
+                AccountsHit::Row(i) => view.cursor = i.min(view.rows.len().saturating_sub(1)),
+                AccountsHit::Field(i) => {
+                    if let Mode::Form(form) = &mut view.mode {
+                        form.field = i.min(form.fields().len().saturating_sub(1));
+                    }
+                }
+                AccountsHit::Project(i) => {
+                    if let Mode::UseFor { cursor } = &mut view.mode {
+                        if *cursor == i {
+                            handle_key(app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), out);
+                        } else {
+                            *cursor = i;
+                        }
+                    }
+                }
+                AccountsHit::Spread(i) => {
+                    let word = nebula_core::accounts::SPREADS[i.min(2)];
+                    let done = view.set_spread(word);
+                    match done {
+                        Ok(o) => {
+                            app.chrome.flash = Some(o.message);
+                            refresh(app);
+                        }
+                        Err(e) => app.chrome.flash = Some(e),
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    true
+}
+
+/// The checkout a login terminal opens in: the selected one, else the
+/// first project's root.
+fn login_worktree(app: &App) -> Option<WorktreeId> {
+    app.selected_worktree()
+        .map(|w| w.id.clone())
+        .filter(|id| !app.is_placeholder_worktree(id))
+        .or_else(|| {
+            app.tree
+                .projects
+                .first()
+                .and_then(|p| app.root_worktree(&p.id))
+        })
+}
+
+/// Sign the account `key` in: its login command (looked up here, never
+/// typed by anyone) run in a new terminal session, which the pane shows.
+/// With no checkout to open one in, the footer says the command instead.
+pub(crate) fn sign_in(app: &mut App, key: &str, out: &mut Vec<ClientRequest>) {
+    let row = match &app.modals.overlay {
+        Some(Overlay::Accounts(view)) => view.rows.iter().find(|r| r.key == key).cloned(),
+        _ => None,
+    };
+    let Some(row) = row else {
+        app.chrome.flash = Some(format!("no account `{key}`"));
+        return;
+    };
+    if let Some(problem) = &row.problem {
+        app.chrome.flash = Some(format!("{}: {problem}", row.label()));
+        return;
+    }
+    let Some(line) = nebula_core::accounts::login_command(row.profile.as_ref(), &row.harness)
+    else {
+        app.chrome.flash = Some(format!(
+            "kete knows no sign-in for {}: sign in from a session under it",
+            row.harness
+        ));
+        return;
+    };
+    let Some(worktree) = login_worktree(app) else {
+        app.chrome.flash = Some(format!("add a repo first, or run it yourself: {line}"));
+        return;
+    };
+    app.modals.overlay = None;
+    app.chrome.flash = Some(format!(
+        "signing {} in: finish in the terminal, then ⇧U shows it signed in",
+        row.label()
+    ));
+    send_with(app, out, PendingIntent::SignIn { line }, |req_id| {
+        ClientRequest::CreateTerminal {
+            req_id,
+            worktree,
+            name: Some(format!("sign in {}", row.key.trim_start_matches('@'))),
+        }
+    });
+}
+
+/// `m`: the session under the grid's cursor moved onto the selected
+/// account, through MOVE TO ACCOUNT's confirm.
+fn move_session_here(app: &mut App) {
+    let Some(Overlay::Accounts(view)) = &app.modals.overlay else {
+        return;
+    };
+    let Some(row) = view.selected().cloned() else {
+        return;
+    };
+    let session = match app.selected_session_row() {
+        Some(crate::app::SessionRow::Agent(a)) => a,
+        _ => {
+            app.chrome.flash = Some("no session under the cursor to move".into());
+            return;
+        }
+    };
+    let harness = nebula_core::accounts::session_harness(&session);
+    if harness != row.harness {
+        app.chrome.flash = Some(format!(
+            "{} is a {} account: {} runs {harness}",
+            row.label(),
+            row.harness,
+            session.name
+        ));
+        return;
+    }
+    if nebula_core::accounts::session_account(&session) == row.key {
+        app.chrome.flash = Some(format!("{} already runs on {}", session.name, row.label()));
+        return;
+    }
+    let profile = row.profile.as_ref().map(|p| p.name.trim().to_string());
+    crate::account_switch::confirm(app, session.id.clone(), profile);
 }
 
 /// A 55+ daemon's account list: replaces what was known.

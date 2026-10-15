@@ -85,6 +85,7 @@ fn handle_overlay_mouse(
         Overlay::Metrics(_) => handle_metrics_mouse(app, mouse, mouse_pos, out),
         Overlay::Subagents(_) => desk::handle_subagents_mouse(app, mouse, out),
         Overlay::Ado(_) => ado::handle_mouse(app, mouse, out),
+        Overlay::Accounts(_) => accounts::handle_mouse(app, mouse, out),
         _ => true,
     }
 }

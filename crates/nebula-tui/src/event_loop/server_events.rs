@@ -365,6 +365,14 @@ fn handle_ack_event(app: &mut App, event: ServerEvent, out: &mut Vec<ClientReque
                 (Some(PendingIntent::FlashOnAck(note)), _) => {
                     app.chrome.flash = Some(note);
                 }
+                // The shell buffers what arrives before its prompt.
+                (Some(PendingIntent::SignIn { line }), Some(EntityId::Terminal(id))) => {
+                    out.push(ClientRequest::Input {
+                        session: SessionRef::Terminal(id.clone()),
+                        data: format!("{line}\r").into_bytes(),
+                    });
+                    attach_created(app, EntityId::Terminal(id), true, None, follow, out);
+                }
                 // F10's start prompt: straight into the view.
                 (Some(PendingIntent::OpenOrchestrator), Some(EntityId::Agent(id))) => {
                     orchestrator::open_view(app, id, out);
