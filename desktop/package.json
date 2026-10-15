@@ -10,7 +10,10 @@
     "check": "node scripts/check-encoding.mjs && npm run icons && svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
     "tauri": "tauri",
-    "icons": "node scripts/material-icons.mjs"
+    "icons": "node scripts/material-icons.mjs",
+    "e2e:prepare": "node e2e/prepare.mjs",
+    "e2e:run": "node --test --test-concurrency=1 e2e/desktop.e2e.mjs",
+    "e2e": "npm run e2e:prepare && npm run e2e:run"
   },
   "dependencies": {
     "@fontsource/jetbrains-mono": "^5.3.0",

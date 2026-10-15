@@ -4,3 +4,6 @@ target/
 src-tauri/gen/
 public/material-icons/
 src/lib/material-map.json
+
+# The e2e suite's downloaded drivers and paths.json (e2e/prepare.mjs)
+e2e/.tools/
