@@ -17,6 +17,8 @@ mod agent;
 mod flows;
 #[cfg(windows)]
 mod harness;
+#[cfg(windows)]
+mod upgrade;
 
 #[cfg(not(windows))]
 fn main() {}
