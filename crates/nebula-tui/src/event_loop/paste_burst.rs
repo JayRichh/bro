@@ -100,10 +100,12 @@ impl PasteBurst {
 fn pasted_text(held: &[Event]) -> Option<String> {
     let mut text = String::new();
     let mut chars = 0;
+    let mut releases = 0;
     let mut line_break = false;
     for event in held {
         let Event::Key(key) = event else { continue };
         if key.kind == KeyEventKind::Release {
+            releases += 1;
             continue;
         }
         chars += 1;
@@ -121,7 +123,11 @@ fn pasted_text(held: &[Event]) -> Option<String> {
             _ => return None,
         }
     }
-    (chars >= 2 && (line_break || chars > MIN_PASTE_CHARS)).then_some(text)
+    // A paste comes up as it goes down, key for key. A held key's repeats
+    // are presses with one release at the end: `j` held through a slow
+    // frame is navigation, never a paste the grid would drop.
+    let paired = releases * 2 >= chars;
+    (paired && chars >= 2 && (line_break || chars > MIN_PASTE_CHARS)).then_some(text)
 }
 
 /// A key press that types text: what a paste is made of.
@@ -297,6 +303,18 @@ mod tests {
         batch.extend(typed("\nx"));
         burst.feed(batch, Instant::now());
         assert_eq!(burst.settle(), vec![Event::Paste("A@\nx".into())]);
+    }
+
+    /// A held `j`'s repeats queued up behind a slow frame — presses, no
+    /// releases — are replayed as the navigation they are.
+    #[test]
+    fn a_held_keys_repeats_are_not_a_paste() {
+        let mut burst = PasteBurst::default();
+        let repeats: Vec<Event> = (0..40)
+            .map(|_| key(KeyCode::Char('j'), KeyEventKind::Press))
+            .collect();
+        assert!(burst.feed(repeats.clone(), Instant::now()).is_empty());
+        assert_eq!(burst.settle(), repeats);
     }
 
     /// A lone release (a typed key coming up) is never a burst.
