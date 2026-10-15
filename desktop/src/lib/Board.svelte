@@ -164,8 +164,14 @@
    *  verbs above it); the rest open the session. */
   function openCard(a: Agent, lane: Lane) {
     selId = a.id;
-    if (lane === 'unseen' || lane === 'pr') openReview(a.id);
-    else openSession({ Agent: a.id });
+    if (lane === 'unseen' || lane === 'pr') {
+      openReview(a.id);
+      // Read, the card may move lanes and its node with it: keep the focus
+      // on it, so the board's keys still work beside the diff.
+      setTimeout(() => {
+        if (document.activeElement === document.body) focusSel();
+      }, 250);
+    } else openSession({ Agent: a.id });
   }
 
   function onKey(e: KeyboardEvent) {

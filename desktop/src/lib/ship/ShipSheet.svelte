@@ -146,6 +146,7 @@
           <span class="min-w-0 flex-1 truncate text-[14px]">{pr.title}</span>
           {#if pr.draft}<span class="flex-none font-mono text-[11px] text-muted">draft</span>{/if}
         </button>
+        <p class="m-0 -mt-2 truncate font-mono text-[11px] text-muted select-text" title={pr.url}>{pr.url}</p>
         {#if pr.draft}
           <p class="m-0 text-[13px] text-muted">A draft can't merge: mark it ready for review on {forgeName(pr.forge)} first.</p>
         {/if}
