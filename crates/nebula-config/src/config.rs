@@ -1573,6 +1573,11 @@ pub struct Config {
     /// shows the page once and writes it here. Left out while empty.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub whats_new_seen: String,
+    /// The checkouts, by path, already told that git tracks a file Kete
+    /// writes for an agent's hooks (`nebula_core::tracked_settings`), so
+    /// the notice shows once for each. Left out of the file while empty.
+    #[serde(skip_serializing_if = "BTreeSet::is_empty")]
+    pub tracked_settings_noticed: BTreeSet<String>,
     /// Hotkey overrides, keyed by `keymap::ActionSpec::id`; the value is a
     /// comma-separated chord list (`"j, down"`), and an empty string means
     /// deliberately unbound. Only rows that differ from the defaults are
@@ -1792,6 +1797,7 @@ impl Default for Config {
             quick_prompt_new_worktree: false,
             show_tips: true,
             tips_seen: BTreeSet::new(),
+            tracked_settings_noticed: BTreeSet::new(),
             whats_new_seen: String::new(),
             keybindings: BTreeMap::new(),
             skipped: BTreeSet::new(),

@@ -1513,3 +1513,57 @@ pub(crate) fn land_client_rss(app: &mut App, bytes: u64) {
         view.client_rss_bytes = bytes;
     }
 }
+
+/// TRACKED SETTINGS (`nebula_core::tracked_settings`): once the tree is
+/// in, ask git off the loop whether a checkout not told before tracks a
+/// file Kete writes for an agent's hooks (an agent's `git add -A` before
+/// 0.52 could commit one), and flash the command that untracks it. Each
+/// checkout is told once (`tracked_settings_noticed`); nothing is
+/// untracked for the user.
+pub(crate) fn check_tracked_settings(app: &App) {
+    let Some(jobs) = app.jobs.view_jobs.clone() else {
+        return;
+    };
+    let told = crate::config::Config::load().tracked_settings_noticed;
+    let checkouts: Vec<(String, std::path::PathBuf)> = app
+        .tree
+        .worktrees
+        .iter()
+        .filter(|w| !told.contains(&w.path.display().to_string()))
+        .map(|w| {
+            let project = app
+                .tree
+                .projects
+                .iter()
+                .find(|p| p.id == w.project_id)
+                .map_or("", |p| p.name.as_str());
+            (format!("{project} {}", w.branch), w.path.clone())
+        })
+        .collect();
+    if checkouts.is_empty() {
+        return;
+    }
+    jobs.run(move || {
+        let mut found = Vec::new();
+        let mut paths = Vec::new();
+        for (label, path) in checkouts {
+            let files = nebula_core::tracked_settings::tracked_in(&path);
+            for file in &files {
+                tracing::warn!(
+                    checkout = %path.display(),
+                    file,
+                    "git tracks a file Kete writes; untrack it with `{}`",
+                    nebula_core::tracked_settings::untrack_command(file)
+                );
+            }
+            // One line a checkout: the notice counts checkouts.
+            if let Some(file) = files.first() {
+                found.push((label, *file));
+                paths.push(path.display().to_string());
+            }
+        }
+        let flash = nebula_core::tracked_settings::notice(&found)?;
+        let _ = crate::config::Config::update(|c| c.tracked_settings_noticed.extend(paths));
+        Some(crate::view_jobs::Answer::Flash(flash))
+    });
+}
