@@ -577,7 +577,16 @@ pub fn read_listing_with(
         Some(sha) => crate::review::Scope::Base(sha),
         None => crate::review::Scope::Head(&head_key),
     };
-    let stored = crate::review::load_scoped(root, scope);
+    let mut stored = crate::review::load_scoped(root, scope);
+    // A read against the base with no marks of its own takes the ones
+    // made against HEAD: all a 0.48 install has, or ones made with the
+    // toggle on HEAD. The fingerprint check below keeps only a file whose
+    // diff against the base is the very text approved (work the branch's
+    // commits never touched), and those become the base's.
+    let carried = since.is_some() && stored.is_empty();
+    if carried {
+        stored = crate::review::load_scoped(root, crate::review::Scope::Head(&head_key));
+    }
     let reviewed: std::collections::HashMap<String, u64> = files
         .iter()
         .filter_map(|file| {
@@ -586,7 +595,12 @@ pub fn read_listing_with(
             (crate::review::fingerprint(&diff) == mark).then(|| (file.path.clone(), mark))
         })
         .collect();
-    if reviewed.len() != stored.len() {
+    let changed = if carried {
+        !reviewed.is_empty()
+    } else {
+        reviewed.len() != stored.len()
+    };
+    if changed {
         crate::review::store_scoped(root, scope, &reviewed);
     }
     Ok(crate::view_jobs::DiffListing {
@@ -1662,6 +1676,44 @@ mod tests {
             // Against HEAD there is nothing left, marked or not.
             let head = read_listing(&repo, Some(nebula_core::review_base::Against::Head)).unwrap();
             assert!(head.files.is_empty() && head.reviewed.is_empty());
+        });
+    }
+
+    /// Marks made against HEAD (a 0.48 install's, the only kind it had)
+    /// show in the base read a branch now opens on, for the files whose
+    /// diff against the base is the text approved; a committed file's
+    /// is not, and stays unmarked. Carried over, they are the base's and
+    /// survive the commit.
+    #[test]
+    fn marks_made_against_head_carry_over_to_the_base_read() {
+        use nebula_core::review_base::Against;
+        let _env = crate::test_env::spawning();
+        let dir = tempfile::tempdir().unwrap();
+        let (repo, _) = branch_with_a_commit(&dir);
+        crate::review::with_store_path(dir.path().join("reviewed.json"), || {
+            let head_read = read_listing(&repo, Some(Against::Head)).unwrap();
+            let head = head_read.head.clone().unwrap();
+            let tracked = head_read
+                .files
+                .iter()
+                .find(|f| f.path == "tracked.txt")
+                .unwrap();
+            let approved = crate::review::fingerprint(&diff_since(&repo, tracked, true, None));
+            let marks = std::collections::HashMap::from([
+                ("tracked.txt".to_string(), approved),
+                ("b.txt".to_string(), 7),
+            ]);
+            crate::review::store_marks(&repo, &head, &marks);
+
+            let listing = read_listing(&repo, None).unwrap();
+            assert_eq!(listing.against, Against::Base);
+            let marked: Vec<&String> = listing.reviewed.keys().collect();
+            assert_eq!(marked, vec!["tracked.txt"]);
+            git(&repo, &["commit", "-q", "-am", "commit the edit"]);
+            assert!(read_listing(&repo, None)
+                .unwrap()
+                .reviewed
+                .contains_key("tracked.txt"));
         });
     }
 
