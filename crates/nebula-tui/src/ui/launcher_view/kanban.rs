@@ -207,8 +207,16 @@ pub(super) fn draw(f: &mut Frame, app: &mut App, body: Rect) {
         hits.push((zone, HitTarget::KanbanArchive));
     }
     // The lanes after their cards, so a card wins the click; a held card
-    // let go on a lane's air is let go on the lane.
-    hits.extend(lane_hits);
+    // let go on a lane's air is let go on the lane. Only while a card is
+    // pressed: otherwise the air is the board's, its menu and its wheel.
+    let pressed = app
+        .launcher
+        .order_drag
+        .as_ref()
+        .is_some_and(|d| matches!(d.item, OrderItem::Board { .. }));
+    if pressed {
+        hits.extend(lane_hits);
+    }
     app.chrome.hits.extend(hits);
     app.chrome
         .hits
@@ -260,7 +268,7 @@ fn draw_beside_mark(f: &mut Frame, app: &App, rect: Rect, id: &nebula_core::Agen
     f.buffer_mut().set_stringn(
         rect.x,
         y,
-        "━".repeat(rect.width as usize),
+        "─".repeat(rect.width as usize),
         rect.width as usize,
         Style::default().fg(th.accent),
     );

@@ -67,7 +67,7 @@ pub(super) fn draw(f: &mut Frame, app: &mut App, body: Rect) {
 }
 
 /// Where a held card, band or tab would land, marked over the frame just
-/// drawn in the theme's accent: a bar in the gap beside the card it would
+/// drawn in the theme's accent: a 1px rule in the gap beside the card it would
 /// sit next to, the rule of the band it would go before (`▲`) or after
 /// (`▼`), a bar at the side of the tab it would go beside. Read off the
 /// frame's own hit map, so the mark is where the cells are.
@@ -82,7 +82,7 @@ fn draw_drop_marks(f: &mut Frame, app: &App) {
     let mut bar = |x: u16, r: Rect| {
         if x < frame.right() {
             for y in r.y..r.bottom().min(frame.bottom()) {
-                buf.set_string(x, y, "┃", accent);
+                buf.set_string(x, y, "│", accent);
             }
         }
     };

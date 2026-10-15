@@ -2296,7 +2296,9 @@ pub(super) fn drag_card(app: &mut App, pos: (u16, u16)) {
     let mut over_tab = None;
     let hit = app.hit_at(pos.0, pos.1);
     // Over another session card of the band it stands in: a reorder,
-    // before or after that card by the half of it under the pointer.
+    // before or after that card by the half of it under the pointer. A
+    // one-line entry (the LIST layout) has no halves: past one up the
+    // band, before it; down, after.
     let slot = match &hit {
         Some(target @ HitTarget::LauncherCard(at)) => match view::card_at(&bands, *at) {
             Some(view::Card::Session(row))
@@ -2305,11 +2307,16 @@ pub(super) fn drag_card(app: &mut App, pos: (u16, u16)) {
                         .position(&SessionRef::Agent(drag.agent.clone()))
                         .is_some() =>
             {
+                let own = bands[at.band].position(&SessionRef::Agent(drag.agent.clone()));
                 app.hit_rect(target).map(|r| {
-                    (
-                        row.agent.id.clone(),
-                        crate::order::Place::of(pos.0.saturating_sub(r.x), r.width),
-                    )
+                    let place = if r.height > 1 {
+                        crate::order::Place::of(pos.0.saturating_sub(r.x), r.width)
+                    } else if own.is_some_and(|own| at.card < own) {
+                        crate::order::Place::Before
+                    } else {
+                        crate::order::Place::After
+                    };
+                    (row.agent.id.clone(), place)
                 })
             }
             _ => None,
@@ -13845,7 +13852,7 @@ mod tests {
                 assert_eq!(drag.slot, Some((AgentId("a9".into()), Place::Before)));
                 // The mark is drawn, in the gap before the card.
                 let term = draw_at(&mut app, 130, 50);
-                assert_eq!(term.backend().buffer()[(r.x - 1, r.y)].symbol(), "┃");
+                assert_eq!(term.backend().buffer()[(r.x - 1, r.y)].symbol(), "│");
                 let out = mouse_out(
                     &mut app,
                     MouseEventKind::Up(MouseButton::Left),
@@ -13982,10 +13989,13 @@ mod tests {
                         .any(|(_, h)| *h == HitTarget::KanbanArchive),
                     "no Archived zone until a card is held"
                 );
-                let done = rect_where(&app, |h| {
-                    *h == HitTarget::KanbanLane(crate::launcher::Lane::Done.index())
-                });
-                let lane_air = (done.x + 2, done.bottom() - 2);
+                assert!(
+                    !app.chrome
+                        .hits
+                        .iter()
+                        .any(|(_, h)| matches!(h, HitTarget::KanbanLane(_))),
+                    "a lane's air is the board's until a card is pressed"
+                );
                 let card = |app: &App, id: &str| {
                     rect_where(app, |h| matches!(h, HitTarget::KanbanCard(a) if a.0 == id))
                 };
@@ -14001,6 +14011,10 @@ mod tests {
                     r.y + 2,
                 );
                 draw_at(&mut app, w, h);
+                let done = rect_where(&app, |h| {
+                    *h == HitTarget::KanbanLane(crate::launcher::Lane::Done.index())
+                });
+                let lane_air = (done.x + 2, done.bottom() - 2);
                 mouse(
                     &mut app,
                     MouseEventKind::Drag(MouseButton::Left),
@@ -14223,6 +14237,14 @@ mod tests {
                 key(&mut app, KeyCode::Char('?'), KeyModifiers::NONE);
                 key(&mut app, KeyCode::Char('K'), KeyModifiers::SHIFT);
                 assert!(app.modals.overlay.is_none() && app.launcher.launcher_kanban);
+                key(&mut app, KeyCode::Char('S'), KeyModifiers::SHIFT);
+                assert!(matches!(app.modals.overlay, Some(Overlay::Subagents(_))));
+                key(&mut app, KeyCode::Char('K'), KeyModifiers::SHIFT);
+                assert!(app.modals.overlay.is_none() && app.launcher.launcher_kanban);
+                key(&mut app, KeyCode::Char('U'), KeyModifiers::SHIFT);
+                assert!(matches!(app.modals.overlay, Some(Overlay::Accounts(_))));
+                key(&mut app, KeyCode::Char('K'), KeyModifiers::SHIFT);
+                assert!(app.modals.overlay.is_none() && app.launcher.launcher_kanban);
 
                 // A diff opened from the board: Esc lands back on it.
                 draw(&mut app);
@@ -14238,6 +14260,36 @@ mod tests {
                 key(&mut app, KeyCode::Char('K'), KeyModifiers::SHIFT);
                 assert!(!app.pane.collapsed);
                 assert!(app.launcher.launcher_kanban);
+            });
+        }
+
+        /// `⌥↑` on a board card steps it past the card of its checkout
+        /// above it in its lane, from the order the board shows.
+        #[test]
+        fn the_move_keys_on_the_board_step_within_the_lane() {
+            with_default_config(|| {
+                let mut app = three_sessions();
+                let now = crate::app::now_ms();
+                for (id, ago) in [("a9", 1_000), ("a1", 3_000)] {
+                    let a = agent(&mut app, id);
+                    a.status = AgentStatus::Finished;
+                    a.status_changed_at = now - ago;
+                }
+                app.launcher.launcher_kanban = true;
+                draw_at(&mut app, 200, 50);
+                let r = rect_where(
+                    &app,
+                    |h| matches!(h, HitTarget::KanbanCard(a) if a.0 == "a1"),
+                );
+                click_at(&mut app, r.x + 2, r.y + 2);
+                let out = key(&mut app, KeyCode::Up, KeyModifiers::ALT);
+                assert_eq!(
+                    reorders(&out),
+                    [(
+                        ReorderScope::Agents(WorktreeId("w1".into())),
+                        vec!["a1".to_string(), "a9".into()]
+                    )]
+                );
             });
         }
 
