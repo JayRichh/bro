@@ -985,6 +985,42 @@ mod tests {
         );
     }
 
+    /// The keys a 0.48 user rebound (`crates/nebula/tests/fixtures/
+    /// upgrade`) still bind after the 0.49 key table: every id is still a
+    /// verb, their chords win over defaults added since (`z` for full
+    /// screen), help on their F12 leaves `?` to the verbs menu, and a save
+    /// writes the same overrides back.
+    #[test]
+    fn a_048_users_rebound_keys_still_bind() {
+        let text = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../nebula/tests/fixtures/upgrade/v0.48/data/config.json"
+        ))
+        .unwrap();
+        let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let theirs: BTreeMap<String, String> =
+            serde_json::from_value(json["keybindings"].clone()).unwrap();
+        assert_eq!(theirs.len(), 6);
+        for id in theirs.keys() {
+            assert!(
+                ACTIONS.iter().any(|s| s.id == id),
+                "{id} is no longer a verb"
+            );
+        }
+        let map = Keymap::from_overrides(&theirs);
+        let at = |chord: &str| map.lookup(Scope::Global, &KeyChord::parse(chord).unwrap());
+        assert_eq!(at("ctrl+n"), Some(Action::QuickPrompt));
+        assert_ne!(at("p"), Some(Action::QuickPrompt));
+        assert_eq!(at("z"), Some(Action::Screenshot));
+        assert_eq!(at("f12"), Some(Action::Help));
+        assert_eq!(at("?"), Some(Action::Verbs));
+        assert_eq!(at("f2"), Some(Action::Rename));
+        assert_eq!(at("r"), Some(Action::Rename));
+        assert_eq!(at("alt+k"), Some(Action::ReorderUp));
+        assert!(map.chords(Action::Archive).is_empty());
+        assert_eq!(map.overrides(), theirs);
+    }
+
     #[test]
     fn a_hand_edited_duplicate_is_flagged_on_both_rows() {
         // Nothing in the overlay can produce this; a text editor can. (One

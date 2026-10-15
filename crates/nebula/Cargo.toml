@@ -37,6 +37,8 @@ kete-ado = { workspace = true, features = ["test-support"] }
 httpmock = "0.7"
 portable-pty = { workspace = true }
 vt100 = { workspace = true }
+# The upgrade fixtures keep a database as SQL text (tests/fixtures/upgrade).
+rusqlite = { version = "0.40", features = ["bundled"] }
 
 # The Windows end-to-end suite reads its fake agent's console raw.
 [target.'cfg(windows)'.dev-dependencies]

@@ -1,0 +1,46 @@
+{
+  "desktop": {
+    "collapsed": [
+      "alpha"
+    ],
+    "home": "board",
+    "theme": "dark"
+  },
+  "harnesses": {
+    "claude": {
+      "program": "@AGENT@"
+    }
+  },
+  "keybindings": {
+    "archive": "",
+    "help": "f12",
+    "quick_prompt": "ctrl+n",
+    "rename": "f2, r",
+    "reorder_up": "alt+k",
+    "screenshot": "z"
+  },
+  "profiles": [
+    {
+      "default": true,
+      "harness": "claude",
+      "name": "work"
+    },
+    {
+      "disabled": true,
+      "env": {
+        "FIXTURE": "1"
+      },
+      "harness": "claude",
+      "name": "spare"
+    }
+  ],
+  "projects": {
+    "@ROOT@/repos/beta": {
+      "default_profiles": {
+        "claude": "spare"
+      }
+    }
+  },
+  "theme": "default",
+  "worktree_base_branch": "main"
+}

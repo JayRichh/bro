@@ -3003,6 +3003,55 @@ mod tests {
         assert!(!kb.contains_key("quit"));
     }
 
+    /// On the settings a 0.48 install left (`crates/nebula/tests/fixtures/
+    /// upgrade`): the window's first rebind (Hotkeys, as `desktop_key_set`
+    /// saves it) adds its `desktop.` entry and keeps every key the terminal
+    /// app had, the window's 0.48 preferences and the accounts; the
+    /// terminal app's next Hotkeys save keeps the window's.
+    #[test]
+    fn a_048_config_keeps_both_apps_keys_through_each_apps_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let local = dir.path().join("config.local.json");
+        std::fs::copy(
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../nebula/tests/fixtures/upgrade/v0.48/data/config.json"
+            ),
+            &path,
+        )
+        .unwrap();
+        let before = crate::Config::load_at(&path, &local);
+        assert!(desktop_overrides(&before.keybindings).is_empty());
+        let palette = ["ctrl+j".to_string()];
+        crate::Config::update_in(&path, &local, |c| {
+            set_desktop_override(&mut c.keybindings, "palette", Some(&palette)).unwrap()
+        })
+        .unwrap();
+        let after = crate::Config::load_at(&path, &local);
+        let mut expect = before.keybindings.clone();
+        expect.insert("desktop.palette".into(), "ctrl+j".into());
+        assert_eq!(after.keybindings, expect);
+        assert_eq!(after.profiles.len(), 2);
+        let prefs = crate::desktop::DesktopPrefs::load_at(&path, &local);
+        assert_eq!(
+            (prefs.theme.as_str(), prefs.home.as_str()),
+            ("dark", "board")
+        );
+        assert_eq!(prefs.collapsed, vec!["alpha".to_string()]);
+
+        let mut tui: BTreeMap<String, String> = before.keybindings.clone();
+        tui.insert("help".into(), "f11".into());
+        crate::Config::update_in(&path, &local, |c| {
+            merge_tui_overrides(&mut c.keybindings, tui)
+        })
+        .unwrap();
+        let kb = crate::Config::load_at(&path, &local).keybindings;
+        assert_eq!(kb["desktop.palette"], "ctrl+j");
+        assert_eq!(kb["help"], "f11");
+        assert_eq!(kb["archive"], "");
+    }
+
     #[test]
     fn the_generated_file_is_plain_ascii() {
         assert!(render_ts().is_ascii());

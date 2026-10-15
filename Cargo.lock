@@ -1902,6 +1902,7 @@ dependencies = [
  "nebula-daemon",
  "nebula-tui",
  "portable-pty",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",

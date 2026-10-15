@@ -33,6 +33,10 @@ pub const TESTS: &[(&str, Test)] = &[
         "a_20_kb_paste_reaches_the_agent_as_one_paste",
         a_20_kb_paste_reaches_the_agent_as_one_paste,
     ),
+    (
+        "a_048_data_dir_upgrades_in_place",
+        super::upgrade::a_048_data_dir_upgrades_in_place,
+    ),
 ];
 
 /// The feature the fake agent builds: a question, a file, a commit.

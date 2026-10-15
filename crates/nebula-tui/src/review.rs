@@ -103,6 +103,17 @@ pub fn store_marks(worktree: &Path, head: &str, files: &HashMap<String, u64>) {
     store_scoped(worktree, Scope::Head(head), files)
 }
 
+/// Whether marks against the base `sha` were ever stored for `worktree`
+/// (an empty set included): a reader who cleared them has a record.
+pub fn base_recorded(worktree: &Path, sha: &str) -> bool {
+    let store = read_store(&store_path());
+    store
+        .worktrees
+        .get(worktree.to_string_lossy().as_ref())
+        .and_then(|marks| marks.base.as_ref())
+        .is_some_and(|base| base.sha == sha)
+}
+
 /// [`store_marks`] for either scope; the other scope's marks are kept.
 pub fn store_scoped(worktree: &Path, scope: Scope, files: &HashMap<String, u64>) {
     let path = store_path();
@@ -115,14 +126,18 @@ pub fn store_scoped(worktree: &Path, scope: Scope, files: &HashMap<String, u64>)
             entry.head = head.to_string();
             entry.files = files.clone();
         }
+        // Cleared while HEAD marks remain, the base keeps an empty record,
+        // so [`base_recorded`] holds and the read against the base doesn't
+        // carry the HEAD marks over again (`git_diff::read_listing_with`).
         Scope::Base(sha) => {
-            entry.base = (!files.is_empty()).then(|| BaseMarks {
+            entry.base = (!files.is_empty() || !entry.files.is_empty()).then(|| BaseMarks {
                 sha: sha.to_string(),
                 files: files.clone(),
             });
         }
     }
-    if entry.files.is_empty() && entry.base.is_none() {
+    let base_empty = entry.base.as_ref().is_none_or(|b| b.files.is_empty());
+    if entry.files.is_empty() && base_empty {
         store.worktrees.remove(&key);
     }
     if let Err(err) = crate::pr_cache::write_json_atomic(&path, &store) {
@@ -245,6 +260,36 @@ mod tests {
             assert_eq!(load_scoped(&wt, Scope::Base("mb")), base);
             store_scoped(&wt, Scope::Base("mb"), &HashMap::new());
             assert!(read_store(&store_path()).worktrees.is_empty());
+        });
+    }
+
+    /// A 0.48 `reviewed.json` (`crates/nebula/tests/fixtures/upgrade`):
+    /// its HEAD marks read back for that worktree and HEAD, and a base
+    /// mark stored beside them keeps them.
+    #[test]
+    fn a_048_store_still_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let wt = dir.path().join("alpha");
+        std::fs::create_dir(&wt).unwrap();
+        let key = serde_json::to_string(&wt.to_string_lossy()).unwrap();
+        let text = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../nebula/tests/fixtures/upgrade/v0.48/data/reviewed.json"
+        ))
+        .unwrap()
+        .replace(r#""@ROOTW@\\repos\\alpha""#, &key);
+        let path = dir.path().join("reviewed.json");
+        std::fs::write(&path, text).unwrap();
+        with_store_path(path, || {
+            let head = "3c63799e00e81d7af0e7f74716f3b0c9d4571e15";
+            let theirs = HashMap::from([("README.md".to_string(), 0x1234_5678_u64)]);
+            assert_eq!(load_marks(&wt, head), theirs);
+            store_scoped(
+                &wt,
+                Scope::Base("mb"),
+                &HashMap::from([("b".to_string(), 1)]),
+            );
+            assert_eq!(load_marks(&wt, head), theirs);
         });
     }
 

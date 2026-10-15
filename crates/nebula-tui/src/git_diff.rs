@@ -577,7 +577,19 @@ pub fn read_listing_with(
         Some(sha) => crate::review::Scope::Base(sha),
         None => crate::review::Scope::Head(&head_key),
     };
-    let stored = crate::review::load_scoped(root, scope);
+    let mut stored = crate::review::load_scoped(root, scope);
+    // A read against a base with no marks recorded takes the ones made
+    // against HEAD: all a 0.48 install has, or ones made with the toggle
+    // on HEAD. The fingerprint check below keeps only a file whose diff
+    // against the base is the very text approved (work the branch's
+    // commits never touched), and those become the base's. A base whose
+    // marks were cleared has a record, and gets none back.
+    let carried = since
+        .as_deref()
+        .is_some_and(|sha| !crate::review::base_recorded(root, sha));
+    if carried {
+        stored = crate::review::load_scoped(root, crate::review::Scope::Head(&head_key));
+    }
     let reviewed: std::collections::HashMap<String, u64> = files
         .iter()
         .filter_map(|file| {
@@ -586,7 +598,12 @@ pub fn read_listing_with(
             (crate::review::fingerprint(&diff) == mark).then(|| (file.path.clone(), mark))
         })
         .collect();
-    if reviewed.len() != stored.len() {
+    let changed = if carried {
+        !reviewed.is_empty()
+    } else {
+        reviewed.len() != stored.len()
+    };
+    if changed {
         crate::review::store_scoped(root, scope, &reviewed);
     }
     Ok(crate::view_jobs::DiffListing {
@@ -1662,6 +1679,77 @@ mod tests {
             // Against HEAD there is nothing left, marked or not.
             let head = read_listing(&repo, Some(nebula_core::review_base::Against::Head)).unwrap();
             assert!(head.files.is_empty() && head.reviewed.is_empty());
+        });
+    }
+
+    /// Marks made against HEAD (a 0.48 install's, the only kind it had)
+    /// show in the base read a branch now opens on, for the files whose
+    /// diff against the base is the text approved; a committed file's
+    /// is not, and stays unmarked. Carried over, they are the base's and
+    /// survive the commit.
+    #[test]
+    fn marks_made_against_head_carry_over_to_the_base_read() {
+        use nebula_core::review_base::Against;
+        let _env = crate::test_env::spawning();
+        let dir = tempfile::tempdir().unwrap();
+        let (repo, _) = branch_with_a_commit(&dir);
+        crate::review::with_store_path(dir.path().join("reviewed.json"), || {
+            let head_read = read_listing(&repo, Some(Against::Head)).unwrap();
+            let head = head_read.head.clone().unwrap();
+            let tracked = head_read
+                .files
+                .iter()
+                .find(|f| f.path == "tracked.txt")
+                .unwrap();
+            let approved = crate::review::fingerprint(&diff_since(&repo, tracked, true, None));
+            let marks = std::collections::HashMap::from([
+                ("tracked.txt".to_string(), approved),
+                ("b.txt".to_string(), 7),
+            ]);
+            crate::review::store_marks(&repo, &head, &marks);
+
+            let listing = read_listing(&repo, None).unwrap();
+            assert_eq!(listing.against, Against::Base);
+            let marked: Vec<&String> = listing.reviewed.keys().collect();
+            assert_eq!(marked, vec!["tracked.txt"]);
+            git(&repo, &["commit", "-q", "-am", "commit the edit"]);
+            assert!(read_listing(&repo, None)
+                .unwrap()
+                .reviewed
+                .contains_key("tracked.txt"));
+        });
+    }
+
+    /// A carried-over mark the reader takes off in the base read stays
+    /// off: the HEAD mark it came from is not carried over again.
+    #[test]
+    fn a_carried_mark_taken_off_stays_off() {
+        use nebula_core::review_base::Against;
+        let _env = crate::test_env::spawning();
+        let dir = tempfile::tempdir().unwrap();
+        let (repo, _) = branch_with_a_commit(&dir);
+        crate::review::with_store_path(dir.path().join("reviewed.json"), || {
+            let mut view = DiffView::new(repo.clone(), "feat".into(), Vec::new(), true);
+            fill_view(&mut view, read_listing(&repo, Some(Against::Head)).unwrap());
+            assert!(view.select_path("tracked.txt"));
+            load_selected_diff(&mut view);
+            assert!(view.toggle_reviewed().is_some());
+            view.store_marks();
+
+            let mut view = DiffView::new(repo.clone(), "feat".into(), Vec::new(), true);
+            fill_view(&mut view, read_listing(&repo, None).unwrap());
+            assert!(view.reviewed.contains_key("tracked.txt"), "carried over");
+            assert!(view.select_path("tracked.txt"));
+            load_selected_diff(&mut view);
+            assert!(view.toggle_reviewed().is_some());
+            view.store_marks();
+            assert!(!view.reviewed.contains_key("tracked.txt"));
+
+            let again = read_listing(&repo, None).unwrap();
+            assert!(again.reviewed.is_empty(), "{:?}", again.reviewed);
+            // The HEAD read keeps its own.
+            let head = read_listing(&repo, Some(Against::Head)).unwrap();
+            assert!(head.reviewed.contains_key("tracked.txt"));
         });
     }
 

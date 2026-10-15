@@ -230,9 +230,9 @@ fn parse(version: &str) -> Option<(u32, u32)> {
     Some((a.parse().ok()?, b.parse().ok()?))
 }
 
-/// Whether the WHAT'S NEW page shows: this is an upgrade, the release
-/// `current` is newer than the one last shown (`seen`), and the page has
-/// something for it. `fresh`: no settings file was there before this run,
+/// Whether the WHAT'S NEW page shows: this is an upgrade, and the page
+/// has a part for a release after the one last shown (`seen`), up to
+/// `current`. `fresh`: no settings file was there before this run,
 /// so this is a first install, not an upgrade: nothing shows (the caller
 /// records `current` as seen). An unreadable `seen` (a hand edit) counts
 /// as older; an empty one, on an existing install, as before 0.49.
@@ -243,9 +243,12 @@ pub fn whats_new_due(seen: &str, current: &str, fresh: bool) -> bool {
     let Some(now) = parse(current) else {
         return false;
     };
-    let newer = parse(seen).is_none_or(|was| was < now);
-    let covered = WHATS_NEW.iter().any(|r| parse(r.version) <= Some(now));
-    newer && covered
+    // A part newer than the one last shown, and not after this release:
+    // a release with no part of its own (0.53 over 0.52) shows nothing.
+    let was = parse(seen);
+    WHATS_NEW
+        .iter()
+        .any(|r| parse(r.version).is_some_and(|v| v <= now && was.is_none_or(|was| was < v)))
 }
 
 /// Whether none of `marks` exists: a first run, not an upgrade. See
@@ -464,6 +467,34 @@ mod tests {
             whats_new_due("junk", "0.52", false),
             "a bad value counts as older"
         );
+        assert!(
+            !whats_new_due("0.52", "0.53", false),
+            "a release with no part of its own shows nothing new"
+        );
+        assert!(
+            whats_new_due("0.50", "0.53", false),
+            "parts newer than the one shown still show"
+        );
+    }
+
+    /// The settings a 0.48 install left (`crates/nebula/tests/fixtures/
+    /// upgrade`): no seen-state, so the page is due once and every tip may
+    /// show; seen, it is not due again.
+    #[test]
+    fn a_048_config_sees_whats_new_once_and_every_tip() {
+        let fixture = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../nebula/tests/fixtures/upgrade/v0.48/data/config.json"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = Config::load_at(std::path::Path::new(fixture), &dir.path().join("none.json"));
+        assert!(c.skipped.is_empty(), "{:?}", c.skipped);
+        assert!(whats_new_due(&c.whats_new_seen, "0.53", false));
+        for tip in TIPS {
+            assert!(tip_due(&c, tip.id, false), "{}", tip.id);
+        }
+        c.whats_new_seen = "0.53".into();
+        assert!(!whats_new_due(&c.whats_new_seen, "0.53", false));
     }
 
     #[test]
