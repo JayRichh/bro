@@ -750,6 +750,9 @@ pub fn session_words(
 pub struct Place {
     pub path: PathBuf,
     pub base_setting: String,
+    /// The base Kete recorded when it cut the checkout, read before the
+    /// setting (`review_base::resolve_with`); None derives it.
+    pub recorded: Option<review_base::RecordedBase>,
 }
 
 impl Place {
@@ -757,7 +760,14 @@ impl Place {
         Self {
             path: path.into(),
             base_setting: base_setting.into(),
+            recorded: None,
         }
+    }
+
+    /// With the base Kete recorded for the checkout when it cut it.
+    pub fn with_recorded(mut self, recorded: Option<review_base::RecordedBase>) -> Self {
+        self.recorded = recorded;
+        self
     }
 
     /// The checked-out branch; None on a detached HEAD.
@@ -772,18 +782,22 @@ impl Place {
     /// The review base branch (`main`, `develop`), as both apps' diffs read it.
     pub async fn base_branch(&self) -> Option<String> {
         let (path, setting) = (self.path.clone(), self.base_setting.clone());
-        tokio::task::spawn_blocking(move || review_base::resolve(&path, &setting))
-            .await
-            .ok()
-            .flatten()
-            .map(|b| b.branch)
+        let recorded = self.recorded.clone();
+        tokio::task::spawn_blocking(move || {
+            review_base::resolve_with(&path, &setting, recorded.as_ref())
+        })
+        .await
+        .ok()
+        .flatten()
+        .map(|b| b.branch)
     }
 
     /// The commits since the review base, newest first.
     pub async fn commits(&self) -> Vec<CommitLine> {
         let (path, setting) = (self.path.clone(), self.base_setting.clone());
+        let recorded = self.recorded.clone();
         tokio::task::spawn_blocking(move || {
-            review_base::resolve(&path, &setting)
+            review_base::resolve_with(&path, &setting, recorded.as_ref())
                 .map(|b| review_base::commits_since(&path, &b.sha, review_base::MAX_COMMITS))
                 .unwrap_or_default()
         })

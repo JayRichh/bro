@@ -8,8 +8,10 @@
 //! only when it has none in its worktree yet, so a respawn, a resume, a
 //! restart or a prewarm adoption keeps the original; the last one at every
 //! turn end (finished, needs feedback). The refs that keep the trees from
-//! `git gc` go with the session's row, its worktree's or its project's, and
-//! any a crash left behind are pruned at startup.
+//! `git gc` go with the session's row, its worktree's or its project's.
+//! Nothing sweeps refs by absence: another daemon (a test's, WSL's beside
+//! Windows') may keep its own sessions' refs in the same repo, under ids
+//! this one has never seen. A row lost to a crash leaves its refs behind.
 
 use super::*;
 use nebula_core::session_snapshot::{self as snap, SessionChanges, Which};
@@ -21,8 +23,6 @@ enum Job {
     Take { agent: AgentId, boundary: bool },
     /// Delete these sessions' refs in the repo at `repo`.
     DropRefs { repo: PathBuf, agents: Vec<String> },
-    /// Delete every session ref with no snapshot row, in every project.
-    Prune,
     /// Answer once every job sent before it is done.
     #[cfg(test)]
     Flush(mpsc::Sender<()>),
@@ -97,11 +97,6 @@ impl Daemon {
         (!agents.is_empty()).then_some((repo, agents))
     }
 
-    /// Delete session refs a crash or an older build left with no row.
-    pub fn prune_session_refs(&self) {
-        self.snapshot_job(Job::Prune);
-    }
-
     /// `ClientRequest::SessionChanges`: the session's snapshots, and how
     /// many sessions in its worktree have some.
     pub fn session_changes(&self, agent: &AgentId) -> Result<SessionChanges> {
@@ -151,11 +146,6 @@ fn run_job(store: &Store, job: Job) {
                 tracing::debug!(repo = %repo.display(), "dropping session refs failed");
             }
         }
-        Job::Prune => {
-            if let Err(error) = prune(store) {
-                tracing::debug!(%error, "pruning session refs failed");
-            }
-        }
         #[cfg(test)]
         Job::Flush(done) => {
             let _ = done.send(());
@@ -193,24 +183,6 @@ fn take(store: &Store, id: &AgentId, boundary: bool) -> Result<()> {
         store.set_snapshot_start(id, &worktree.id, &point)?;
     } else {
         store.set_snapshot_last(id, &point)?;
-    }
-    Ok(())
-}
-
-fn prune(store: &Store) -> Result<()> {
-    let kept: std::collections::HashSet<String> = store.snapshot_agents()?.into_iter().collect();
-    let (projects, _, _, _) = store.load_tree()?;
-    for project in projects {
-        if !project.repo_path.is_dir() {
-            continue;
-        }
-        let stale: Vec<String> = snap::kept_agents(&project.repo_path)
-            .into_iter()
-            .filter(|id| !kept.contains(id))
-            .collect();
-        if !stale.is_empty() {
-            snap::drop_refs(&project.repo_path, &stale);
-        }
     }
     Ok(())
 }

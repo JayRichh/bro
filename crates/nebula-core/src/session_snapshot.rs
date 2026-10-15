@@ -241,7 +241,12 @@ fn tree_of(root: &Path, has_head: bool, limits: &Limits) -> Option<String> {
             root.join(p)
         }
     });
-    let copied = index.is_some_and(|index| std::fs::copy(index, &temp.0).is_ok());
+    // Read and written rather than `fs::copy`: a plain read shares the file
+    // for delete, so a session's `git add` renaming its lock over the index
+    // meanwhile is never refused.
+    let copied = index
+        .and_then(|index| std::fs::read(index).ok())
+        .is_some_and(|bytes| std::fs::write(&temp.0, bytes).is_ok());
     if !copied && has_head {
         let mut cmd = command(root, &["read-tree", "HEAD"]);
         cmd.env("GIT_INDEX_FILE", &temp.0);

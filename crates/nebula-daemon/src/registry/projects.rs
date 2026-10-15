@@ -543,6 +543,7 @@ impl Daemon {
         self.kill_sessions_in(std::slice::from_ref(id), &agents, &terminals);
 
         git::remove_worktree(&project.repo_path, &worktree.path, force).await?;
+        let refs = self.snapshot_refs_under(&worktree.project_id, Some(id));
         let delete_id = id.clone();
         self.store_blocking(move |store| store.delete_worktree(&delete_id))
             .await?;
@@ -550,7 +551,9 @@ impl Daemon {
             id: EntityId::Worktree(id.clone()),
         });
         // Its sessions' snapshot refs went with the rows: drop them in git.
-        self.prune_session_refs();
+        if let Some((repo, agents)) = refs {
+            self.drop_snapshot_refs(repo, agents);
+        }
         // The delete has happened as far as git and every client are
         // concerned; the WORKTREE HOOK only releases what the checkout
         // owned elsewhere, so it runs after, and its failure is a warning
@@ -630,6 +633,7 @@ impl Daemon {
 
         self.kill_sessions_in(std::slice::from_ref(id), &agents, &terminals);
         git::remove_worktree(&project.repo_path, &worktree.path, false).await?;
+        let refs = self.snapshot_refs_under(&worktree.project_id, Some(id));
         let delete_id = id.clone();
         self.store_blocking(move |store| store.delete_worktree(&delete_id))
             .await?;
@@ -637,7 +641,9 @@ impl Daemon {
             id: EntityId::Worktree(id.clone()),
         });
         // Its sessions' snapshot refs went with the rows: drop them in git.
-        self.prune_session_refs();
+        if let Some((repo, agents)) = refs {
+            self.drop_snapshot_refs(repo, agents);
+        }
         tracing::info!(branch, pr_number, pr_url, "cleaned up merged worktree");
         self.run_worktree_hook(WorktreeHook::Delete, &project.repo_path, &worktree)
             .await;

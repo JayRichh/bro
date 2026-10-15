@@ -1311,6 +1311,7 @@ impl Store {
     }
 
     /// Every session that has snapshots, by id.
+    #[cfg(test)]
     pub fn snapshot_agents(&self) -> Result<Vec<String>> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare("SELECT agent_id FROM session_snapshots")?;

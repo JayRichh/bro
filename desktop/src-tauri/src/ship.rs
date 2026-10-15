@@ -31,10 +31,10 @@ pub struct ShipView {
 fn place(client: &Client, worktree: &str) -> ShipRes<Place> {
     let path = crate::ado::checkout_path(client, worktree)
         .map_err(|e| ShipError::new(ShipErrorKind::Other, None, e))?;
-    Ok(Place::new(
-        path,
-        nebula_config::Config::load().worktree_base_branch,
-    ))
+    Ok(
+        Place::new(path, nebula_config::Config::load().worktree_base_branch)
+            .with_recorded(client.recorded_base(worktree)),
+    )
 }
 
 /// Where `worktree` stands for shipping, with a suggested title and body

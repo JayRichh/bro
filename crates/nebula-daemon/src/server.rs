@@ -1673,6 +1673,30 @@ mod tests {
         );
     }
 
+    /// The recorded bases ride beside a Snapshot to a 59 subscriber and
+    /// never to a 58 one, whose decoder would drop the connection on them.
+    #[tokio::test]
+    async fn worktree_bases_follow_a_snapshot_only_to_peers_that_decode_them() {
+        for (peer, expect) in [(58u32, false), (59, true)] {
+            let daemon = test_daemon();
+            let (tx, mut out) = mpsc::channel(16);
+            assert!(send_snapshot(&daemon, &tx, peer).await);
+            drop(tx);
+            let mut got = Vec::new();
+            while let Some(ev) = out.recv().await {
+                got.push(ev);
+            }
+            assert!(matches!(got.first(), Some(ServerEvent::Snapshot { .. })));
+            assert_eq!(
+                got.iter()
+                    .any(|ev| matches!(ev, ServerEvent::WorktreeBases { .. })),
+                expect,
+                "peer {peer}: {got:?}"
+            );
+            assert!(got.iter().all(|ev| ev.decodable_by(peer)));
+        }
+    }
+
     /// Usage events reach a 55 subscriber and never a 54 one, whose
     /// decoder would fail on the unknown variant and drop the connection.
     #[tokio::test]

@@ -5333,4 +5333,33 @@ pub(crate) mod tests {
             .unwrap();
         assert_eq!(daemon.store.worktree_bases().unwrap().len(), 1);
     }
+
+    /// A worktree's delete takes its sessions' snapshot refs with it.
+    #[tokio::test]
+    async fn deleting_a_worktree_drops_its_sessions_snapshot_refs() {
+        use nebula_core::session_snapshot::kept_agents;
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = init_repo(tmp.path());
+        let daemon = test_daemon();
+        let project = project_at(&daemon, &repo);
+        let EntityId::Worktree(id) = daemon
+            .create_worktree(&project.id, "feat", Some("main"))
+            .await
+            .unwrap()
+        else {
+            panic!("a worktree id");
+        };
+        seed_agent(&daemon, "a1", id.as_str(), None);
+        seed_agent(&daemon, "keep", "rt", None);
+        daemon.snapshot_session_start(&AgentId("a1".into()));
+        daemon.snapshot_session_start(&AgentId("keep".into()));
+        daemon.settle_snapshots();
+        assert_eq!(
+            kept_agents(&repo),
+            vec!["a1".to_string(), "keep".to_string()]
+        );
+        daemon.delete_worktree(&id, true).await.unwrap();
+        daemon.settle_snapshots();
+        assert_eq!(kept_agents(&repo), vec!["keep".to_string()]);
+    }
 }
