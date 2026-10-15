@@ -5,8 +5,11 @@
   import Terminal from './Terminal.svelte';
   import OrchBadge from './orchestrator/OrchBadge.svelte';
   import ContextBar from './accounts/ContextBar.svelte';
-  import { agentMenu, terminalMenu } from './actions';
+  import { agentMenu, followUp, newTerminal, openEditor, restartAgent, terminalMenu, unarchiveAgent } from './actions';
   import { openMenu } from './ui/ui.svelte';
+  import { toggleMaximize } from './commands';
+  import { withKey } from './shortcuts';
+  import IconButton from './ui/IconButton.svelte';
 
   function actions(at: HTMLElement | { x: number; y: number }) {
     const items = agent ? agentMenu(agent) : terminal ? terminalMenu(terminal) : [];
@@ -22,16 +25,17 @@
   const where = $derived(wt ? placeOf(app.model, wt) : null);
   const tone = $derived(agent ? toneOf(agent) : terminal ? terminalTone(terminal) : 'idle');
   const prompt = $derived(agent ? lastPrompt(agent) : null);
-
-  const tool =
-    'inline-flex h-7 items-center gap-1.5 border border-rule bg-transparent px-2 text-[13px] text-ink hover:border-rule-strong';
+  const target = $derived(agent ? `agent:${agent.id}` : terminal ? `terminal:${terminal.id}` : undefined);
 </script>
 
 {#if s && (agent || terminal)}
   <div class="flex h-full min-h-0 flex-col">
+    <!-- The header is the session's row: with one of its controls focused,
+         the row keys (F, Shift+R, T, Shift+O, A, Del) act on this session. -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-      class="flex min-w-0 flex-none flex-col gap-1 border-b border-rule px-4 py-2"
+      class="@container flex min-w-0 flex-none flex-col gap-1 border-b border-rule px-4 py-2"
+      data-target={target}
       oncontextmenu={(e) => (e.preventDefault(), actions({ x: e.clientX, y: e.clientY }))}
     >
       <div class="flex min-w-0 items-center gap-3">
@@ -41,25 +45,45 @@
         {#if agent?.role === 'orchestrator'}<OrchBadge />{/if}
         <Status {tone} />
         <span class="flex-1"></span>
-        <button class={tool} onclick={() => openDiff(wt)} title="Diff this worktree (Ctrl+Shift+D)">Diff</button>
-        <button
-          class={tool}
-          aria-haspopup="menu"
-          title="Session actions: rename, restart, move, archive, delete (or right-click the header)"
-          onclick={(e) => actions(e.currentTarget as HTMLElement)}>Actions</button
-        >
-        <button
-          class="grid size-7 place-items-center border border-rule bg-transparent text-ink hover:border-rule-strong"
-          onclick={() => goHome(projectOf(wt))}
-          title="Close the split (Esc)"
-          aria-label="Close the split"
-        >
-          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.4" /></svg>
-        </button>
+        <div class="flex flex-none items-center gap-1" role="toolbar" aria-label="Session">
+          {#if agent?.archived}
+            <IconButton icon="unarchive" label="Unarchive" word="Unarchive" title={withKey('Unarchive', 'unarchive')} onclick={() => unarchiveAgent(agent.id)} />
+          {:else if agent}
+            <IconButton
+              icon="reply"
+              label="Follow-up prompt"
+              word="Follow-up"
+              title={withKey(agent.alive ? 'Follow-up prompt' : 'Follow-up prompt (not running: restart it first)', 'follow_up')}
+              onclick={() => followUp(agent.id)}
+            />
+            <IconButton icon="restart" label="Restart the agent" title={withKey('Restart the agent', 'restart')} onclick={() => restartAgent(agent.id)} />
+          {/if}
+          <!-- Secondary verbs give way in a narrow pane; Actions keeps them. -->
+          <span class="hidden items-center gap-1 @min-[560px]:flex">
+            <IconButton icon="terminal" label="New terminal in this worktree" title={withKey('New terminal in this worktree', 'new_terminal')} onclick={() => newTerminal(wt ?? undefined)} />
+            <IconButton icon="editor" label="Open the worktree in the editor" title={withKey('Open the worktree in the editor', 'open_editor')} onclick={() => openEditor(wt ?? undefined)} />
+          </span>
+          <IconButton icon="diff" label="Diff this worktree" word="Diff" title={withKey('Diff this worktree', 'open_diff')} onclick={() => openDiff(wt)} />
+          <IconButton
+            icon={app.paneMax ? 'restore' : 'maximize'}
+            label={app.paneMax ? 'Bring the pane back down' : 'Full pane'}
+            title={withKey(app.paneMax ? 'Bring the pane back down' : 'Full pane: give the session the window', 'maximize')}
+            pressed={app.paneMax}
+            onclick={toggleMaximize}
+          />
+          <IconButton
+            icon="dots"
+            label="Session actions"
+            menu
+            title={withKey('Session actions: rename, move, duplicate, archive, delete (or right-click the header)', 'row_menu')}
+            onclick={(e) => actions(e.currentTarget as HTMLElement)}
+          />
+          <IconButton icon="close" label="Close the split" title="Close the split (Esc)" onclick={() => goHome(projectOf(wt))} />
+        </div>
       </div>
       <div class="flex min-w-0 items-baseline gap-3 text-[13px] text-muted">
         {#if agent}
-          <span class="flex-none">{harnessLabel(agent)}{agent.profile ? ` \u00b7 ${agent.profile}` : ''}</span>
+          <span class="flex-none">{harnessLabel(agent)}{#if agent.profile}{' '}&middot; {agent.profile}{/if}</span>
         {/if}
         {#if where}
           <span class="flex-none font-mono text-[12px]" title={where.path}>{where.project} / {where.branch}</span>
@@ -75,6 +99,13 @@
   </div>
 {:else}
   <div class="grid h-full place-items-center text-[14px] text-muted">
-    <p>That session is gone. Pick another in the overview.</p>
+    <div class="flex flex-col items-center gap-3">
+      <p class="m-0">That session is gone. Pick another in the overview.</p>
+      <button
+        class="h-7 border border-rule bg-transparent px-3 text-[13px] text-ink hover:border-rule-strong"
+        title="Back to the overview (Esc)"
+        onclick={() => goHome(projectOf(wt))}>Back to the overview</button
+      >
+    </div>
   </div>
 {/if}

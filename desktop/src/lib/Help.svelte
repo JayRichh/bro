@@ -42,9 +42,14 @@
   >
     <header class="flex flex-none items-baseline gap-4 border-b border-rule-strong px-5 py-3">
       <h2 id="help-title" class="m-0 text-[17px] font-semibold">Keyboard shortcuts</h2>
-      <span class="font-mono text-[12px] text-muted">right-click a row for its actions</span>
+      <span class="min-w-0 truncate font-mono text-[12px] text-muted">every key has a button too: the headers, a card's hover strip, or right-click</span>
       <span class="flex-1"></span>
-      <kbd class="border border-rule px-1.5 font-mono text-[11px] leading-5 text-muted">Esc</kbd>
+      <button
+        class="flex-none border border-rule bg-transparent px-1.5 font-mono text-[11px] leading-5 text-muted hover:border-rule-strong hover:text-ink"
+        title="Close (Esc)"
+        aria-label="Close the keyboard shortcuts"
+        onclick={() => (ui.help = false)}>Esc</button
+      >
     </header>
     <div class="min-h-0 gap-x-8 overflow-y-auto px-5 pb-5 md:columns-2">
       {#each groups as g (g.group)}

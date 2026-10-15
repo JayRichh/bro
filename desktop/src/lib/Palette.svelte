@@ -88,7 +88,13 @@
         aria-expanded="true"
         aria-controls="palette-list"
       />
-      <kbd class="border border-rule px-1.5 font-mono text-[11px] leading-5 text-muted">Esc</kbd>
+      <button
+        type="button"
+        class="flex-none border border-rule bg-transparent px-1.5 font-mono text-[11px] leading-5 text-muted hover:border-rule-strong hover:text-ink"
+        title="Close (Esc)"
+        aria-label="Close the palette"
+        onclick={close}>Esc</button
+      >
     </label>
     <ul bind:this={list} id="palette-list" class="m-0 min-h-0 flex-1 list-none overflow-y-auto p-0" role="listbox">
       {#each rows as r, i (r.item.target.kind + ':' + ('id' in r.item.target ? r.item.target.id : r.item.target.url))}

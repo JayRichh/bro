@@ -135,7 +135,7 @@
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true;
       // App chords reach the window, not the CLI.
-      if (e.ctrlKey && e.shiftKey && /^[BDNLPT]$/i.test(e.key)) return false;
+      if (e.ctrlKey && e.shiftKey && /^[BDLMNOPT]$/i.test(e.key)) return false;
       if (e.ctrlKey && !e.shiftKey && e.key === 'c' && term!.hasSelection()) {
         navigator.clipboard.writeText(term!.getSelection()).catch(() => {});
         term!.clearSelection();

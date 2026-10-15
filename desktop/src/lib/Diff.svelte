@@ -4,6 +4,9 @@
   import { isDiffMode, type DiffMode } from './diff-api';
   import { placeOf } from './status';
   import DiffPane from './DiffPane.svelte';
+  import { toggleMaximize } from './commands';
+  import { withKey } from './shortcuts';
+  import Icon from './ui/Icon.svelte';
 
   let pane: DiffPane | undefined = $state();
 
@@ -64,6 +67,15 @@
     </select>
   {/snippet}
   {#snippet trail()}
+    <button
+      class="grid size-7 flex-none place-items-center border-0 bg-transparent hover:bg-surface hover:text-ink {app.paneMax ? 'text-ink' : 'text-muted'}"
+      onclick={toggleMaximize}
+      title={withKey(app.paneMax ? 'Bring the pane back down' : 'Full pane: give the diff the window', 'maximize')}
+      aria-label={app.paneMax ? 'Bring the pane back down' : 'Full pane'}
+      aria-pressed={app.paneMax}
+    >
+      <Icon name={app.paneMax ? 'restore' : 'maximize'} size={13} />
+    </button>
     <button
       class="ml-1 grid size-7 flex-none place-items-center border border-rule bg-transparent text-ink hover:border-rule-strong"
       onclick={closeDiff}

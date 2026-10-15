@@ -49,6 +49,15 @@
   function onKey(e: KeyboardEvent) {
     e.stopPropagation();
     if (e.key === 'Escape') return (e.preventDefault(), cancel());
+    // Tab stays in the dialog: it is modal, and the page behind it would
+    // take keys meant for these fields.
+    if (e.key === 'Tab' && box) {
+      const all = [...box.querySelectorAll<HTMLElement>('input, textarea, button:not([disabled])')];
+      const i = all.indexOf(document.activeElement as HTMLElement);
+      if (e.shiftKey && i <= 0) (e.preventDefault(), all[all.length - 1]?.focus());
+      else if (!e.shiftKey && i === all.length - 1) (e.preventDefault(), all[0]?.focus());
+      return;
+    }
     const multi = (e.target as HTMLElement).tagName === 'TEXTAREA';
     if (e.key === 'Enter' && (!multi || e.ctrlKey)) return (e.preventDefault(), confirm());
     if (d?.kind === 'pick' && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
