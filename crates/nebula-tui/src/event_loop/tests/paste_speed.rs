@@ -135,7 +135,9 @@ fn a_110_kb_paste_is_one_input_in_a_few_turns() {
     };
     let mut burst = PasteBurst::default();
     let (handled, turns) = drive(&mut input, &mut burst);
-    assert!(turns <= 4, "read in {turns} turns");
+    // 4 here; a 1024-event batch took 220. Room for a slow machine, where
+    // the batch's time runs out first.
+    assert!(turns <= 32, "read in {turns} turns");
     assert_eq!(handled, vec![Event::Paste(text.clone())]);
 
     let mut out = Vec::new();

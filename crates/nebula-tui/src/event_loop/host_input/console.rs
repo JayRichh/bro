@@ -362,8 +362,11 @@ fn modifiers(state: u32) -> KeyModifiers {
 }
 
 fn key_record(record: &INPUT_RECORD) -> Option<KEY_EVENT_RECORD> {
+    if u32::from(record.EventType) != KEY_EVENT {
+        return None;
+    }
     // SAFETY: the union holds a key record when the type says so.
-    (u32::from(record.EventType) == KEY_EVENT).then(|| unsafe { record.Event.KeyEvent })
+    Some(unsafe { record.Event.KeyEvent })
 }
 
 fn unit(key: &KEY_EVENT_RECORD) -> u16 {
