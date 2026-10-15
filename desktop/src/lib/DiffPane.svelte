@@ -3,17 +3,25 @@
   composer's preview. Props:
   - `worktree`: the worktree id every command reads in.
   - `range`: base and tip (refs or SHAs) for a range diff; absent, the
-    working tree against HEAD, with per-hunk Stage, Unstage and Discard.
+    working tree against its base or HEAD (`against`).
+  - `against`: the working tree against the merge-base with the base
+    branch (`base`: an agent's commits stay in view) or HEAD (`head`, with
+    per-hunk Stage, Unstage and Discard); null, the base when there is
+    one. Bindable: the header's toggle sets it.
+  - `shown`: what the last load read against, and the base there is;
+    bindable, for the palette's entry.
   - `mode`: side, inline or replacement; bindable.
   - `keys`: answer the view's keys (j/k, F7) from anywhere in the window,
     not only when focus is inside the pane.
   - `lead`: a snippet drawn at the left of the toolbar.
   - `trail`: a snippet drawn at the right end of the toolbar (a close button).
+  - `pick`: drawn in place of the diff while there is no worktree (a picker).
 -->
 <script lang="ts">
   import { onDestroy, onMount, tick, type Snippet } from 'svelte';
   import { app, toast } from './store.svelte';
   import { diffApi, type Blob, type DiffFile, type DiffMode, type DiffRange, type DiffSide, type Hunk, type HunkAction } from './diff-api';
+  import { againstLabel, againstTitle, canStage, type Against, type ReviewBase, type ReviewCommit } from './diff-base';
   import { fileIcon, languageOf } from './icons';
   import { blockLine, replacementModel, type ReplacementModel } from './replacement';
   import { defineMonacoTheme, termFamily, token } from './theme';
@@ -23,16 +31,22 @@
     worktree,
     range = null,
     mode = $bindable('side'),
+    against = $bindable(null),
+    shown: shownOut = $bindable(null),
     keys = false,
     lead,
     trail,
+    pick,
   }: {
     worktree: string | null;
     range?: DiffRange | null;
     mode?: DiffMode;
+    against?: Against | null;
+    shown?: { against: Against; base: ReviewBase | null } | null;
     keys?: boolean;
     lead?: Snippet;
     trail?: Snippet;
+    pick?: Snippet;
   } = $props();
 
   /** `absent`: the status says this side has no file, so why. */
@@ -58,6 +72,12 @@
   let problem = $state<Problem | null>(null);
   let fileError = $state<string | null>(null);
   let showFiles = $state(true);
+  /** What the working tree was read against, its base, and the commits
+   *  made since that base (read-only, newest first). */
+  let readAgainst = $state<Against>('head');
+  let base = $state<ReviewBase | null>(null);
+  let commits = $state<ReviewCommit[]>([]);
+  let showCommits = $state(true);
 
   /** Change stops in the shown file, as modified-side lines. */
   let stops = $state<number[]>([]);
@@ -70,7 +90,10 @@
   let confirming = $state<string | null>(null);
   let busy = $state(false);
 
-  const working = $derived(!range);
+  /** Hunks stage and discard: a working tree read against HEAD. */
+  const working = $derived(canStage(!!range, readAgainst));
+  /** The working tree against the merge-base: the old side is that commit. */
+  const sinceBase = $derived(!range && readAgainst === 'base' && !!base);
   const totals = $derived(
     files.reduce((t, f) => ({ add: t.add + (f.added ?? 0), del: t.del + (f.removed ?? 0) }), { add: 0, del: 0 }),
   );
@@ -89,9 +112,12 @@
   async function load(keep: boolean) {
     const wt = worktree;
     const r = range;
+    const asked = against;
     const mine = ++loadSeq;
     if (!wt) {
       files = [];
+      base = null;
+      commits = [];
       await show(null);
       return;
     }
@@ -105,11 +131,18 @@
         pinned = { base: res.base, tip: res.tip };
         offline = res.offline;
         list = res.files;
+        base = null;
+        commits = [];
       } else {
-        list = await diffApi.files(wt);
+        const res = await diffApi.review(wt, asked);
         if (mine !== loadSeq) return;
         pinned = null;
         offline = false;
+        readAgainst = res.against;
+        base = res.base;
+        commits = res.commits;
+        shownOut = { against: res.against, base: res.base };
+        list = res.files;
       }
       files = list;
       const again = keep && current ? list.find((f) => f.path === current!.path) : undefined;
@@ -119,6 +152,7 @@
       error = String(e);
       files = [];
       pinned = null;
+      commits = [];
       await show(null);
     } finally {
       if (mine === loadSeq) loading = false;
@@ -134,10 +168,13 @@
         newLabel: `Tip ${short(pinned.tip)}`,
       };
     }
+    // Against the base the old side is the merge-base commit, the new one
+    // the disk: what was committed since and what is not yet, together.
+    const from = sinceBase && base ? base.sha : 'HEAD';
     return {
-      old: f.status === 'A' || f.status === 'U' ? null : { kind: 'commit', rev: 'HEAD' },
+      old: f.status === 'A' || f.status === 'U' ? null : { kind: 'commit', rev: from },
       new: f.status === 'D' ? null : { kind: 'worktree' },
-      oldLabel: 'HEAD',
+      oldLabel: sinceBase && base ? `${base.branch} ${base.short}` : 'HEAD',
       newLabel: 'Working tree',
     };
   }
@@ -193,7 +230,7 @@
       landOn = null;
       setText(null);
     }
-    if (!pinned) loadHunks(f, mine);
+    if (working) loadHunks(f, mine);
     else hunks = { unstaged: [], staged: [], note: null };
   }
 
@@ -404,6 +441,12 @@
     tick().then(() => list?.querySelector<HTMLButtonElement>(`[data-discard="${CSS.escape(k)}"]`)?.focus());
   }
 
+  /** The header's toggle and the palette's entry: the base, or HEAD. */
+  export function toggleAgainst() {
+    if (!base || range) return;
+    against = readAgainst === 'base' ? 'head' : 'base';
+  }
+
   async function act(h: Hunk, action: HunkAction) {
     if (!worktree || busy) return;
     busy = true;
@@ -475,7 +518,7 @@
 
   let loadedFor = '';
   $effect(() => {
-    const k = `${worktree ?? ''}\u0000${range?.base ?? ''}\u0000${range?.tip ?? ''}`;
+    const k = `${worktree ?? ''}\u0000${range?.base ?? ''}\u0000${range?.tip ?? ''}\u0000${range ? '' : (against ?? '')}`;
     if (ready && k !== loadedFor) {
       loadedFor = k;
       current = null;
@@ -573,6 +616,20 @@
       >
     </button>
     {@render lead?.()}
+    {#if !range && worktree}
+      <!-- Against the base or HEAD: one button, the word says which is read. -->
+      <button
+        class="h-7 max-w-[260px] min-w-[64px] shrink truncate border border-rule bg-transparent px-2 font-mono text-[12px] whitespace-nowrap
+          {base ? 'text-ink enabled:hover:border-rule-strong' : 'cursor-default text-muted'}"
+        disabled={loading}
+        aria-disabled={!base}
+        onclick={toggleAgainst}
+        title="{againstTitle(readAgainst, base)}{base ? ` (also in the command palette)` : ''}"
+        aria-label="{againstLabel(readAgainst, base)}. {base ? 'Switch the comparison' : 'No base branch'}"
+        aria-pressed={readAgainst === 'base'}
+        >{againstLabel(readAgainst, base)}</button
+      >
+    {/if}
     <!-- The range and totals give way first when the pane is narrow. -->
     <span class="flex min-w-0 flex-auto items-center gap-3 overflow-hidden">
       {#if pinned}
@@ -670,7 +727,39 @@
   {/if}
   <div class="grid min-h-0 flex-1 {showFiles ? 'grid-cols-[minmax(200px,248px)_1fr]' : 'grid-cols-[1fr]'}">
     {#if showFiles}
-      <ul bind:this={list} class="m-0 list-none overflow-y-auto border-r border-rule bg-bg p-0" aria-label="Changed files">
+      <div class="flex min-h-0 flex-col border-r border-rule bg-bg">
+      {#if base && !range}
+        <!-- What was committed since the base: read-only, so an agent's
+             commits are in view beside the files they changed. -->
+        <section class="flex max-h-[40%] min-h-0 flex-none flex-col border-b border-rule" aria-label="Commits since {base.branch}">
+          <button
+            class="flex h-7 w-full flex-none items-center gap-1.5 border-0 bg-transparent px-3 text-left text-[12px] text-muted hover:bg-surface hover:text-ink"
+            onclick={() => (showCommits = !showCommits)}
+            aria-expanded={showCommits}
+            title="{showCommits ? 'Fold' : 'Show'} the commits on this branch since it forked from {base.branch} at {base.short}"
+          >
+            <svg width="9" height="9" viewBox="0 0 10 10" aria-hidden="true" class={showCommits ? 'rotate-90' : ''}
+              ><path d="M3 1.5L7 5 3 8.5" fill="none" stroke="currentColor" stroke-width="1.4" /></svg
+            >
+            <span class="truncate"
+              >{commits.length
+                ? `${commits.length}${commits.length >= 200 ? '+' : ''} ${commits.length === 1 ? 'commit' : 'commits'} since ${base.branch}`
+                : `No commits since ${base.branch}`}</span
+            >
+          </button>
+          {#if showCommits && commits.length}
+            <ol class="m-0 min-h-0 list-none overflow-y-auto p-0 pb-1">
+              {#each commits as c (c.sha)}
+                <li class="flex h-6 items-center gap-2 px-3 text-[12px]" title={`${c.sha}\n${c.subject}`}>
+                  <span class="flex-none font-mono text-faint">{c.short}</span>
+                  <span class="min-w-0 truncate text-ink">{c.subject}</span>
+                </li>
+              {/each}
+            </ol>
+          {/if}
+        </section>
+      {/if}
+      <ul bind:this={list} class="m-0 min-h-0 flex-1 list-none overflow-y-auto p-0" aria-label="Changed files">
         {#each files as f (f.path)}
           {@const p = split(f.path)}
           {@const cur = current?.path === f.path}
@@ -697,6 +786,18 @@
                 >{f.status}</span
               >
             </button>
+            {#if cur && sinceBase && f.status !== 'U'}
+              <!-- Staging reads the index against HEAD; against the base the
+                   hunks would not line up, so the controls wait there. -->
+              <div class="flex min-h-7 items-center gap-2 border-b border-rule bg-surface py-1 pr-2 pl-8 text-[12px] text-muted">
+                <span class="min-w-0 flex-1">Stage and discard work against HEAD.</span>
+                <button
+                  class="flex-none border border-rule bg-bg px-1.5 leading-5 text-ink hover:bg-raised"
+                  title="Compare with HEAD to stage, unstage or discard this file's hunks"
+                  onclick={toggleAgainst}>vs HEAD</button
+                >
+              </div>
+            {/if}
             {#if cur && working}
               <div class="border-b border-rule bg-surface pb-1.5 text-[12px]">
                 {#if hunks.note}
@@ -774,10 +875,11 @@
         {/each}
         {#if !files.length && !loading}
           <li class="px-3 py-3 text-[13px] text-muted">
-            {#if error}<span class="text-fail">{error}</span>{:else if range}No changes between these two commits.{:else if worktree}Working tree clean. Nothing to diff against HEAD.{:else}No worktree to diff.{/if}
+            {#if error}<span class="text-fail">{error}</span>{:else if range}No changes between these two commits.{:else if sinceBase && base}No changes since {base.branch}.{:else if worktree}Working tree clean. Nothing to diff against HEAD.{:else}No worktree to diff.{/if}
           </li>
         {/if}
       </ul>
+      </div>
     {/if}
     <div class="relative min-h-0 min-w-0">
       <div class="absolute inset-0 {mode === 'replacement' ? 'hidden' : ''}" bind:this={diffHost}></div>
@@ -800,6 +902,8 @@
           <p class="m-0 flex items-center gap-1.5 font-medium text-ink"><span class="size-1.5 bg-fail" aria-hidden="true"></span>Could not read this file</p>
           <p class="mt-1 max-w-[65ch] text-muted">{fileError}</p>
         </div>
+      {:else if !worktree && pick}
+        <div class="absolute inset-0 overflow-y-auto bg-bg">{@render pick()}</div>
       {:else if !current && !loading}
         <div class="absolute inset-0 bg-bg"></div>
       {/if}

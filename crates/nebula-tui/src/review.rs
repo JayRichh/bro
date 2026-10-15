@@ -14,6 +14,10 @@
 //!   The open path (`open_diff_view`) recomputes the fingerprint and drops
 //!   marks whose diff changed since, so a file an agent kept editing comes
 //!   back unreviewed.
+//! - A diff read against the base branch (`nebula_core::review_base`) keeps
+//!   its marks apart, scoped to the MERGE-BASE instead of HEAD: an agent's
+//!   commit does not move it, so what was approved stays approved for as
+//!   long as its diff text against the base is the same.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -34,6 +38,26 @@ struct WorktreeMarks {
     /// File path (relative to the worktree root) → diff fingerprint.
     #[serde(default)]
     files: HashMap<String, u64>,
+    /// The marks made reading against the base branch, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    base: Option<BaseMarks>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct BaseMarks {
+    /// The merge-base the marks were made against.
+    #[serde(default)]
+    sha: String,
+    #[serde(default)]
+    files: HashMap<String, u64>,
+}
+
+/// What a set of marks is scoped to: HEAD's OID (empty on an unborn HEAD)
+/// for a diff against HEAD, the merge-base for one against the base.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope<'a> {
+    Head(&'a str),
+    Base(&'a str),
 }
 
 /// FNV-1a 64 of the diff text. Deliberately hand-rolled: `DefaultHasher`
@@ -51,33 +75,55 @@ pub fn fingerprint(text: &str) -> u64 {
 /// were made under a different HEAD. Read-only — a stale entry is left in
 /// place until the next `store_marks` overwrites it.
 pub fn load_marks(worktree: &Path, head: &str) -> HashMap<String, u64> {
+    load_scoped(worktree, Scope::Head(head))
+}
+
+/// [`load_marks`] for either scope.
+pub fn load_scoped(worktree: &Path, scope: Scope) -> HashMap<String, u64> {
     let store = read_store(&store_path());
-    match store.worktrees.get(worktree.to_string_lossy().as_ref()) {
-        Some(marks) if marks.head == head => marks.files.clone(),
+    let Some(marks) = store.worktrees.get(worktree.to_string_lossy().as_ref()) else {
+        return HashMap::new();
+    };
+    match scope {
+        Scope::Head(head) if marks.head == head => marks.files.clone(),
+        Scope::Base(sha) => match &marks.base {
+            Some(base) if base.sha == sha => base.files.clone(),
+            _ => HashMap::new(),
+        },
         _ => HashMap::new(),
     }
 }
 
-/// Replace `worktree`'s marks (an empty map removes its entry). Load-modify-
+/// Replace `worktree`'s HEAD marks (empty, with no base marks either, removes its entry). Load-modify-
 /// write so parallel TUIs only clobber each other's marks for the *same*
 /// worktree; entries for worktrees gone from disk are pruned on the way.
 /// Persistence failures are logged, not surfaced — the in-modal state still
 /// works for this run.
 pub fn store_marks(worktree: &Path, head: &str, files: &HashMap<String, u64>) {
+    store_scoped(worktree, Scope::Head(head), files)
+}
+
+/// [`store_marks`] for either scope; the other scope's marks are kept.
+pub fn store_scoped(worktree: &Path, scope: Scope, files: &HashMap<String, u64>) {
     let path = store_path();
     let mut store = read_store(&path);
     store.worktrees.retain(|root, _| Path::new(root).is_dir());
     let key = worktree.to_string_lossy().into_owned();
-    if files.is_empty() {
-        store.worktrees.remove(&key);
-    } else {
-        store.worktrees.insert(
-            key,
-            WorktreeMarks {
-                head: head.to_string(),
+    let entry = store.worktrees.entry(key.clone()).or_default();
+    match scope {
+        Scope::Head(head) => {
+            entry.head = head.to_string();
+            entry.files = files.clone();
+        }
+        Scope::Base(sha) => {
+            entry.base = (!files.is_empty()).then(|| BaseMarks {
+                sha: sha.to_string(),
                 files: files.clone(),
-            },
-        );
+            });
+        }
+    }
+    if entry.files.is_empty() && entry.base.is_none() {
+        store.worktrees.remove(&key);
     }
     if let Err(err) = crate::pr_cache::write_json_atomic(&path, &store) {
         tracing::warn!("failed to save {}: {err}", path.display());
@@ -175,6 +221,30 @@ mod tests {
             store_marks(&wt1, "h", &marks);
             std::fs::create_dir(&wt2).unwrap();
             assert!(load_marks(&wt2, "h").is_empty(), "dead entry pruned");
+        });
+    }
+
+    #[test]
+    fn base_marks_live_beside_head_marks_and_survive_a_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let wt = dir.path().join("wt");
+        std::fs::create_dir(&wt).unwrap();
+        with_store_path(dir.path().join("reviewed.json"), || {
+            let head = HashMap::from([("a.rs".to_string(), 1_u64)]);
+            let base = HashMap::from([("b.rs".to_string(), 2_u64)]);
+            store_scoped(&wt, Scope::Head("h1"), &head);
+            store_scoped(&wt, Scope::Base("mb"), &base);
+            assert_eq!(load_scoped(&wt, Scope::Head("h1")), head);
+            assert_eq!(load_scoped(&wt, Scope::Base("mb")), base);
+            // A commit moves HEAD, not the merge-base.
+            assert!(load_scoped(&wt, Scope::Head("h2")).is_empty());
+            assert_eq!(load_scoped(&wt, Scope::Base("mb")), base);
+            assert!(load_scoped(&wt, Scope::Base("other")).is_empty());
+            // Clearing one scope keeps the other; clearing both drops the entry.
+            store_scoped(&wt, Scope::Head("h2"), &HashMap::new());
+            assert_eq!(load_scoped(&wt, Scope::Base("mb")), base);
+            store_scoped(&wt, Scope::Base("mb"), &HashMap::new());
+            assert!(read_store(&store_path()).worktrees.is_empty());
         });
     }
 

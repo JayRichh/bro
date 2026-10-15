@@ -278,6 +278,78 @@ async fn diff_files(client: State<'_, Arc<Client>>, worktree: String) -> Res<Vec
         .map_err(err)?
 }
 
+/// Where the worktree forked from its base branch, for the header.
+#[derive(Serialize)]
+struct ReviewBaseInfo {
+    sha: String,
+    short: String,
+    branch: String,
+}
+
+#[derive(Serialize)]
+struct ReviewCommit {
+    sha: String,
+    short: String,
+    subject: String,
+}
+
+/// A worktree's diff read against its base or HEAD
+/// (`nebula_core::review_base`). `against` is what was read: `base` only
+/// when there is a base to read from. `commits` are those since the base,
+/// newest first, whichever way it was read.
+#[derive(Serialize)]
+struct ReviewDiff {
+    against: &'static str,
+    base: Option<ReviewBaseInfo>,
+    commits: Vec<ReviewCommit>,
+    files: Vec<git::DiffFile>,
+}
+
+/// `against`: `base` or `head` as the reader picked it; absent, the base
+/// when there is one.
+#[tauri::command]
+async fn diff_review(
+    client: State<'_, Arc<Client>>,
+    worktree: String,
+    against: Option<String>,
+) -> Res<ReviewDiff> {
+    use nebula_core::review_base::{self as rb, Against};
+    let root = worktree_path(&client, &worktree)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let setting = nebula_config::Config::load().worktree_base_branch;
+        let base = rb::resolve(&root, &setting);
+        let asked = against.as_deref().and_then(Against::parse);
+        let against = rb::default_against(base.as_ref(), asked);
+        let files = match (&base, against) {
+            (Some(b), Against::Base) => git::files_since(&root, &b.sha)?,
+            _ => git::changed_files(&root)?,
+        };
+        let commits = base
+            .as_ref()
+            .map(|b| rb::commits_since(&root, &b.sha, rb::MAX_COMMITS))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|c| ReviewCommit {
+                sha: c.sha,
+                short: c.short,
+                subject: c.subject,
+            })
+            .collect();
+        Ok(ReviewDiff {
+            against: against.as_str(),
+            base: base.map(|b| ReviewBaseInfo {
+                short: b.short().to_string(),
+                sha: b.sha,
+                branch: b.branch,
+            }),
+            commits,
+            files,
+        })
+    })
+    .await
+    .map_err(err)?
+}
+
 #[derive(Deserialize)]
 struct FileRef {
     path: String,
@@ -830,6 +902,7 @@ fn main() {
             settings::desktop_key_set,
             settings::run_commands,
             diff_files,
+            diff_review,
             diff_pair,
             diff_range,
             diff_blob,

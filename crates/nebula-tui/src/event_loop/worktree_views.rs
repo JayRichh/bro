@@ -386,9 +386,10 @@ pub(crate) fn open_diff_view(app: &mut App) {
         return;
     };
     let show_graph = crate::config::Config::load().source_control_graph;
+    let asked = app.modals.diff_against;
     let Some(jobs) = app.jobs.view_jobs.clone() else {
         // No loop to land an answer on (unit tests): read inline.
-        match crate::git_diff::read_listing(&path) {
+        match crate::git_diff::read_listing(&path, asked) {
             Ok(listing) => {
                 if show_graph {
                     show_graph_diff_listing(app, path, branch, listing);
@@ -402,8 +403,12 @@ pub(crate) fn open_diff_view(app: &mut App) {
     };
     let ticket = crate::view_jobs::ticket();
     let selected = app.selected_worktree().map(|w| w.id.clone());
-    let known_clean =
-        matches!(&app.jobs.git_changes, Some((id, Some(0))) if Some(id) == selected.as_ref());
+    // The badge counts changes against HEAD; read against the base, a
+    // clean tree can still have commits to show, so only a reader who
+    // asked for HEAD is told "no changes" off it.
+    let head_only = asked == Some(nebula_core::review_base::Against::Head);
+    let known_clean = head_only
+        && matches!(&app.jobs.git_changes, Some((id, Some(0))) if Some(id) == selected.as_ref());
     if known_clean && !show_graph {
         app.chrome.flash = Some(format!("no changes in {branch}"));
         app.jobs.diff_probe = Some((ticket, path.clone(), branch));
@@ -423,10 +428,12 @@ pub(crate) fn open_diff_view(app: &mut App) {
         // list to open on: the files are up on this keypress and the first
         // diff is being read while the `git status` below checks them, not
         // after it. `fill_view` reconciles the two when that lands.
+        // Only against HEAD: the badge's list is HEAD's.
         let polled = app
             .jobs
             .changed_files
             .as_ref()
+            .filter(|_| head_only)
             .filter(|(id, files)| Some(id) == selected.as_ref() && !files.is_empty());
         if let Some((_, files)) = polled {
             view.replace_files(files.clone());
@@ -438,7 +445,7 @@ pub(crate) fn open_diff_view(app: &mut App) {
     jobs.run(move || {
         Some(crate::view_jobs::Answer::DiffListing {
             ticket,
-            result: crate::git_diff::read_listing(&path),
+            result: crate::git_diff::read_listing(&path, asked),
         })
     });
 }
@@ -471,7 +478,8 @@ pub(crate) fn show_diff_listing(
     branch: String,
     listing: crate::view_jobs::DiffListing,
 ) {
-    if listing.files.is_empty() {
+    // Commits since the base with a clean tree are still worth the modal.
+    if listing.files.is_empty() && listing.commits.is_empty() {
         app.chrome.flash = Some(format!("no changes in {branch}"));
         return;
     }
@@ -689,14 +697,16 @@ pub(crate) fn land_diff_listing(
         }
         return;
     }
+    // A list read again for the against toggle keeps the modal up even
+    // empty: the reader is in it, and the header says what was read.
     let (branch, has_graph) = match &app.modals.overlay {
         Some(Overlay::Diff(view)) if view.listing == Some(ticket) => {
-            (view.branch.clone(), view.log.is_some())
+            (view.branch.clone(), view.log.is_some() || view.keep_open)
         }
         _ => return,
     };
     match result {
-        Ok(listing) if !listing.files.is_empty() => {
+        Ok(listing) if !listing.files.is_empty() || !listing.commits.is_empty() => {
             if let Some(Overlay::Diff(view)) = &mut app.modals.overlay {
                 crate::git_diff::fill_view(view, listing);
             }

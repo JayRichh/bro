@@ -2593,6 +2593,64 @@ mod tests {
         }
     }
 
+    /// Read against the base, the file column heads with the toggle and the
+    /// COMMITS since the base; the toggle's rect is written back for a
+    /// click. A cramped screen still draws, the strip giving way first.
+    #[test]
+    fn the_diff_modal_heads_its_files_with_the_base_and_its_commits() {
+        use nebula_core::review_base::{Against, CommitLine, ReviewBase};
+        for (w, h) in [(200, 30), (60, 16), (40, 10), (24, 6)] {
+            let mut app = App::new();
+            let files = vec![crate::git_diff::DiffFile {
+                path: "a.rs".into(),
+                orig_path: None,
+                xy: ['M', ' '],
+            }];
+            let mut view = crate::app::DiffView::new("/no-such".into(), "feat".into(), files, true);
+            view.against = Against::Base;
+            view.base = Some(Box::new(ReviewBase {
+                sha: "0123456789abcdef".into(),
+                branch: "main".into(),
+                refname: "origin/main".into(),
+            }));
+            view.commits = (0..8)
+                .map(|i| CommitLine {
+                    sha: format!("{i:040}"),
+                    short: format!("{i:07}"),
+                    subject: format!("a commit subject long enough to clip {i}"),
+                })
+                .collect();
+            app.modals.overlay = Some(Overlay::Diff(view));
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
+            terminal.draw(|f| draw(f, &mut app)).unwrap();
+            if w < 200 {
+                continue;
+            }
+            let buf = terminal.backend().buffer().clone();
+            let text: String = (0..buf.area.height)
+                .map(|y| {
+                    (0..buf.area.width)
+                        .map(|x| buf[(x, y)].symbol())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains("vs main (merge-base 0123456)"), "{text}");
+            assert!(text.contains("0123456)  ^g"), "{text}");
+            assert!(text.contains("Commits (8)"), "{text}");
+            assert!(text.contains("+3 more"), "{text}");
+            let Some(Overlay::Diff(view)) = &app.modals.overlay else {
+                unreachable!()
+            };
+            assert!(view.against_area.width > 0, "the toggle can be clicked");
+            assert!(
+                view.list_area.y > view.against_area.y + 2,
+                "the files sit below"
+            );
+        }
+    }
+
     /// A TRUECOLOR PRESET paints its canvas under every default cell and
     /// its text over every default glyph, BLACK BACKGROUND or not — and,
     /// as with the black, a fill something else drew stays on top.

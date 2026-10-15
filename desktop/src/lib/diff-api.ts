@@ -4,6 +4,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import type { DiffFile } from './api';
+import type { Against, ReviewDiff } from './diff-base';
 
 export type { DiffFile };
 
@@ -53,6 +54,10 @@ export type HunkAction = 'stage' | 'unstage' | 'discard';
 export const diffApi = {
   /** Every changed path in a worktree, against HEAD. */
   files: (worktree: string) => invoke<DiffFile[]>('diff_files', { worktree }),
+  /** Against the merge-base with the base branch, or HEAD; null: the base
+   *  when there is one. Also the base and the commits since it. */
+  review: (worktree: string, against: Against | null) =>
+    invoke<ReviewDiff>('diff_review', { worktree, against }),
   range: (worktree: string, base: string, tip: string, pr?: number) =>
     invoke<RangeDiff>('diff_range', { worktree, base, tip, pr: pr ?? null }),
   blob: (worktree: string, side: DiffSide, path: string) =>

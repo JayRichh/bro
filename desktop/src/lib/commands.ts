@@ -240,6 +240,18 @@ function focusedRepo(): string | undefined {
 
 type Command = PaletteCommand & { run: () => unknown };
 
+/** With the Diff view up on a worktree that has a base branch: compare with
+ *  the other one (the header's toggle). No key of its own. */
+export function diffAgainstCommand(
+  cmd: (id: string, label: string, group: string, run: () => unknown, key?: ShortcutId, words?: string) => Command,
+): Command[] {
+  const shown = app.diffShown;
+  if (nav.current.view !== 'diff' || app.diffRange || !shown?.base) return [];
+  const toBase = shown.against === 'head';
+  const label = toBase ? `Diff: compare with ${shown.base.branch}` : 'Diff: compare with HEAD';
+  return [cmd('diff-against', label, 'Window', () => (app.diffAgainst = toBase ? 'base' : 'head'), undefined, 'merge-base base head against branch committed')];
+}
+
 /** Everything the palette offers besides jumping: the window's actions,
  *  then the shown session's own verbs. */
 export function paletteCommands(): Command[] {
@@ -262,6 +274,7 @@ export function paletteCommands(): Command[] {
     cmd('next-attention', 'Next session needing you', 'Window', () => jumpAttention(1), 'next_attention', 'attention jump feedback'),
     cmd('prev-attention', 'Previous session needing you', 'Window', () => jumpAttention(-1), 'prev_attention', 'attention jump feedback'),
     cmd('diff', 'Diff the worktree', 'Window', () => openDiff(diffTarget()), ['diff', 'open_diff']),
+    ...diffAgainstCommand(cmd),
     ...(split() ? [cmd('maximize', app.paneMax ? 'Bring the pane back down' : 'Full pane', 'Window', toggleMaximize, ['maximize_z', 'maximize'], 'maximize zoom full screen')] : []),
     cmd('theme', `Cycle theme (now ${app.themePref})`, 'Window', cycleTheme, 'cycle_theme', 'dark light system'),
     cmd('settings', 'Settings', 'Window', () => openSettings(), 'settings', 'preferences config'),

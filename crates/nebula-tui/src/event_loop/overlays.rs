@@ -545,11 +545,18 @@ fn handle_diff_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) {
                 // `DiffView::toggle_reviewed`).
                 KeyCode::Char('r') if ctrl => {
                     if let Some(changed) = view.toggle_reviewed() {
-                        crate::review::store_marks(&view.root, &view.head_key, &view.reviewed);
+                        view.store_marks();
                         if changed {
                             crate::git_diff::load_selected_diff(view);
                         }
                     }
+                }
+                // Ctrl+g reads the list against the other of the base
+                // branch's merge-base and HEAD (the header's toggle);
+                // remembered for the next open.
+                KeyCode::Char('g') if ctrl => {
+                    app.chrome.flash =
+                        Some(diff_toggle_against(view, &mut app.modals.diff_against));
                 }
                 // Ctrl+t flips the file list between flat paths and the
                 // directory tree (`diff_tree`), the cursor staying on its
@@ -581,6 +588,7 @@ fn handle_diff_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) {
                     view.scroll = view.scroll.min(view.max_scroll());
                     crate::git_diff::request_aux(view);
                     let worktree = view.stageable().is_some();
+                    let since_base = view.diff_base().is_some();
                     app.modals.diff_full_context = full;
                     let mut cfg = crate::config::Config::load();
                     cfg.diff_context = if full { "full" } else { "collapsed" }.into();
@@ -588,6 +596,9 @@ fn handle_diff_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) {
                     app.chrome.flash = Some(
                         match (full, worktree) {
                             (true, true) => "unchanged lines: the whole file",
+                            (true, false) if since_base => {
+                                "unchanged lines: the whole file, against HEAD (Ctrl+g)"
+                            }
                             (true, false) => {
                                 "unchanged lines: the whole file, for a working-tree diff"
                             }
@@ -639,6 +650,34 @@ fn handle_diff_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) {
     }
 }
 
+/// `Ctrl+g`, or a click on the header's toggle, in the DIFF VIEWER: read
+/// against the other of the base and HEAD, `remember` it for the next
+/// open, and say what is being read — or why there is nothing to switch.
+pub(crate) fn diff_toggle_against(
+    view: &mut crate::app::DiffView,
+    remember: &mut Option<nebula_core::review_base::Against>,
+) -> String {
+    use nebula_core::review_base::{against_label, Against};
+    if view.prefetched.is_some() {
+        return "a pull request's diff is read against its own base".into();
+    }
+    let Some(base) = view.base.clone() else {
+        return "no base branch to compare with: this is it, it is detached, or the clone has none"
+            .into();
+    };
+    match crate::git_diff::toggle_against(view) {
+        Some(want) => {
+            *remember = Some(want);
+            let said = against_label(want, Some(&*base));
+            match want {
+                Against::Base => format!("diff {said}"),
+                Against::Head => format!("diff {said}: stage and discard work here"),
+            }
+        }
+        None => "could not read the diff again".into(),
+    }
+}
+
 /// `Ctrl+n` / `Ctrl+p` in the DIFF VIEWER: the next or previous CHANGE of
 /// the file on screen, scrolled near the top and marked in the gutter;
 /// the footer counts where it is (`change 2/5`).
@@ -664,6 +703,8 @@ fn diff_target(
     let Some(file) = view.stageable().cloned() else {
         return Err(if view.prefetched.is_some() {
             "a pull request's diff can't be staged here".into()
+        } else if view.diff_base().is_some() {
+            "staging works against HEAD: Ctrl+g to compare with HEAD first".into()
         } else if view.selected_file().is_some_and(|f| f.is_untracked()) {
             "an untracked file is one change: stage it whole with git add".into()
         } else {
@@ -707,7 +748,7 @@ fn diff_stage(view: &mut crate::app::DiffView) -> String {
                 view.reviewed
                     .insert(file.path.clone(), crate::review::fingerprint(&view.diff));
                 view.recompute_matches();
-                crate::review::store_marks(&view.root, &view.head_key, &view.reviewed);
+                view.store_marks();
                 format!(
                     "staged change {}/{total}; all of {} staged ✓",
                     c + 1,
