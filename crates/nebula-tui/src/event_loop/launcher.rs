@@ -934,6 +934,16 @@ pub(super) fn handle_action(
 /// so the board outlives the restart. Landing on the board puts the
 /// cursor on a card of it, so the keys have something to walk.
 pub(super) fn toggle_kanban(app: &mut App, out: &mut Vec<ClientRequest>) {
+    // From a full-screen session (one not typing: a locked pane's `⇧K` is
+    // the agent's): down out of it, onto the board, never off it.
+    if app.pane.collapsed && app.launcher_active() {
+        toggle_full_screen(app, out);
+        if app.launcher.launcher_kanban {
+            kanban_move(app, 0, 0, out);
+            app.chrome.flash = Some(kanban_flash(app));
+            return;
+        }
+    }
     let mut cfg = crate::config::Config::load();
     cfg.kanban = !app.launcher.launcher_kanban;
     if super::save_config(app, &cfg) {
@@ -946,6 +956,46 @@ pub(super) fn toggle_kanban(app: &mut App, out: &mut Vec<ClientRequest>) {
         app.chrome.flash = Some("overview: a band per worktree · ⇧K: board".into());
     }
     app.chrome.dirty = true;
+}
+
+/// `⇧K` from an overlay that has no text field taking it (the git diff
+/// with nothing typed in its filter, Settings, the accounts, Azure
+/// DevOps, subagents, help and memory overlays): the overlay closes into
+/// the board — on, never toggled off — and a full-screen session under it
+/// comes down too.
+pub(super) fn board_key_closes(app: &App, chord: &crate::keymap::KeyChord) -> bool {
+    use crate::app::Overlay;
+    if !app.launcher_active()
+        || app
+            .chrome
+            .keymap
+            .lookup(crate::keymap::Scope::Global, chord)
+            != Some(Action::ToggleKanban)
+    {
+        return false;
+    }
+    match &app.modals.overlay {
+        Some(Overlay::Settings(v)) => v.capture.is_none(),
+        Some(Overlay::Accounts(v)) => matches!(v.mode, crate::accounts_overlay::Mode::List),
+        Some(Overlay::Diff(v)) => v.filter.is_empty() && v.confirm_discard.is_none(),
+        Some(Overlay::Subagents(_) | Overlay::Ado(_) | Overlay::Help(_) | Overlay::Metrics(_)) => {
+            true
+        }
+        _ => false,
+    }
+}
+
+/// What [`board_key_closes`] lets through: the overlay closed as Ctrl+Q
+/// closes it (Settings saving its place), then the board.
+pub(super) fn show_board(app: &mut App, out: &mut Vec<ClientRequest>) {
+    crate::overlay_close::force_close(app);
+    if app.launcher.launcher_kanban && !app.pane.collapsed {
+        kanban_move(app, 0, 0, out);
+        app.chrome.flash = Some(kanban_flash(app));
+        app.chrome.dirty = true;
+        return;
+    }
+    toggle_kanban(app, out);
 }
 
 /// What the footer says the board is showing.
@@ -2534,7 +2584,7 @@ pub(super) fn drop_order(app: &mut App, out: &mut Vec<ClientRequest>) {
             LaneDrop::Refuse(why) => app.chrome.flash = Some(why.into()),
             LaneDrop::Seen => {
                 super::mark_agent_seen(app, &agent, out);
-                app.chrome.flash = Some("marked seen: the card is done".into());
+                app.chrome.flash = Some(crate::order::MARKED_SEEN.into());
             }
             LaneDrop::Archive => {
                 super::archive_agent(app, agent, out);
@@ -13549,5 +13599,670 @@ mod tests {
                 Some("agent-1")
             );
         });
+    }
+
+    /// The user's order (`crate::order`): the rule the views lay out by,
+    /// the drags, the move keys and the board one key away.
+    mod order {
+        use super::*;
+        use crate::app::{OrderItem, OrderOver};
+        use crate::order::{DropLane, Place};
+        use nebula_core::ReorderScope;
+        use ratatui::layout::Rect;
+
+        fn mouse_out(app: &mut App, kind: MouseEventKind, x: u16, y: u16) -> Vec<ClientRequest> {
+            let mut out = Vec::new();
+            let event = MouseEvent {
+                kind,
+                column: x,
+                row: y,
+                modifiers: KeyModifiers::NONE,
+            };
+            handle_terminal_event(app, crossterm::event::Event::Mouse(event), &mut out);
+            out
+        }
+
+        fn rect_where(app: &App, f: impl Fn(&HitTarget) -> bool) -> Rect {
+            app.chrome
+                .hits
+                .iter()
+                .find_map(|(r, h)| f(h).then_some(*r))
+                .expect("drawn")
+        }
+
+        fn agent<'a>(app: &'a mut App, id: &str) -> &'a mut Agent {
+            app.tree
+                .agents
+                .iter_mut()
+                .find(|a| a.id.0 == id)
+                .expect("the session")
+        }
+
+        fn set_worktree_order(app: &mut App, id: &str, order: i64) {
+            app.tree
+                .worktrees
+                .iter_mut()
+                .find(|w| w.id.0 == id)
+                .expect("the worktree")
+                .sort_order = order;
+        }
+
+        fn set_project_order(app: &mut App, id: &str, order: i64) {
+            app.tree
+                .projects
+                .iter_mut()
+                .find(|p| p.id.0 == id)
+                .expect("the project")
+                .sort_order = order;
+        }
+
+        /// A linked checkout `id` of demo, `branch`, with `agent` running.
+        fn add_linked(app: &mut App, id: &str, branch: &str, agent: &str) {
+            hse(
+                app,
+                ServerEvent::EntityUpserted {
+                    entity: Entity::Worktree(Worktree {
+                        id: WorktreeId(id.into()),
+                        project_id: ProjectId("p1".into()),
+                        path: format!("/tmp/demo-{branch}").into(),
+                        branch: branch.into(),
+                        is_main: false,
+                        sort_order: 0,
+                    }),
+                },
+            );
+            seed_running(app, agent, id, agent);
+        }
+
+        fn reorders(out: &[ClientRequest]) -> Vec<(ReorderScope, Vec<String>)> {
+            out.iter()
+                .filter_map(|r| match r {
+                    ClientRequest::Reorder { scope, ids, .. } => Some((scope.clone(), ids.clone())),
+                    _ => None,
+                })
+                .collect()
+        }
+
+        fn band_ids(app: &App) -> Vec<String> {
+            crate::launcher::bands(app)
+                .iter()
+                .map(|b| b.worktree.0.clone())
+                .collect()
+        }
+
+        fn card_ids(app: &App, worktree: &str) -> Vec<String> {
+            crate::order::band_shown(app, &WorktreeId(worktree.into()))
+                .into_iter()
+                .map(|a| a.0)
+                .collect()
+        }
+
+        fn tab_names(app: &App) -> Vec<String> {
+            crate::launcher::project_tabs(app)
+                .into_iter()
+                .map(|t| t.name)
+                .collect()
+        }
+
+        /// A scope never ordered keeps the view's own order; once a row
+        /// of it is above 0 the scope lays out by `sort_order` — the
+        /// bands (the root always first), a band's cards, the tabs.
+        #[test]
+        fn a_user_ordered_scope_lays_out_by_sort_order() {
+            with_default_config(|| {
+                let mut app = three_sessions();
+                add_linked(&mut app, "w3", "docs", "a4");
+                assert_eq!(band_ids(&app)[0], "w1", "the root first");
+
+                set_worktree_order(&mut app, "w3", 1);
+                set_worktree_order(&mut app, "w2", 2);
+                assert_eq!(band_ids(&app), ["w1", "w3", "w2"]);
+                set_worktree_order(&mut app, "w2", 1);
+                set_worktree_order(&mut app, "w3", 2);
+                assert_eq!(band_ids(&app), ["w1", "w2", "w3"]);
+
+                // The root's cards: recency first (two running, the newer
+                // id ahead), then the user's order once there is one.
+                let before = card_ids(&app, "w1");
+                assert_eq!(before, ["a9", "a1"]);
+                agent(&mut app, "a9").sort_order = 1;
+                assert_eq!(card_ids(&app, "w1"), ["a1", "a9"]);
+
+                // The tabs: most recently worked in first while the
+                // projects are all at 0, the user's order after.
+                app.launcher.launcher_tabs = vec![ProjectId("p2".into()), ProjectId("p1".into())];
+                assert_eq!(tab_names(&app), ["web", "demo"]);
+                set_project_order(&mut app, "p2", 1);
+                assert_eq!(tab_names(&app), ["demo", "web"]);
+                app.bring_tab_forward(&ProjectId("p2".into()));
+                assert_eq!(
+                    tab_names(&app),
+                    ["demo", "web"],
+                    "working in it moves no tab"
+                );
+                // The Projects column agrees.
+                let rows: Vec<String> = app
+                    .project_rows()
+                    .into_iter()
+                    .map(|i| app.tree.projects[i].name.clone())
+                    .collect();
+                assert_eq!(rows, ["demo", "web"]);
+            });
+        }
+
+        /// A reorder lands as one upsert per row; the cursor stays on the
+        /// card it was on through each of them.
+        #[test]
+        fn the_cursor_follows_its_card_through_a_reorders_upserts() {
+            with_default_config(|| {
+                let mut app = three_sessions();
+                add_linked(&mut app, "w3", "docs", "a4");
+                draw_at(&mut app, 130, 60);
+                let (x, y) = card_cell(&app, &SessionRef::Agent(AgentId("a2".into())));
+                click_at(&mut app, x, y);
+                assert_eq!(selected(&app).as_deref(), Some("a2"));
+                for (id, order) in [("w3", 1), ("w2", 2)] {
+                    let mut w = app
+                        .tree
+                        .worktrees
+                        .iter()
+                        .find(|w| w.id.0 == id)
+                        .unwrap()
+                        .clone();
+                    w.sort_order = order;
+                    hse(
+                        &mut app,
+                        ServerEvent::EntityUpserted {
+                            entity: Entity::Worktree(w),
+                        },
+                    );
+                    assert_eq!(selected(&app).as_deref(), Some("a2"));
+                }
+                assert_eq!(band_ids(&app), ["w1", "w3", "w2"]);
+            });
+        }
+
+        /// The board's lanes stay newest first across checkouts; a
+        /// checkout the user ordered refills the slots its cards hold in
+        /// that order.
+        #[test]
+        fn the_board_refills_a_user_ordered_checkouts_slots() {
+            with_default_config(|| {
+                let mut app = three_sessions();
+                let now = crate::app::now_ms();
+                for (id, ago) in [("a9", 1_000), ("a2", 2_000), ("a1", 3_000)] {
+                    let a = agent(&mut app, id);
+                    a.status = AgentStatus::Finished;
+                    a.status_changed_at = now - ago;
+                }
+                let done = |app: &App| -> Vec<String> {
+                    crate::launcher::kanban(app, true)[crate::launcher::Lane::Done.index()]
+                        .iter()
+                        .map(|r| r.agent.id.0.clone())
+                        .collect()
+                };
+                assert_eq!(done(&app), ["a9", "a2", "a1"]);
+                // w1 ordered a1 then a9: its two slots, the first and the
+                // last, take them in that order; a2 keeps its place.
+                agent(&mut app, "a9").sort_order = 1;
+                assert_eq!(done(&app), ["a1", "a2", "a9"]);
+            });
+        }
+
+        /// A card let go on the near half of another card of its own band
+        /// reorders the band; over another band it would move instead.
+        #[test]
+        fn a_card_drop_beside_its_band_mate_reorders_and_onto_another_band_moves() {
+            with_default_config(|| {
+                let mut app = three_sessions();
+                draw_at(&mut app, 130, 50);
+                key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+                draw_at(&mut app, 130, 50);
+                let (x, y) = card_cell(&app, &SessionRef::Agent(AgentId("a1".into())));
+                mouse(&mut app, MouseEventKind::Down(MouseButton::Left), x, y);
+                draw_at(&mut app, 130, 50);
+                // Over the other band: a move, no slot.
+                let (bx, by) = band_rule_cell(&app, "w2");
+                mouse(&mut app, MouseEventKind::Drag(MouseButton::Left), bx, by);
+                let drag = app.launcher.card_drag.clone().expect("held");
+                assert_eq!(drag.over, Some(WorktreeId("w2".into())));
+                assert_eq!(drag.slot, None);
+                // Over the left half of ship-docs, its band mate: a reorder.
+                let bands = crate::launcher::bands(&app);
+                let r = rect_where(&app, |h| {
+                    matches!(h, HitTarget::LauncherCard(at)
+                        if crate::launcher::card_at(&bands, *at)
+                            .is_some_and(|c| c.sref() == SessionRef::Agent(AgentId("a9".into()))))
+                });
+                mouse(
+                    &mut app,
+                    MouseEventKind::Drag(MouseButton::Left),
+                    r.x + 1,
+                    r.y + 1,
+                );
+                let drag = app.launcher.card_drag.clone().expect("held");
+                assert_eq!(drag.over, None, "not a move");
+                assert_eq!(drag.slot, Some((AgentId("a9".into()), Place::Before)));
+                // The mark is drawn, in the gap before the card.
+                let term = draw_at(&mut app, 130, 50);
+                assert_eq!(term.backend().buffer()[(r.x - 1, r.y)].symbol(), "┃");
+                let out = mouse_out(
+                    &mut app,
+                    MouseEventKind::Up(MouseButton::Left),
+                    r.x + 1,
+                    r.y + 1,
+                );
+                assert!(sent_move(&out).is_none(), "{out:?}");
+                assert_eq!(
+                    reorders(&out),
+                    [(
+                        ReorderScope::Agents(WorktreeId("w1".into())),
+                        vec!["a1".to_string(), "a9".to_string()]
+                    )]
+                );
+            });
+        }
+
+        /// A band's rule drags among the project's linked worktrees (the
+        /// root's stays put and first); a tab drags along the header.
+        #[test]
+        fn band_and_tab_drags_reorder_their_scopes() {
+            with_default_config(|| {
+                let mut app = two_tabs();
+                add_linked(&mut app, "w3", "docs", "a4");
+                set_worktree_order(&mut app, "w2", 1);
+                set_worktree_order(&mut app, "w3", 2);
+                draw_at(&mut app, 130, 60);
+                key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+                draw_at(&mut app, 130, 60);
+
+                // The root's rule arms nothing.
+                let (rx, ry) = band_rule_cell(&app, "w1");
+                mouse(&mut app, MouseEventKind::Down(MouseButton::Left), rx, ry);
+                assert!(app.launcher.order_drag.is_none());
+                mouse(&mut app, MouseEventKind::Up(MouseButton::Left), rx, ry);
+
+                draw_at(&mut app, 130, 60);
+                let (x, y) = band_rule_cell(&app, "w3");
+                mouse(&mut app, MouseEventKind::Down(MouseButton::Left), x, y);
+                draw_at(&mut app, 130, 60);
+                let (tx, ty) = band_rule_cell(&app, "w2");
+                mouse(&mut app, MouseEventKind::Drag(MouseButton::Left), tx, ty);
+                assert_eq!(
+                    app.launcher
+                        .order_drag
+                        .as_ref()
+                        .and_then(|d| d.over.clone()),
+                    Some(OrderOver::Band(WorktreeId("w2".into()), Place::Before))
+                );
+                let term = draw_at(&mut app, 130, 60);
+                assert!(screen_text(&term).contains("▲ before"));
+                let out = mouse_out(&mut app, MouseEventKind::Up(MouseButton::Left), tx, ty);
+                assert_eq!(
+                    reorders(&out),
+                    [(
+                        ReorderScope::Worktrees(ProjectId("p1".into())),
+                        vec!["w1".to_string(), "w3".into(), "w2".into()]
+                    )]
+                );
+
+                // The tabs, all at 0: the header's order is what moves.
+                draw_at(&mut app, 130, 60);
+                assert_eq!(tab_names(&app), ["web", "demo"]);
+                let demo = rect_where(
+                    &app,
+                    |h| matches!(h, HitTarget::LauncherTab(p) if p.0 == "p1"),
+                );
+                mouse(
+                    &mut app,
+                    MouseEventKind::Down(MouseButton::Left),
+                    demo.x + 1,
+                    demo.y,
+                );
+                draw_at(&mut app, 130, 60);
+                let web = rect_where(
+                    &app,
+                    |h| matches!(h, HitTarget::LauncherTab(p) if p.0 == "p2"),
+                );
+                mouse(
+                    &mut app,
+                    MouseEventKind::Drag(MouseButton::Left),
+                    web.x,
+                    web.y,
+                );
+                assert_eq!(
+                    app.launcher
+                        .order_drag
+                        .as_ref()
+                        .and_then(|d| d.over.clone()),
+                    Some(OrderOver::Tab(ProjectId("p2".into()), Place::Before))
+                );
+                let out = mouse_out(
+                    &mut app,
+                    MouseEventKind::Up(MouseButton::Left),
+                    web.x,
+                    web.y,
+                );
+                assert_eq!(
+                    reorders(&out),
+                    [(ReorderScope::Projects, vec!["p1".to_string(), "p2".into()])]
+                );
+            });
+        }
+
+        /// Board drops do only what the user can cause: Unread to Done
+        /// marks the session seen, Running to Done is refused with the
+        /// reason, the Archived zone (there only while a card is held)
+        /// archives, and beside a card of its checkout in its lane it
+        /// reorders.
+        #[test]
+        fn board_drops_act_by_lane_and_refuse_what_the_agent_owns() {
+            with_default_config(|| {
+                let mut app = three_sessions();
+                let now = crate::app::now_ms();
+                // a1 Unread, a2 Running, a9 Done — all of demo.
+                {
+                    let a = agent(&mut app, "a1");
+                    a.status = AgentStatus::Finished;
+                    a.unseen = true;
+                    a.status_changed_at = now - 5_000;
+                }
+                {
+                    let a = agent(&mut app, "a9");
+                    a.status = AgentStatus::Finished;
+                    a.status_changed_at = now - 1_000;
+                }
+                app.launcher.launcher_kanban = true;
+                let (w, h) = (200, 50);
+                draw_at(&mut app, w, h);
+                assert!(
+                    !app.chrome
+                        .hits
+                        .iter()
+                        .any(|(_, h)| *h == HitTarget::KanbanArchive),
+                    "no Archived zone until a card is held"
+                );
+                let done = rect_where(&app, |h| {
+                    *h == HitTarget::KanbanLane(crate::launcher::Lane::Done.index())
+                });
+                let lane_air = (done.x + 2, done.bottom() - 2);
+                let card = |app: &App, id: &str| {
+                    rect_where(app, |h| matches!(h, HitTarget::KanbanCard(a) if a.0 == id))
+                };
+
+                // Unread → Done: seen. (The press lands the cursor on the
+                // card, which may mark it read already; the drop says so
+                // either way.)
+                let r = card(&app, "a1");
+                let mut out = mouse_out(
+                    &mut app,
+                    MouseEventKind::Down(MouseButton::Left),
+                    r.x + 2,
+                    r.y + 2,
+                );
+                draw_at(&mut app, w, h);
+                mouse(
+                    &mut app,
+                    MouseEventKind::Drag(MouseButton::Left),
+                    lane_air.0,
+                    lane_air.1,
+                );
+                assert!(screen_text(&draw_at(&mut app, w, h)).contains("Archived"));
+                out.extend(mouse_out(
+                    &mut app,
+                    MouseEventKind::Up(MouseButton::Left),
+                    lane_air.0,
+                    lane_air.1,
+                ));
+                assert!(
+                    out.iter()
+                        .any(|r| matches!(r, ClientRequest::MarkAgentSeen { id } if id.0 == "a1")),
+                    "{out:?}"
+                );
+                assert_eq!(app.chrome.flash.as_deref(), Some(crate::order::MARKED_SEEN));
+
+                // Running → Done: refused, with why.
+                draw_at(&mut app, w, h);
+                let r = card(&app, "a2");
+                mouse(
+                    &mut app,
+                    MouseEventKind::Down(MouseButton::Left),
+                    r.x + 2,
+                    r.y + 2,
+                );
+                draw_at(&mut app, w, h);
+                mouse(
+                    &mut app,
+                    MouseEventKind::Drag(MouseButton::Left),
+                    lane_air.0,
+                    lane_air.1,
+                );
+                let out = mouse_out(
+                    &mut app,
+                    MouseEventKind::Up(MouseButton::Left),
+                    lane_air.0,
+                    lane_air.1,
+                );
+                assert!(out.is_empty(), "{out:?}");
+                assert!(
+                    app.chrome
+                        .flash
+                        .as_deref()
+                        .is_some_and(|f| f.contains("Running is the agent")),
+                    "{:?}",
+                    app.chrome.flash
+                );
+
+                // Done → the Archived zone: archived (behind the confirm the
+                // default settings ask).
+                draw_at(&mut app, w, h);
+                let r = card(&app, "a9");
+                mouse(
+                    &mut app,
+                    MouseEventKind::Down(MouseButton::Left),
+                    r.x + 2,
+                    r.y + 2,
+                );
+                draw_at(&mut app, w, h);
+                mouse(
+                    &mut app,
+                    MouseEventKind::Drag(MouseButton::Left),
+                    r.x + 3,
+                    r.y + 3,
+                );
+                draw_at(&mut app, w, h);
+                let zone = rect_where(&app, |h| *h == HitTarget::KanbanArchive);
+                mouse(
+                    &mut app,
+                    MouseEventKind::Drag(MouseButton::Left),
+                    zone.x + 3,
+                    zone.y + 1,
+                );
+                assert_eq!(
+                    app.launcher
+                        .order_drag
+                        .as_ref()
+                        .and_then(|d| d.over.clone()),
+                    Some(OrderOver::Lane(DropLane::Archived, None))
+                );
+                let out = mouse_out(
+                    &mut app,
+                    MouseEventKind::Up(MouseButton::Left),
+                    zone.x + 3,
+                    zone.y + 1,
+                );
+                assert!(
+                    matches!(app.modals.overlay, Some(Overlay::Confirm(_))) || !out.is_empty(),
+                    "the archive asks or goes out"
+                );
+                app.modals.overlay = None;
+
+                // Beside a card of its own checkout in its own lane: a
+                // reorder of that checkout.
+                agent(&mut app, "a1").unseen = false;
+                agent(&mut app, "a1").status_changed_at = now - 500;
+                draw_at(&mut app, w, h);
+                let a1 = card(&app, "a1");
+                let a9 = card(&app, "a9");
+                assert!(a1.y < a9.y, "newest first down Done");
+                mouse(
+                    &mut app,
+                    MouseEventKind::Down(MouseButton::Left),
+                    a9.x + 2,
+                    a9.y + 2,
+                );
+                draw_at(&mut app, w, h);
+                mouse(
+                    &mut app,
+                    MouseEventKind::Drag(MouseButton::Left),
+                    a1.x + 2,
+                    a1.y + 1,
+                );
+                let drag = app.launcher.order_drag.clone().expect("held");
+                assert!(matches!(drag.item, OrderItem::Board { .. }));
+                assert_eq!(
+                    drag.over,
+                    Some(OrderOver::Lane(
+                        DropLane::Lane(crate::launcher::Lane::Done),
+                        Some((AgentId("a1".into()), Place::Before))
+                    ))
+                );
+                let out = mouse_out(
+                    &mut app,
+                    MouseEventKind::Up(MouseButton::Left),
+                    a1.x + 2,
+                    a1.y + 1,
+                );
+                assert_eq!(
+                    reorders(&out),
+                    [(
+                        ReorderScope::Agents(WorktreeId("w1".into())),
+                        vec!["a9".to_string(), "a1".into()]
+                    )]
+                );
+            });
+        }
+
+        /// `⌥↑` / `⌥↓` step the card under the cursor along its band, the
+        /// tab under the header's cursor along the tabs; the card's menu
+        /// carries the same moves, and its band's.
+        #[test]
+        fn the_move_keys_and_menus_step_the_row_under_the_cursor() {
+            with_default_config(|| {
+                let mut app = three_sessions();
+                draw_at(&mut app, 130, 50);
+                let (x, y) = card_cell(&app, &SessionRef::Agent(AgentId("a1".into())));
+                click_at(&mut app, x, y);
+                draw_at(&mut app, 130, 50);
+                let out = key(&mut app, KeyCode::Up, KeyModifiers::ALT);
+                assert_eq!(
+                    reorders(&out),
+                    [(
+                        ReorderScope::Agents(WorktreeId("w1".into())),
+                        vec!["a1".to_string(), "a9".into()]
+                    )]
+                );
+                let out = key(&mut app, KeyCode::Down, KeyModifiers::ALT);
+                assert!(reorders(&out).is_empty(), "already last");
+                assert_eq!(app.chrome.flash.as_deref(), Some("already last"));
+
+                // polish-nav's menu: its moves, and its worktree's.
+                let (x, y) = card_cell(&app, &SessionRef::Agent(AgentId("a2".into())));
+                click_at(&mut app, x, y);
+                right_click_card(&mut app);
+                let Some(Overlay::Menu(menu)) = &app.modals.overlay else {
+                    panic!("the card's menu");
+                };
+                let labels: Vec<&str> = menu.items.iter().map(|i| i.label.as_str()).collect();
+                for want in [
+                    "Move up",
+                    "Move down",
+                    "Move worktree up",
+                    "Move worktree down",
+                ] {
+                    assert!(labels.contains(&want), "{labels:?}");
+                }
+            });
+        }
+
+        /// The board is one key away from the overlays with no text field
+        /// taking the letter — they close into it — and from a session
+        /// full-screen; a diff opened on the board closes back onto it.
+        #[test]
+        fn shift_k_closes_overlays_into_the_board_and_the_diff_returns_there() {
+            with_default_config(|| {
+                let mut app = two_sessions();
+                draw(&mut app);
+                let diff = || {
+                    crate::app::Overlay::Diff(crate::app::DiffView::new(
+                        "/nonexistent-nebula-order-test".into(),
+                        "main".into(),
+                        Vec::new(),
+                        false,
+                    ))
+                };
+                // Something typed in the diff's filter takes the K.
+                app.modals.overlay = Some(diff());
+                key(&mut app, KeyCode::Char('x'), KeyModifiers::NONE);
+                key(&mut app, KeyCode::Char('K'), KeyModifiers::SHIFT);
+                assert!(matches!(app.modals.overlay, Some(Overlay::Diff(_))));
+                assert!(!app.launcher.launcher_kanban);
+                // An empty filter: the diff closes into the board.
+                app.modals.overlay = Some(diff());
+                key(&mut app, KeyCode::Char('K'), KeyModifiers::SHIFT);
+                assert!(app.modals.overlay.is_none());
+                assert!(app.launcher.launcher_kanban);
+
+                // Settings, help, accounts-free overlays: into the board,
+                // never toggling it off.
+                key(&mut app, KeyCode::Char('s'), KeyModifiers::NONE);
+                assert!(matches!(app.modals.overlay, Some(Overlay::Settings(_))));
+                key(&mut app, KeyCode::Char('K'), KeyModifiers::SHIFT);
+                assert!(app.modals.overlay.is_none());
+                assert!(app.launcher.launcher_kanban, "still the board");
+                key(&mut app, KeyCode::Char('?'), KeyModifiers::NONE);
+                key(&mut app, KeyCode::Char('K'), KeyModifiers::SHIFT);
+                assert!(app.modals.overlay.is_none() && app.launcher.launcher_kanban);
+
+                // A diff opened from the board: Esc lands back on it.
+                draw(&mut app);
+                app.modals.overlay = Some(diff());
+                key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+                assert!(app.modals.overlay.is_none());
+                assert!(app.launcher.launcher_kanban);
+
+                // Full-screen (not typing): down onto the board.
+                key(&mut app, KeyCode::Char('K'), KeyModifiers::SHIFT);
+                assert!(!app.launcher.launcher_kanban);
+                app.pane.collapsed = true;
+                key(&mut app, KeyCode::Char('K'), KeyModifiers::SHIFT);
+                assert!(!app.pane.collapsed);
+                assert!(app.launcher.launcher_kanban);
+            });
+        }
+
+        /// The board card under the cursor wears the card buttons, its
+        /// diff among them, and a click on it opens the diff for that card.
+        #[test]
+        fn a_board_card_has_a_diff_button() {
+            with_default_config(|| {
+                let mut app = two_sessions();
+                app.launcher.launcher_kanban = true;
+                draw_at(&mut app, 200, 50);
+                let r = rect_where(
+                    &app,
+                    |h| matches!(h, HitTarget::KanbanCard(a) if a.0 == "a1"),
+                );
+                click_at(&mut app, r.x + 2, r.y + 2);
+                draw_at(&mut app, 200, 50);
+                let diff = rect_where(
+                    &app,
+                    |h| matches!(h, HitTarget::KanbanButton(a, crate::keymap::Action::GitDiff) if a.0 == "a1"),
+                );
+                assert_eq!(diff.y, r.bottom() - 1, "on the card's bottom edge");
+                click_at(&mut app, diff.x + 1, diff.y);
+                assert_eq!(app.selected_session().map(|a| a.id.0), Some("a1".into()));
+            });
+        }
     }
 }

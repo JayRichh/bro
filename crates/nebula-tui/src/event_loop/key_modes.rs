@@ -28,6 +28,17 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientReque
         if !crate::key_combo::is_text_key(&chord) {
             crate::key_combo::note(app, &[chord], None);
         }
+        // `⇧K`: the board, one key away from an overlay with no text
+        // field taking the letter — it closes into it.
+        if launcher::board_key_closes(app, &chord) {
+            crate::key_combo::note(
+                app,
+                &[chord],
+                crate::keymap::spec_of(crate::keymap::Action::ToggleKanban).map(|s| s.label),
+            );
+            launcher::show_board(app, out);
+            return;
+        }
         handle_overlay_key(app, key, out);
         return;
     }

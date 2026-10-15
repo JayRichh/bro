@@ -292,12 +292,31 @@ pub enum OrderTarget {
 /// order that puts it after a linked worktree.
 pub const ROOT_STAYS_FIRST: &str = "the root checkout stays first";
 
+/// What an Unread card let go on Done says.
+pub const MARKED_SEEN: &str = "marked read: the card is done";
+
 /// The open PROJECT TABS, in the order the header draws them.
 fn tab_ids(app: &App) -> Vec<ProjectId> {
     crate::launcher::project_tabs(app)
         .into_iter()
         .map(|t| t.id)
         .collect()
+}
+
+/// The projects a tab drop or step starts from: the user's order, or —
+/// from a daemon that left them all at 0 — the tabs as the header shows
+/// them, then the projects with no tab, so the first move keeps the rest
+/// put.
+fn project_base(app: &App) -> Vec<ProjectId> {
+    if projects_ordered(app) {
+        return project_ids(app);
+    }
+    let tabs = tab_ids(app);
+    let rest: Vec<ProjectId> = project_ids(app)
+        .into_iter()
+        .filter(|p| !tabs.contains(p))
+        .collect();
+    tabs.into_iter().chain(rest).collect()
 }
 
 /// `worktree`'s sessions as the BAND shows them, first card to last.
@@ -368,7 +387,7 @@ fn is_root(app: &App, id: &WorktreeId) -> bool {
 pub fn step(app: &mut App, target: &OrderTarget, dir: i64, out: &mut Vec<ClientRequest>) -> bool {
     let (scope, ids) = match target {
         OrderTarget::Project(id) => {
-            let all = project_ids(app);
+            let all = project_base(app);
             let tabs = tab_ids(app);
             let peers = if tabs.contains(id) { tabs } else { all.clone() };
             (
@@ -441,7 +460,7 @@ pub fn drop_project(
     place: Place,
     out: &mut Vec<ClientRequest>,
 ) -> bool {
-    match place_id(&project_ids(app), id, target, place) {
+    match place_id(&project_base(app), id, target, place) {
         Some(ids) => reorder(app, ReorderScope::Projects, raw(ids), out),
         None => false,
     }
