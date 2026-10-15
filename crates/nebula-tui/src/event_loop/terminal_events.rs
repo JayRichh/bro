@@ -189,6 +189,12 @@ pub(crate) fn dispatch_terminal_event(app: &mut App, event: Event, out: &mut Vec
     if let Some(before) = launcher_before {
         launcher::keep_cursor(app, before, out);
     }
+    // Where that left the grid, for BACK / FORWARD — not for a key typed
+    // into a locked pane, which only went to the PTY and must not pay for
+    // the walk on its way to the echo.
+    if pressed && !app.pane.term_locked {
+        desk::note_place(app);
+    }
 }
 
 /// [`dispatch_terminal_event`]'s body: the event to its handler.

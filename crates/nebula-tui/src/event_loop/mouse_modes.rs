@@ -83,6 +83,8 @@ fn handle_overlay_mouse(
         }
         Overlay::Settings(_) => handle_settings_mouse(app, mouse, mouse_pos, out),
         Overlay::Metrics(_) => handle_metrics_mouse(app, mouse, mouse_pos, out),
+        Overlay::Subagents(_) => desk::handle_subagents_mouse(app, mouse, out),
+        Overlay::Ado(_) => ado::handle_mouse(app, mouse, out),
         _ => true,
     }
 }
@@ -937,6 +939,16 @@ fn handle_left_click_target(app: &mut App, mouse: MouseEvent, out: &mut Vec<Clie
         Some(HitTarget::CardMenu(at)) => launcher::click_card_menu(app, at, out),
         Some(HitTarget::LauncherBandNew(i)) => launcher::click_band_new(app, i, out),
         Some(HitTarget::LauncherPaneMenu) => launcher::click_pane_menu(app),
+        // The views ported from the desktop: a card's or the pane's ⑂
+        // chip opens the SUBAGENTS OVERLAY on its session, an ATTENTION
+        // STRIP count the next session in that state, ‹ › back and
+        // forward.
+        Some(HitTarget::SubagentChip(id)) => desk::open_subagents(app, Some(id)),
+        Some(HitTarget::Attention(tone)) => desk::jump_attention_kind(app, tone, out),
+        Some(HitTarget::NavBack) => desk::go(app, -1, out),
+        Some(HitTarget::NavForward) => desk::go(app, 1, out),
+        Some(HitTarget::AdoButton) => ado::open(app),
+        Some(HitTarget::CommandsButton) => desk::open_command_palette(app),
         Some(
             target @ (HitTarget::ProjectRow(_)
             | HitTarget::WorktreeRow(_)

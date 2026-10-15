@@ -287,13 +287,13 @@ fn handle_global_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>)
     dispatch_action(app, action, armed, chord, out);
 }
 
-/// A BUTTON's click: the action its key runs, through the very dispatch a
+/// A BUTTON's click, or the COMMAND PALETTE's Enter on an action row: the action its key runs, through the very dispatch a
 /// press takes after the keymap lookup ([`dispatch_action`]), so a click
 /// and its key can never come to mean two things. No double tap is armed
 /// (a click is one press), and the chord handed on is the action's first
 /// binding — what the KEY COMBO DISPLAY shows — or, for an action left
 /// unbound, a chord no key sends, which the display leaves out.
-pub(super) fn run_action(
+pub(crate) fn run_action(
     app: &mut App,
     action: crate::keymap::Action,
     out: &mut Vec<ClientRequest>,
@@ -396,6 +396,12 @@ fn handle_global_action(
         Action::ToggleOrchestratorView => orchestrator::toggle(app, out),
         // ⇧U: the ACCOUNTS OVERLAY.
         Action::Accounts => accounts::open(app),
+        // The views ported from the desktop window.
+        // ⇧B: the AZURE DEVOPS OVERLAY.
+        Action::Ado => ado::open(app),
+        Action::CommandPalette | Action::NavBack | Action::NavForward | Action::Subagents => {
+            desk::handle_action(app, action, out)
+        }
         // Listed rather than `_`: a new action is a compile error here
         // until it is routed, never an `unreachable!` at the user's press.
         Action::GitDiff

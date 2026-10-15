@@ -263,6 +263,7 @@ pub(crate) fn refresh_palette(app: &mut App) {
     if let Some(Overlay::Palette(palette)) = &mut app.modals.overlay {
         palette.rebuild(&app.tree, &app.github.open_prs, app.launcher.hide_draft_prs);
     }
+    desk::refresh_subagents(app);
 }
 
 /// What each panel cursor pointed at, captured with `selection_snapshot`

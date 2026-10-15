@@ -557,6 +557,12 @@ pub(crate) fn update_pointer(app: &mut App, mouse: &MouseEvent) {
                 | HitTarget::LauncherPullRequests
                 | HitTarget::LauncherIssues
                 | HitTarget::LauncherWelcomePrompt
+                | HitTarget::SubagentChip(_)
+                | HitTarget::Attention(_)
+                | HitTarget::NavBack
+                | HitTarget::NavForward
+                | HitTarget::AdoButton
+                | HitTarget::CommandsButton
                 | HitTarget::FooterUsage
                 | HitTarget::Button(_)
                 | HitTarget::FooterHint(_)

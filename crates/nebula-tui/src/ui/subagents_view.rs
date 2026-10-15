@@ -1,0 +1,281 @@
+//! The SUBAGENTS' drawing (`crate::subagents` is the model,
+//! `event_loop::desk` the keys): the `⑂ 1/3` chip on a session card's
+//! bottom edge and in the PANE's header, and the SUBAGENTS OVERLAY — the
+//! desktop overview's SESSION TREE, sessions nested under the session that
+//! started them and each one's subagents under it.
+
+use super::*;
+use crate::subagents::{Row, SubagentsView, Tone};
+use nebula_core::AgentId;
+use ratatui::buffer::Buffer;
+
+/// The overlay's width; its height follows the rows.
+const WIDTH: u16 = 88;
+
+/// The chip's glyph: a fork, for work split off the session.
+const FORK: &str = "⑂";
+
+/// A tone's color: the STATUS DOT's for the same state.
+pub(crate) fn tone_color(tone: Tone, th: Theme) -> Color {
+    match tone {
+        Tone::Needs => th.err,
+        Tone::Failed => th.special,
+        Tone::Unread => th.done,
+        Tone::Running => th.warn,
+        Tone::Done => th.ok,
+        Tone::Stopped | Tone::Idle => th.dim,
+    }
+}
+
+/// `⑂ 1/3` — running of all — for a session with subagents; None
+/// without any. In the running color while one runs, dim after.
+fn chip(app: &App, id: &AgentId, th: Theme) -> Option<(String, Color)> {
+    let (running, all) = app.desk.subagents.counts(id);
+    if all == 0 {
+        return None;
+    }
+    let fg = if running > 0 { th.warn } else { th.dim };
+    Some((format!(" {FORK} {running}/{all} "), fg))
+}
+
+/// Where a card drawn at `area` puts its chip `width` cells wide: the
+/// right end of its bottom edge, a cell of the frame either side. None
+/// on a card too narrow to keep its frame's corners clear.
+fn chip_rect(area: Rect, width: u16) -> Option<Rect> {
+    if area.height < 3 || area.width < width + 4 {
+        return None;
+    }
+    Some(Rect {
+        x: area.right() - 2 - width,
+        y: area.bottom() - 1,
+        width,
+        height: 1,
+    })
+}
+
+/// The chip on the card of session `a` drawn at `area`: laid over its
+/// bottom edge, underlined under the pointer.
+pub(crate) fn draw_card_chip(
+    buf: &mut Buffer,
+    app: &App,
+    area: Rect,
+    a: &nebula_core::Agent,
+    th: Theme,
+) {
+    let Some((label, fg)) = chip(app, &a.id, th) else {
+        return;
+    };
+    let Some(r) = chip_rect(area, Span::raw(label.as_str()).width() as u16) else {
+        return;
+    };
+    let mut style = Style::default().fg(fg);
+    if app.launcher.hover_crumb == Some(HitTarget::SubagentChip(a.id.clone())) {
+        style = style.add_modifier(Modifier::UNDERLINED);
+    }
+    buf.set_string(r.x, r.y, label, style);
+}
+
+/// The click target of the chip on `card` placed at `placed`: only while
+/// the card's bottom edge is on screen. Registered ahead of the card, so
+/// the chip wins.
+pub(crate) fn card_chip_hit(
+    app: &App,
+    card: &crate::launcher::Card,
+    placed: crate::launcher::Placed,
+) -> Option<(Rect, HitTarget)> {
+    let crate::launcher::Card::Session(row) = card else {
+        return None;
+    };
+    if placed.cut_bottom > 0 {
+        return None;
+    }
+    let (label, _) = chip(app, &row.agent.id, app.chrome.theme)?;
+    // The whole card's height decides whether it has room; its bottom
+    // edge is on screen, so the chip's row is the placed rect's last.
+    let whole = Rect {
+        height: placed.rect.height + placed.cut_top,
+        ..placed.rect
+    };
+    let r = chip_rect(whole, Span::raw(label.as_str()).width() as u16)?;
+    let r = Rect {
+        y: placed.rect.bottom().checked_sub(1)?,
+        ..r
+    };
+    Some((r, HitTarget::SubagentChip(row.agent.id.clone())))
+}
+
+/// The PANE header's chip for session `id`: `⑂ 2 of 3 subagents
+/// running`, or `⑂ 3 subagents` once none runs. None without any.
+pub(crate) fn pane_chip(app: &App, id: &AgentId) -> Option<Vec<Span<'static>>> {
+    let th = app.chrome.theme;
+    let (running, all) = app.desk.subagents.counts(id);
+    if all == 0 {
+        return None;
+    }
+    let noun = if all == 1 { "subagent" } else { "subagents" };
+    let (text, fg) = if running > 0 {
+        (format!("{FORK} {running} of {all} {noun} running"), th.warn)
+    } else {
+        (format!("{FORK} {all} {noun}"), th.muted)
+    };
+    let mut style = Style::default().fg(fg);
+    if app.launcher.hover_crumb == Some(HitTarget::SubagentChip(id.clone())) {
+        style = style.add_modifier(Modifier::UNDERLINED);
+    }
+    // Its key beside it, the way the header's buttons carry theirs.
+    Some(vec![
+        Span::raw("  "),
+        Span::styled(text, style),
+        Span::styled(
+            format!(" {}", key_hint(app, Action::Subagents)),
+            Style::default().fg(th.dim),
+        ),
+    ])
+}
+
+/// The column a row at `depth` draws its fold mark at, inside the list
+/// rect `area` — past the selection mark, two cells a level.
+pub(crate) fn caret_x(area: Rect, depth: usize) -> u16 {
+    area.x + 1 + (depth as u16).saturating_mul(2)
+}
+
+/// One row of the tree: the indent, the fold mark, the dot in the row's
+/// tone, the name, what it is (dim), what a fold hides, its age.
+fn row_spans(row: &Row, width: usize, now: i64, th: Theme) -> Vec<Span<'static>> {
+    let n = &row.node;
+    let indent = "  ".repeat(n.depth);
+    let caret = if !row.has_kids() {
+        "  "
+    } else if row.expanded {
+        "▾ "
+    } else {
+        "▸ "
+    };
+    let dot = if n.session { "● " } else { "◦ " };
+    let color = tone_color(n.tone, th);
+    let mut tail = String::new();
+    if n.when > 0 {
+        tail = crate::hosts::ago_label(now - n.when);
+    }
+    let hidden = if row.hidden > 0 {
+        format!("  +{}", row.hidden)
+    } else {
+        String::new()
+    };
+    let word = format!("  {}", n.tone.word());
+    let meta = format!("  {}", n.meta);
+    let lead = indent.chars().count() + 4;
+    let fixed = lead
+        + word.chars().count()
+        + meta.chars().count()
+        + hidden.chars().count()
+        + tail.chars().count()
+        + 2;
+    let label = truncate(&n.label, width.saturating_sub(fixed).max(8));
+    let name_style = if n.session {
+        Style::default().fg(th.text).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(th.muted)
+    };
+    let mut spans = vec![
+        Span::raw(indent),
+        Span::styled(caret, Style::default().fg(th.muted)),
+        Span::styled(dot, Style::default().fg(color)),
+        Span::styled(label.clone(), name_style),
+        Span::styled(word.clone(), Style::default().fg(color)),
+        Span::styled(meta.clone(), Style::default().fg(th.dim)),
+        Span::styled(hidden.clone(), Style::default().fg(th.muted)),
+    ];
+    let used = lead
+        + label.chars().count()
+        + word.chars().count()
+        + meta.chars().count()
+        + hidden.chars().count();
+    if !tail.is_empty() && used + tail.chars().count() + 1 < width {
+        spans.push(Span::raw(" ".repeat(width - used - tail.chars().count())));
+        spans.push(Span::styled(tail, Style::default().fg(th.dim)));
+    }
+    spans
+}
+
+pub(super) fn draw(f: &mut Frame, app: &mut App, mut view: SubagentsView) {
+    let th = app.chrome.theme;
+    let now = crate::app::now_ms();
+    let ceiling = f.area().height.saturating_sub(2);
+    let height = (view.rows.len() as u16 + 4).clamp(8, 30).min(ceiling);
+    let area = centered_rect(f.area(), WIDTH, height);
+    let scope = match &view.project {
+        Some(id) => app
+            .tree
+            .projects
+            .iter()
+            .find(|p| &p.id == id)
+            .map_or_else(|| "project".to_string(), |p| p.name.clone()),
+        None => "all projects".to_string(),
+    };
+    let inner = render_modal_frame(f, area, format!(" Sessions · {scope} "), th);
+    // The first row: what the tree holds, and Tab's other scope.
+    let sessions = view.rows.iter().filter(|r| r.node.session).count();
+    let running: usize = view
+        .rows
+        .iter()
+        .filter(|r| r.node.session)
+        .map(|r| app.desk.subagents.counts(&r.node.opens).0)
+        .sum();
+    if let Some(head) = row_rect(inner, 0) {
+        let other = if view.project.is_some() {
+            "Tab: every project"
+        } else {
+            "Tab: this project"
+        };
+        let line = Line::from(vec![
+            Span::styled(
+                format!(
+                    " {sessions} session{} · {running} subagent{} running",
+                    if sessions == 1 { "" } else { "s" },
+                    if running == 1 { "" } else { "s" },
+                ),
+                Style::default().fg(th.muted),
+            ),
+            Span::styled(format!("   {other}"), Style::default().fg(th.dim)),
+        ]);
+        f.render_widget(Paragraph::new(line), head);
+    }
+    let list = below_first_row(inner);
+    if view.rows.is_empty() {
+        empty_list_row(
+            f,
+            list,
+            " no live sessions here: Tab shows every project",
+            th,
+        );
+    }
+    let fit = usize::from(list.height.max(1));
+    // The last frame's window, moved only as far as the cursor needs.
+    let mut start = view.scroll.min(view.cursor);
+    if view.cursor >= start + fit {
+        start = view.cursor + 1 - fit;
+    }
+    let width = usize::from(list.width).saturating_sub(2);
+    for (i, row) in view.rows.iter().enumerate().skip(start).take(fit) {
+        let Some(r) = row_rect(list, i - start) else {
+            break;
+        };
+        render_row(
+            f,
+            r,
+            row_spans(row, width, now, th),
+            i == view.cursor,
+            true,
+            th,
+        );
+    }
+    view.area = area;
+    view.list_area = list;
+    view.scroll = start;
+    if let Some(Overlay::Subagents(v)) = &mut app.modals.overlay {
+        v.area = view.area;
+        v.list_area = view.list_area;
+        v.scroll = view.scroll;
+    }
+}

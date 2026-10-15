@@ -225,6 +225,20 @@ pub enum HitTarget {
     /// The `⋯` in the PANE's header: the CONTEXT MENU of the card the
     /// pane reads, hung under the button.
     LauncherPaneMenu,
+    /// The `⑂ 2` SUBAGENT CHIP on a session's card, or in the PANE's
+    /// header, by the session: a click opens the SUBAGENTS OVERLAY on it.
+    SubagentChip(AgentId),
+    /// A count on the header's ATTENTION STRIP: a click opens the next
+    /// session in that state, round and round.
+    Attention(crate::subagents::Tone),
+    /// The header's BACK and FORWARD buttons (`‹ ›`), as `⌥←` / `⌥→`.
+    NavBack,
+    NavForward,
+    /// The header's `ado` button, on a project whose remote is on Azure
+    /// DevOps: the AZURE DEVOPS OVERLAY, as `⇧B`.
+    AdoButton,
+    /// The header's `commands` button: the COMMAND PALETTE, as `^K`.
+    CommandsButton,
 }
 
 /// Default outer width of the diff modal's file-list panel.
@@ -2525,6 +2539,10 @@ pub enum Overlay {
     ProjectPicker(crate::launcher::ProjectPicker),
     /// `⇧U`: the ACCOUNTS OVERLAY — plan usage and login per account.
     Accounts(crate::accounts_overlay::AccountsView),
+    /// `⇧S`: the SUBAGENTS OVERLAY — the project's SESSION TREE.
+    Subagents(crate::subagents::SubagentsView),
+    /// `⇧B`: the AZURE DEVOPS OVERLAY — tasks, pull requests, branches.
+    Ado(crate::ado::AdoView),
 }
 
 /// Rows optimistically removed for an in-flight DeleteWorktree, kept so an
@@ -4760,6 +4778,9 @@ pub struct App {
     pub github: GithubState,
     /// The ORCHESTRATOR VIEW (F10) and the reviews it opens.
     pub orch: crate::orchestrator_view::OrchState,
+    /// The views ported from the desktop window: subagents, the attention
+    /// strip, back / forward.
+    pub desk: crate::desk::DeskState,
 }
 
 impl Default for App {
@@ -4781,6 +4802,7 @@ impl App {
             jobs: JobState::default(),
             github: GithubState::default(),
             orch: crate::orchestrator_view::OrchState::default(),
+            desk: crate::desk::DeskState::default(),
         };
         app.launcher.columns_recent_prompts_count = 3;
         app

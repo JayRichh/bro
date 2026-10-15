@@ -14,11 +14,14 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
 mod accounts_view;
+mod ado_view;
+mod attention_view;
 mod footer;
 mod launcher_view;
 mod overlay;
 mod review_view;
 mod rows;
+pub(crate) mod subagents_view;
 
 pub(crate) use rows::{fit_to_width, render_row, status_color, status_dot};
 

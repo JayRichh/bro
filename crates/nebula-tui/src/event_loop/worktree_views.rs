@@ -581,6 +581,7 @@ pub(crate) fn land_view_answer(app: &mut App, answer: crate::view_jobs::Answer) 
             }
         }
         Answer::Files { ticket, result } => land_worktree_files(app, ticket, result),
+        Answer::Ado(answer) => super::ado::land(app, answer),
         Answer::DeleteCheck { worktree, result } => {
             crate::delete_check::land(app, worktree, result)
         }

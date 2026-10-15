@@ -257,6 +257,18 @@ fn draw_head(f: &mut Frame, app: &mut App, body: Rect, count: HeadCount, hidden:
             Paragraph::new(Line::from(spans)).alignment(ratatui::layout::Alignment::Right),
             r,
         );
+        // BACK / FORWARD and the ATTENTION STRIP, in what the tabs and
+        // the counts leave between them.
+        let gap = (r.width as usize).saturating_sub(taken + used + HEAD_GAP * 2);
+        super::attention_view::draw(
+            f,
+            app,
+            Rect {
+                x: r.x + (taken + HEAD_GAP) as u16,
+                width: gap as u16,
+                ..r
+            },
+        );
     }
     draw_rule(f, body, 2, th.edge);
 }
@@ -1115,6 +1127,9 @@ fn draw_bands(
                     app.chrome.hits.extend(card_issue_hit(app, card, placed));
                     app.chrome
                         .hits
+                        .extend(super::subagents_view::card_chip_hit(app, card, placed));
+                    app.chrome
+                        .hits
                         .push((placed.rect, HitTarget::LauncherCard(at)));
                 }
             }
@@ -1145,6 +1160,9 @@ fn draw_bands(
                     selected_card_buttons(f, app, card, slot.at, placed, selected);
                     note_tail_card(app, card);
                     app.chrome.hits.extend(card_issue_hit(app, card, placed));
+                    app.chrome
+                        .hits
+                        .extend(super::subagents_view::card_chip_hit(app, card, placed));
                     app.chrome
                         .hits
                         .push((placed.rect, HitTarget::LauncherCard(slot.at)));
@@ -1723,7 +1741,8 @@ fn draw_any_card(
 ) {
     match card {
         crate::launcher::Card::Session(row) => {
-            draw_card(buf, app, area, row, selected, focused, th, cfg)
+            draw_card(buf, app, area, row, selected, focused, th, cfg);
+            super::subagents_view::draw_card_chip(buf, app, area, &row.agent, th);
         }
         crate::launcher::Card::Terminal(t) => draw_chip(buf, app, area, t, selected, focused, th),
     }
@@ -3394,11 +3413,20 @@ fn pane_title(app: &App, room: usize) -> Vec<PaneTab> {
         Some(crate::launcher::Card::Session(row)) => {
             let a = &row.agent;
             let name = truncate(&a.name, name_room);
-            let used = 2 + name.chars().count();
+            let mut used = 2 + name.chars().count();
             tabs.push(PaneTab::plain(vec![
                 status_dot(Some(a.status), a.unseen, th),
                 Span::styled(name, lit),
             ]));
+            // Its SUBAGENTS, a button onto the SUBAGENTS OVERLAY.
+            if let Some(spans) = super::subagents_view::pane_chip(app, &a.id) {
+                let tab = PaneTab {
+                    spans,
+                    hit: Some(HitTarget::SubagentChip(a.id.clone())),
+                };
+                used += tab.width();
+                tabs.push(tab);
+            }
             // A session's header says what the desktop's does, as far as
             // the row allows ([`fact_spans`]); the checkout is one of the
             // facts, so the block below is the terminal's.
