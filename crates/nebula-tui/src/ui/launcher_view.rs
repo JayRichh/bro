@@ -3343,6 +3343,7 @@ const PROMPT_MIN: usize = 12;
 /// its age — each whole or not at all, and once one has not fitted
 /// nothing after it is tried, so a narrowing pane only takes words away
 /// — then the last prompt, cut to whatever is left.
+#[cfg(test)]
 fn fact_spans(facts: &PaneFacts, room: usize, th: Theme) -> Vec<Span<'static>> {
     fact_groups(facts, room, th)
         .into_iter()

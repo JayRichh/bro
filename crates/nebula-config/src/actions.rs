@@ -726,7 +726,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::Accounts,
         id: "accounts",
         label: "Accounts and usage",
-        hint: "Every account (profiles, and each CLI's own login) with its 5h and weekly plan usage, resets and login; Space switches a profile on or off, d makes it its harness's default",
+        hint: "Every account (profiles, and each CLI's own login) with its 5h and weekly plan usage, resets and login; a adds one, Enter edits, Space switches it on or off, d makes it the default, l signs it in, p makes it a repo's default, s sets the spread",
         group: "GENERAL",
         scope: Scope::Global,
         defaults: &["shift+u"],
