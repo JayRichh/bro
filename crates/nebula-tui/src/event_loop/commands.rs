@@ -337,6 +337,9 @@ pub(crate) fn run_pending_action(
         }
         PendingAction::DeleteAgent(id) => delete_agent(app, id, out),
         PendingAction::MoveAgent { id, worktree } => launcher::move_agent(app, id, worktree, out),
+        PendingAction::SwitchAccount { id, profile } => {
+            crate::account_switch::send(app, id, profile, out);
+        }
         PendingAction::CloseTerminal(id) => close_terminal(app, id, out),
         PendingAction::DeleteLink(id) => {
             send(app, out, |req_id| ClientRequest::DeleteLink { req_id, id });
@@ -608,6 +611,10 @@ pub(crate) fn run_menu_action(app: &mut App, action: MenuAction, out: &mut Vec<C
         MenuAction::SendCloudMessage(id) => open_prompt(app, PromptKind::CloudMessage { id }),
         MenuAction::DuplicateAgent(id) => launcher::duplicate_agent(app, id),
         MenuAction::MoveAgentPicker(id) => launcher::open_move_picker(app, id),
+        MenuAction::SwitchAccountPicker(id) => crate::account_switch::open_picker(app, id),
+        MenuAction::SwitchAccount { id, profile } => {
+            crate::account_switch::confirm(app, id, profile)
+        }
         MenuAction::MoveAgent { id, worktree } => launcher::move_agent(app, id, worktree, out),
         MenuAction::RenameAgent(id) => open_prompt(app, PromptKind::RenameAgent { id }),
         MenuAction::ArchiveAgent(id) => {

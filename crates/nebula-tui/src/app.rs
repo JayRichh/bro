@@ -387,6 +387,16 @@ pub enum MenuAction {
     /// A card menu's **Move to…**: the MOVE PICKER of the checkouts
     /// session `id` can move to, what `m` on the card opens.
     MoveAgentPicker(AgentId),
+    /// A card menu's (or the pane header's account chip's) **Move to
+    /// account…**: the accounts session `id` can restart on
+    /// (`account_switch::open_picker`).
+    SwitchAccountPicker(AgentId),
+    /// A row of that picker: confirm, then restart session `id` fresh on
+    /// `profile` (None: its harness's own login).
+    SwitchAccount {
+        id: AgentId,
+        profile: Option<String>,
+    },
     /// A MOVE PICKER row, or a card dropped on another band: move the
     /// session into `worktree` (`ClientRequest::MoveAgent`).
     MoveAgent {
@@ -747,6 +757,12 @@ pub enum PendingAction {
         terminals: Vec<TerminalId>,
     },
     DeleteAgent(AgentId),
+    /// MOVE TO ACCOUNT, confirmed: `ClientRequest::SwitchAgentAccount`
+    /// (`account_switch::send`).
+    SwitchAccount {
+        id: AgentId,
+        profile: Option<String>,
+    },
     /// A session card dropped on another band or PROJECT TAB, with the
     /// **Confirm drag move** SETTING on: move it once the dialog is
     /// answered.
