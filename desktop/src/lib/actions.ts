@@ -22,6 +22,8 @@ import { moveToAccount, pickProjectAccount, SWITCH_UNAVAILABLE } from './account
 import { canSwitch } from './accounts/view';
 import { whileCutting } from './worktrees/rows.svelte';
 import { moveStep, stepInFor, type StepIn } from './reorder.svelte';
+import { openComposer, openMerge } from './ship/sheet.svelte';
+import { reviewVerbs } from './ship/ship';
 
 export type Target =
   /** `viaSub`: picked from one of its subagents' rows, so it acts on
@@ -85,9 +87,9 @@ export async function renameAgent(id: string) {
 /** Archive a session and the thread nested under it. `viaSub`: asked
  *  from a subagent's row, which acts on its parent, so it always confirms
  *  and says it is the parent going. */
-export async function archiveAgent(id: string, viaSub = false) {
+export async function archiveAgent(id: string, viaSub = false): Promise<boolean> {
   const a = agentOf(id);
-  if (!a || a.archived) return;
+  if (!a || a.archived) return false;
   const kids = descendants(m(), id).filter((k) => !k.archived);
   if (viaSub || kids.length || app.launch.ask_before_archive !== false) {
     const r = await ask.confirm({
@@ -100,15 +102,57 @@ export async function archiveAgent(id: string, viaSub = false) {
       detail: kids.length ? [a.name, ...kids.map((k) => k.name)] : undefined,
       confirm: 'Archive',
     });
-    if (!r.ok) return;
+    if (!r.ok) return false;
   }
   // The model may have moved while the dialog was up: act on it as it is now.
   const now = agentOf(id);
-  if (!now || now.archived) return;
+  if (!now || now.archived) return false;
   const thread = descendants(m(), id).filter((k) => !k.archived);
+  let done = false;
   await attempt('Could not archive', async () => {
     for (const x of [now, ...thread]) await api.archiveAgent(x.id);
+    done = true;
   });
+  return done;
+}
+
+/** Until the model shows `ok`, at most `ms`; whether it did. */
+async function until(ok: () => boolean, ms = 3000): Promise<boolean> {
+  for (let waited = 0; !ok() && waited < ms; waited += 50) await new Promise((r) => setTimeout(r, 50));
+  return ok();
+}
+
+/** A Done card let go on Archived (core's `ArchiveAndOfferWorktreeDelete`):
+ *  archive it, then, when that leaves its linked worktree with nothing live,
+ *  offer the worktree's safe delete (worktrees/delete.ts), as a session
+ *  delete does. Uncommitted work there needs its box ticked. */
+export async function archiveAndOfferWorktree(id: string) {
+  const a = agentOf(id);
+  if (!a || a.archived) return;
+  const { worktree_id: wt, name } = a;
+  if (!(await archiveAgent(id))) return;
+  // The offer counts live cards off the model: wait for the archive to land.
+  if (!(await until(() => !!agentOf(id)?.archived))) return;
+  const p = await prepareOffer(wt, 0, []);
+  if (!p) return;
+  const o = offerConfirm(p);
+  if (!o.check) {
+    // Delete emptied worktree is on and the checkout is clean: no question.
+    toast(o.line);
+    await attempt('Could not delete the worktree', async () => deleteEmptied(stillOffered(p, false, 0, [])));
+    return;
+  }
+  const risky = !o.checked;
+  const r = await ask.confirm({
+    title: 'Delete its worktree too?',
+    message: `Archived "${name}". ${o.line}`,
+    detail: o.detail,
+    confirm: 'Delete worktree',
+    danger: true,
+    ...(risky ? { check: o.check, checked: false } : {}),
+  });
+  if (!r.ok || (risky && !r.checked)) return;
+  await attempt('Could not delete the worktree', async () => deleteEmptied(stillOffered(p, true, 0, [])));
 }
 
 /** Bring back an archived session and the thread archived with it. */
@@ -415,6 +459,11 @@ function rows(on: AppliesTo, table: VerbTable): MenuItem[] {
   });
 }
 
+/** A session's ship verbs (Open PR or View PR, Merge, the worktree delete). */
+function shipVerbs(a: Agent) {
+  return reviewVerbs(m().prs[a.worktree_id], m().cards[a.id]?.drops?.pr, !!worktreeOf(a.worktree_id)?.is_main);
+}
+
 /** A session's verbs as the window runs them: none an archived one does
  *  not have, no reorder from a subagent's row (it acts on its parent). */
 function agentVerbs(a: Agent, viaSub = false, where: StepIn = stepInFor()): VerbTable {
@@ -441,6 +490,14 @@ function agentVerbs(a: Agent, viaSub = false, where: StepIn = stepInFor()): Verb
     archive: { run: () => archiveAgent(a.id, viaSub), label: viaSub ? 'Archive parent session\u2026' : undefined },
     delete: { run: () => deleteAgent(a.id) },
   };
+  // Its worktree's pull request: the composer without one, the page with
+  // one open (the review row's Open PR / View PR).
+  const pr = m().prs[a.worktree_id];
+  const rv = shipVerbs(a);
+  t.open_pull_request =
+    rv.pr.kind === 'view' && pr
+      ? { run: () => api.openUrl(pr.url).catch((e) => toast(String(e))), label: `View PR #${pr.number}` }
+      : { run: () => openComposer(a.worktree_id, a.id), label: 'Open PR\u2026', disabled: !!rv.pr.why };
   if (!viaSub) {
     t.reorder_up = { run: () => moveStep({ kind: 'agent', id: a.id }, -1, where) };
     t.reorder_down = { run: () => moveStep({ kind: 'agent', id: a.id }, 1, where) };
@@ -555,8 +612,10 @@ export function agentMenu(a: Agent, viaSub = false, where: StepIn = stepInFor())
   const verbs = rows('session', agentVerbs(a, viaSub, where));
   if (a.archived) return [...head, ...verbs];
   // The window's own, ahead of the rows that take the session away.
+  const merge = shipVerbs(a).merge;
   const extra: MenuEntry[] = [
     ...(a.unseen ? [{ label: 'Mark seen', run: () => seeAgent(a.id) }] : []),
+    ...(merge ? [{ label: 'Merge PR\u2026', run: () => openMerge(a.worktree_id, a.id), ...(merge.why ? { disabled: true } : {}) }] : []),
     ...orchestratorMenuItems(a).filter((e) => typeof e === 'object' && 'label' in e && e.label === 'Review\u2026'),
   ];
   const at = verbs.findIndex((e) => e.danger || e.label === menuLabel('archive', 'session') || e.label === 'Archive parent session\u2026');

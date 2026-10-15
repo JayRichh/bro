@@ -3,7 +3,8 @@
 // `nav` (shell/history.svelte.ts); this file follows it.
 
 import { untrack } from 'svelte';
-import { api, type AccountRow, type Launchables, type Model, type SessionRef } from './api';
+import { api, type AccountRow, type Launchables, type Model, type Scope, type SessionRef } from './api';
+import { pruneScope, repoScope, sameScope, tidy } from './scope';
 import { ado, type AdoContextInfo } from './ado/api';
 import { nav, type Place } from './shell/history.svelte';
 import { applyOverrides } from './shortcuts';
@@ -40,7 +41,9 @@ const empty: Model = {
   accounts: {},
   contexts: {},
   cards: {},
-  lanes: { needs: [], running: [], unseen: [], done: [], pr: [] }, hidden: { needs: 0, running: 0, unseen: 0, done: 0, pr: 0 }, scope: {},
+  lanes: { needs: [], running: [], unseen: [], done: [], pr: [] },
+  hidden: { needs: 0, running: 0, unseen: 0, done: 0, pr: 0 },
+  scope: {},
 };
 
 export const app = $state({
@@ -84,7 +87,17 @@ export const app = $state({
   runCommands: {} as Record<string, string>,
   /** The overview lists archived sessions too (Shift+A). */
   showArchived: false,
+  /** The session whose review the Diff view shows (a Review or Ship card
+   *  opened): its verbs ride above the diff while it reads its worktree. */
+  review: null as string | null,
 });
+
+/** Narrow the window to `s` (`{}`: everything). The Tauri side holds it
+ *  and pushes the model back narrowed; `model.scope` is the truth. */
+export function setScope(s: Scope) {
+  if (sameScope(s, app.model.scope)) return;
+  api.boardScope(tidy(s)).catch((e) => toast(`Could not set the scope: ${e}`));
+}
 
 /** The window's own preferences, saved under `desktop` in config.json. */
 export type DesktopPref = 'theme' | 'diff_mode' | 'home';
@@ -204,6 +217,7 @@ export function openSession(s: SessionRef) {
 }
 
 export function openDiff(worktree: string | null) {
+  app.review = null;
   app.diffWorktree = worktree;
   app.diffRange = null;
   nav.go({ view: 'diff', repo: projectOf(worktree), item: worktree ?? undefined });
@@ -211,9 +225,24 @@ export function openDiff(worktree: string | null) {
 
 /** The Diff view on a range (`base` and `tip` as refs or SHAs), read in `worktree`. */
 export function openDiffRange(worktree: string, range: DiffRange) {
+  app.review = null;
   app.diffWorktree = worktree;
   app.diffRange = { base: range.base, tip: range.tip };
   nav.go({ view: 'diff', repo: projectOf(worktree), item: diffItem(worktree, range) });
+}
+
+/** A Review (or Ship) card opened: the board stays on the left, the
+ *  session's worktree diffed against its base on the right, the card's
+ *  verbs (reply, PR, merge, archive, delete worktree) above the diff. The
+ *  session is read, as opening it would. */
+export function openReview(agent: string) {
+  const a = app.model.agents.find((x) => x.id === agent);
+  if (!a) return;
+  app.session = { Agent: agent };
+  markSeen(app.session);
+  app.diffAgainst = 'base';
+  openDiff(a.worktree_id);
+  app.review = agent;
 }
 
 /** Leave the Diff view for wherever it was opened from (the orchestrator,
@@ -236,8 +265,10 @@ export function goHome(repo?: string) {
   nav.go({ view: app.home, repo });
 }
 
-/** A repo picked in the rail: go home and scroll its row into view. */
+/** A repo picked in the rail (or by its digit): narrow the scope to it, go
+ *  home and scroll its row into view. */
 export function revealRepo(repo: string) {
+  setScope(repoScope(app.model.scope, repo));
   goHome(repo);
   app.reveal.repo = repo;
   app.reveal.seq += 1;
@@ -327,6 +358,9 @@ let worktreeSig = '';
 function take(m: Model) {
   app.model = m;
   askAdo(m);
+  // A scope naming a repo, worktree or session that is gone lets it go.
+  const pruned = pruneScope(m);
+  if (pruned) setScope(pruned);
   // A session open on screen that turns unread again (a new turn finished
   // while you watch) is seen at once, as the TUI's pane does.
   seeOpenSession();

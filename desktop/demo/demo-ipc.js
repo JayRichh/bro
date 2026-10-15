@@ -60,7 +60,10 @@ const model = {
 // session per state, a nested one, a terminal and a PR.
 const ORCH_VIEWS = ['orchestrator', 'start-orchestrator', 'review', 'overview-cue'];
 const ORCH = ORCH_VIEWS.includes(q.get('view'));
-const W2 = ['menu', 'palette', 'help', 'quick', 'selftest', 'accounts', 'context', 'worktrees', 'wt-overview'].includes(q.get('view')) || ORCH;
+// The board shots (view=board, board-review, board-ship, board-scope):
+// every lane, a PR in Ship, commits past the base, the ship sheet, a scope.
+const BOARD = ['board', 'board-review', 'board-ship', 'board-scope'].includes(q.get('view'));
+const W2 = ['menu', 'palette', 'help', 'quick', 'selftest', 'accounts', 'context', 'worktrees', 'wt-overview'].includes(q.get('view')) || ORCH || BOARD;
 if (W2) {
   const a = (id, worktree_id, name, status, extra = {}) => ({
     id, worktree_id, name, status, archived: false, unseen: false, status_changed_at: now - 60_000,
@@ -87,6 +90,51 @@ if (W2) {
     model.terminals.push({ id: 't2', worktree_id: 'w3', name: 'run', sort_order: 1, alive: true, run_command: 'npm run dev' });
   }
 }
+
+if (BOARD) {
+  model.agents.push({
+    id: 'a6', worktree_id: 'w2', name: 'gst-docs', status: 'finished', archived: false, unseen: false, status_changed_at: now - 1_900_000,
+    kind: 'claude', custom_harness: null, model: null, effort: null, profile: 'work', alive: true,
+    recent_prompts: [{ text: 'Document the GST rounding rule', submitted_at: now - 2_000_000 }], role: 'worker', sort_order: 0, parent: null,
+  });
+  model.prs.w2 = { ...model.prs.w2, draft: false, state: 'open' };
+}
+// Lanes, cards and the scope as the Tauri side works them out (a
+// stand-in for nebula-core's rule, enough for the shots).
+const LANE_OF = { a1: 'running', a5: 'running', a2: 'needs', a3: 'unseen', a6: 'pr', a4: 'done', o1: 'done' };
+const R = (reason) => ({ act: 'refuse', reason });
+function dropsFor(l) {
+  const d = {
+    running: R('Only the agent puts a card in Running, by starting a turn: send it a follow-up.'),
+    needs: R('Only the agent puts a card in Needs you, by asking.'),
+    unseen: R('Review comes from a turn finishing or from new changes; a card cannot be sent back to it.'),
+    pr: R('Nothing to ship from Done: its worktree has no changes, or its pull request already landed.'),
+    done: R('Running is the agent\u2019s: the card moves on when the turn ends.'),
+    archived: { act: l === 'done' ? 'archive_and_offer_worktree_delete' : 'archive' },
+  };
+  d[l] = { act: 'reorder' };
+  if (l === 'unseen') Object.assign(d, { pr: { act: 'open_pr' }, done: R('Its worktree has changes no pull request carries: commit and push them, ship them (drop on Ship) or archive the card.') });
+  if (l === 'pr') d.done = { act: 'merge_pr' };
+  return d;
+}
+function layOut() {
+  const sc = model.scope ?? {};
+  const proj = (a) => model.worktrees.find((w) => w.id === a.worktree_id)?.project_id;
+  const admits = (a) => (!sc.repo || proj(a) === sc.repo) && (!sc.worktree || a.worktree_id === sc.worktree) && (!sc.session || a.id === sc.session) && (!sc.account || (a.profile ?? '@' + a.kind) === sc.account);
+  model.cards = {};
+  model.lanes = { running: [], needs: [], unseen: [], pr: [], done: [] };
+  model.hidden = { running: 0, needs: 0, unseen: 0, pr: 0, done: 0 };
+  for (const a of model.agents) {
+    const lane = LANE_OF[a.id] ?? 'done';
+    const in_scope = admits(a);
+    model.cards[a.id] = { lane, tier: 3, in_scope, drops: dropsFor(lane) };
+    if (a.archived || a.role === 'orchestrator') continue;
+    if (in_scope) model.lanes[lane].push(a.id);
+    else model.hidden[lane] += 1;
+  }
+}
+model.scope = q.get('view') === 'board-scope' ? { repo: 'p1' } : {};
+layOut();
 
 // The orchestrator shots: a protocol-54 daemon, the orchestrator in its own
 // workspace, and sessions it started in both repos (one of them nested).
@@ -301,6 +349,19 @@ const sameTarget = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 const handlers = {
   get_state: () => model,
+  board_scope: ({ scope }) => {
+    model.scope = scope;
+    layOut();
+    callbacks[listeners['kete://state']]?.({ event: 'kete://state', id: 2, payload: { ...model } });
+    return null;
+  },
+  ship_status: ({ worktree }) =>
+    worktree === 'w2'
+      ? { forge: 'ado', remote: 'origin', branch: 'jari/gst-rounding', base: 'main', unpushed: 0, pr: { forge: 'ado', number: 418, url: model.prs.w2.url, title: 'Round GST per invoice', state: 'open', draft: false, head: 'jari/gst-rounding', base: 'main', headSha: null }, error: null, suggestion: null }
+      : { forge: 'github', remote: 'origin', branch: 'jari/cart-badge', base: 'main', unpushed: 2, pr: null, error: { kind: 'signIn', forge: 'github', message: 'GitHub sign-in needed: run `gh auth login`, then try again.', url: null }, suggestion: { title: 'Show the item count on the cart icon', body: '## Summary\n- Cart badge with the item count, capped at 99+\n' } },
+  ship_create_pr: () => Promise.reject({ kind: 'signIn', forge: 'github', message: 'GitHub sign-in needed: run `gh auth login`, then try again.', url: null }),
+  ship_merge: () => ({ pr: { number: 418 }, state: 'merged', branchDeleted: true, note: null }),
+  refresh_prs: () => null,
   'plugin:event|listen': ({ event, handler }) => ((listeners[event] = handler), handler),
   attach: ({ session, onEvent }) => {
     const text = session.Agent === 'o1' ? ORCH_SCREEN : CHILD_SCREEN;
@@ -359,7 +420,7 @@ const handlers = {
     Object.fromEntries(
       worktrees.map((id, i) => [
         id,
-        { changed: [0, 3, 0, 1, 0, 0][i % 6], untracked: i % 3 === 1 ? 1 : 0, upstream: id === 'w6' ? null : 'origin/x', ahead: id === 'w6' ? null : i % 3, behind: i === 0 ? 2 : 0, committed: Math.round((now - i * 7_200_000) / 1000) },
+        { changed: [0, 3, 0, 1, 0, 0][i % 6], untracked: i % 3 === 1 ? 1 : 0, upstream: id === 'w6' ? null : 'origin/x', ahead: id === 'w6' ? null : i % 3, behind: i === 0 ? 2 : 0, committed: Math.round((now - i * 7_200_000) / 1000), ahead_of_base: id === 'w4' ? 3 : id === 'w2' ? 5 : 0, on_default_branch: id === 'w1' || id === 'w3' },
       ]),
     ),
   worktree_reveal: () => null,
@@ -373,7 +434,7 @@ const handlers = {
     return null;
   },
   settings_reset: () => null,
-  desktop_prefs: () => ({ theme: 'system', diff_mode: 'side', home: 'overview' }),
+  desktop_prefs: () => ({ theme: 'system', diff_mode: 'side', home: BOARD ? 'board' : 'overview' }),
   config_problem: () => null,
   run_commands: () => ({ w1: 'dotnet watch run', w2: 'dotnet watch run' }),
   start_run: () => 't9',
@@ -538,6 +599,14 @@ window.addEventListener('load', async () => {
     return;
   }
   if (view === 'overview-cue' || view === 'wt-overview') return;
+  if (BOARD) {
+    if (view === 'board-review') (await until(() => document.querySelector('[data-target="agent:a3"] button'))).click();
+    if (view === 'board-ship') {
+      (await until(() => document.querySelector('[data-target="agent:a3"] button'))).click();
+      (await until(byText('[data-review-bar] button', 'Open PR\u2026'))).click();
+    }
+    return;
+  }
   if (view === 'worktrees') {
     (await until(() => document.querySelector('[aria-label="storefront-web views"] button'))).click();
     return;

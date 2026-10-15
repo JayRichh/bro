@@ -4,13 +4,15 @@
   import Empty from '../Empty.svelte';
   import RepoRow from './RepoRow.svelte';
   import { repoRows } from './repos';
+  import { scopeModel } from '../scope';
   import { refreshGit, shownIds, watchGit } from '../worktrees/rows.svelte';
   import { gitSignal } from '../worktrees/groups';
 
   let { active = true }: { active?: boolean } = $props();
   let scroller: HTMLDivElement;
 
-  const rows = $derived(repoRows(app.model, { archived: app.showArchived }));
+  // The repos, worktrees and sessions the scope admits (the header's chip).
+  const rows = $derived(repoRows(scopeModel(app.model), { archived: app.showArchived }));
 
   // The worktree groups' git state: read while the overview is up, and
   // again when a checkout comes or goes or a session there changes state.

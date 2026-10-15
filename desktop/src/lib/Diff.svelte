@@ -7,12 +7,21 @@
   import { toggleMaximize } from './commands';
   import { withKey } from './shortcuts';
   import Icon from './ui/Icon.svelte';
+  import ReviewBar from './ship/ReviewBar.svelte';
+  import { scopedWorktree } from './scope';
 
   let pane: DiffPane | undefined = $state();
 
   // No worktree named and no session to take one from: the view asks
   // which, rather than diffing whichever checkout happens to be first.
-  const worktree = $derived(app.diffWorktree ?? sessionWorktree(app.session) ?? null);
+  // A scope on one worktree (or one session) names it before the session does.
+  const worktree = $derived(app.diffWorktree ?? scopedWorktree(app.model) ?? sessionWorktree(app.session) ?? null);
+  // A review (a Review or Ship card opened) shows its verbs while the diff
+  // reads that session's worktree.
+  const review = $derived.by(() => {
+    const a = app.review ? app.model.agents.find((x) => x.id === app.review) : undefined;
+    return a && !app.diffRange && a.worktree_id === worktree ? a : null;
+  });
   const groups = $derived(groupWorktrees(app.model));
   const repo = $derived(projectOf(worktree) ?? '');
   // The mode is per repo, kept with the view's other state.
@@ -46,6 +55,8 @@
       return;
     }
     if (t.closest('input, textarea, select, .monaco-editor, .xterm')) return;
+    // A card or row beside the diff (the board in a review) keeps its keys.
+    if (t.closest('[data-board], [data-target]')) return;
     if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
     if (e.key === 's') setMode('side');
     else if (e.key === 'i') setMode('inline');
@@ -56,6 +67,9 @@
 
 <svelte:window onkeydown={onKey} />
 
+<div class="flex h-full min-h-0 flex-col">
+{#if review}<ReviewBar agent={review} />{/if}
+<div class="min-h-0 flex-1">
 <DiffPane
   bind:this={pane}
   {worktree}
@@ -126,3 +140,5 @@
     </button>
   {/snippet}
 </DiffPane>
+</div>
+</div>

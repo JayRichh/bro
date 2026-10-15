@@ -7,7 +7,8 @@
 // does without Force, so git still refuses anything with work in it.
 
 import { api, type Worktree } from '../api';
-import { app, focusQuickPrompt, openDiff, toast } from '../store.svelte';
+import { app, focusQuickPrompt, openDiff, setScope, toast } from '../store.svelte';
+import { dropPart, worktreeScope } from '../scope';
 import { ask, type MenuEntry } from '../ui/ui.svelte';
 import { keyLabel, keysOf, type ShortcutId } from '../shortcuts';
 import { deleteWorktree, moveItems, newTerminal, openEditor, openRemote } from '../actions';
@@ -71,11 +72,21 @@ export type Verb = {
   danger?: boolean;
 };
 
+/** Narrow the window to this checkout (the header's chip), or, scoped to
+ *  it already, widen back to its repo. */
+export function scopeVerb(w: Worktree): Verb {
+  const s = app.model.scope ?? {};
+  if (s.worktree === w.id)
+    return { id: 'scope', label: 'Widen the scope to the repo', short: 'unscope', run: () => setScope(dropPart(s, 'worktree')) };
+  return { id: 'scope', label: 'Scope to this worktree', short: 'scope', run: () => setScope(worktreeScope(app.model, s, w.id)) };
+}
+
 export function verbsFor(w: Worktree): Verb[] {
   const out: Verb[] = [
     { id: 'session', label: say('quick_prompt'), short: 'session', run: () => newSessionIn(w), rowKey: 's' },
     { id: 'terminal', label: say('new_terminal'), short: 'terminal', run: () => newTerminal(w.id), key: 'new_terminal' },
     { id: 'diff', label: say('git_diff'), short: 'diff', run: () => openDiff(w.id), rowKey: 'd' },
+    scopeVerb(w),
   ];
   if (w.is_main && canSwitchBranch(w.project_id))
     out.push({ id: 'branch', label: say('switch_branch'), short: 'branch', run: () => openBranchSwitch(w.project_id), key: 'switch_branch' });

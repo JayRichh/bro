@@ -534,6 +534,12 @@ export const api = {
     invoke<ShipStatus>('ship_status', { worktree, session: session ?? null }),
   shipCreatePr: (worktree: string, pr: ShipNewPr) => invoke<ShipCreated>('ship_create_pr', { worktree, pr }),
   shipMerge: (worktree: string, opts: ShipMergeOpts) => invoke<ShipMerged>('ship_merge', { worktree, opts }),
+  /** `gh auth login` in a new terminal in `worktree` (GitHub's sign-in, run
+   *  as an account's login is); the terminal's id. */
+  shipGhSignIn: (worktree: string) => invoke<string>('ship_gh_sign_in', { worktree }),
+  /** Narrow the board, the cards' `in_scope` and `model.scope` to `scope`
+   *  (`{}`: everything). The window's own; it survives a reconnect. */
+  boardScope: (scope: Scope) => invoke<void>('board_scope', { scope }),
   renameTerminal: (terminal: string, name: string) => invoke<void>('rename_terminal', { terminal, name }),
   closeTerminal: (terminal: string) => invoke<void>('close_terminal', { terminal }),
   followUp: (agent: string, text: string) => invoke<void>('follow_up', { agent, text }),

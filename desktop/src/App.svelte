@@ -16,6 +16,8 @@
   import { nav } from './lib/shell/history.svelte';
   import Rail from './lib/shell/Rail.svelte';
   import Breadcrumb from './lib/shell/Breadcrumb.svelte';
+  import ScopeChip from './lib/shell/ScopeChip.svelte';
+  import ShipSheet from './lib/ship/ShipSheet.svelte';
   import AttentionStrip from './lib/overview/AttentionStrip.svelte';
   import Overview from './lib/overview/Overview.svelte';
   import Board from './lib/Board.svelte';
@@ -244,6 +246,7 @@
           onclick={() => (listShown = !listShown)}>{listShown ? 'Pane' : 'List'}</button
         >
       {/if}
+      <ScopeChip compact={narrow} />
       {#if !narrow}<AttentionStrip />{/if}
       {#if app.home === 'overview' && !adoView && view !== 'settings' && view !== 'worktrees' && view !== 'accounts' && !orchView}
         <button
@@ -396,6 +399,7 @@
 <ReviewNotices />
 <FileSheet />
 <AddAccount />
+<ShipSheet />
 
 {#if app.toast}
   <div

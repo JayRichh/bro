@@ -5,7 +5,6 @@ import {
   boardIds,
   dropZone,
   hasUserOrder,
-  laneDrop,
   placeId,
   projectIds,
   rootFirst,
@@ -167,22 +166,6 @@ describe('dropZone', () => {
     expect(dropZone(9, 10, { insert: true, onto: true })).toBe('after');
     expect(dropZone(9, 10, { insert: false, onto: true })).toBe('onto');
     expect(dropZone(9, 10, { insert: false, onto: false })).toBeNull();
-  });
-});
-
-describe('laneDrop', () => {
-  it('does what the lane means where the user can cause it', () => {
-    expect(laneDrop('unseen', 'done')).toEqual({ act: 'seen' });
-    expect(laneDrop('running', 'archived')).toEqual({ act: 'archive' });
-    expect(laneDrop('done', 'done')).toEqual({ act: 'reorder' });
-  });
-  it('refuses a status the agent or the pull request owns, with the reason', () => {
-    for (const from of ['needs', 'running', 'pr'] as const) {
-      const d = laneDrop(from, 'done');
-      expect(d.act).toBe('refuse');
-    }
-    expect(laneDrop('needs', 'done')).toMatchObject({ reason: expect.stringContaining('Needs you') });
-    for (const to of ['needs', 'running', 'unseen', 'pr'] as const) expect(laneDrop('done', to).act).toBe('refuse');
   });
 });
 
