@@ -22588,6 +22588,7 @@ fn a_desktop_write_waits_for_the_reset_confirm_too() {
         assert!(app.launcher.launcher_kanban);
     });
 }
+mod board;
 mod buttons;
 mod dispatch;
 mod orch_view;

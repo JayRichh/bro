@@ -232,13 +232,13 @@ pub(crate) fn menu_action(app: &App, action: Action, t: &Target) -> Option<MenuA
                 Action::SwitchBranch => w.is_main.then_some(MenuAction::SwitchBranch(id)),
                 Action::DeleteWorktree => (!w.is_main).then_some(MenuAction::DeleteWorktree(id)),
                 Action::CreatePullRequest => {
-                    ships(app, &id).then(|| MenuAction::CreatePullRequest {
+                    ships(app, &id).then_some(MenuAction::CreatePullRequest {
                         worktree: id,
                         agent: None,
                     })
                 }
                 Action::MergePullRequest => {
-                    merges(app, &id).then(|| MenuAction::MergePullRequest {
+                    merges(app, &id).then_some(MenuAction::MergePullRequest {
                         worktree: id,
                         agent: None,
                     })

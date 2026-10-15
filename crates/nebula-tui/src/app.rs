@@ -1581,7 +1581,7 @@ pub struct DiffView {
     pub keep_open: bool,
     /// The REVIEW UNIT: this diff docked beside the board for one Review
     /// card, with its verb row (`event_loop::review`). None: the modal.
-    pub review: Option<ReviewDock>,
+    pub review: Option<Box<ReviewDock>>,
     /// The board card this diff was opened from: closing it (Esc, `⇧K`)
     /// lands the cursor back on that card, wherever reading it moved it.
     pub from_card: Option<AgentId>,

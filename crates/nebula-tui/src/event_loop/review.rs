@@ -67,11 +67,11 @@ pub(crate) fn open(app: &mut App, out: &mut Vec<ClientRequest>) {
     app.modals.diff_against = remembered;
     match &mut app.modals.overlay {
         Some(Overlay::Diff(view)) => {
-            view.review = Some(ReviewDock {
+            view.review = Some(Box::new(ReviewDock {
                 agent: agent.clone(),
                 worktree,
                 verbs: Vec::new(),
-            });
+            }));
             view.from_card = Some(agent);
         }
         _ => {

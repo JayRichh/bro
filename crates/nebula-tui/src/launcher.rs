@@ -2067,7 +2067,11 @@ pub fn launch_checkout(app: &App, project: &ProjectId) -> Option<WorktreeId> {
     // The columns and the KANBAN have no band under the cursor: the
     // selection's own checkout is the one.
     let checkout = if app.launcher.launcher_columns || app.launcher.launcher_kanban {
-        app.selected_worktree().map(|w| w.id.clone())
+        // The board's aim let go (Esc) is the grid's: nothing under the
+        // cursor.
+        app.selected_worktree()
+            .filter(|_| !(app.launcher.launcher_kanban && app.launcher.launcher_unaimed))
+            .map(|w| w.id.clone())
     } else {
         cursor_checkout(app)
     };
