@@ -578,12 +578,15 @@ pub fn read_listing_with(
         None => crate::review::Scope::Head(&head_key),
     };
     let mut stored = crate::review::load_scoped(root, scope);
-    // A read against the base with no marks of its own takes the ones
-    // made against HEAD: all a 0.48 install has, or ones made with the
-    // toggle on HEAD. The fingerprint check below keeps only a file whose
-    // diff against the base is the very text approved (work the branch's
-    // commits never touched), and those become the base's.
-    let carried = since.is_some() && stored.is_empty();
+    // A read against a base with no marks recorded takes the ones made
+    // against HEAD: all a 0.48 install has, or ones made with the toggle
+    // on HEAD. The fingerprint check below keeps only a file whose diff
+    // against the base is the very text approved (work the branch's
+    // commits never touched), and those become the base's. A base whose
+    // marks were cleared has a record, and gets none back.
+    let carried = since
+        .as_deref()
+        .is_some_and(|sha| !crate::review::base_recorded(root, sha));
     if carried {
         stored = crate::review::load_scoped(root, crate::review::Scope::Head(&head_key));
     }
@@ -1714,6 +1717,39 @@ mod tests {
                 .unwrap()
                 .reviewed
                 .contains_key("tracked.txt"));
+        });
+    }
+
+    /// A carried-over mark the reader takes off in the base read stays
+    /// off: the HEAD mark it came from is not carried over again.
+    #[test]
+    fn a_carried_mark_taken_off_stays_off() {
+        use nebula_core::review_base::Against;
+        let _env = crate::test_env::spawning();
+        let dir = tempfile::tempdir().unwrap();
+        let (repo, _) = branch_with_a_commit(&dir);
+        crate::review::with_store_path(dir.path().join("reviewed.json"), || {
+            let mut view = DiffView::new(repo.clone(), "feat".into(), Vec::new(), true);
+            fill_view(&mut view, read_listing(&repo, Some(Against::Head)).unwrap());
+            assert!(view.select_path("tracked.txt"));
+            load_selected_diff(&mut view);
+            assert!(view.toggle_reviewed().is_some());
+            view.store_marks();
+
+            let mut view = DiffView::new(repo.clone(), "feat".into(), Vec::new(), true);
+            fill_view(&mut view, read_listing(&repo, None).unwrap());
+            assert!(view.reviewed.contains_key("tracked.txt"), "carried over");
+            assert!(view.select_path("tracked.txt"));
+            load_selected_diff(&mut view);
+            assert!(view.toggle_reviewed().is_some());
+            view.store_marks();
+            assert!(!view.reviewed.contains_key("tracked.txt"));
+
+            let again = read_listing(&repo, None).unwrap();
+            assert!(again.reviewed.is_empty(), "{:?}", again.reviewed);
+            // The HEAD read keeps its own.
+            let head = read_listing(&repo, Some(Against::Head)).unwrap();
+            assert!(head.reviewed.contains_key("tracked.txt"));
         });
     }
 
