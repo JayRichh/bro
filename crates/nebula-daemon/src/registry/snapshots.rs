@@ -29,8 +29,9 @@
 //!
 //! The refs live under this data dir's daemon id
 //! (`refs/kete/d/<id>/sessions/<agent>/…`) and go with the session's row,
-//! its worktree's or its project's. At startup a sweep moves this daemon's
-//! sessions' 0.51 refs into its namespace and deletes refs in its own
+//! its worktree's or its project's. At startup, once a day after, and in
+//! a project's repo when it is added or removed, a sweep moves this
+//! daemon's sessions' 0.51 refs into its namespace and deletes refs in its own
 //! namespace for sessions it no longer has (a row lost to a crash). It
 //! never deletes a ref outside its namespace by absence: another daemon
 //! (a test's, WSL's beside Windows') keeps its own in the same repo.

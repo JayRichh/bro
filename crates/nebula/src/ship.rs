@@ -21,6 +21,10 @@ use std::fmt::Write as _;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
+/// How long `kete ship` outside a session waits on a running daemon for
+/// its tree (the recorded base) before deriving without it.
+const PLAIN_DAEMON_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
 pub fn run_ship(command: ShipCommand, target: Target) -> Result<()> {
     // Before any thread or child exists: every git and gh inherits these,
     // so nothing can open a sign-in window or ask on the terminal.
@@ -145,7 +149,13 @@ async fn checkout(target: &Target) -> Result<(PathBuf, Option<Tree>)> {
     }
     let tree = match env::non_empty(env::AGENT_ID) {
         Some(_) => daemon::fetch_tree().await.ok().map(|(t, _)| t),
-        None => daemon::fetch_tree_if_running().await.ok().flatten(),
+        // A running daemon that has stopped answering must not hang a
+        // command that never needed one: no answer, no record, derived.
+        None => tokio::time::timeout(PLAIN_DAEMON_WAIT, daemon::fetch_tree_if_running())
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .flatten(),
     };
     Ok((top, tree))
 }
