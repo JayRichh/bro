@@ -419,10 +419,14 @@ fn handle_pr_key(app: &mut App, key: KeyEvent) -> bool {
             KeyCode::Esc => t.reply = None,
             KeyCode::Enter => send_reply(app),
             KeyCode::Backspace => {
-                t.reply.as_mut().map(String::pop);
+                if let Some(r) = t.reply.as_mut() {
+                    r.pop();
+                }
             }
             KeyCode::Char(c) if plain && !t.sending => {
-                t.reply.as_mut().map(|r| r.push(c));
+                if let Some(r) = t.reply.as_mut() {
+                    r.push(c);
+                }
             }
             _ => {}
         }
