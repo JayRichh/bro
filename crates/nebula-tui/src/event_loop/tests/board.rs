@@ -18,7 +18,7 @@ use ratatui::layout::Rect;
 /// `demo` with its root `main` (agent-1, read and done) and a linked
 /// worktree `feat` at `feat_path` with `polish-nav` in it, finished and
 /// unread: a Review card. On the board, every project.
-fn bench_at(feat_path: std::path::PathBuf) -> App {
+pub(super) fn bench_at(feat_path: std::path::PathBuf) -> App {
     let mut app = App::new();
     seed_tree(&mut app);
     hse(
@@ -49,11 +49,11 @@ fn bench_at(feat_path: std::path::PathBuf) -> App {
     app
 }
 
-fn bench() -> App {
+pub(super) fn bench() -> App {
     bench_at("/tmp/demo-feat".into())
 }
 
-fn agent<'a>(app: &'a mut App, id: &str) -> &'a mut nebula_core::Agent {
+pub(super) fn agent<'a>(app: &'a mut App, id: &str) -> &'a mut nebula_core::Agent {
     app.tree
         .agents
         .iter_mut()
@@ -106,7 +106,7 @@ fn card(app: &App, id: &str) -> Rect {
 }
 
 /// The cursor onto board card `id`, as a step there lands it.
-fn select_card(app: &mut App, id: &str) {
+pub(super) fn select_card(app: &mut App, id: &str) {
     let mut out = Vec::new();
     super::super::launcher::select(app, AgentId(id.into()), &mut out);
 }
@@ -162,7 +162,7 @@ fn pr_info(number: u64, state: &str) -> PrInfo {
 }
 
 /// `feat` carrying an open pull request, #12.
-fn with_open_pr(app: &mut App) {
+pub(super) fn with_open_pr(app: &mut App) {
     app.github.pull_requests.insert(
         WorktreeId("w2".into()),
         Some(crate::pull_request::PullRequest {
@@ -684,7 +684,7 @@ fn the_ship_verbs_are_on_the_cards_menus() {
 // ---- the REVIEW UNIT ----
 
 /// A git checkout on `feat`, one commit past `main`, with an edit on top.
-fn feat_repo(dir: &tempfile::TempDir) -> std::path::PathBuf {
+pub(super) fn feat_repo(dir: &tempfile::TempDir) -> std::path::PathBuf {
     let repo = test_repo(dir);
     let git = |args: &[&str]| {
         let out = std::process::Command::new("git")
