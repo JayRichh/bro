@@ -93,7 +93,7 @@ impl Daemon {
             pr_url.is_some() || issue_url.is_some(),
         ) && cloud_prompt.is_none();
         let worktree_lookup = worktree_id.clone();
-        // The new row's slot: after the checkout's last session.
+        // The new row's slot: last in a checkout the user has ordered.
         let (worktree, sort_order) = self
             .store_blocking(move |store| {
                 let worktree = store

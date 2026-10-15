@@ -4,7 +4,7 @@
 //! the tree folds in like any other; nothing is reordered here first.
 //!
 //! The rule every client lays rows out by is `nebula_core::ReorderScope`'s:
-//! `sort_order`, then creation, a project's main checkout first.
+//! `sort_order`, then the view's own tiebreak, a project's main checkout first.
 
 use crate::app::{App, PendingIntent};
 use nebula_core::{ClientRequest, ReorderScope, REORDER_PROTOCOL};

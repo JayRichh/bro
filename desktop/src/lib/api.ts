@@ -175,8 +175,8 @@ export interface Model {
 export type SessionRef = { Agent: string } | { Terminal: string };
 
 /** What `reorder` reorders: every project, one project's worktrees, or
- *  one worktree's sessions. Rows lay out by `sort_order`, then creation,
- *  a project's main checkout first; the daemon keeps that rule. */
+ *  one worktree's sessions. Rows lay out by `sort_order`, then the view's
+ *  tiebreak, a project's main checkout first; the daemon keeps that rule. */
 export type ReorderScope =
   | { kind: 'projects' }
   | { kind: 'worktrees'; project: string }

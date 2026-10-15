@@ -641,13 +641,18 @@ pub enum ClientRequest {
 }
 
 /// What a [`ClientRequest::Reorder`] reorders, and the order rule every
-/// client lays rows out by: `sort_order` ascending, then creation (the
-/// Snapshot already lists rows `sort_order, created_at`, so a stable sort
-/// on `sort_order` alone keeps it), with a project's main checkout ahead of
-/// its other worktrees. A client may group rows on top of that (a board's
-/// status lanes, say) but keeps this order within a group. A new project,
-/// worktree or session, and a session moved onto another checkout, takes
-/// the slot after the last row of its scope.
+/// client lays rows out by: `sort_order` ascending, then the client's own
+/// tiebreak (the Snapshot lists rows `sort_order, created_at`, so a stable
+/// sort keeps creation order), with a project's main checkout ahead of its
+/// other worktrees. A client may group rows on top of that (a board's
+/// status lanes, say) but keeps this order within a group.
+///
+/// A worktree or session scope has a user order when some row's
+/// `sort_order` is above 0; until then every row sits at 0 and the
+/// tiebreak alone decides (recency, status age). A new worktree or
+/// session, and a session moved onto another checkout, goes last in a
+/// scope with a user order and at 0 in one without. Projects have always
+/// had slots 0..n in the order they were added, and a new one goes last.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReorderScope {
     /// Every project: the TUI's project tabs, the desktop's rail.

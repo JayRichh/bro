@@ -86,14 +86,14 @@ impl Daemon {
         // worktrees too so `nebula` matches reality on day one. Root-ness is
         // the path test the reconcile uses, not insert order — the two agreeing
         // is what keeps `repo_path` and the ⌂ root row the same directory.
-        for (slot, entry) in entries.into_iter().enumerate() {
+        for entry in entries {
             let worktree = Worktree {
                 id: WorktreeId::generate(),
                 project_id: project.id.clone(),
                 is_main: entry.path == repo_path,
                 path: entry.path.clone(),
                 branch: entry.branch,
-                sort_order: slot as i64,
+                sort_order: 0,
             };
             let worktree_to_insert = worktree.clone();
             self.store_blocking(move |store| store.insert_worktree(&worktree_to_insert))

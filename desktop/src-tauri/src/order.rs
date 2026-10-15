@@ -5,7 +5,7 @@
 //! it is refused here, before it is sent.
 //!
 //! Every view lays rows out by `nebula_core::ReorderScope`'s rule:
-//! `sort_order`, then creation, a project's main checkout first.
+//! `sort_order`, then the view's own tiebreak, a project's main checkout first.
 
 use crate::daemon::Client;
 use crate::orchestrator::RELOAD_HINT;

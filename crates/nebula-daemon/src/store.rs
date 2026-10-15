@@ -519,11 +519,12 @@ impl Store {
         Ok(())
     }
 
-    /// Insert a new worktree row in the slot after its project's last one,
-    /// returning the row as stored.
+    /// Insert a new worktree row, returning it as stored: in the slot after
+    /// its project's last one when the user has ordered them, else at 0
+    /// ([`NEXT_SLOT`]).
     pub fn append_worktree(&self, mut w: Worktree) -> Result<Worktree> {
         w.sort_order = self.conn.lock().query_row(
-            "SELECT COALESCE(MAX(sort_order) + 1, 0) FROM worktrees WHERE project_id = ?1",
+            &format!("SELECT {NEXT_SLOT} FROM worktrees WHERE project_id = ?1"),
             params![w.project_id.as_str()],
             |r| r.get(0),
         )?;
@@ -555,10 +556,10 @@ impl Store {
 
     // ---- agents ----
 
-    /// Sort slot for a new session in `worktree`: after its last one.
+    /// Sort slot for a new session in `worktree` ([`NEXT_SLOT`]).
     pub fn next_agent_sort_order(&self, worktree: &WorktreeId) -> Result<i64> {
         Ok(self.conn.lock().query_row(
-            "SELECT COALESCE(MAX(sort_order) + 1, 0) FROM agents WHERE worktree_id = ?1",
+            &format!("SELECT {NEXT_SLOT} FROM agents WHERE worktree_id = ?1"),
             params![worktree.as_str()],
             |r| r.get(0),
         )?)
@@ -807,14 +808,15 @@ impl Store {
     }
 
     /// Re-home a session's row. A row that changes checkout takes the slot
-    /// after the target's last session, as a new one would; one already
-    /// there keeps its place.
+    /// a new one there would ([`NEXT_SLOT`]); one already there keeps its
+    /// place.
     pub fn set_agent_worktree(&self, id: &AgentId, worktree_id: &WorktreeId) -> Result<()> {
         self.conn.lock().execute(
-            "UPDATE agents SET worktree_id = ?2,
-               sort_order = (SELECT COALESCE(MAX(sort_order) + 1, 0) FROM agents
-                             WHERE worktree_id = ?2 AND id != ?1)
-             WHERE id = ?1 AND worktree_id != ?2",
+            &format!(
+                "UPDATE agents SET worktree_id = ?2,
+                   sort_order = (SELECT {NEXT_SLOT} FROM agents WHERE worktree_id = ?2 AND id != ?1)
+                 WHERE id = ?1 AND worktree_id != ?2"
+            ),
             params![id.as_str(), worktree_id.as_str()],
         )?;
         Ok(())
@@ -1340,6 +1342,13 @@ impl Store {
 // on which path fetched it. The column order is the mapper's contract.
 
 // Column orders the `row_to_*` mappers below read.
+/// The slot a new (or moved-in) worktree or session takes in its scope:
+/// after the last row when the user has ordered the scope (`Reorder`
+/// leaves some row above 0), else 0 with the rest, where each client's own
+/// tiebreak keeps deciding the order. Projects always append instead
+/// (`next_project_sort_order`): their slots have been 0..n from the start.
+const NEXT_SLOT: &str = "CASE WHEN MAX(sort_order) > 0 THEN MAX(sort_order) + 1 ELSE 0 END";
+
 const PROJECT_COLUMNS: &str = "id, name, repo_path, sort_order";
 const WORKTREE_COLUMNS: &str = "id, project_id, path, branch, is_main, sort_order";
 const AGENT_COLUMNS: &str = "id, worktree_id, name, status, archived, kind, \
@@ -3101,58 +3110,68 @@ mod tests {
     }
 
     #[test]
-    fn new_and_moved_rows_take_the_slot_after_the_last() {
+    fn new_and_moved_rows_go_last_only_in_a_scope_the_user_ordered() {
         let store = store_with_worktree();
         linked(&store, "feat", "p");
-        let feat = store
-            .append_worktree(Worktree {
-                id: WorktreeId("next".into()),
-                project_id: ProjectId("p".into()),
-                path: "/tmp/next".into(),
-                branch: "next".into(),
-                is_main: false,
-                sort_order: 0,
-            })
-            .unwrap();
-        assert_eq!(feat.sort_order, 1, "after main and feat, both at 0");
-        assert_eq!(
-            store
-                .get_worktree(&WorktreeId("next".into()))
-                .unwrap()
-                .unwrap()
-                .sort_order,
-            1,
-            "stored as returned"
-        );
+        let worktree = |id: &str| Worktree {
+            id: WorktreeId(id.into()),
+            project_id: ProjectId("p".into()),
+            path: format!("/tmp/{id}").into(),
+            branch: id.into(),
+            is_main: false,
+            sort_order: 0,
+        };
+        // Never ordered (main and feat at 0): the new row joins them at 0,
+        // and the client's own tiebreak keeps deciding.
+        let next = store.append_worktree(worktree("next")).unwrap();
+        assert_eq!(next.sort_order, 0);
+        // Ordered: last, and stored as returned.
+        let scope = ReorderScope::Worktrees(ProjectId("p".into()));
+        store.reorder(&scope, &ids(&["next", "feat"])).unwrap();
+        let last = store.append_worktree(worktree("last")).unwrap();
+        assert_eq!(last.sort_order, 3);
+        assert_eq!(shown(&store, &scope), slots(&["w", "next", "feat", "last"]));
 
         let w = WorktreeId("w".into());
         assert_eq!(store.next_agent_sort_order(&w).unwrap(), 0, "empty");
-        for (i, id) in ["a", "b"].iter().enumerate() {
+        for id in ["a", "b"] {
             store
-                .insert_agent(&Agent {
-                    sort_order: i as i64,
-                    ..role_agent(id, nebula_core::AgentRole::Worker)
-                })
+                .insert_agent(&role_agent(id, nebula_core::AgentRole::Worker))
                 .unwrap();
         }
+        assert_eq!(store.next_agent_sort_order(&w).unwrap(), 0, "never ordered");
+        store
+            .reorder(&ReorderScope::Agents(w.clone()), &ids(&["b", "a"]))
+            .unwrap();
         assert_eq!(store.next_agent_sort_order(&w).unwrap(), 2);
 
-        // Moved onto a checkout: last there. Moved onto its own: unchanged.
+        // Moved onto a never-ordered checkout: 0 with the rest there.
         let a = AgentId("a".into());
+        let b = AgentId("b".into());
         store
             .insert_agent(&Agent {
                 worktree_id: WorktreeId("feat".into()),
-                sort_order: 4,
                 ..role_agent("f", nebula_core::AgentRole::Worker)
             })
             .unwrap();
         store
             .set_agent_worktree(&a, &WorktreeId("feat".into()))
             .unwrap();
-        assert_eq!(store.get_agent(&a).unwrap().unwrap().sort_order, 5);
+        assert_eq!(store.get_agent(&a).unwrap().unwrap().sort_order, 0);
+        // Moved onto an ordered one: last there. Onto its own: unchanged.
         store
-            .set_agent_worktree(&a, &WorktreeId("feat".into()))
+            .reorder(
+                &ReorderScope::Agents(WorktreeId("feat".into())),
+                &ids(&["a", "f"]),
+            )
             .unwrap();
-        assert_eq!(store.get_agent(&a).unwrap().unwrap().sort_order, 5);
+        store
+            .set_agent_worktree(&b, &WorktreeId("feat".into()))
+            .unwrap();
+        assert_eq!(store.get_agent(&b).unwrap().unwrap().sort_order, 2);
+        store
+            .set_agent_worktree(&b, &WorktreeId("feat".into()))
+            .unwrap();
+        assert_eq!(store.get_agent(&b).unwrap().unwrap().sort_order, 2);
     }
 }
