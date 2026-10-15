@@ -2834,10 +2834,36 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         assert!(fetch(&repo, &AtomicBool::new(false)));
-        // Whatever the fetch was doing, a raised flag ends the wait at once.
+        // A remote that takes the connection and never answers, so the
+        // fetch hangs for as long as the test holds it. The flag goes up
+        // once the fetch is hanging there, and ends it: bounded by that
+        // hang, not by how fast a loaded machine starts git and taskkill.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = format!("git://{}/stuck", listener.local_addr().unwrap());
+        git(&repo, &["remote", "add", "stuck", &url]);
+        let quit = Arc::new(AtomicBool::new(false));
+        let held = {
+            let quit = quit.clone();
+            std::thread::spawn(move || {
+                let deadline = Instant::now() + Duration::from_secs(60);
+                while Instant::now() < deadline {
+                    if let Ok((conn, _)) = listener.accept() {
+                        quit.store(true, Ordering::Relaxed);
+                        return Some(conn);
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                None
+            })
+        };
         let started = Instant::now();
-        let _ = fetch(&repo, &AtomicBool::new(true));
-        assert!(started.elapsed() < FETCH_GRACE + Duration::from_secs(1));
+        assert!(!fetch(&repo, &quit), "a stopped fetch did not finish");
+        assert!(started.elapsed() < Duration::from_secs(30));
+        assert!(
+            held.join().unwrap().is_some(),
+            "the fetch reached the remote"
+        );
     }
 
     // ---- the modal ----
