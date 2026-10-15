@@ -828,6 +828,16 @@ fn handle_left_click_target(app: &mut App, mouse: MouseEvent, out: &mut Vec<Clie
         // Never in the hit map: the ISSUES and PULL REQUESTS MODALS route
         // the click on their button themselves, before this is reached.
         Some(HitTarget::ModalBrowser) => {}
+        // A BUTTON is its action's key: the one dispatch the press takes.
+        Some(HitTarget::Button(action)) => run_action(app, action, out),
+        // The buttons on the card under the cursor, its `⋯`, a band's
+        // `+` and the pane header's `⋯`.
+        Some(HitTarget::CardButton(at, action)) => {
+            launcher::click_card_button(app, at, action, out)
+        }
+        Some(HitTarget::CardMenu(at)) => launcher::click_card_menu(app, at, out),
+        Some(HitTarget::LauncherBandNew(i)) => launcher::click_band_new(app, i, out),
+        Some(HitTarget::LauncherPaneMenu) => launcher::click_pane_menu(app),
         Some(
             target @ (HitTarget::ProjectRow(_)
             | HitTarget::WorktreeRow(_)

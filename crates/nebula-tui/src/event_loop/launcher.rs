@@ -2319,6 +2319,69 @@ pub(super) fn click_band_more(app: &mut App, index: usize, out: &mut Vec<ClientR
     }
 }
 
+/// The keys back on the cards for a button that acts on one: a LOCKED
+/// PANE lets go of them (`leave_terminal_lock`), and the grid takes FOCUS,
+/// since `a` and `d` act on the card only from there.
+fn keys_to_cards(app: &mut App) {
+    if app.nav.focus == Focus::Terminal {
+        super::leave_terminal_lock(app);
+    }
+    app.nav.focus = Focus::Sessions;
+}
+
+/// A click on a CARD BUTTON (`HitTarget::CardButton`): the cursor onto
+/// that card, the keys back on the cards, and the action its key runs.
+///
+/// INPUT PARITY: the action goes through `run_action`, the very dispatch
+/// the key takes, so `a` and the `archive` button can never differ.
+pub(super) fn click_card_button(
+    app: &mut App,
+    at: CardRef,
+    action: Action,
+    out: &mut Vec<ClientRequest>,
+) {
+    if point_at(app, at, out).is_none() {
+        return;
+    }
+    keys_to_cards(app);
+    super::run_action(app, action, out);
+}
+
+/// A click on a card's `⋯` (`HitTarget::CardMenu`): the cursor onto the
+/// card, then the menu a right-click on it opens, hung under the button.
+pub(super) fn click_card_menu(app: &mut App, at: CardRef, out: &mut Vec<ClientRequest>) {
+    let anchor = crumb_anchor(app, &HitTarget::CardMenu(at));
+    if point_at(app, at, out).is_none() {
+        return;
+    }
+    keys_to_cards(app);
+    if let Some(items) = super::context_menu_items(app, Focus::Sessions) {
+        super::open_menu(app, items, anchor);
+    }
+}
+
+/// A click on the PANE header's `⋯` (`HitTarget::LauncherPaneMenu`): the
+/// menu of the card the pane reads — the cursor's — hung under it.
+pub(super) fn click_pane_menu(app: &mut App) {
+    let anchor = crumb_anchor(app, &HitTarget::LauncherPaneMenu);
+    keys_to_cards(app);
+    if let Some(items) = super::context_menu_items(app, Focus::Sessions) {
+        super::open_menu(app, items, anchor);
+    }
+}
+
+/// A click on the `+` at a BAND's rule (`HitTarget::LauncherBandNew`):
+/// the cursor onto the band, then the QUICK PROMPT in its checkout.
+///
+/// INPUT PARITY: the box is [`open_box`], the one `p` opens.
+pub(super) fn click_band_new(app: &mut App, index: usize, out: &mut Vec<ClientRequest>) {
+    if !select_band_row(app, index, out) {
+        return;
+    }
+    keys_to_cards(app);
+    open_box(app);
+}
+
 /// A click on the fold caret of a NESTED thread's root row
 /// (`HitTarget::LauncherBandFold`): the cursor onto that root, then the
 /// thread folds or opens.

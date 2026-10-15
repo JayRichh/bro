@@ -199,6 +199,28 @@ pub enum HitTarget {
     /// map: it is what `hover_crumb` holds while the pointer rests on the
     /// button (`ui::browser_button_under`), so the draw can underline it.
     ModalBrowser,
+    /// A BUTTON that is its action's key: the footer's key hints, the
+    /// header's settings and help, the pane header's diff. A click runs
+    /// the action through the dispatch the key takes
+    /// (`event_loop::run_action`), and the footer names the key while the
+    /// pointer rests on it.
+    Button(crate::keymap::Action),
+    /// A CARD BUTTON on the bottom edge of the card under the cursor —
+    /// follow-up, diff, archive, delete — by the card and the action: a
+    /// click lands the cursor on that card, takes the keys back from the
+    /// pane, and runs the action as its key would. Registered ahead of the
+    /// card, so it wins.
+    CardButton(crate::launcher::CardRef, crate::keymap::Action),
+    /// The `⋯` at the end of those: the card's CONTEXT MENU, the one a
+    /// right-click on it opens, hung under the button.
+    CardMenu(crate::launcher::CardRef),
+    /// The `+` at the right end of a BAND's rule, by the band's place in
+    /// `launcher::bands`: the cursor onto the band and the QUICK PROMPT
+    /// in its checkout, the box `p` opens there.
+    LauncherBandNew(usize),
+    /// The `⋯` in the PANE's header: the CONTEXT MENU of the card the
+    /// pane reads, hung under the button.
+    LauncherPaneMenu,
 }
 
 /// Default outer width of the diff modal's file-list panel.

@@ -136,7 +136,12 @@ pub(super) fn land_click_focus(app: &mut App, column: u16, row: u16, out: &mut V
             | HitTarget::LauncherWelcomePrompt
             | HitTarget::OrchestratorChip(_)
             | HitTarget::FooterUsage
-            | HitTarget::ModalBrowser,
+            | HitTarget::ModalBrowser
+            | HitTarget::Button(_)
+            | HitTarget::CardButton(..)
+            | HitTarget::CardMenu(_)
+            | HitTarget::LauncherBandNew(_)
+            | HitTarget::LauncherPaneMenu,
         )
         | None => {}
     }
