@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use nebula_core::clock::now_ms;
 use nebula_core::{
     Agent, AgentId, AgentKind, AgentStatus, Link, LinkId, PrSeen, Project, ProjectId, PromptEntry,
-    TerminalId, TerminalTab, Worktree, WorktreeId, RECENT_PROMPTS_KEPT,
+    ReorderScope, TerminalId, TerminalTab, Worktree, WorktreeId, RECENT_PROMPTS_KEPT,
 };
 use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -519,6 +519,18 @@ impl Store {
         Ok(())
     }
 
+    /// Insert a new worktree row in the slot after its project's last one,
+    /// returning the row as stored.
+    pub fn append_worktree(&self, mut w: Worktree) -> Result<Worktree> {
+        w.sort_order = self.conn.lock().query_row(
+            "SELECT COALESCE(MAX(sort_order) + 1, 0) FROM worktrees WHERE project_id = ?1",
+            params![w.project_id.as_str()],
+            |r| r.get(0),
+        )?;
+        self.insert_worktree(&w)?;
+        Ok(w)
+    }
+
     pub fn delete_worktree(&self, id: &WorktreeId) -> Result<()> {
         self.delete_by_id("worktrees", id.as_str())
     }
@@ -542,6 +554,15 @@ impl Store {
     }
 
     // ---- agents ----
+
+    /// Sort slot for a new session in `worktree`: after its last one.
+    pub fn next_agent_sort_order(&self, worktree: &WorktreeId) -> Result<i64> {
+        Ok(self.conn.lock().query_row(
+            "SELECT COALESCE(MAX(sort_order) + 1, 0) FROM agents WHERE worktree_id = ?1",
+            params![worktree.as_str()],
+            |r| r.get(0),
+        )?)
+    }
 
     pub fn insert_agent(&self, a: &Agent) -> Result<()> {
         self.insert_agent_with_launch_context(a, false, None, None)
@@ -785,9 +806,15 @@ impl Store {
         }
     }
 
+    /// Re-home a session's row. A row that changes checkout takes the slot
+    /// after the target's last session, as a new one would; one already
+    /// there keeps its place.
     pub fn set_agent_worktree(&self, id: &AgentId, worktree_id: &WorktreeId) -> Result<()> {
         self.conn.lock().execute(
-            "UPDATE agents SET worktree_id = ?2 WHERE id = ?1",
+            "UPDATE agents SET worktree_id = ?2,
+               sort_order = (SELECT COALESCE(MAX(sort_order) + 1, 0) FROM agents
+                             WHERE worktree_id = ?2 AND id != ?1)
+             WHERE id = ?1 AND worktree_id != ?2",
             params![id.as_str(), worktree_id.as_str()],
         )?;
         Ok(())
@@ -1173,8 +1200,86 @@ impl Store {
         Ok(rows)
     }
 
+    // ---- user order ----
+
+    /// Write the user's order for `scope` (`ClientRequest::Reorder`): `ids`
+    /// first to last, minus any id that isn't a row of the scope and any
+    /// repeat, then the rows `ids` left out in their old order. A project's
+    /// main checkout stays ahead of its other worktrees: refused when `ids`
+    /// puts one after a linked checkout, kept first when left out. The rows
+    /// get `sort_order` 0..n in one transaction. Returns the ids whose slot
+    /// changed, for the caller to broadcast.
+    pub fn reorder(&self, scope: &ReorderScope, ids: &[String]) -> Result<Vec<String>> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        // (id, sort_order, is_main) in the order `load_tree` lists them, so
+        // "old order" means what every client already shows.
+        let (table, sql, parent) = match scope {
+            ReorderScope::Projects => (
+                "projects",
+                "SELECT id, sort_order, 0 FROM projects ORDER BY sort_order, created_at",
+                None,
+            ),
+            ReorderScope::Worktrees(project) => (
+                "worktrees",
+                "SELECT id, sort_order, is_main FROM worktrees WHERE project_id = ?1
+                 ORDER BY is_main DESC, sort_order, created_at",
+                Some(("projects", "project", project.as_str())),
+            ),
+            ReorderScope::Agents(worktree) => (
+                "agents",
+                "SELECT id, sort_order, 0 FROM agents WHERE worktree_id = ?1
+                 ORDER BY sort_order, created_at",
+                Some(("worktrees", "worktree", worktree.as_str())),
+            ),
+        };
+        let rows: Vec<(String, i64, bool)> = {
+            let mut stmt = tx.prepare(sql)?;
+            let map = |r: &rusqlite::Row<'_>| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, i64>(2)? != 0,
+                ))
+            };
+            match parent {
+                Some((parent_table, what, id)) => {
+                    let exists: bool = tx.query_row(
+                        &format!("SELECT EXISTS(SELECT 1 FROM {parent_table} WHERE id = ?1)"),
+                        params![id],
+                        |r| r.get(0),
+                    )?;
+                    if !exists {
+                        anyhow::bail!("{what} not found");
+                    }
+                    stmt.query_map(params![id], map)?
+                        .collect::<rusqlite::Result<_>>()?
+                }
+                None => stmt.query_map([], map)?.collect::<rusqlite::Result<_>>()?,
+            }
+        };
+        let order = user_order(&rows, ids)?;
+        let mut changed = Vec::new();
+        {
+            let mut update =
+                tx.prepare(&format!("UPDATE {table} SET sort_order = ?2 WHERE id = ?1"))?;
+            for (slot, i) in order.into_iter().enumerate() {
+                let (id, old, _) = &rows[i];
+                let slot = slot as i64;
+                if *old != slot {
+                    update.execute(params![id, slot])?;
+                    changed.push(id.clone());
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(changed)
+    }
+
     // ---- whole tree ----
 
+    /// Every row, in the order clients lay them out (`ReorderScope`):
+    /// `sort_order`, then creation, a project's main checkout first.
     pub fn load_tree(&self) -> Result<TreeRows> {
         let conn = self.conn.lock();
 
@@ -1346,6 +1451,36 @@ fn row_to_link(r: &rusqlite::Row) -> rusqlite::Result<Link> {
         url: r.get(2)?,
         sort_order: r.get(3)?,
     })
+}
+
+/// [`Store::reorder`]'s new order, as indices into `rows` (`(id,
+/// sort_order, is_main)` in their old order): the ids that name a row,
+/// first mention only, then every row left out, mains moved ahead.
+fn user_order(rows: &[(String, i64, bool)], ids: &[String]) -> Result<Vec<usize>> {
+    let index: std::collections::HashMap<&str, usize> = rows
+        .iter()
+        .enumerate()
+        .map(|(i, (id, _, _))| (id.as_str(), i))
+        .collect();
+    let mut taken = vec![false; rows.len()];
+    let mut order = Vec::with_capacity(rows.len());
+    for id in ids {
+        if let Some(&i) = index.get(id.as_str()) {
+            if !std::mem::replace(&mut taken[i], true) {
+                order.push(i);
+            }
+        }
+    }
+    let is_main = |i: &usize| rows[*i].2;
+    if let Some(linked) = order.iter().position(|i| !is_main(i)) {
+        if order[linked..].iter().any(is_main) {
+            anyhow::bail!("the main checkout stays first among a project's worktrees");
+        }
+    }
+    order.extend((0..rows.len()).filter(|&i| !taken[i]));
+    // Stable: only a main left out of `ids` moves, back to the front.
+    order.sort_by_key(|i| !is_main(i));
+    Ok(order)
 }
 
 #[cfg(test)]
@@ -2800,5 +2935,224 @@ mod tests {
         assert!(!store
             .push_prompt(&AgentId("ghost".into()), &entry(1))
             .unwrap());
+    }
+
+    fn linked(store: &Store, id: &str, project: &str) {
+        store
+            .insert_worktree(&Worktree {
+                id: WorktreeId(id.into()),
+                project_id: ProjectId(project.into()),
+                path: format!("/tmp/{id}").into(),
+                branch: id.into(),
+                is_main: false,
+                sort_order: 0,
+            })
+            .unwrap();
+    }
+
+    /// (id, sort_order) of the rows `load_tree` lists for `scope`, in its
+    /// order — what a client shows.
+    fn shown(store: &Store, scope: &ReorderScope) -> Vec<(String, i64)> {
+        let (projects, worktrees, agents, _) = store.load_tree().unwrap();
+        match scope {
+            ReorderScope::Projects => projects
+                .into_iter()
+                .map(|p| (p.id.0, p.sort_order))
+                .collect(),
+            ReorderScope::Worktrees(p) => worktrees
+                .into_iter()
+                .filter(|w| &w.project_id == p)
+                .map(|w| (w.id.0, w.sort_order))
+                .collect(),
+            ReorderScope::Agents(w) => agents
+                .into_iter()
+                .filter(|a| &a.worktree_id == w)
+                .map(|a| (a.id.0, a.sort_order))
+                .collect(),
+        }
+    }
+
+    fn ids(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn slots(list: &[&str]) -> Vec<(String, i64)> {
+        list.iter()
+            .enumerate()
+            .map(|(i, s)| (s.to_string(), i as i64))
+            .collect()
+    }
+
+    #[test]
+    fn reorder_writes_the_whole_scope_0_to_n_and_reports_what_moved() {
+        let store = store_with_worktree();
+        for id in ["a", "b", "c"] {
+            store
+                .insert_agent(&role_agent(id, nebula_core::AgentRole::Worker))
+                .unwrap();
+        }
+        let scope = ReorderScope::Agents(WorktreeId("w".into()));
+        // All three sat at 0 (legacy rows): every one gets a slot.
+        let changed = store.reorder(&scope, &ids(&["c", "a", "b"])).unwrap();
+        assert_eq!(shown(&store, &scope), slots(&["c", "a", "b"]));
+        assert_eq!(changed, ids(&["a", "b"]), "c already sat at 0");
+
+        // Same order again: nothing to write, nothing to broadcast.
+        assert!(store
+            .reorder(&scope, &ids(&["c", "a", "b"]))
+            .unwrap()
+            .is_empty());
+
+        // Projects too, and their slots survive a reopen of the tree.
+        for (i, id) in ["q", "r"].iter().enumerate() {
+            store
+                .insert_project(&Project {
+                    id: ProjectId((*id).into()),
+                    name: (*id).into(),
+                    repo_path: format!("/tmp/{id}").into(),
+                    sort_order: i as i64 + 1,
+                })
+                .unwrap();
+        }
+        store
+            .reorder(&ReorderScope::Projects, &ids(&["r", "p", "q"]))
+            .unwrap();
+        assert_eq!(
+            shown(&store, &ReorderScope::Projects),
+            slots(&["r", "p", "q"])
+        );
+    }
+
+    #[test]
+    fn reorder_appends_rows_left_out_and_skips_ids_outside_the_scope() {
+        let store = store_with_worktree();
+        linked(&store, "feat", "p");
+        for id in ["a", "b", "c", "d"] {
+            store
+                .insert_agent(&role_agent(id, nebula_core::AgentRole::Worker))
+                .unwrap();
+        }
+        // A row of the right kind under another checkout.
+        store
+            .insert_agent(&Agent {
+                worktree_id: WorktreeId("feat".into()),
+                ..role_agent("elsewhere", nebula_core::AgentRole::Worker)
+            })
+            .unwrap();
+        let scope = ReorderScope::Agents(WorktreeId("w".into()));
+        store.reorder(&scope, &ids(&["a", "b", "c", "d"])).unwrap();
+
+        // A partial list: d to the front, the rest follow in their old order.
+        store.reorder(&scope, &ids(&["d"])).unwrap();
+        assert_eq!(shown(&store, &scope), slots(&["d", "a", "b", "c"]));
+
+        // Unknown ids, another checkout's row and repeats are skipped.
+        store
+            .reorder(&scope, &ids(&["ghost", "c", "elsewhere", "c", "b", "feat"]))
+            .unwrap();
+        assert_eq!(shown(&store, &scope), slots(&["c", "b", "d", "a"]));
+        assert_eq!(
+            store
+                .get_agent(&AgentId("elsewhere".into()))
+                .unwrap()
+                .unwrap()
+                .worktree_id,
+            WorktreeId("feat".into()),
+            "the stray id's row is untouched"
+        );
+
+        // An empty list changes nothing.
+        assert!(store.reorder(&scope, &[]).unwrap().is_empty());
+
+        // A scope whose parent is gone is an error, not a silent no-op.
+        let err = store
+            .reorder(
+                &ReorderScope::Agents(WorktreeId("gone".into())),
+                &ids(&["a"]),
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("worktree not found"), "{err}");
+        let err = store
+            .reorder(&ReorderScope::Worktrees(ProjectId("gone".into())), &[])
+            .unwrap_err();
+        assert!(err.to_string().contains("project not found"), "{err}");
+    }
+
+    #[test]
+    fn reorder_keeps_the_main_checkout_first() {
+        let store = store_with_worktree();
+        linked(&store, "x", "p");
+        linked(&store, "y", "p");
+        let scope = ReorderScope::Worktrees(ProjectId("p".into()));
+
+        // Left out (a client listing only the linked checkouts): main stays
+        // first, the rest take the order given.
+        store.reorder(&scope, &ids(&["y", "x"])).unwrap();
+        assert_eq!(shown(&store, &scope), slots(&["w", "y", "x"]));
+
+        // Named first: fine.
+        store.reorder(&scope, &ids(&["w", "x", "y"])).unwrap();
+        assert_eq!(shown(&store, &scope), slots(&["w", "x", "y"]));
+
+        // Named anywhere else: refused, and nothing is written.
+        let err = store.reorder(&scope, &ids(&["x", "w", "y"])).unwrap_err();
+        assert!(err.to_string().contains("main checkout"), "{err}");
+        assert_eq!(shown(&store, &scope), slots(&["w", "x", "y"]));
+    }
+
+    #[test]
+    fn new_and_moved_rows_take_the_slot_after_the_last() {
+        let store = store_with_worktree();
+        linked(&store, "feat", "p");
+        let feat = store
+            .append_worktree(Worktree {
+                id: WorktreeId("next".into()),
+                project_id: ProjectId("p".into()),
+                path: "/tmp/next".into(),
+                branch: "next".into(),
+                is_main: false,
+                sort_order: 0,
+            })
+            .unwrap();
+        assert_eq!(feat.sort_order, 1, "after main and feat, both at 0");
+        assert_eq!(
+            store
+                .get_worktree(&WorktreeId("next".into()))
+                .unwrap()
+                .unwrap()
+                .sort_order,
+            1,
+            "stored as returned"
+        );
+
+        let w = WorktreeId("w".into());
+        assert_eq!(store.next_agent_sort_order(&w).unwrap(), 0, "empty");
+        for (i, id) in ["a", "b"].iter().enumerate() {
+            store
+                .insert_agent(&Agent {
+                    sort_order: i as i64,
+                    ..role_agent(id, nebula_core::AgentRole::Worker)
+                })
+                .unwrap();
+        }
+        assert_eq!(store.next_agent_sort_order(&w).unwrap(), 2);
+
+        // Moved onto a checkout: last there. Moved onto its own: unchanged.
+        let a = AgentId("a".into());
+        store
+            .insert_agent(&Agent {
+                worktree_id: WorktreeId("feat".into()),
+                sort_order: 4,
+                ..role_agent("f", nebula_core::AgentRole::Worker)
+            })
+            .unwrap();
+        store
+            .set_agent_worktree(&a, &WorktreeId("feat".into()))
+            .unwrap();
+        assert_eq!(store.get_agent(&a).unwrap().unwrap().sort_order, 5);
+        store
+            .set_agent_worktree(&a, &WorktreeId("feat".into()))
+            .unwrap();
+        assert_eq!(store.get_agent(&a).unwrap().unwrap().sort_order, 5);
     }
 }

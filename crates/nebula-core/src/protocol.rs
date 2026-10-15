@@ -10,7 +10,7 @@ use std::path::PathBuf;
 ///
 /// Bump on every protocol change. Additive changes keep
 /// [`MIN_COMPATIBLE_PROTOCOL`] where it is; breaking changes bump both.
-pub const PROTOCOL_VERSION: u32 = 55;
+pub const PROTOCOL_VERSION: u32 = 56;
 
 /// Oldest IPC protocol this build can safely talk to.
 ///
@@ -43,6 +43,12 @@ pub fn protocol_compatible_with(peer_version: u32) -> bool {
 /// protocol bump and its own gate here, sending the new shape only to
 /// peers that said the new version.
 pub const USAGE_EVENTS_PROTOCOL: u32 = 55;
+
+/// The first protocol whose daemon takes [`ClientRequest::Reorder`]. An
+/// older daemon cannot decode the request and drops the connection on it,
+/// so a client checks the version the daemon said at Hello and refuses the
+/// move itself, asking for a daemon update, rather than send one.
+pub const REORDER_PROTOCOL: u32 = 56;
 
 impl ServerEvent {
     /// Can a peer that said `peer_version` at Hello decode this event?
@@ -616,6 +622,40 @@ pub enum ClientRequest {
         profile: Option<String>,
         starting_prompt: String,
     },
+
+    // -- protocol 56, appended so every older variant keeps its place; sent
+    // only to a 56+ daemon (`REORDER_PROTOCOL`). --
+    /// The user dragged a row (or pressed move up / down) into a new place:
+    /// `ids` is the whole new order of `scope`, first to last. The daemon
+    /// writes `sort_order` 0..n in one transaction, skips ids that are not
+    /// in the scope (and repeats), appends the scope's rows `ids` left out
+    /// in their old order, and broadcasts an upsert for every row whose
+    /// slot changed. A project's main checkout is always first among its
+    /// worktrees: an order that puts it anywhere else is refused, one that
+    /// leaves it out keeps it first. Answered with `Ack`.
+    Reorder {
+        req_id: u64,
+        scope: ReorderScope,
+        ids: Vec<String>,
+    },
+}
+
+/// What a [`ClientRequest::Reorder`] reorders, and the order rule every
+/// client lays rows out by: `sort_order` ascending, then creation (the
+/// Snapshot already lists rows `sort_order, created_at`, so a stable sort
+/// on `sort_order` alone keeps it), with a project's main checkout ahead of
+/// its other worktrees. A client may group rows on top of that (a board's
+/// status lanes, say) but keeps this order within a group. A new project,
+/// worktree or session, and a session moved onto another checkout, takes
+/// the slot after the last row of its scope.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ReorderScope {
+    /// Every project: the TUI's project tabs, the desktop's rail.
+    Projects,
+    /// One project's worktrees.
+    Worktrees(ProjectId),
+    /// One worktree's sessions (agent rows, archived ones included).
+    Agents(WorktreeId),
 }
 
 /// How much of a pull request's conversation the user had already seen the
@@ -1082,7 +1122,7 @@ mod tests {
         );
         assert!(!ctx.decodable_by(53));
         assert!(ServerEvent::WorktreePorts { ports: Vec::new() }.decodable_by(53));
-        assert_eq!(MIN_COMPATIBLE_PROTOCOL, 53, "55 is additive");
+        assert_eq!(MIN_COMPATIBLE_PROTOCOL, 53, "55 and 56 are additive");
         assert!(protocol_compatible_with(54));
     }
 
@@ -1095,6 +1135,40 @@ mod tests {
             53
         ));
         assert!(protocol_compatible_with(53));
+    }
+
+    /// 56 only adds `Reorder`, appended: a 0.47 (55) peer still shakes
+    /// hands, and every scope survives the wire.
+    #[test]
+    fn protocol_56_adds_reorder_without_dropping_55_peers() {
+        const { assert!(PROTOCOL_VERSION >= REORDER_PROTOCOL) };
+        assert!(protocol_ranges_overlap(
+            MIN_COMPATIBLE_PROTOCOL,
+            PROTOCOL_VERSION,
+            53,
+            55
+        ));
+        for scope in [
+            ReorderScope::Projects,
+            ReorderScope::Worktrees(ProjectId("p".into())),
+            ReorderScope::Agents(WorktreeId("w".into())),
+        ] {
+            let req = ClientRequest::Reorder {
+                req_id: 9,
+                scope: scope.clone(),
+                ids: vec!["b".into(), "a".into()],
+            };
+            let back: ClientRequest = rmp_serde::from_slice(&encode(&req)).unwrap();
+            let ClientRequest::Reorder {
+                req_id,
+                scope: got,
+                ids,
+            } = back
+            else {
+                panic!("not Reorder");
+            };
+            assert_eq!((req_id, got, ids), (9, scope, vec!["b".into(), "a".into()]));
+        }
     }
 
     #[test]

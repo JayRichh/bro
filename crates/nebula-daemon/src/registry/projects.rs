@@ -86,14 +86,14 @@ impl Daemon {
         // worktrees too so `nebula` matches reality on day one. Root-ness is
         // the path test the reconcile uses, not insert order — the two agreeing
         // is what keeps `repo_path` and the ⌂ root row the same directory.
-        for entry in entries {
+        for (slot, entry) in entries.into_iter().enumerate() {
             let worktree = Worktree {
                 id: WorktreeId::generate(),
                 project_id: project.id.clone(),
                 is_main: entry.path == repo_path,
                 path: entry.path.clone(),
                 branch: entry.branch,
-                sort_order: 0,
+                sort_order: slot as i64,
             };
             let worktree_to_insert = worktree.clone();
             self.store_blocking(move |store| store.insert_worktree(&worktree_to_insert))
@@ -442,7 +442,7 @@ impl Daemon {
         path: PathBuf,
         branch: &str,
     ) -> Result<Worktree> {
-        let worktree = Worktree {
+        let mut worktree = Worktree {
             id: WorktreeId::generate(),
             project_id: project_id.clone(),
             path,
@@ -450,8 +450,8 @@ impl Daemon {
             is_main: false,
             sort_order: 0,
         };
-        let worktree_to_insert = worktree.clone();
-        self.store_blocking(move |store| store.insert_worktree(&worktree_to_insert))
+        worktree = self
+            .store_blocking(move |store| store.append_worktree(worktree))
             .await?;
         self.broadcast(ServerEvent::EntityUpserted {
             entity: Entity::Worktree(worktree.clone()),
@@ -716,8 +716,8 @@ impl Daemon {
                 branch: entry.branch.clone(),
                 sort_order: 0,
             };
-            let worktree_to_insert = worktree.clone();
-            self.store_blocking(move |store| store.insert_worktree(&worktree_to_insert))
+            let worktree = self
+                .store_blocking(move |store| store.append_worktree(worktree))
                 .await?;
             adopted = true;
             self.broadcast(ServerEvent::EntityUpserted {
