@@ -1,16 +1,23 @@
-//! Seeds a Kete 0.48 data dir for the upgrade fixtures in
-//! `crates/nebula/tests/fixtures/upgrade/` (see its README). Not built by
-//! the workspace: copy it into a v0.48.0 checkout as
-//! `crates/nebula/examples/seed048.rs`, add `rusqlite = { version = "0.40",
-//! features = ["bundled"] }` to that crate's `[dev-dependencies]`, and run
+//! Seeds a Kete 0.48 data dir for the upgrade fixtures beside this file
+//! (`v0.48/`). Not built by the workspace: copy it into a v0.48.0
+//! checkout as `crates/nebula/examples/seed048.rs`, add `rusqlite = {
+//! version = "0.40", features = ["bundled"] }` to that crate's
+//! `[dev-dependencies]`, build that checkout's `kete`, and run
 //!
-//!   cargo run --example seed048 -- <root> <old kete.exe> <fake agent exe>
+//!   cargo run --example seed048 -- <root> <old kete.exe> <agent exe> [--keep-daemon]
 //!
 //! `<root>` must be empty: the repos, their origins, the data and runtime
 //! dirs and a home all go under it, and NEBULA_* point there, so nothing
 //! touches the user's own Kete. Commits are dated and authored the same on
-//! every run (and the same as the test that rebuilds the repos), so their
-//! SHAs, which the reviewed marks are scoped to, come out the same.
+//! every run (and the same as `tests/e2e_windows/upgrade.rs`, which
+//! rebuilds the repos), so their SHAs, which the reviewed marks are scoped
+//! to, come out the same. `--keep-daemon` leaves the 0.48 daemon up with
+//! its sessions (for trying `kete reload` / `kete kill` onto a new build).
+//!
+//! The fixture is `<root>/kete.sql` as `v0.48/nebula.sql`, and
+//! `<root>/data/{config.json,reviewed.json,profiles/*/claude/.claude.json}`
+//! under `v0.48/data/`, with `<root>` replaced by the tokens
+//! `tests/e2e_windows/upgrade.rs` names (and the agent exe by `@AGENT@`).
 
 use nebula_core::codec::{read_frame, write_frame};
 use nebula_core::{
@@ -72,7 +79,10 @@ impl Client {
         let id = self.next;
         write_frame(&mut self.stream, &make(id)).await.unwrap();
         loop {
-            match read_frame::<ServerEvent, _>(&mut self.stream).await.unwrap() {
+            match read_frame::<ServerEvent, _>(&mut self.stream)
+                .await
+                .unwrap()
+            {
                 Some(ServerEvent::Ack { req_id, created }) if req_id == id => return created,
                 Some(ServerEvent::Error {
                     req_id: Some(r),
@@ -155,7 +165,8 @@ async fn main() {
     let mut json: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     json["harnesses"] = serde_json::json!({ "claude": { "program": agent_exe } });
-    json["desktop"] = serde_json::json!({ "theme": "dark", "home": "board", "collapsed": ["alpha"] });
+    json["desktop"] =
+        serde_json::json!({ "theme": "dark", "home": "board", "collapsed": ["alpha"] });
     std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
 
     // The daemon first, its handles all null: one `kete add` spawned would
@@ -177,15 +188,31 @@ async fn main() {
     // Projects and accounts through the 0.48 CLI.
     kete(&kete_exe, &["add", &alpha.display().to_string()]);
     kete(&kete_exe, &["add", &beta.display().to_string()]);
-    kete(&kete_exe, &["profile", "add", "work", "--harness", "claude", "--default"]);
     kete(
         &kete_exe,
-        &["profile", "add", "spare", "--harness", "claude", "--env", "FIXTURE=1"],
+        &["profile", "add", "work", "--harness", "claude", "--default"],
+    );
+    kete(
+        &kete_exe,
+        &[
+            "profile",
+            "add",
+            "spare",
+            "--harness",
+            "claude",
+            "--env",
+            "FIXTURE=1",
+        ],
     );
     kete(&kete_exe, &["profile", "disable", "spare"]);
     kete(
         &kete_exe,
-        &["profile", "set-project", &beta.display().to_string(), "spare"],
+        &[
+            "profile",
+            "set-project",
+            &beta.display().to_string(),
+            "spare",
+        ],
     );
 
     let conn = nebula_tui::ipc::connect_or_spawn().await.unwrap();
@@ -196,7 +223,9 @@ async fn main() {
     c.send(ClientRequest::Subscribe).await;
     let (projects, worktrees) = loop {
         if let Some(ServerEvent::Snapshot {
-            projects, worktrees, ..
+            projects,
+            worktrees,
+            ..
         }) = read_frame::<ServerEvent, _>(&mut c.stream).await.unwrap()
         {
             break (projects, worktrees);
@@ -350,6 +379,11 @@ async fn main() {
 
     tokio::time::sleep(Duration::from_secs(1)).await;
     drop(c);
+    // `--keep-daemon`: leave it up with its sessions (a reload test).
+    if args.get(3).map(String::as_str) == Some("--keep-daemon") {
+        println!("daemon left up in {}", root.display());
+        return;
+    }
     kete(&kete_exe, &["kill"]);
     tokio::time::sleep(Duration::from_secs(1)).await;
 
@@ -358,9 +392,10 @@ async fn main() {
 }
 
 fn worktrees_dir(repo: &Path) -> PathBuf {
-    repo.parent()
-        .unwrap()
-        .join(format!("{}-worktrees", repo.file_name().unwrap().to_string_lossy()))
+    repo.parent().unwrap().join(format!(
+        "{}-worktrees",
+        repo.file_name().unwrap().to_string_lossy()
+    ))
 }
 
 /// The database as SQL text: schema, rows, then indexes and triggers, and
@@ -399,11 +434,17 @@ fn dump_db(db: &Path, out: &Path) {
                         format!("'{}'", String::from_utf8_lossy(t).replace('\'', "''"))
                     }
                     ValueRef::Blob(b) => {
-                        format!("X'{}'", b.iter().map(|x| format!("{x:02x}")).collect::<String>())
+                        format!(
+                            "X'{}'",
+                            b.iter().map(|x| format!("{x:02x}")).collect::<String>()
+                        )
                     }
                 })
                 .collect();
-            text.push_str(&format!("INSERT INTO \"{name}\" VALUES({});\n", vals.join(",")));
+            text.push_str(&format!(
+                "INSERT INTO \"{name}\" VALUES({});\n",
+                vals.join(",")
+            ));
         }
     }
     text.push_str(&format!("PRAGMA user_version={version};\nCOMMIT;\n"));
