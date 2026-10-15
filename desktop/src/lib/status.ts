@@ -3,6 +3,7 @@
 // that applies, an open pull request only once nothing else needs you.
 
 import { prOpen, type Agent, type Model, type PrInfo, type Subagent, type TerminalTab } from './api';
+import { orderedWorktrees, refill } from './order';
 
 export type Lane = 'needs' | 'running' | 'unseen' | 'done' | 'pr';
 
@@ -146,6 +147,9 @@ export function lanes(m: Model): Record<Lane, Agent[]> {
   const out: Record<Lane, Agent[]> = { needs: [], running: [], unseen: [], done: [], pr: [] };
   const visible = m.agents.filter((a) => !a.archived && a.role !== 'orchestrator');
   for (const a of visible) out[laneOf(a, m.prs[a.worktree_id])].push(a);
-  for (const l of Object.values(out)) l.sort((x, y) => y.status_changed_at - x.status_changed_at);
+  // Newest first, but a checkout the user ordered keeps that order among
+  // its own cards (order.ts `refill`).
+  const ordered = orderedWorktrees(m);
+  for (const l of Object.keys(out) as Lane[]) out[l] = refill(out[l], (w) => ordered.has(w));
   return out;
 }

@@ -57,7 +57,8 @@ const ids = (gs: { worktree: Worktree }[]) => gs.map((g) => g.worktree.id);
 
 describe('worktree groups', () => {
   const m = model({
-    worktrees: [wt('main', { is_main: true, sort_order: 0 }), wt('old', { sort_order: 1 }), wt('hot', { sort_order: 2 }), wt('idle', { sort_order: 3 })],
+    // Never ordered: every slot 0, the daemon's state until a Reorder.
+    worktrees: [wt('main', { is_main: true }), wt('old'), wt('hot'), wt('idle')],
     agents: [agent('a', 'old', { status_changed_at: 100 }), agent('b', 'hot', { status_changed_at: 900 }), agent('c', 'main', { status_changed_at: 50 })],
     terminals: [term('t', 'idle', { run_command: 'npm run dev' })],
     ports: [{ worktree: 'idle', block: null, live: [5173, 3000, 5173] }],
@@ -66,6 +67,11 @@ describe('worktree groups', () => {
 
   it('puts the root first, then the most recently worked in', () => {
     expect(ids(worktreeGroups(m, 'p', { showAll: false }))).toEqual(['main', 'hot', 'old', 'idle']);
+  });
+
+  it('follows the user order once the repo has one', () => {
+    const ordered = model({ ...m, worktrees: [wt('main', { is_main: true }), wt('old', { sort_order: 1 }), wt('hot', { sort_order: 2 }), wt('idle', { sort_order: 3 })] });
+    expect(ids(worktreeGroups(ordered, 'p'))).toEqual(['main', 'old', 'hot', 'idle']);
   });
 
   it('keeps a checkout never worked in at its place in the repo order', () => {

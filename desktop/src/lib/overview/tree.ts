@@ -85,6 +85,7 @@ export function buildForest(agents: Agent[], subs: Subagent[], outside?: Map<str
   }
 
   const roots: Node[] = [];
+  // The user's order, else oldest status change first (order.ts).
   const ordered = [...agents].sort((x, y) => x.sort_order - y.sort_order || x.status_changed_at - y.status_changed_at);
   for (const a of ordered) {
     const n = nodes.get(a.id)!;

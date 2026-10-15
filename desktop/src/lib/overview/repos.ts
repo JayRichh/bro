@@ -3,6 +3,7 @@
 
 import type { Model, PrInfo, Project, TerminalTab, Worktree } from '../api';
 import { buildForest, sortRepos, walkAll, type Node, type Status } from './tree';
+import { hasUserOrder } from '../order';
 
 export type RepoRow = {
   project: Project;
@@ -45,7 +46,16 @@ export function repoRows(m: Model, opts: { archived?: boolean } = {}): RepoRow[]
       prs,
     };
   });
-  return sortRepos(rows);
+  return orderRepos(rows);
+}
+
+/** Repos in the user's order (the rail's) once they have one, which is
+ *  as soon as there are two: repos hold slots 0..n from the day they were
+ *  added (order.ts). A lone repo, or a model from before slots, falls back
+ *  to attention then name. */
+export function orderRepos(rows: RepoRow[]): RepoRow[] {
+  if (!hasUserOrder(rows.map((r) => r.project))) return sortRepos(rows);
+  return [...rows].sort((a, b) => a.project.sort_order - b.project.sort_order);
 }
 
 /** Nodes by status, across the given rows. */

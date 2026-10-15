@@ -45,6 +45,8 @@ export type ShortcutId =
   | 'open_remote'
   | 'switch_branch'
   | 'row_menu'
+  | 'move_up'
+  | 'move_down'
   | 'list_move'
   | 'list_open'
   | 'overview_fold'
@@ -93,7 +95,7 @@ export const SHORTCUTS: Shortcut[] = [
   { id: 'home_overview', keys: ['ctrl+shift+o'], scope: 'anywhere', label: 'Overview', group: 'Views' },
   { id: 'toggle_home', keys: ['shift+k'], scope: 'global', label: 'Switch overview and board', group: 'Views' },
   { id: 'open_session', keys: ['ctrl+shift+t'], scope: 'anywhere', label: 'Show the session', group: 'Views' },
-  { id: 'open_diff', keys: ['ctrl+shift+d'], scope: 'anywhere', label: 'Diff the worktree', group: 'Views' },
+  { id: 'open_diff', keys: ['ctrl+shift+d'], scope: 'anywhere', label: 'Diff the checkout in context: the focused row, the session, the repo (again: back from the diff)', group: 'Views' },
   { id: 'go_home', keys: ['1'], scope: 'global', label: 'Home', group: 'Views' },
   { id: 'go_session', keys: ['2'], scope: 'global', label: 'Session', group: 'Views' },
   { id: 'go_diff', keys: ['3'], scope: 'global', label: 'Diff', group: 'Views' },
@@ -125,6 +127,9 @@ export const SHORTCUTS: Shortcut[] = [
   { id: 'open_remote', keys: ['shift+g'], scope: 'row', label: 'Open the repo remote in the browser', group: 'Sessions' },
   { id: 'switch_branch', keys: ['c'], scope: 'row', label: 'Switch the repo root checkout to another branch', group: 'Sessions' },
   { id: 'row_menu', keys: ['shift+f10', 'contextmenu'], scope: 'row', label: 'Actions menu', group: 'Sessions' },
+  // The keyboard's drag: a session, worktree or repo one place up or down.
+  { id: 'move_up', keys: ['alt+arrowup'], scope: 'row', label: 'Move up: the session, worktree or repo (or drag it)', group: 'Sessions' },
+  { id: 'move_down', keys: ['alt+arrowdown'], scope: 'row', label: 'Move down: the session, worktree or repo (or drag it)', group: 'Sessions' },
 
   { id: 'list_move', keys: ['j', 'k', 'arrowdown', 'arrowup'], scope: 'overview', label: 'Move through the rows (cards on the board)', group: 'Overview and board' },
   { id: 'list_open', keys: ['enter', 'space'], scope: 'overview', label: 'Open the session', group: 'Overview and board' },
@@ -189,6 +194,8 @@ export function keyLabel(chord: string): string {
   const NAMES: Record<string, string> = {
     arrowleft: '\u2190',
     arrowright: '\u2192',
+    arrowup: '\u2191',
+    arrowdown: '\u2193',
     escape: 'Esc',
     delete: 'Del',
     contextmenu: 'Menu',

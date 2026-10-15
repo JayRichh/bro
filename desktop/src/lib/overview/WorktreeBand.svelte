@@ -3,18 +3,21 @@
   // draws a band's rule: the root (\u2302) or a linked worktree (\u21b3), its
   // branch, where it stands in git, its pull request, its run and ports,
   // and what is in it. Its verbs show on hover or focus, and on a right
-  // click; a session dragged onto it moves there. Its sessions and
-  // terminals follow it, folded away with it.
+  // click. Dropped on its header, a session moves there and a worktree
+  // lands above or below it (by the pointer's half; the root stays
+  // first). Its sessions and terminals follow it, folded away with it.
   import { app, toast } from '../store.svelte';
   import { api } from '../api';
-  import { ask, openMenu } from '../ui/ui.svelte';
+  import { openMenu } from '../ui/ui.svelte';
   import { age } from '../status';
   import RunButton from './RunButton.svelte';
   import SessionTree from './SessionTree.svelte';
   import { type WorktreeGroup, isEmpty, prLabel, worktreeKey } from '../worktrees/groups';
   import { isCollapsed, rows, toggleCollapsed, setCollapsed } from '../worktrees/rows.svelte';
   import { verbTitle, verbsFor, worktreeMenu } from '../worktrees/verbs';
-  import { DRAG_SESSION } from './drag';
+  import { drag, dropWorktree, endDrag, leftFor, moveOnto, offsetIn, startDrag, worktreeDropOk } from '../reorder.svelte';
+  import { dropZone, type Zone } from '../order';
+  import { withKey } from '../shortcuts';
 
   let { repo, group }: { repo: string; group: WorktreeGroup } = $props();
 
@@ -25,7 +28,9 @@
   const verbs = $derived(verbsFor(w));
   const changes = $derived(git ? git.changed + git.untracked : null);
   const empty = $derived(isEmpty(group));
-  let over = $state(false);
+  /** Where a drag over the header would land: onto it (a session), or
+   *  above or below it (a worktree). */
+  let over = $state<Zone | null>(null);
 
   const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
   const contents = $derived(
@@ -58,31 +63,29 @@
   }
 
   function dragOver(e: DragEvent) {
-    if (!e.dataTransfer?.types.includes(DRAG_SESSION)) return;
+    const d = drag.item;
+    let zone: Zone | null = null;
+    if (d?.kind === 'agent') zone = d.worktree === w.id ? null : 'onto';
+    else if (worktreeDropOk(d, w.project_id, w.id)) {
+      const [y, h] = offsetIn(e);
+      // Nothing goes above the root.
+      zone = w.is_main ? 'after' : dropZone(y, h, { insert: true, onto: false });
+    }
+    over = zone;
+    if (!zone || !e.dataTransfer) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    over = true;
   }
 
   async function drop(e: DragEvent) {
-    over = false;
-    const id = e.dataTransfer?.getData(DRAG_SESSION);
-    if (!id) return;
+    const d = drag.item;
+    const zone = over;
+    over = null;
+    if (!d || !zone) return;
     e.preventDefault();
-    const a = app.model.agents.find((x) => x.id === id);
-    if (!a || a.worktree_id === w.id) return;
-    const ok = await ask.confirm({
-      title: 'Move session',
-      message: `Move "${a.name}" to ${w.branch}? It carries on in that checkout.`,
-      confirm: 'Move',
-    });
-    if (!ok.ok) return;
-    try {
-      await api.moveAgent(id, w.id);
-      toast(`Moved ${a.name} to ${w.branch}.`);
-    } catch (err) {
-      toast(`Could not move: ${err}`);
-    }
+    endDrag();
+    if (d.kind === 'agent' && zone === 'onto') await moveOnto(d.id, w.id);
+    else if (d.kind === 'worktree' && zone !== 'onto') await dropWorktree(w.project_id, d.id, w.id, zone);
   }
 
   const meta = 'font-mono text-[12px] whitespace-nowrap';
@@ -91,14 +94,18 @@
 <div class="@container/wt" data-worktree={w.id}>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
-    class="group/wt relative flex min-h-8 min-w-0 items-center gap-3 border-b border-rule bg-bg pr-4 pl-6 {over
+    class="group/wt relative flex min-h-8 min-w-0 items-center gap-3 border-b border-rule bg-bg pr-4 pl-6 {over === 'onto' && drag.item
       ? 'outline-2 -outline-offset-2 outline-ember'
       : ''}"
     oncontextmenu={menu}
+    ondragenter={dragOver}
     ondragover={dragOver}
-    ondragleave={() => (over = false)}
+    ondragleave={(e) => leftFor(e) && (over = null)}
     ondrop={drop}
   >
+    {#if (over === 'before' || over === 'after') && drag.item}
+      <span class="pointer-events-none absolute inset-x-0 z-10 h-px bg-ember {over === 'before' ? '-top-px' : '-bottom-px'}" aria-hidden="true"></span>
+    {/if}
     <div
       role="button"
       tabindex="0"
@@ -106,7 +113,10 @@
       data-target="worktree:{w.id}"
       aria-expanded={!folded}
       aria-label="{w.is_main ? 'Root checkout' : 'Worktree'} {w.branch}, {contents}. Enter folds; s new session, t terminal, d diff{w.is_main ? '' : ', Delete deletes'}"
-      title="{w.path}. Click or Enter to {folded ? 'unfold' : 'fold'}; right-click for its actions."
+      title="{w.path}. Click or Enter to {folded ? 'unfold' : 'fold'}; right-click for its actions{w.is_main ? '' : `; ${withKey('drag to reorder', ['move_up', 'move_down'])}`}."
+      draggable={!w.is_main}
+      ondragstart={(e) => startDrag(e, { kind: 'worktree', id: w.id, project: w.project_id })}
+      ondragend={() => ((over = null), endDrag())}
       class="flex min-w-0 flex-1 cursor-default items-center gap-2 self-stretch outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rule-strong"
       onclick={() => toggleCollapsed(key)}
       onkeydown={onKey}
