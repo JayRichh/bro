@@ -39,6 +39,8 @@
   import WorktreesView from './lib/worktrees/WorktreesView.svelte';
   import { loadCollapsed } from './lib/worktrees/rows.svelte';
   import { listenAlerts } from './lib/alerts';
+  import { noteFocus } from './lib/selection.svelte';
+  import VerbBar from './lib/VerbBar.svelte';
 
   const media = window.matchMedia('(prefers-color-scheme: dark)');
   let osDark = $state(media.matches);
@@ -157,7 +159,11 @@
   // (ui/focus.ts), so Esc out of a menu leaves its row keys working.
   let lastOutside: HTMLElement | null = null;
   function onFocusIn(e: FocusEvent) {
-    if (e.target instanceof HTMLElement && !e.target.closest(LAYER_SEL)) lastOutside = e.target;
+    if (e.target instanceof HTMLElement && !e.target.closest(LAYER_SEL)) {
+      lastOutside = e.target;
+      // The row the verb bar, `?` and the palette act on.
+      noteFocus(e.target);
+    }
   }
   let layered = false;
   $effect(() => {
@@ -325,14 +331,18 @@
           </p>
         </section>
       {:else}
-        <div class="relative min-w-0 flex-1 {full || (narrow && split && !listShown) ? 'hidden' : ''}">
-          {#if orchView}
-            <OrchestratorPanel />
-          {:else if app.home === 'board'}
-            <Board active={!split || (narrow && listShown)} />
-          {:else}
-            <Overview active={!split || (narrow && listShown)} />
-          {/if}
+        <div class="relative flex min-w-0 flex-1 flex-col {full || (narrow && split && !listShown) ? 'hidden' : ''}">
+          <div class="relative min-h-0 flex-1">
+            {#if orchView}
+              <OrchestratorPanel />
+            {:else if app.home === 'board'}
+              <Board active={!split || (narrow && listShown)} />
+            {:else}
+              <Overview active={!split || (narrow && listShown)} />
+            {/if}
+          </div>
+          <!-- The focused row's verbs, with their keys. -->
+          {#if !orchView}<VerbBar />{/if}
         </div>
         {#if split && !full && !narrow}
           <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->

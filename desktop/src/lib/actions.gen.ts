@@ -1528,9 +1528,9 @@ export const MENU_LABELS: readonly { id: ActionId; on: AppliesTo | null; label: 
 
 /** Each kind's menu, in order: a right-click's rows in both apps. */
 export const MENUS: Readonly<Partial<Record<AppliesTo, readonly ActionId[]>>> = {
-  session: ["activate", "follow_up", "restart", "duplicate_session", "move_session", "move_to_account", "rename", "pin_orchestrator", "unarchive", "archive", "delete", "open_pull_request", "open_issue", "reorder_up", "reorder_down"],
+  session: ["activate", "follow_up", "restart", "duplicate_session", "move_session", "move_to_account", "rename", "pin_orchestrator", "open_pull_request", "open_issue", "reorder_up", "reorder_down", "unarchive", "archive", "delete"],
   terminal: ["activate", "rename", "delete"],
-  worktree: ["new", "new_terminal", "toggle_run", "git_diff", "open_worktree", "open_repo", "switch_branch", "reorder_up", "reorder_down", "delete_all", "delete_worktree"],
+  worktree: ["new", "quick_prompt", "new_terminal", "toggle_run", "git_diff", "open_worktree", "open_repo", "switch_branch", "reorder_up", "reorder_down", "delete_all", "delete_worktree"],
   repo: ["quick_prompt", "new_worktree", "switch_branch", "toggle_run", "open_worktree", "open_repo", "refresh_pull_requests", "rename", "reorder_up", "reorder_down", "delete_worktree", "remove_project"],
 };
 

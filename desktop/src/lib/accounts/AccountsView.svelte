@@ -31,6 +31,7 @@
   import { nameProblem, projectAccount, projectsDefaultingTo, renameBlocker, SPREADS, suggestName, THRESHOLDS, viewRows } from './view';
   import { runLogin, setProjectAccount } from './actions';
   import { openAddAccount } from './add.svelte';
+  import { allKeysItem } from '../commands';
 
   const rows = $derived(viewRows(mergeRows(app.accounts, app.model.accounts ?? {}, ownLoginSessionHarnesses(app.model.agents))));
   const spread = $derived(app.launch.spread ?? 'manual');
@@ -196,11 +197,38 @@
     }
   }
 
-  /** A row's keys while focus is in it: R renames, Delete removes. */
+  /** The row's verbs, as its buttons run them: what `?` lists. */
+  function rowVerbs(r: AccountRow, at: HTMLElement): MenuEntry[] {
+    const out: MenuEntry[] = [];
+    if (r.loginHint && !r.problem) out.push({ label: r.login === 'logged_in' ? 'Re-sign in' : 'Sign in', run: () => void signIn(r) });
+    if (!r.profile) return [...out, { label: 'Add as account', run: () => openAddAccount({ harness: r.harness, adopt: true }) }];
+    if (!r.problem)
+      out.push(
+        { label: r.default ? 'The default' : 'Make default', run: () => void setDefault(r), disabled: r.default },
+        { label: r.disabled ? 'Switch on' : 'Switch off', run: () => void setEnabled(r) },
+        { label: 'Edit\u2026', run: () => edit(r) },
+        { label: 'Duplicate\u2026', run: () => void duplicate(r) },
+        { label: 'Use for\u2026', run: () => useFor(r, at) },
+      );
+    if (r.name !== '(no name)') out.push({ label: 'Rename\u2026', run: () => void rename(r), keys: ['r'] });
+    out.push({ label: 'Remove\u2026', run: () => void remove(r), keys: ['delete'], danger: true });
+    return out;
+  }
+
+  /** A row's keys while focus is in it: ? lists its verbs, R renames,
+   *  Delete removes. */
   function rowKey(e: KeyboardEvent, r: AccountRow) {
-    if (!r.profile || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     const t = e.target as HTMLElement;
     if (t.closest('input, textarea, select, [contenteditable="true"]')) return;
+    // `?`: this account's verbs, searchable, every key last.
+    if (e.key === '?') {
+      e.preventDefault();
+      e.stopPropagation();
+      const at = e.currentTarget as HTMLElement;
+      return openMenu([...rowVerbs(r, at), 'sep', allKeysItem()], at, `account ${r.name}`, { search: true });
+    }
+    if (!r.profile) return;
     // The window's own r and Delete act on the open session: not here.
     if (e.key === 'r' || e.key === 'R') (e.preventDefault(), e.stopPropagation(), rename(r));
     else if (e.key === 'Delete') (e.preventDefault(), e.stopPropagation(), remove(r));

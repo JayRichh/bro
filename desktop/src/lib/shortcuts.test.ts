@@ -42,8 +42,9 @@ describe('the shortcut table', () => {
 
   it('has unique ids and every action a key but the few left unbound', () => {
     // The digits are repos and Shift+R is refresh: these keep their rows
-    // for a user's own key, with none by default.
-    const unbound = ['go_home', 'go_session', 'go_diff', 'orchestrator', 'restart'];
+    // for a user's own key, with none by default. `?` is the verbs menu's
+    // now: help keeps F1 (help_f1) and its own row for a user's key.
+    const unbound = ['go_home', 'go_session', 'go_diff', 'orchestrator', 'restart', 'help'];
     const ids = SHORTCUTS.map((s) => s.id);
     expect(new Set(ids).size).toBe(ids.length);
     for (const s of SHORTCUTS) {
@@ -160,7 +161,8 @@ describe('withKey, the buttons\' tooltips', () => {
   it('names the keys from the table', () => {
     expect(withKey('Restart the agent', 'restart')).toBe('Restart the agent');
     expect(withKey('Diff', ['diff', 'open_diff'])).toBe('Diff (D or Ctrl+Shift+D)');
-    expect(withKey('Keyboard shortcuts', ['help', 'help_f1'])).toBe('Keyboard shortcuts (? or F1)');
+    expect(withKey('Keyboard shortcuts', ['help', 'help_f1'])).toBe('Keyboard shortcuts (F1)');
+    expect(withKey('Verbs', 'verbs')).toBe('Verbs (?)');
     expect(withKey('Full pane', 'maximize')).toBe('Full pane (Ctrl+Shift+M)');
   });
   it('drops the brackets for an action with no key', () => {

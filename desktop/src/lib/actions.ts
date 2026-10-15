@@ -7,9 +7,12 @@
 
 import { api, type Agent, type Model, type TerminalTab, type Worktree } from './api';
 import { app, focusQuickPrompt, markSeen, openDiff, openSession, projectOf, toast } from './store.svelte';
-import { ask, type MenuEntry } from './ui/ui.svelte';
-import { keysOf, type ShortcutId } from './shortcuts';
-import { orchestratorMenuItems } from './orch.svelte';
+import { ask, type MenuEntry, type MenuItem } from './ui/ui.svelte';
+import type { ShortcutId } from './shortcuts';
+import { makeOrchestrator, orchestratorMenuItems, unpinOrchestrator } from './orch.svelte';
+import { orchestratorOf } from './orchestrator';
+import type { ActionId, AppliesTo } from './actions.gen';
+import { destructive, menuIds, menuLabel, verbKeys } from './verbs';
 import { worktreeApi } from './worktrees/api';
 import { cardsLine, dirty, stateLines } from './worktrees/offer';
 import { deleteEmptied, offerConfirm, prepareOffer, stillOffered } from './worktrees/delete';
@@ -381,40 +384,166 @@ export async function removeProject(id: string) {
 
 // ---- menus ----
 
-const item = (label: string, run: () => void, id?: ShortcutId, danger = false) => ({
-  label,
-  run,
-  keys: id ? keysOf(id) : undefined,
-  danger,
+// Every menu is built in the registry's order (MENUS) from the verbs the
+// window can run on the thing (`verbTable`), in the registry's words
+// (`menuLabel`), each with its key: the same rows, words and order as the
+// terminal app's. The window's own extras (Mark seen, Review, Default
+// account, Locate folder) sit among the registry's rows.
+
+/** What the window does for a registry verb on one thing. */
+interface VerbImpl {
+  run: () => unknown;
+  /** Words where the verb turns (Run or Stop run, Unpin orchestrator). */
+  label?: string;
+  disabled?: boolean;
+}
+export type VerbTable = Partial<Record<ActionId, VerbImpl>>;
+
+const entry = (id: ActionId, on: AppliesTo, v: VerbImpl): MenuItem => ({
+  label: v.label ?? menuLabel(id, on),
+  run: () => void v.run(),
+  keys: verbKeys(id),
+  danger: destructive(id),
+  ...(v.disabled ? { disabled: true } : {}),
 });
+
+/** The registry's rows of `on`'s menu that `table` has, in its order. */
+function rows(on: AppliesTo, table: VerbTable): MenuItem[] {
+  return menuIds(on).flatMap((id) => {
+    const v = table[id];
+    return v ? [entry(id, on, v)] : [];
+  });
+}
+
+/** A session's verbs as the window runs them: none an archived one does
+ *  not have, no reorder from a subagent's row (it acts on its parent). */
+function agentVerbs(a: Agent, viaSub = false, where: StepIn = stepInFor()): VerbTable {
+  if (a.archived)
+    return {
+      unarchive: { run: () => unarchiveAgent(a.id) },
+      duplicate_session: { run: () => duplicateAgent(a.id) },
+      delete: { run: () => deleteAgent(a.id) },
+    };
+  const pinned = orchestratorOf(m())?.id === a.id;
+  const t: VerbTable = {
+    activate: { run: () => openSession({ Agent: a.id }) },
+    follow_up: { run: () => followUp(a.id) },
+    git_diff: { run: () => openDiff(a.worktree_id) },
+    restart: { run: () => restartAgent(a.id) },
+    duplicate_session: { run: () => duplicateAgent(a.id) },
+    move_session: { run: () => moveAgent(a.id) },
+    // A fresh restart on another login: the conversation stays behind.
+    move_to_account: canSwitch(m())
+      ? { run: () => moveToAccount(a.id) }
+      : { run: () => toast(SWITCH_UNAVAILABLE), label: `${menuLabel('move_to_account', 'session')} (daemon too old)`, disabled: true },
+    rename: { run: () => renameAgent(a.id) },
+    pin_orchestrator: pinned ? { run: unpinOrchestrator, label: 'Unpin orchestrator' } : { run: () => makeOrchestrator(a) },
+    archive: { run: () => archiveAgent(a.id, viaSub), label: viaSub ? 'Archive parent session\u2026' : undefined },
+    delete: { run: () => deleteAgent(a.id) },
+  };
+  if (!viaSub) {
+    t.reorder_up = { run: () => moveStep({ kind: 'agent', id: a.id }, -1, where) };
+    t.reorder_down = { run: () => moveStep({ kind: 'agent', id: a.id }, 1, where) };
+  }
+  return t;
+}
+
+function terminalVerbs(x: TerminalTab): VerbTable {
+  return {
+    activate: { run: () => openSession({ Terminal: x.id }) },
+    rename: { run: () => renameTerminal(x.id) },
+    delete: { run: () => closeTerminal(x.id) },
+  };
+}
+
+/** Run or stop `w`'s run command, when it has one. */
+function runVerbOf(w: Worktree | undefined): VerbImpl | undefined {
+  if (!w || !app.runCommands[w.id]) return undefined;
+  const running = m().terminals.some((t) => t.worktree_id === w.id && t.run_command && t.alive);
+  return {
+    run: () => attempt(running ? 'Could not stop' : 'Could not run', () => (running ? api.stopRun(w.id) : api.startRun(w.id))),
+    label: running ? 'Stop run' : undefined,
+  };
+}
+
+function worktreeVerbs(w: Worktree): VerbTable {
+  const doomed = checkoutSessions(m(), w.id, app.showArchived);
+  const count = doomed.agents.length + doomed.terminals.length;
+  const project = w.project_id;
+  const t: VerbTable = {
+    quick_prompt: { run: () => focusQuickPrompt({ project, worktree: w.id, newWorktree: false }) },
+    new_terminal: { run: () => newTerminal(w.id) },
+    toggle_run: runVerbOf(w),
+    git_diff: { run: () => openDiff(w.id) },
+    open_worktree: { run: () => openEditor(w.id) },
+    open_repo: { run: () => openRemote(w.id) },
+  };
+  if (w.is_main && canSwitchBranch(project)) t.switch_branch = { run: () => openBranchSwitch(project) };
+  if (!w.is_main) {
+    t.reorder_up = { run: () => moveStep({ kind: 'worktree', id: w.id }, -1) };
+    t.reorder_down = { run: () => moveStep({ kind: 'worktree', id: w.id }, 1) };
+    t.delete_worktree = { run: () => deleteWorktree(w.id) };
+  }
+  if (count) t.delete_all = { run: () => deleteAllSessions(w.id) };
+  return t;
+}
+
+function projectVerbs(project: string): VerbTable {
+  const main = mainOf(project);
+  const t: VerbTable = {
+    quick_prompt: { run: () => focusQuickPrompt({ project }) },
+    new_worktree: { run: () => newWorktree(project) },
+    toggle_run: runVerbOf(main),
+    open_worktree: { run: () => openEditor(main?.id) },
+    open_repo: { run: () => openRemote(main?.id) },
+    refresh_pull_requests: { run: refreshPrs },
+    rename: { run: () => renameProject(project) },
+    reorder_up: { run: () => moveStep({ kind: 'project', id: project }, -1) },
+    reorder_down: { run: () => moveStep({ kind: 'project', id: project }, 1) },
+    remove_project: { run: () => removeProject(project) },
+  };
+  if (canSwitchBranch(project)) t.switch_branch = { run: () => openBranchSwitch(project) };
+  return t;
+}
+
+/** What the window can do to `t` now, verb by verb. */
+export function verbTable(t: Target): VerbTable {
+  switch (t.kind) {
+    case 'agent': {
+      const a = agentOf(t.id);
+      return a ? agentVerbs(a, t.viaSub) : {};
+    }
+    case 'terminal': {
+      const x = terminalOf(t.id);
+      return x ? terminalVerbs(x) : {};
+    }
+    case 'worktree': {
+      const w = worktreeOf(t.id);
+      return w ? worktreeVerbs(w) : {};
+    }
+    case 'project':
+      return projectVerbs(t.id);
+  }
+}
+
+/** Run verb `id` on `t`, as its menu row does. False when it means
+ *  nothing there. */
+export function runVerb(t: Target, id: ActionId): boolean {
+  const v = verbTable(t)[id];
+  if (!v || v.disabled) return false;
+  void v.run();
+  return true;
+}
 
 function worktreeItems(w: Worktree | undefined): MenuEntry[] {
   if (!w) return [];
-  const run = app.runCommands[w.id];
-  const running = m().terminals.some((t) => t.worktree_id === w.id && t.run_command && t.alive);
-  const out: MenuEntry[] = [{ heading: `${w.is_main ? 'checkout' : 'worktree'} ${w.branch}` }];
-  if (run)
-    out.push(
-      item(running ? 'Stop run' : 'Run', () =>
-        attempt(running ? 'Could not stop' : 'Could not run', () => (running ? api.stopRun(w.id) : api.startRun(w.id))),
-      ),
-    );
-  out.push(
-    item('New terminal', () => newTerminal(w.id), 'new_terminal'),
-    item('Diff', () => openDiff(w.id), 'diff'),
-    item('Open in editor', () => openEditor(w.id), 'open_editor'),
-    item('Open remote in browser', () => openRemote(w.id), 'open_remote'),
-  );
-  const doomed = checkoutSessions(m(), w.id, app.showArchived);
-  const count = doomed.agents.length + doomed.terminals.length;
-  if (count) out.push(item(`Delete all ${count} session${count === 1 ? '' : 's'}\u2026`, () => deleteAllSessions(w.id), undefined, true));
-  if (!w.is_main) out.push(item('Delete worktree\u2026', () => deleteWorktree(w.id), undefined, true));
-  return out;
+  return [{ heading: `${w.is_main ? 'checkout' : 'worktree'} ${w.branch}` }, ...rows('worktree', worktreeVerbs(w))];
 }
 
 /** Move up / Move down, the keyboard's (and the menu's) drag. */
 export function moveItems(t: { kind: string; id: string }, where: StepIn = 'tree'): MenuEntry[] {
-  return [item('Move up', () => moveStep(t, -1, where), 'move_up'), item('Move down', () => moveStep(t, 1, where), 'move_down')];
+  const on: AppliesTo = t.kind === 'project' ? 'repo' : t.kind === 'worktree' ? 'worktree' : 'session';
+  return [entry('reorder_up', on, { run: () => moveStep(t, -1, where) }), entry('reorder_down', on, { run: () => moveStep(t, 1, where) })];
 }
 
 /** `where`: the board orders a lane's cards, the overview a tree's rows;
@@ -423,68 +552,39 @@ export function agentMenu(a: Agent, viaSub = false, where: StepIn = stepInFor())
   const w = worktreeOf(a.worktree_id);
   // From a subagent's row every verb is the parent's: say so up top.
   const head: MenuEntry[] = viaSub ? [{ heading: `Parent session: ${a.name}` }] : [];
-  if (a.archived)
-    return [
-      ...head,
-      item('Unarchive', () => unarchiveAgent(a.id), 'unarchive'),
-      item('Duplicate', () => duplicateAgent(a.id), 'duplicate'),
-      'sep',
-      item('Delete\u2026', () => deleteAgent(a.id), 'delete', true),
-    ];
-  const out: MenuEntry[] = [
-    ...head,
-    item('Open', () => openSession({ Agent: a.id })),
-    item('Follow-up prompt\u2026', () => followUp(a.id), 'follow_up'),
-    item('Restart agent', () => restartAgent(a.id), 'restart'),
-    item('Duplicate', () => duplicateAgent(a.id), 'duplicate'),
-    item('Move to\u2026', () => moveAgent(a.id), 'move'),
-    // A fresh restart on another login: the conversation stays behind.
-    canSwitch(m())
-      ? item('Move to account\u2026', () => moveToAccount(a.id))
-      : { label: 'Move to account\u2026 (daemon too old)', run: () => toast(SWITCH_UNAVAILABLE), disabled: true },
-    item('Rename\u2026', () => renameAgent(a.id), 'rename'),
-    ...(viaSub ? [] : moveItems({ kind: 'agent', id: a.id }, where)),
+  const verbs = rows('session', agentVerbs(a, viaSub, where));
+  if (a.archived) return [...head, ...verbs];
+  // The window's own, ahead of the rows that take the session away.
+  const extra: MenuEntry[] = [
+    ...(a.unseen ? [{ label: 'Mark seen', run: () => seeAgent(a.id) }] : []),
+    ...orchestratorMenuItems(a).filter((e) => typeof e === 'object' && 'label' in e && e.label === 'Review\u2026'),
   ];
-  if (a.unseen) out.push(item('Mark seen', () => seeAgent(a.id)));
-  out.push(...orchestratorMenuItems(a));
-  out.push(item(viaSub ? 'Archive parent session\u2026' : 'Archive', () => archiveAgent(a.id, viaSub), 'archive'), item('Delete\u2026', () => deleteAgent(a.id), 'delete', true));
-  return [...out, 'sep', ...worktreeItems(w)];
+  const at = verbs.findIndex((e) => e.danger || e.label === menuLabel('archive', 'session') || e.label === 'Archive parent session\u2026');
+  const cut = at < 0 ? verbs.length : at;
+  return [...head, ...verbs.slice(0, cut), ...extra, ...verbs.slice(cut), 'sep', ...worktreeItems(w)];
 }
 
 export function terminalMenu(t: TerminalTab): MenuEntry[] {
-  return [
-    item('Open', () => openSession({ Terminal: t.id })),
-    item('Rename\u2026', () => renameTerminal(t.id), 'rename'),
-    item('Close terminal\u2026', () => closeTerminal(t.id), 'delete', true),
-    'sep',
-    ...worktreeItems(worktreeOf(t.worktree_id)),
-  ];
+  return [...rows('terminal', terminalVerbs(t)), 'sep', ...worktreeItems(worktreeOf(t.worktree_id))];
 }
 
 export function projectMenu(project: string): MenuEntry[] {
-  const main = mainOf(project);
   const linked = m()
     .worktrees.filter((w) => w.project_id === project && !w.is_main)
     .sort((a, b) => a.sort_order - b.sort_order);
-  const out: MenuEntry[] = [
-    item('New session here', () => focusQuickPrompt({ project })),
-    item('New worktree\u2026', () => newWorktree(project), 'new_worktree'),
-    ...(canSwitchBranch(project) ? [item('Switch branch\u2026', () => openBranchSwitch(project), 'switch_branch')] : []),
-    item('Open in editor', () => openEditor(main?.id)),
-    item('Open remote in browser', () => openRemote(main?.id)),
-    item('Refresh pull requests', refreshPrs, 'refresh'),
-    item('Default account\u2026', () => pickProjectAccount(project)),
-    'sep',
-    item('Rename\u2026', () => renameProject(project)),
-    ...moveItems({ kind: 'project', id: project }),
-    item('Locate folder\u2026', () => locateProject(project)),
-    item('Remove from Kete\u2026', () => removeProject(project), undefined, true),
-  ];
+  const out: MenuEntry[] = rows('repo', projectVerbs(project));
+  // The window's own: the repo's default account after the reload, the
+  // folder's location before the remove.
+  const at = (id: ActionId) => out.findIndex((e) => typeof e === 'object' && 'label' in e && e.label === menuLabel(id, 'repo'));
+  const refresh = at('refresh_pull_requests');
+  out.splice(refresh < 0 ? out.length : refresh + 1, 0, { label: 'Default account\u2026', run: () => void pickProjectAccount(project) });
+  const remove = at('remove_project');
+  out.splice(remove < 0 ? out.length : remove, 0, { label: 'Locate folder\u2026', run: () => void locateProject(project) });
   if (linked.length) {
     out.push('sep', { heading: 'worktrees' });
     for (const w of linked) {
-      out.push(item(`Open ${w.branch} in editor`, () => openEditor(w.id)));
-      out.push(item(`Delete ${w.branch}\u2026`, () => deleteWorktree(w.id), undefined, true));
+      out.push({ label: `Open ${w.branch} in editor`, run: () => void openEditor(w.id) });
+      out.push({ label: `Delete ${w.branch}\u2026`, run: () => void deleteWorktree(w.id), danger: true });
     }
   }
   return out;
@@ -500,10 +600,8 @@ export function menuFor(t: Target): MenuEntry[] {
       const x = terminalOf(t.id);
       return x ? terminalMenu(x) : [];
     }
-    case 'worktree': {
-      const w = worktreeOf(t.id);
-      return [...worktreeItems(w), ...(w && !w.is_main ? ['sep' as const, ...moveItems(t)] : [])];
-    }
+    case 'worktree':
+      return worktreeItems(worktreeOf(t.id));
     case 'project':
       return projectMenu(t.id);
   }
@@ -528,6 +626,7 @@ export function runRowKey(id: ShortcutId, t: Target): boolean {
     : term
       ? { rename: () => renameTerminal(term.id), delete: () => closeTerminal(term.id) }
       : {};
+  if (t.kind === 'project') table.rename = () => renameProject(t.id);
   Object.assign(table, {
     new_terminal: () => newTerminal(wt),
     open_editor: () => openEditor(wt),

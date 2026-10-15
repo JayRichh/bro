@@ -16,6 +16,10 @@ import { worktreeApi, type CheckoutState } from './api';
 import { stateLines } from './offer';
 import { sweepCandidates, sweepReason, type Sweep, type WorktreeGroup } from './groups';
 import { refreshGit } from './rows.svelte';
+import { menuLabel } from '../verbs';
+
+/** A registry verb's words on a worktree: one set for both apps. */
+const say = (id: Parameters<typeof menuLabel>[0]) => menuLabel(id, 'worktree');
 
 async function attempt(what: string, f: () => Promise<unknown>) {
   try {
@@ -69,21 +73,21 @@ export type Verb = {
 
 export function verbsFor(w: Worktree): Verb[] {
   const out: Verb[] = [
-    { id: 'session', label: 'New session here', short: 'session', run: () => newSessionIn(w), rowKey: 's' },
-    { id: 'terminal', label: 'New terminal here', short: 'terminal', run: () => newTerminal(w.id), key: 'new_terminal' },
-    { id: 'diff', label: 'Diff', short: 'diff', run: () => openDiff(w.id), rowKey: 'd' },
+    { id: 'session', label: say('quick_prompt'), short: 'session', run: () => newSessionIn(w), rowKey: 's' },
+    { id: 'terminal', label: say('new_terminal'), short: 'terminal', run: () => newTerminal(w.id), key: 'new_terminal' },
+    { id: 'diff', label: say('git_diff'), short: 'diff', run: () => openDiff(w.id), rowKey: 'd' },
   ];
   if (w.is_main && canSwitchBranch(w.project_id))
-    out.push({ id: 'branch', label: 'Switch branch\u2026', short: 'branch', run: () => openBranchSwitch(w.project_id), key: 'switch_branch' });
+    out.push({ id: 'branch', label: say('switch_branch'), short: 'branch', run: () => openBranchSwitch(w.project_id), key: 'switch_branch' });
   out.push(
-    { id: 'editor', label: 'Open in editor', short: 'editor', run: () => openEditor(w.id), key: 'open_editor' },
+    { id: 'editor', label: say('open_worktree'), short: 'editor', run: () => openEditor(w.id), key: 'open_editor' },
     { id: 'folder', label: 'Open folder', short: 'folder', run: () => revealFolder(w) },
     { id: 'copy', label: 'Copy path', short: 'copy path', run: () => copyPath(w) },
   );
   if (app.runCommands[w.id] || isRunning(w))
-    out.push({ id: 'run', label: isRunning(w) ? 'Stop run' : 'Run', short: isRunning(w) ? 'stop' : 'run', run: () => toggleRun(w) });
+    out.push({ id: 'run', label: isRunning(w) ? 'Stop run' : say('toggle_run'), short: isRunning(w) ? 'stop' : 'run', run: () => toggleRun(w) });
   if (!w.is_main)
-    out.push({ id: 'delete', label: 'Delete worktree\u2026', short: 'delete', run: () => deleteWorktree(w.id), rowKey: 'delete', danger: true });
+    out.push({ id: 'delete', label: say('delete_worktree'), short: 'delete', run: () => deleteWorktree(w.id), rowKey: 'delete', danger: true });
   return out;
 }
 
@@ -95,7 +99,7 @@ export function worktreeMenu(w: Worktree): MenuEntry[] {
     if (v.id === 'delete') entries.push('sep');
     entries.push({ label: v.label, run: () => void v.run(), keys: v.key ? keysOf(v.key) : v.rowKey ? [v.rowKey] : undefined, danger: v.danger });
     if (v.id === 'copy') {
-      entries.push({ label: 'Open remote in browser', run: () => void openRemote(w.id), keys: keysOf('open_remote') });
+      entries.push({ label: say('open_repo'), run: () => void openRemote(w.id), keys: keysOf('open_remote') });
       // The keyboard's drag of the group (the root stays first).
       if (!w.is_main) entries.push(...moveItems({ kind: 'worktree', id: w.id }));
     }

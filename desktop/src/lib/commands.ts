@@ -24,7 +24,10 @@ import {
 import { keysOf, type ShortcutId } from './shortcuts';
 import { menuFor, newWorktree, parseTarget, refreshPrs, runRowKey, type Target } from './actions';
 import { pickBranchSwitch } from './worktrees/switcher.svelte';
-import { ask, openMenu, ui, type MenuItem } from './ui/ui.svelte';
+import { ask, openMenu, ui, type MenuEntry, type MenuItem } from './ui/ui.svelte';
+import { selection } from './selection.svelte';
+import { PRIMARY, type ActionId } from './actions.gen';
+import { deskKeysOf, menuLabel, verbKeys } from './verbs';
 import { attentionSessions, stepRing, type PaletteCommand } from './palette';
 import { askStartOrchestrator, openOrchestrator, orchestratorCommands } from './orch.svelte';
 import { orchestratorOf } from './orchestrator';
@@ -68,8 +71,30 @@ export function currentRepo(): string | undefined {
 
 /** The session row or card with the focus, if any. */
 export function focusedTarget(): Target | null {
+  if (typeof document === 'undefined') return null;
   const el = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('[data-target]');
   return parseTarget(el?.dataset.target);
+}
+
+/** Still in the model: a remembered row that was deleted is none. */
+function live(t: Target | null): Target | null {
+  if (!t) return null;
+  const m = app.model;
+  const there =
+    t.kind === 'agent'
+      ? m.agents.some((a) => a.id === t.id)
+      : t.kind === 'terminal'
+        ? m.terminals.some((x) => x.id === t.id)
+        : t.kind === 'worktree'
+          ? m.worktrees.some((w) => w.id === t.id)
+          : m.projects.some((p) => p.id === t.id);
+  return there ? t : null;
+}
+
+/** The row the keys act on: the focused one, else the one focused last
+ *  (a menu, the palette or the verb bar has the focus now). */
+export function selectedTarget(): Target | null {
+  return focusedTarget() ?? live(selection.target);
 }
 
 /** The session the window shows, as a target. */
@@ -165,11 +190,71 @@ function quickPrompt() {
   focusQuickPrompt(repo ? { project: repo } : undefined);
 }
 
+/** What the verbs menu acts on with no row selected: the diff's
+ *  checkout in the diff, the shown session in its view, else the repo in
+ *  view. */
+function viewTarget(): Target | null {
+  const v = nav.current.view;
+  if (v === 'diff' && app.diffWorktree) return { kind: 'worktree', id: app.diffWorktree };
+  if (v === 'session') return currentTarget();
+  const repo = nav.current.repo;
+  return repo ? { kind: 'project', id: repo } : null;
+}
+
+/** The verbs menu's title: what its verbs act on. */
+export function targetName(t: Target): string {
+  const m = app.model;
+  switch (t.kind) {
+    case 'agent':
+      return `session ${m.agents.find((a) => a.id === t.id)?.name ?? ''}`;
+    case 'terminal':
+      return `terminal ${m.terminals.find((x) => x.id === t.id)?.name ?? ''}`;
+    case 'worktree': {
+      const w = m.worktrees.find((x) => x.id === t.id);
+      return `${nav.current.view === 'diff' ? 'diff' : w?.is_main ? 'checkout' : 'worktree'} ${w?.branch ?? ''}`;
+    }
+    case 'project':
+      return `repo ${m.projects.find((p) => p.id === t.id)?.name ?? ''}`;
+  }
+}
+
+/** The verbs menu's last row: every key (the full help, F1). */
+export function allKeysItem(): MenuItem {
+  return { label: 'All keys\u2026', run: () => ((ui.palette = false), (ui.help = true)), keys: keysOf('help_f1'), pinned: true };
+}
+
+/** The window's own verbs, with nothing selected: the registry's leading
+ *  ones (new session, the palette, the board, Settings), as their keys. */
+export function globalVerbs(): MenuItem[] {
+  return (PRIMARY.global ?? []).flatMap((id: ActionId) => {
+    const key = deskKeysOf(id)[0];
+    return key ? [{ label: menuLabel(id, 'global'), run: () => void runShortcut(key), keys: verbKeys(id) }] : [];
+  });
+}
+
+/** `?`: the verbs of the focused row (or of what the view shows), each
+ *  with its key, searchable, All keys last. */
+export function openVerbs(): boolean {
+  const { items, title } = verbsMenu(selectedTarget() ?? viewTarget());
+  const row = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('[data-target], [data-verb-bar]');
+  const at = row ?? { x: Math.max(8, Math.round(window.innerWidth / 2 - 180)), y: 96 };
+  openMenu(items, at, title, { search: true });
+  return true;
+}
+
+/** The verbs menu for `t` (the window's own verbs for none): its menu's
+ *  rows, then All keys. */
+export function verbsMenu(t: Target | null): { items: MenuEntry[]; title: string } {
+  const items: MenuEntry[] = t ? menuFor(t) : globalVerbs();
+  return { items: [...items, 'sep', allKeysItem()], title: t ? targetName(t) : 'Verbs' };
+}
+
 /** Run the action a shortcut names. False when it does nothing here. */
 export function runShortcut(id: ShortcutId): boolean {
   const go: Partial<Record<ShortcutId, () => unknown>> = {
     palette: () => ((ui.help = false), (ui.palette = true)),
     palette_alt: () => ((ui.help = false), (ui.palette = true)),
+    verbs: openVerbs,
     help: () => ((ui.palette = false), (ui.help = !ui.help)),
     help_f1: () => ((ui.palette = false), (ui.help = !ui.help)),
     settings: () => openSettings(),
@@ -280,7 +365,20 @@ export function paletteCommands(): Command[] {
           cmd('switch-branch', 'Switch branch\u2026', 'Window', () => pickBranchSwitch(), 'switch_branch', 'checkout git'),
         ]),
   ];
-  const t = currentTarget();
+  // The selection's verbs first, ahead of every session (palette.ts
+  // pins them).
+  const sel = selectedTarget();
+  if (sel) {
+    let i = 0;
+    for (const e of menuFor(sel)) {
+      if (typeof e !== 'object' || !('run' in e)) continue;
+      const it = e as MenuItem;
+      if (it.disabled) continue;
+      out.push({ id: `sel-${i++}`, label: it.label, group: targetName(sel), keys: it.keys, run: it.run, pinned: true });
+    }
+  }
+  const shown = currentTarget();
+  const t = shown && !(sel && sel.kind === shown.kind && sel.id === shown.id) ? shown : null;
   if (t) {
     const name =
       t.kind === 'agent' ? app.model.agents.find((a) => a.id === t.id)?.name : app.model.terminals.find((x) => x.id === t.id)?.name;
