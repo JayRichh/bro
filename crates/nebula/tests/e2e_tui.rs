@@ -35,7 +35,7 @@ const CTRL_R: &[u8] = &[0x12];
 const CTRL_E: &[u8] = &[0x05];
 
 /// A row only the PROJECT's own menu carries.
-const PROJECT_MENU_ROW: &str = "Remove from list";
+const PROJECT_MENU_ROW: &str = "Remove from Kete";
 /// Terminal pane input-locked inside the launcher grid: keys forward to the
 /// PTY, and the footer offers the launcher-pane hatch back to the card.
 const FOOTER_TERMINAL_LOCKED: &str = "back to the card";
@@ -449,7 +449,7 @@ fn tui_help_modal_grouped_keymap() {
 
     // The grouped two-column keymap: every section header on screen at
     // once (the old single list clipped its tail on short terminals).
-    tui.send(b"?");
+    tui.send(b"OP"); // F1: full help (`?` is the verbs menu)
     tui.wait_for_text("NAVIGATE & SEARCH");
     tui.wait_for_text("CHECKOUTS & GITHUB");
     tui.wait_for_text("SESSIONS");
@@ -584,9 +584,9 @@ fn tui_manual_link_add_is_unavailable() {
     add_project(&mut tui, &repo, "link-proj");
 
     tui.send(b"L");
-    tui.send(b"?");
-    // If Shift+L still opened a prompt, this `?` would type into it instead
-    // of opening HELP OVERLAY, so this heading proves the key was a no-op.
+    tui.send(b"OP"); // F1: full help (`?` is the verbs menu)
+                      // If Shift+L still opened a prompt, this `?` would type into it instead
+                      // of opening HELP OVERLAY, so this heading proves the key was a no-op.
     tui.wait_for_text("NAVIGATE & SEARCH");
     tui.wait_for_gone("attach a link");
 }

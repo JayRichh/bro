@@ -376,7 +376,15 @@ mod tests {
         drop(held);
 
         // Free again: back to the default, so the usual case is unchanged.
-        assert_eq!(resolve_port(None, DEFAULT_BIND).unwrap(), DEFAULT_PORT);
+        // The OS can take a moment to release the port, so allow a short wait.
+        let back = (0..40).any(|_| {
+            let ok = resolve_port(None, DEFAULT_BIND).unwrap() == DEFAULT_PORT;
+            if !ok {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            ok
+        });
+        assert!(back, "the default port comes back once it is free");
     }
 
     /// `--port 0` used to be refused outright. It now means "any free one",
