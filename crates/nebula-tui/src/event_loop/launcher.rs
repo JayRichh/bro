@@ -2319,6 +2319,69 @@ pub(super) fn click_band_more(app: &mut App, index: usize, out: &mut Vec<ClientR
     }
 }
 
+/// The keys back on the cards for a button that acts on one: a LOCKED
+/// PANE lets go of them (`leave_terminal_lock`), and the grid takes FOCUS,
+/// since `a` and `d` act on the card only from there.
+fn keys_to_cards(app: &mut App) {
+    if app.nav.focus == Focus::Terminal || app.pane.term_locked {
+        super::leave_terminal_lock(app);
+    }
+    app.nav.focus = Focus::Sessions;
+}
+
+/// A click on a CARD BUTTON (`HitTarget::CardButton`): the cursor onto
+/// that card, the keys back on the cards, and the action its key runs.
+///
+/// INPUT PARITY: the action goes through `run_action`, the very dispatch
+/// the key takes, so `a` and the `archive` button can never differ.
+pub(super) fn click_card_button(
+    app: &mut App,
+    at: CardRef,
+    action: Action,
+    out: &mut Vec<ClientRequest>,
+) {
+    if point_at(app, at, out).is_none() {
+        return;
+    }
+    keys_to_cards(app);
+    super::run_action(app, action, out);
+}
+
+/// A click on a card's `⋯` (`HitTarget::CardMenu`): the cursor onto the
+/// card, then the menu a right-click on it opens, hung under the button.
+pub(super) fn click_card_menu(app: &mut App, at: CardRef, out: &mut Vec<ClientRequest>) {
+    let anchor = crumb_anchor(app, &HitTarget::CardMenu(at));
+    if point_at(app, at, out).is_none() {
+        return;
+    }
+    keys_to_cards(app);
+    if let Some(items) = super::context_menu_items(app, Focus::Sessions) {
+        super::open_menu(app, items, anchor);
+    }
+}
+
+/// A click on the PANE header's `⋯` (`HitTarget::LauncherPaneMenu`): the
+/// menu of the card the pane reads — the cursor's — hung under it.
+pub(super) fn click_pane_menu(app: &mut App) {
+    let anchor = crumb_anchor(app, &HitTarget::LauncherPaneMenu);
+    keys_to_cards(app);
+    if let Some(items) = super::context_menu_items(app, Focus::Sessions) {
+        super::open_menu(app, items, anchor);
+    }
+}
+
+/// A click on the `+` at a BAND's rule (`HitTarget::LauncherBandNew`):
+/// the cursor onto the band, then the QUICK PROMPT in its checkout.
+///
+/// INPUT PARITY: the box is [`open_box`], the one `p` opens.
+pub(super) fn click_band_new(app: &mut App, index: usize, out: &mut Vec<ClientRequest>) {
+    if !select_band_row(app, index, out) {
+        return;
+    }
+    keys_to_cards(app);
+    open_box(app);
+}
+
 /// A click on the fold caret of a NESTED thread's root row
 /// (`HitTarget::LauncherBandFold`): the cursor onto that root, then the
 /// thread folds or opens.
@@ -6257,12 +6320,24 @@ mod tests {
                 session.width * 2 + crate::launcher::GAP_X,
                 "two columns wide: {text}"
             );
-            // No `+` anywhere under the header: the tab strip's own is the
-            // one on screen.
+            // No `+` for a terminal anywhere under the header: the only ones
+            // are the bands' NEW BUTTONS, which open the box `p` does.
             let buffer = terminal.backend().buffer();
+            let new_buttons: Vec<ratatui::layout::Rect> = app
+                .chrome
+                .hits
+                .iter()
+                .filter(|(_, h)| matches!(h, HitTarget::LauncherBandNew(_)))
+                .map(|(r, _)| *r)
+                .collect();
             let pluses: Vec<(u16, u16)> = (crate::launcher::HEAD_H..50u16)
                 .flat_map(|y| (0..130u16).map(move |x| (x, y)))
                 .filter(|&(x, y)| buffer[(x, y)].symbol() == "+")
+                .filter(|&(x, y)| {
+                    !new_buttons
+                        .iter()
+                        .any(|r| r.contains(ratatui::layout::Position::new(x, y)))
+                })
                 .collect();
             assert!(pluses.is_empty(), "no + on the grid: {pluses:?}\n{text}");
 
@@ -11391,7 +11466,8 @@ mod tests {
             let rule = app
                 .hit_rect(&HitTarget::LauncherBand(1))
                 .expect("feat's rule");
-            let (x, y) = (rule.x + rule.width - 2, rule.y);
+            // The rule's last cell: the NEW BUTTON stands just before it.
+            let (x, y) = (rule.x + rule.width - 1, rule.y);
             app.chrome.flash = None;
             mouse(&mut app, MouseEventKind::Down(MouseButton::Left), x, y);
             draw_tall(&mut app);

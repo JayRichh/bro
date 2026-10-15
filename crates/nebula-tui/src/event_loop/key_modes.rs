@@ -284,6 +284,47 @@ fn handle_global_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>)
     let Some(action) = action else {
         return;
     };
+    dispatch_action(app, action, armed, chord, out);
+}
+
+/// A BUTTON's click: the action its key runs, through the very dispatch a
+/// press takes after the keymap lookup ([`dispatch_action`]), so a click
+/// and its key can never come to mean two things. No double tap is armed
+/// (a click is one press), and the chord handed on is the action's first
+/// binding — what the KEY COMBO DISPLAY shows — or, for an action left
+/// unbound, a chord no key sends, which the display leaves out.
+pub(super) fn run_action(
+    app: &mut App,
+    action: crate::keymap::Action,
+    out: &mut Vec<ClientRequest>,
+) {
+    let bound = app.chrome.keymap.first(action);
+    if let Some(chord) = bound {
+        crate::key_combo::note(
+            app,
+            &[chord],
+            crate::keymap::spec_of(action).map(|s| s.label),
+        );
+    }
+    let chord = bound.unwrap_or(crate::keymap::KeyChord {
+        code: KeyCode::Null,
+        mods: crossterm::event::KeyModifiers::NONE,
+    });
+    dispatch_action(app, action, None, chord, out);
+    // A click holds no key down: nothing for the RELEASE WATCH to wait on.
+    app.chrome.release_watch = None;
+    app.chrome.dirty = true;
+}
+
+/// Everything a bound key does once the keymap has named its action: the
+/// closed-tabs gate, the LAUNCHER VIEW's grid, then the panels' meaning.
+fn dispatch_action(
+    app: &mut App,
+    action: crate::keymap::Action,
+    armed: Option<(crate::keymap::Action, std::time::Instant)>,
+    chord: crate::keymap::KeyChord,
+    out: &mut Vec<ClientRequest>,
+) {
     // Every PROJECT TAB closed: the splash is on screen with the projects'
     // rows still selected under it, so only the keys that open a project,
     // or put up nothing but a modal, mean anything. The rest would walk or

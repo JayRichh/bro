@@ -69,7 +69,7 @@ use host_terminal::{
     on_host_resize, reassert_modes, repaint, report_working_directory, setup_terminal,
     take_worker_panic, watch_held_key, MODE_REASSERT,
 };
-use key_modes::handle_key;
+use key_modes::{handle_key, run_action};
 pub(crate) use loop_run::*;
 use mouse_modes::handle_mouse;
 pub(crate) use overlays::handle_overlay_key;

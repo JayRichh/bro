@@ -42,6 +42,11 @@ fn handle_overlay_mouse(
             }
         }
     }
+    if handle_modal_buttons(app, mouse, mouse_pos, out)
+        || handle_help_mouse(app, mouse, mouse_pos, out)
+    {
+        return true;
+    }
     let Some(overlay) = &app.modals.overlay else {
         return false;
     };
@@ -78,6 +83,98 @@ fn handle_overlay_mouse(
         }
         Overlay::Settings(_) => handle_settings_mouse(app, mouse, mouse_pos, out),
         Overlay::Metrics(_) => handle_metrics_mouse(app, mouse, mouse_pos, out),
+        _ => true,
+    }
+}
+
+/// How long after a modal BUTTON's click another one is ignored: the
+/// double-click window, so the second half of a double-click can never
+/// answer the dialog the first half put up (`ModalState::button_clicked_at`).
+const BUTTON_GUARD: Duration = Duration::from_millis(400);
+
+/// A CONFIRM DIALOG's answers and a one-line prompt's `[Enter]` and
+/// `[Esc] cancel`: a click on one is its key, pressed through the
+/// overlay's own key handling, so the click and the key can never answer
+/// differently. The pointer over one lights it. True when the event was a
+/// button's.
+fn handle_modal_buttons(
+    app: &mut App,
+    mouse: MouseEvent,
+    pos: ratatui::layout::Position,
+    out: &mut Vec<ClientRequest>,
+) -> bool {
+    let buttons: Vec<(ratatui::layout::Rect, KeyCode)> = match &app.modals.overlay {
+        Some(Overlay::Confirm(confirm)) => confirm
+            .answer_rects()
+            .into_iter()
+            .map(|(rect, answer)| (rect, answer.key))
+            .collect(),
+        Some(Overlay::Prompt(prompt)) => prompt.answer_rects(),
+        _ => return false,
+    };
+    let under = buttons.iter().find(|(rect, _)| rect.contains(pos)).copied();
+    match mouse.kind {
+        MouseEventKind::Moved => {
+            let hover = under.map(|(rect, _)| rect);
+            if app.modals.button_hover != hover {
+                app.modals.button_hover = hover;
+                app.chrome.dirty = true;
+            }
+            false
+        }
+        MouseEventKind::Down(MouseButton::Left) => {
+            let Some((_, key)) = under else {
+                return false;
+            };
+            let now = std::time::Instant::now();
+            let guarded = app
+                .modals
+                .button_clicked_at
+                .is_some_and(|at| now.duration_since(at) <= BUTTON_GUARD);
+            if !guarded {
+                app.modals.button_clicked_at = Some(now);
+                app.modals.button_hover = None;
+                handle_overlay_key(app, KeyEvent::new(key, KeyModifiers::NONE), out);
+            }
+            app.chrome.dirty = true;
+            true
+        }
+        _ => false,
+    }
+}
+
+/// The HELP's rows are buttons (`HelpView::buttons`): the pointer lights
+/// the row under it, and a click closes the help and runs the action,
+/// through the dispatch its key takes. A click on the help's own key just
+/// closes it, as the key does.
+fn handle_help_mouse(
+    app: &mut App,
+    mouse: MouseEvent,
+    pos: ratatui::layout::Position,
+    out: &mut Vec<ClientRequest>,
+) -> bool {
+    let Some(Overlay::Help(help)) = &mut app.modals.overlay else {
+        return false;
+    };
+    match mouse.kind {
+        MouseEventKind::Moved => {
+            let hover = help.row_at(pos);
+            if help.hover != hover {
+                help.hover = hover;
+                app.chrome.dirty = true;
+            }
+            true
+        }
+        MouseEventKind::Down(MouseButton::Left) => {
+            if let Some(action) = help.button_at(pos) {
+                app.modals.overlay = None;
+                if action != crate::keymap::Action::Help {
+                    run_action(app, action, out);
+                }
+                app.chrome.dirty = true;
+            }
+            true
+        }
         _ => true,
     }
 }
@@ -828,6 +925,18 @@ fn handle_left_click_target(app: &mut App, mouse: MouseEvent, out: &mut Vec<Clie
         // Never in the hit map: the ISSUES and PULL REQUESTS MODALS route
         // the click on their button themselves, before this is reached.
         Some(HitTarget::ModalBrowser) => {}
+        // A BUTTON is its action's key: the one dispatch the press takes.
+        Some(HitTarget::Button(action) | HitTarget::FooterHint(action)) => {
+            run_action(app, action, out)
+        }
+        // The buttons on the card under the cursor, its `⋯`, a band's
+        // `+` and the pane header's `⋯`.
+        Some(HitTarget::CardButton(at, action)) => {
+            launcher::click_card_button(app, at, action, out)
+        }
+        Some(HitTarget::CardMenu(at)) => launcher::click_card_menu(app, at, out),
+        Some(HitTarget::LauncherBandNew(i)) => launcher::click_band_new(app, i, out),
+        Some(HitTarget::LauncherPaneMenu) => launcher::click_pane_menu(app),
         Some(
             target @ (HitTarget::ProjectRow(_)
             | HitTarget::WorktreeRow(_)

@@ -558,6 +558,12 @@ pub(crate) fn update_pointer(app: &mut App, mouse: &MouseEvent) {
                 | HitTarget::LauncherIssues
                 | HitTarget::LauncherWelcomePrompt
                 | HitTarget::FooterUsage
+                | HitTarget::Button(_)
+                | HitTarget::FooterHint(_)
+                | HitTarget::CardButton(..)
+                | HitTarget::CardMenu(_)
+                | HitTarget::LauncherBandNew(_)
+                | HitTarget::LauncherPaneMenu
         )
     });
     // The ISSUES and PULL REQUESTS MODALS' `↗ open in browser` button is

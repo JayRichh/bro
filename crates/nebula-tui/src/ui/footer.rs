@@ -2,7 +2,45 @@ use super::*;
 
 struct FooterHint {
     hints: Span<'static>,
-    key_bar: Option<Vec<(String, &'static str)>>,
+    key_bar: Option<Vec<KeyHint>>,
+    /// Between a KEY BAR entry's key and its words: the colon the
+    /// footer's prose has always used, or the NESTED layout's bare space.
+    sep: &'static str,
+}
+
+/// One entry of the footer's KEY BAR: the key, what it does, and the
+/// action a click on it runs — None for the entries that are a walk of
+/// several keys (`hjkl: move`) rather than one button.
+struct KeyHint {
+    key: String,
+    does: String,
+    action: Option<Action>,
+}
+
+/// A clickable [`KeyHint`]: `key` names `action` and runs it.
+fn button(key: String, does: impl Into<String>, action: Action) -> KeyHint {
+    KeyHint {
+        key,
+        does: does.into(),
+        action: Some(action),
+    }
+}
+
+/// A [`KeyHint`] that only says what keys do — no button.
+fn keys(key: String, does: impl Into<String>) -> KeyHint {
+    KeyHint {
+        key,
+        does: does.into(),
+        action: None,
+    }
+}
+
+fn key_bar(hints: Vec<KeyHint>) -> FooterHint {
+    FooterHint {
+        hints: Span::raw(""),
+        key_bar: Some(hints),
+        sep: ": ",
+    }
 }
 
 pub(super) fn draw_footer_bar(f: &mut Frame, app: &mut App, area: Rect) {
@@ -13,10 +51,29 @@ pub(super) fn draw_footer_bar(f: &mut Frame, app: &mut App, area: Rect) {
         ..area
     };
     let th = app.chrome.theme;
-    let FooterHint { hints, key_bar } = footer_hint(app);
-    let mut spans = footer_left_context(app, th);
-    append_footer_hint(&mut spans, hints, key_bar, th);
-    render_footer_left(f, app, area, spans, th);
+    let FooterHint {
+        hints,
+        key_bar,
+        sep,
+    } = footer_hint(app);
+    // On the grid, a KEY BAR that would run past the bar loses the
+    // breadcrumb first: the header's lit tab and the pane's header already
+    // say the project, the checkout and the card, and the buttons are
+    // what the footer is for there.
+    let room = usize::from(area.width).saturating_sub(footer_usage_width(app));
+    let bar_w: usize = key_bar.as_ref().map_or(0, |bar| {
+        bar.iter()
+            .map(|h| h.key.chars().count() + sep.chars().count() + h.does.chars().count() + 2)
+            .sum()
+    });
+    let mut context = footer_left_context(app, th, true);
+    let context_w: usize = context.iter().map(|s| s.width()).sum();
+    if key_bar.is_some() && app.launcher_grid() && context_w + PLATE_ROOM + bar_w > room {
+        context = footer_left_context(app, th, false);
+    }
+    let mut spans: FooterSpans = context.into_iter().map(|s| (s, None)).collect();
+    let actions = append_footer_hint(app, &mut spans, hints, key_bar, sep, th);
+    render_footer_left(f, app, area, spans, &actions, th);
     render_footer_usage(f, app, area, th);
 }
 
@@ -30,6 +87,9 @@ fn footer_hint(app: &App) -> FooterHint {
     }
     if let Some(overlay) = &app.modals.overlay {
         return overlay_footer_hint(app, overlay, th);
+    }
+    if let Some(tip) = button_tooltip(app, th) {
+        return tip;
     }
     if app.splash_showing() {
         return splash_footer_hint(app, th);
@@ -50,6 +110,7 @@ fn span_hint(hints: Span<'static>) -> FooterHint {
     FooterHint {
         hints,
         key_bar: None,
+        sep: ": ",
     }
 }
 
@@ -175,50 +236,85 @@ fn quick_prompt_footer_hint(app: &App, th: Theme) -> FooterHint {
     dim_hint(hint, th)
 }
 
-fn splash_footer_hint(app: &App, th: Theme) -> FooterHint {
+/// What the footer says while the pointer rests on a button that is not
+/// in it — a card's, a band's `+`, the header's and the pane header's:
+/// the button's key and what it does, the Hotkeys tab's own words. The
+/// TUI's tooltip, so no button is a mystery until it is clicked.
+fn button_tooltip(app: &App, th: Theme) -> Option<FooterHint> {
+    let action = match app.launcher.hover_crumb.as_ref()? {
+        HitTarget::Button(action) | HitTarget::CardButton(_, action) => *action,
+        HitTarget::LauncherBandNew(_) => Action::QuickPrompt,
+        HitTarget::CardMenu(_) | HitTarget::LauncherPaneMenu => {
+            return Some(dim_hint(
+                "click: the card's menu (a right-click on any card opens its own)",
+                th,
+            ));
+        }
+        _ => return None,
+    };
+    let spec = crate::keymap::spec_of(action)?;
+    Some(span_hint(Span::styled(
+        format!("{}: {} · {}", key_hint(app, action), spec.label, spec.hint),
+        Style::default().fg(th.text),
+    )))
+}
+
+fn splash_footer_hint(app: &App, _th: Theme) -> FooterHint {
     // The splash covers the panels, so every panel hotkey is dead here.
     // List only what actually fires.
     let k = |a| key_hint(app, a);
     // Launched inside a repo: Enter opens it, and `o` is for any other folder.
-    let here = app
-        .launch_repo_name()
-        .map(|name| format!("{}: open {name}  ", k(Action::Activate)))
-        .unwrap_or_default();
-    dim_hint(
-        format!(
-            "{here}{}: open {}folder  {}: ssh host  {}: settings  {}: help  {}: quit",
-            k(Action::AddProject),
-            if here.is_empty() { "a " } else { "another " },
-            k(Action::Hosts),
-            k(Action::Settings),
-            k(Action::Help),
-            k(Action::Quit),
-        ),
-        th,
-    )
+    let mut hints = Vec::new();
+    if let Some(name) = app.launch_repo_name() {
+        hints.push(button(
+            k(Action::Activate),
+            format!("open {name}"),
+            Action::Activate,
+        ));
+    }
+    let folder = if hints.is_empty() {
+        "open a folder"
+    } else {
+        "open another folder"
+    };
+    hints.extend([
+        button(k(Action::AddProject), folder, Action::AddProject),
+        button(k(Action::Hosts), "ssh host", Action::Hosts),
+        button(k(Action::Settings), "settings", Action::Settings),
+        button(k(Action::Help), "help", Action::Help),
+        button(k(Action::Quit), "quit", Action::Quit),
+    ]);
+    key_bar(hints)
 }
 
-fn launcher_tabs_footer_hint(app: &App, th: Theme) -> FooterHint {
+fn launcher_tabs_footer_hint(app: &App, _th: Theme) -> FooterHint {
     // The LAUNCHER VIEW's PROJECT TABS holding the keys (`k`,`k` off the top
     // row of cards): walking the header's cursor, switching the grid as it
     // goes, and the ways back down.
     let k = |a| key_hint(app, a);
     let down = k(Action::MoveDown);
-    dim_hint(
-        format!(
-            "{}{}: switch project  {} or {down}{down}: into its cards  {}: close tab  esc: back to the cards  {}: help  {}: quit",
-            k(Action::FocusLeft),
-            k(Action::FocusRight),
-            k(Action::Activate),
-            k(Action::CloseProjectTab),
-            k(Action::Help),
-            k(Action::Quit),
+    key_bar(vec![
+        button(k(Action::Help), "help", Action::Help),
+        keys(
+            format!("{}{}", k(Action::FocusLeft), k(Action::FocusRight)),
+            "switch project",
         ),
-        th,
-    )
+        button(
+            format!("{} or {down}{down}", k(Action::Activate)),
+            "into its cards",
+            Action::Activate,
+        ),
+        button(
+            k(Action::CloseProjectTab),
+            "close tab",
+            Action::CloseProjectTab,
+        ),
+        keys("esc".into(), "back to the cards"),
+        button(k(Action::Quit), "quit", Action::Quit),
+    ])
 }
 
-fn launcher_grid_footer_hint(app: &App, th: Theme) -> FooterHint {
+fn launcher_grid_footer_hint(app: &App, _th: Theme) -> FooterHint {
     let k = |a| key_hint(app, a);
     let move_keys = format!(
         "{}{}{}{}",
@@ -230,66 +326,81 @@ fn launcher_grid_footer_hint(app: &App, th: Theme) -> FooterHint {
     if app.launcher.launcher_nested && !app.launcher.show_archived {
         let walk = format!("{}{}", k(Action::MoveDown), k(Action::MoveUp));
         return FooterHint {
-            hints: Span::raw(""),
-            key_bar: Some(vec![
-                (walk, "move"),
-                (k(Action::Activate), "open"),
-                (k(Action::QuickPrompt), "sub-prompt"),
-            ]),
+            sep: " ",
+            ..key_bar(vec![
+                keys(walk, "move"),
+                button(k(Action::Activate), "open", Action::Activate),
+                button(k(Action::QuickPrompt), "sub-prompt", Action::QuickPrompt),
+            ])
         };
     }
+    // Every entry that is one action's key is a button: a click on it runs
+    // that action, as the key does. The walks (`hjkl`, `[]`) stay words.
+    // Help leads the bar, so the one button every other action is a click
+    // away from (each of its rows is a button) is never the one a narrow
+    // bar cuts.
+    let help = button(k(Action::Help), "help", Action::Help);
     // The KANBAN's own keys first: its lanes, its scope, the way back to
     // the bands — the board is the grid's other home, and its footer
     // says how to leave it as plainly as the bands' says how to reach it.
-    let text = if app.launcher.launcher_kanban {
+    let mut hints = if app.launcher.launcher_kanban {
         let scope = if app.launcher.kanban_all {
             "this project"
         } else {
             "all projects"
         };
-        format!(
-            "{}{}: lanes  {}{}: cards  {}: {scope}  {}: open  {}: new session  {}: overview  {}: jump  {}: help  {}: quit",
-            k(Action::FocusLeft),
-            k(Action::FocusRight),
-            k(Action::MoveDown),
-            k(Action::MoveUp),
-            k(Action::FocusNext),
-            k(Action::Activate),
-            k(Action::QuickPrompt),
-            k(Action::ToggleKanban),
-            k(Action::Palette),
-            k(Action::Help),
-            k(Action::Quit),
-        )
+        vec![
+            keys(
+                format!("{}{}", k(Action::FocusLeft), k(Action::FocusRight)),
+                "lanes",
+            ),
+            keys(
+                format!("{}{}", k(Action::MoveDown), k(Action::MoveUp)),
+                "cards",
+            ),
+            button(k(Action::FocusNext), scope, Action::FocusNext),
+            button(k(Action::Activate), "open", Action::Activate),
+            button(k(Action::QuickPrompt), "new session", Action::QuickPrompt),
+            button(k(Action::ToggleKanban), "overview", Action::ToggleKanban),
+        ]
     } else if app.launcher.show_archived {
-        format!(
-            "{move_keys}: move  {}: unarchive  {}: delete  {}: back to live sessions  {}: jump  {}: help  {}: quit",
-            k(Action::Unarchive),
-            k(Action::Delete),
-            k(Action::ToggleArchived),
-            k(Action::Palette),
-            k(Action::Help),
-            k(Action::Quit),
-        )
+        vec![
+            keys(move_keys, "move"),
+            button(k(Action::Unarchive), "unarchive", Action::Unarchive),
+            button(k(Action::Delete), "delete", Action::Delete),
+            button(
+                k(Action::ToggleArchived),
+                "back to live sessions",
+                Action::ToggleArchived,
+            ),
+        ]
     } else {
-        format!(
-            "{move_keys}: move  {}: open  {}: new session  {}{}: project tabs  {}: terminals  {}: archive  {}: archived  {}: board  {}: diff  {}: jump  {}: settings  {}: help  {}: quit",
-            k(Action::Activate),
-            k(Action::QuickPrompt),
-            k(Action::PrevProjectTab),
-            k(Action::NextProjectTab),
-            k(Action::PaneTabs),
-            k(Action::Archive),
-            k(Action::ToggleArchived),
-            k(Action::ToggleKanban),
-            k(Action::GitDiff),
-            k(Action::Palette),
-            k(Action::Settings),
-            k(Action::Help),
-            k(Action::Quit),
-        )
+        vec![
+            keys(move_keys, "move"),
+            button(k(Action::Activate), "open", Action::Activate),
+            button(k(Action::QuickPrompt), "new session", Action::QuickPrompt),
+            keys(
+                format!("{}{}", k(Action::PrevProjectTab), k(Action::NextProjectTab)),
+                "project tabs",
+            ),
+            button(k(Action::PaneTabs), "terminals", Action::PaneTabs),
+            button(k(Action::Archive), "archive", Action::Archive),
+            button(
+                k(Action::ToggleArchived),
+                "archived",
+                Action::ToggleArchived,
+            ),
+            button(k(Action::ToggleKanban), "board", Action::ToggleKanban),
+            button(k(Action::GitDiff), "diff", Action::GitDiff),
+        ]
     };
-    dim_hint(text, th)
+    hints.insert(0, help);
+    hints.push(button(k(Action::Palette), "jump", Action::Palette));
+    if !app.launcher.launcher_kanban && !app.launcher.show_archived {
+        hints.push(button(k(Action::Settings), "settings", Action::Settings));
+    }
+    hints.push(button(k(Action::Quit), "quit", Action::Quit));
+    key_bar(hints)
 }
 
 fn pane_footer_hint(app: &App, th: Theme) -> FooterHint {
@@ -432,7 +543,9 @@ fn worktree_footer_hint(app: &App, k: &impl Fn(Action) -> String) -> String {
     )
 }
 
-fn footer_left_context(app: &App, th: Theme) -> Vec<Span<'static>> {
+/// The footer's left: the host, the connection, and — with `crumbs` —
+/// the breadcrumb.
+fn footer_left_context(app: &App, th: Theme, crumbs: bool) -> Vec<Span<'static>> {
     let mut spans = vec![Span::raw(" ")];
     if app.chrome.is_remote {
         spans.push(Span::styled(
@@ -445,7 +558,7 @@ fn footer_left_context(app: &App, th: Theme) -> Vec<Span<'static>> {
         spans.push(Span::styled("✗ disconnected", Style::default().fg(th.err)));
         spans.push(Span::styled("  ·  ", Style::default().fg(th.dim)));
     }
-    let crumbs = breadcrumb(app);
+    let crumbs = if crumbs { breadcrumb(app) } else { Vec::new() };
     if !crumbs.is_empty() {
         spans.extend(crumbs);
         // No changed-file count here: it rides each card's branch, where
@@ -455,40 +568,69 @@ fn footer_left_context(app: &App, th: Theme) -> Vec<Span<'static>> {
     spans
 }
 
-fn append_footer_hint(
-    spans: &mut Vec<Span<'static>>,
-    hints: Span<'static>,
-    key_bar: Option<Vec<(String, &'static str)>>,
-    th: Theme,
-) {
-    match key_bar {
-        Some(keys) => {
-            for (i, (key, does)) in keys.into_iter().enumerate() {
-                if i > 0 {
-                    spans.push(Span::raw("  "));
-                }
-                spans.push(Span::styled(key, Style::default().fg(th.text)));
-                spans.push(Span::styled(
-                    format!(" {does}"),
-                    Style::default().fg(th.muted),
-                ));
-            }
-        }
-        None => {
-            let mut hints = hints;
-            if hints.style.fg == Some(th.dim) {
-                hints.style.fg = Some(th.muted);
-            }
-            spans.push(hints);
-        }
-    }
+/// What the version plate takes (`kete v0.48.0  ·  `), give or take an
+/// update notice: the room [`draw_footer_bar`] keeps for it.
+const PLATE_ROOM: usize = 20;
+
+/// The columns the usage readout at the bar's right end takes.
+fn footer_usage_width(app: &App) -> usize {
+    footer_usage(app).map_or(0, |s| s.chars().count() + 2)
 }
 
+/// The footer's spans, each tagged with the KEY BAR entry it belongs to,
+/// if any — so the draw can lay a button's hit rect over exactly the
+/// columns its entry took, wherever the plate before it pushed them.
+type FooterSpans = Vec<(Span<'static>, Option<usize>)>;
+
+/// Lay the hint after the context: the KEY BAR's entries, the key bright
+/// and its words muted, or the one line of prose. Returns the action each
+/// entry runs, by the index its spans are tagged with. An entry under the
+/// pointer is lit and underlined, as the header's buttons are.
+fn append_footer_hint(
+    app: &App,
+    spans: &mut FooterSpans,
+    hints: Span<'static>,
+    key_bar: Option<Vec<KeyHint>>,
+    sep: &'static str,
+    th: Theme,
+) -> Vec<Option<Action>> {
+    let Some(entries) = key_bar else {
+        let mut hints = hints;
+        if hints.style.fg == Some(th.dim) {
+            hints.style.fg = Some(th.muted);
+        }
+        spans.push((hints, None));
+        return Vec::new();
+    };
+    let mut actions = Vec::with_capacity(entries.len());
+    for (i, hint) in entries.into_iter().enumerate() {
+        if i > 0 {
+            spans.push((Span::raw("  "), None));
+        }
+        let hovered = hint
+            .action
+            .is_some_and(|a| app.launcher.hover_crumb == Some(HitTarget::FooterHint(a)));
+        let (mut key, mut does) = (Style::default().fg(th.text), Style::default().fg(th.muted));
+        if hovered {
+            key = key.fg(th.accent).add_modifier(Modifier::UNDERLINED);
+            does = does.fg(th.text).add_modifier(Modifier::UNDERLINED);
+        }
+        spans.push((Span::styled(hint.key, key), Some(i)));
+        spans.push((Span::styled(format!("{sep}{}", hint.does), does), Some(i)));
+        actions.push(hint.action);
+    }
+    actions
+}
+
+/// The footer's left side, and the KEY BAR's buttons laid over it: an
+/// entry is a button only where it is drawn whole — one the bar had no
+/// room for, or cut at its edge, is not one.
 fn render_footer_left(
     f: &mut Frame,
-    app: &App,
+    app: &mut App,
     area: Rect,
-    mut spans: Vec<Span<'static>>,
+    mut spans: FooterSpans,
+    actions: &[Option<Action>],
     th: Theme,
 ) {
     let usage = footer_usage(app);
@@ -502,10 +644,40 @@ fn render_footer_left(
         ..area
     };
     prepend_version_plate(app, &mut spans, left.width, th);
+    let end = usize::from(left.x) + usize::from(left.width);
+    let mut x = usize::from(left.x);
+    let mut runs: Vec<(usize, usize, usize)> = Vec::new();
+    for (span, tag) in &spans {
+        let w = span.width();
+        if let Some(i) = *tag {
+            match runs.last_mut() {
+                Some((at, _, run_w)) if *at == i => *run_w += w,
+                _ => runs.push((i, x, w)),
+            }
+        }
+        x += w;
+    }
+    for (i, from, w) in runs {
+        let Some(Some(action)) = actions.get(i) else {
+            continue;
+        };
+        if from + w > end {
+            break;
+        }
+        app.chrome.hits.push((
+            Rect {
+                x: from as u16,
+                width: w as u16,
+                ..left
+            },
+            HitTarget::FooterHint(*action),
+        ));
+    }
+    let spans: Vec<Span<'static>> = spans.into_iter().map(|(s, _)| s).collect();
     f.render_widget(Paragraph::new(Line::from(spans)), left);
 }
 
-fn prepend_version_plate(app: &App, spans: &mut Vec<Span<'static>>, width: u16, th: Theme) {
+fn prepend_version_plate(app: &App, spans: &mut FooterSpans, width: u16, th: Theme) {
     let plate = format!("kete v{}", env!("CARGO_PKG_VERSION"));
     let update = app
         .chrome
@@ -515,18 +687,21 @@ fn prepend_version_plate(app: &App, spans: &mut Vec<Span<'static>>, width: u16, 
     let plate_w = plate.chars().count()
         + update.as_ref().map_or(0, |u| u.chars().count())
         + "  ·  ".chars().count();
-    let body_w: usize = spans.iter().map(|s| s.width()).sum();
+    let body_w: usize = spans.iter().map(|(s, _)| s.width()).sum();
     if app.chrome.flash.is_some() && body_w + plate_w > width as usize {
         return;
     }
-    let mut plate_spans = vec![Span::styled(plate, Style::default().fg(th.dim))];
+    let mut plate_spans = vec![(Span::styled(plate, Style::default().fg(th.dim)), None)];
     if let Some(update) = update {
-        plate_spans.push(Span::styled(
-            update,
-            Style::default().fg(th.warn).add_modifier(Modifier::BOLD),
+        plate_spans.push((
+            Span::styled(
+                update,
+                Style::default().fg(th.warn).add_modifier(Modifier::BOLD),
+            ),
+            None,
         ));
     }
-    plate_spans.push(Span::styled("  ·  ", Style::default().fg(th.dim)));
+    plate_spans.push((Span::styled("  ·  ", Style::default().fg(th.dim)), None));
     spans.splice(1..1, plate_spans);
 }
 
