@@ -619,11 +619,12 @@
     {#if !range && worktree}
       <!-- Against the base or HEAD: one button, the word says which is read. -->
       <button
-        class="h-7 max-w-[260px] min-w-0 flex-none truncate border border-rule bg-transparent px-2 font-mono text-[12px] whitespace-nowrap
-          enabled:hover:border-rule-strong {base ? 'text-ink' : 'text-muted'}"
-        disabled={!base || loading}
+        class="h-7 max-w-[260px] min-w-[64px] shrink truncate border border-rule bg-transparent px-2 font-mono text-[12px] whitespace-nowrap
+          {base ? 'text-ink enabled:hover:border-rule-strong' : 'cursor-default text-muted'}"
+        disabled={loading}
+        aria-disabled={!base}
         onclick={toggleAgainst}
-        title={againstTitle(readAgainst, base)}
+        title="{againstTitle(readAgainst, base)}{base ? ` (also in the command palette)` : ''}"
         aria-label="{againstLabel(readAgainst, base)}. {base ? 'Switch the comparison' : 'No base branch'}"
         aria-pressed={readAgainst === 'base'}
         >{againstLabel(readAgainst, base)}</button
