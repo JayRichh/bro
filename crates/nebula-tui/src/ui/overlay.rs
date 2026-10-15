@@ -653,7 +653,7 @@ fn draw_help_overlay(f: &mut Frame, app: &mut App, view: crate::app::HelpView) {
     let inner = block.inner(area);
     f.render_widget(block, area);
     // The WHAT'S NEW page, a key and a click away on the top border.
-    let wn_label = format!(" w: what's new ");
+    let wn_label = " w: what's new ";
     let wn_w = (wn_label.chars().count() as u16).min(area.width.saturating_sub(12));
     let wn_rect = Rect {
         x: area.right().saturating_sub(wn_w + 2),

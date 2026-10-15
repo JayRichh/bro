@@ -307,8 +307,6 @@ impl HeadCount {
     }
 }
 
-/// What the ARCHIVED VIEW says with nothing in it.
-
 /// The header over the grid: the PROJECT TABS on the left, each with its
 /// status dots, how many cards the grid holds on the right — and how many
 /// of them it could not fit — a rule under both: the same three-row head

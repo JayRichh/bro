@@ -2268,7 +2268,7 @@ fn fold_empty_grid(app: &mut App, out: &mut Vec<ClientRequest>) {
     if app.pane.term.is_some() {
         super::detach_pane(app, out);
     }
-    app.chrome.flash = Some(word.into());
+    app.chrome.flash = Some(word);
 }
 
 /// The card project `card` was last left on: the session under the cursor
