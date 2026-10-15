@@ -71,7 +71,7 @@
     ondragleave: (e: DragEvent) => leftFor(e) && mark?.id === id && (mark = null),
     ondrop: (e: DragEvent) => drop(e, id),
   });
-  const reorderHint = withKey('drag to reorder', ['move_up', 'move_down']);
+  const reorderHint = $derived(withKey('drag to reorder', ['move_up', 'move_down']));
 
   async function addProject(e: SubmitEvent) {
     e.preventDefault();

@@ -203,3 +203,16 @@ export function helpGroups(table: Shortcut[] = SHORTCUTS): { group: string; rows
 export function isModifierKey(key: string): boolean {
   return key === 'Control' || key === 'Shift' || key === 'Alt' || key === 'Meta' || key === 'AltGraph' || key === 'OS';
 }
+
+/** Whether `chord` may go on a row of `scope` (nebula-config's
+ *  `typing_safe`): a row that counts while a field or terminal has the
+ *  keys takes only a chord typing never sends, one with Ctrl or Alt, or an
+ *  F key. Shift alone is a capital letter. */
+export function typingSafe(scope: Scope, chord: string): boolean {
+  if (scope !== 'anywhere' && scope !== 'fields') return true;
+  const parts = chord.split('+');
+  const key = parts[parts.length - 1];
+  const n = /^f(\d{1,2})$/.exec(key);
+  const fkey = !!n && Number(n[1]) >= 1 && Number(n[1]) <= 24;
+  return parts.slice(0, -1).some((m) => m === 'ctrl' || m === 'alt') || fkey;
+}

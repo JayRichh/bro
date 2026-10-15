@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { ACTIONS, DESK_KEYS } from './actions.gen';
-import { SHORTCUTS, actionOf, applyOverrides, clashes, defaultKeys, isFixed, isModifierKey, keysOf, overlaps, shortcutFor, withKey } from './shortcuts';
+import { SHORTCUTS, actionOf, applyOverrides, clashes, defaultKeys, isFixed, isModifierKey, keysOf, typingSafe, overlaps, shortcutFor, withKey } from './shortcuts';
 
 const idle = { inTerminal: false, typing: false, onRow: false };
 const press = (k: string) => ({ key: k, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false });
@@ -44,5 +44,14 @@ describe('the registry behind the table', () => {
     expect(isFixed('board')).toBe(true);
     expect(isModifierKey('Shift')).toBe(true);
     expect(isModifierKey('k')).toBe(false);
+  });
+
+  it('keeps typed keys off the rows that count while typing', () => {
+    expect(typingSafe('anywhere', 't')).toBe(false);
+    expect(typingSafe('fields', 'shift+b')).toBe(false);
+    expect(typingSafe('fields', 'f6')).toBe(true);
+    expect(typingSafe('anywhere', 'ctrl+,')).toBe(true);
+    expect(typingSafe('global', 'h')).toBe(true);
+    for (const s of SHORTCUTS) for (const k of s.keys) expect(typingSafe(s.scope, k), s.id + ' ' + k).toBe(true);
   });
 });

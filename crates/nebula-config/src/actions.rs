@@ -1807,9 +1807,30 @@ pub fn merge_tui_overrides(
     keybindings.extend(tui);
 }
 
+/// Whether `chord` may go on a key row of `scope`. A row that counts while
+/// a field or terminal has the keys (`anywhere`, `fields`) takes only a
+/// chord typing never sends: one with Ctrl or Alt, or an F key. Shift
+/// alone is a capital letter. The window checks the same before it asks.
+pub fn typing_safe(scope: DeskScope, chord: &str) -> bool {
+    if !matches!(scope, DeskScope::Anywhere | DeskScope::Fields) {
+        return true;
+    }
+    let key = chord.rsplit('+').next().unwrap_or_default();
+    let fkey = key
+        .strip_prefix('f')
+        .and_then(|n| n.parse::<u8>().ok())
+        .is_some_and(|n| (1..=24).contains(&n));
+    let mods: Vec<&str> = chord.split('+').collect();
+    let held = mods[..mods.len().saturating_sub(1)]
+        .iter()
+        .any(|m| *m == "ctrl" || *m == "alt");
+    held || fkey
+}
+
 /// Set (`Some`) or clear back to its default (`None`) one desktop key's
-/// override. Refuses an unknown id and a home view's walking keys (those
-/// views handle them themselves).
+/// override. Refuses an unknown id, a home view's walking keys (those
+/// views handle them themselves) and a chord typing would send on a row
+/// that counts while typing ([`typing_safe`]).
 pub fn set_desktop_override(
     keybindings: &mut BTreeMap<String, String>,
     id: &str,
@@ -1830,6 +1851,12 @@ pub fn set_desktop_override(
     let mut list: Vec<String> = Vec::new();
     for c in chords {
         let c = c.trim().to_ascii_lowercase();
+        if !c.is_empty() && !typing_safe(key.scope, &c) {
+            return Err(format!(
+                "{c} would fire while typing: {} counts in fields, so its keys take Ctrl, Alt or an F key",
+                key.label
+            ));
+        }
         if !c.is_empty() && !list.contains(&c) {
             list.push(c);
         }
@@ -2137,6 +2164,20 @@ mod tests {
         assert!(!kb.contains_key("desktop.help_f1"));
         assert!(set_desktop_override(&mut kb, "nope", None).is_err());
         assert!(set_desktop_override(&mut kb, "board_diff", Some(&["x".into()])).is_err());
+        // A key that counts while typing takes no bare or shifted letter.
+        assert!(set_desktop_override(&mut kb, "cycle_theme", Some(&["t".into()])).is_err());
+        assert!(set_desktop_override(&mut kb, "back", Some(&["shift+b".into()])).is_err());
+        assert!(set_desktop_override(&mut kb, "back", Some(&["f6".into()])).is_ok());
+        assert!(set_desktop_override(&mut kb, "help", Some(&["h".into()])).is_ok());
+        assert!(typing_safe(DeskScope::Anywhere, "ctrl+,"));
+        assert!(!typing_safe(DeskScope::Fields, "f"));
+        for (_, k) in desktop_keys() {
+            for c in k.chords {
+                assert!(typing_safe(k.scope, c), "{} default {c}", k.id);
+            }
+        }
+        set_desktop_override(&mut kb, "back", None).unwrap();
+        set_desktop_override(&mut kb, "help", None).unwrap();
         // A TUI save replaces its own part only.
         set_desktop_override(&mut kb, "rename", Some(&["f2".into(), ",".into()])).unwrap();
         merge_tui_overrides(

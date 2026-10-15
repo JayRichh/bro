@@ -7,7 +7,7 @@
   // config.json's `keybindings`, beside the terminal app's.
   import { api } from '../api';
   import { toast } from '../store.svelte';
-  import { SHORTCUTS, applyOverrides, chordOf, clashes, defaultKeys, isFixed, isModifierKey, keyLabel, type Shortcut, type ShortcutId } from '../shortcuts';
+  import { SHORTCUTS, applyOverrides, chordOf, clashes, defaultKeys, isFixed, isModifierKey, keyLabel, typingSafe, type Shortcut, type ShortcutId } from '../shortcuts';
   import { matches } from './settings';
 
   let { filter = '' }: { filter?: string } = $props();
@@ -22,7 +22,7 @@
   };
 
   /** The row taking a chord, and a chord held for a clash's confirm. */
-  let capture = $state<{ id: ShortcutId; chord?: string; clash?: Shortcut[] } | null>(null);
+  let capture = $state<{ id: ShortcutId; chord?: string; clash?: Shortcut[]; typing?: boolean } | null>(null);
   let busy = $state(false);
 
   const groups = $derived.by(() => {
@@ -51,6 +51,7 @@
 
   async function take(s: Shortcut, chord: string) {
     if (s.keys.includes(chord)) return void (capture = null);
+    if (!typingSafe(s.scope, chord)) return void (capture = { id: s.id, chord, typing: true });
     const clash = clashes(s.id, chord);
     // Held for a second press; a home view's walking key stays the view's.
     const held = capture?.chord === chord && !clash.some((c) => isFixed(c.scope));
@@ -122,7 +123,14 @@
               {/if}
             {/if}
           </div>
-          {#if taking && capture?.clash?.length}
+          {#if taking && capture?.typing}
+            <p class="col-span-full m-0 flex items-center gap-2 text-[12px] text-ink" role="alert">
+              <span class="size-1.5 flex-none bg-fail" aria-hidden="true"></span>
+              <span class="min-w-0">
+                {keyLabel(capture.chord ?? '')} would fire while you type: this key counts in fields, so it takes Ctrl, Alt or an F key. Press another, or Esc.
+              </span>
+            </p>
+          {:else if taking && capture?.clash?.length}
             <p class="col-span-full m-0 flex items-center gap-2 text-[12px] text-ink" role="alert">
               <span class="size-1.5 flex-none bg-fail" aria-hidden="true"></span>
               <span class="min-w-0">
