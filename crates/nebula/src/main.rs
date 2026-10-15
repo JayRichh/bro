@@ -66,6 +66,42 @@ fn main() -> Result<()> {
                 env,
             },
             ProfileCommand::Remove { name, purge } => profile::ProfileOp::Remove { name, purge },
+            ProfileCommand::Edit {
+                name,
+                harness,
+                use_default,
+                own_home,
+                default,
+                env,
+                clear_env,
+            } => profile::ProfileOp::Edit {
+                name,
+                harness,
+                use_default: if use_default {
+                    Some(true)
+                } else if own_home {
+                    Some(false)
+                } else {
+                    None
+                },
+                default,
+                env: if clear_env {
+                    Some(Vec::new())
+                } else if env.is_empty() {
+                    None
+                } else {
+                    Some(env)
+                },
+            },
+            ProfileCommand::SetProject {
+                project,
+                profile,
+                clear,
+            } => profile::ProfileOp::SetProject {
+                project,
+                profile,
+                clear,
+            },
             ProfileCommand::Default { name } => profile::ProfileOp::Default { name },
             ProfileCommand::Enable { name } => profile::ProfileOp::Enable { name, on: true },
             ProfileCommand::Disable { name } => profile::ProfileOp::Enable { name, on: false },

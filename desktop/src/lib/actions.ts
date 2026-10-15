@@ -15,6 +15,8 @@ import { cardsLine, dirty, stateLines } from './worktrees/offer';
 import { deleteEmptied, offerConfirm, prepareOffer, stillOffered } from './worktrees/delete';
 import { canSwitchBranch, openBranchSwitch } from './worktrees/switcher.svelte';
 import { checkoutSessions, deleteAllSessions } from './checkout';
+import { moveToAccount, pickProjectAccount, SWITCH_UNAVAILABLE } from './accounts/actions';
+import { canSwitch } from './accounts/view';
 import { whileCutting } from './worktrees/rows.svelte';
 
 export type Target =
@@ -428,6 +430,10 @@ export function agentMenu(a: Agent, viaSub = false): MenuEntry[] {
     item('Restart agent', () => restartAgent(a.id), 'restart'),
     item('Duplicate', () => duplicateAgent(a.id), 'duplicate'),
     item('Move to\u2026', () => moveAgent(a.id), 'move'),
+    // A fresh restart on another login: the conversation stays behind.
+    canSwitch(m())
+      ? item('Move to account\u2026', () => moveToAccount(a.id))
+      : { label: 'Move to account\u2026 (daemon too old)', run: () => toast(SWITCH_UNAVAILABLE), disabled: true },
     item('Rename\u2026', () => renameAgent(a.id), 'rename'),
   ];
   if (a.unseen) out.push(item('Mark seen', () => seeAgent(a.id)));
@@ -458,6 +464,7 @@ export function projectMenu(project: string): MenuEntry[] {
     item('Open in editor', () => openEditor(main?.id)),
     item('Open remote in browser', () => openRemote(main?.id)),
     item('Refresh pull requests', refreshPrs),
+    item('Default account\u2026', () => pickProjectAccount(project)),
     'sep',
     item('Rename\u2026', () => renameProject(project)),
     item('Locate folder\u2026', () => locateProject(project)),

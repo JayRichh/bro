@@ -13,10 +13,13 @@ export const AUTO = '';
 
 const SPREAD_WORD: Record<string, string> = { manual: 'default', failover: 'failover', least_used: 'least used' };
 
-/** Where the picker starts on a harness: auto while a spread is on (so it
- *  can choose), under `manual` the default in force, else auto (which then
- *  is the CLI's own login). */
-export function initialProfile(profiles: LaunchProfile[], spread: string | undefined): string {
+/** Where the picker starts on a harness: the repo's default account for it
+ *  when it has one that can run (it comes before any spread), else auto
+ *  while a spread is on (so it can choose), under `manual` the default in
+ *  force, else auto (which then is the CLI's own login). */
+export function initialProfile(profiles: LaunchProfile[], spread: string | undefined, projectDefault: string | null = null): string {
+  const project = projectDefault && profiles.find((p) => p.name === projectDefault && !p.disabled);
+  if (project) return project.name;
   if (spread && spread !== 'manual') return AUTO;
   return profiles.find((p) => p.default && !p.disabled)?.name ?? AUTO;
 }

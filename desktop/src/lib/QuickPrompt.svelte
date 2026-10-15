@@ -2,6 +2,7 @@
   import { app, openSession, projectOf, sessionWorktree, toast } from './store.svelte';
   import { api, type AutoPick, type HarnessInfo, type Preset } from './api';
   import { initialProfile, profileOptions, stillOffered } from './accounts/pick';
+  import { projectAccount } from './accounts/view';
   import { nav } from './shell/history.svelte';
   import { ORCH_TARGET, orchestratorOf, quickPromptTarget } from './orchestrator';
   import { sendToOrchestrator } from './orch.svelte';
@@ -41,6 +42,8 @@
       .sort((a, b) => Number(b.is_main) - Number(a.is_main) || a.sort_order - b.sort_order),
   );
   const profiles = $derived(app.launch.profiles.filter((p) => p.harness === harness));
+  /** The repo's default account for this harness, which comes before the spread. */
+  const projectDefault = $derived(projectAccount(app.launch, app.model.projects.find((p) => p.id === project)?.repo_path, harness));
   const profileOpts = $derived(profileOptions(profiles, app.launch.spread, autoPick));
   const models = $derived(info?.choices?.models ?? []);
   const efforts = $derived(info?.choices?.efforts[model] ?? info?.choices?.efforts[info?.choices?.model ?? ''] ?? []);
@@ -115,10 +118,10 @@
   // and steps back there when its pick is gone.
   let profileFor = '';
   $effect(() => {
-    const key = [harness, app.launch.spread ?? '', ...profiles.map((p) => `${p.name}:${p.default}:${p.disabled}`)].join('|');
+    const key = [harness, app.launch.spread ?? '', projectDefault ?? '', ...profiles.map((p) => `${p.name}:${p.default}:${p.disabled}`)].join('|');
     if (profileFor !== key || !stillOffered(profile, profiles)) {
       profileFor = key;
-      profile = initialProfile(profiles, app.launch.spread);
+      profile = initialProfile(profiles, app.launch.spread, projectDefault);
     }
   });
   // What auto would pick, asked again on each opening (usage moves).
@@ -129,7 +132,7 @@
     }
     const kind = harness;
     api
-      .accountPick(kind)
+      .accountPick(kind, project && project !== ORCH ? project : null)
       .then((p) => {
         if (kind === harness) autoPick = p;
       })

@@ -632,6 +632,18 @@ impl ClientConnection {
                 reply_done(&self.out_tx, req_id, result).await;
                 Ok(true)
             }
+            ClientRequest::SwitchAgentAccount {
+                req_id,
+                id,
+                profile,
+            } => {
+                let result = self
+                    .daemon
+                    .switch_agent_account(&id, profile.as_deref())
+                    .await;
+                reply_done(&self.out_tx, req_id, result).await;
+                Ok(true)
+            }
             ClientRequest::MoveAgent {
                 req_id,
                 id,

@@ -10,6 +10,13 @@
   import { toggleMaximize } from './commands';
   import { withKey } from './shortcuts';
   import IconButton from './ui/IconButton.svelte';
+  import { accountMenu } from './accounts/actions';
+  import { accountLabel, canSwitch } from './accounts/view';
+
+  /** The account chip: where this session runs, and the move menu. */
+  function accounts(at: HTMLElement) {
+    if (agent) openMenu(accountMenu(agent.id), at, 'Account');
+  }
 
   function actions(at: HTMLElement | { x: number; y: number }) {
     const items = agent ? agentMenu(agent) : terminal ? terminalMenu(terminal) : [];
@@ -83,7 +90,17 @@
       </div>
       <div class="flex min-w-0 items-baseline gap-3 text-[13px] text-muted">
         {#if agent}
-          <span class="flex-none">{harnessLabel(agent)}{#if agent.profile}{' '}&middot; {agent.profile}{/if}</span>
+          <span class="flex-none">{harnessLabel(agent)}</span>
+          <button
+            class="inline-flex h-5 flex-none items-center gap-1 self-center border border-rule bg-transparent px-1.5 font-mono text-[11px] text-ink hover:border-rule-strong"
+            aria-haspopup="menu"
+            title={canSwitch(app.model)
+              ? `Runs on ${agent.profile?.trim() || "its harness's own login"}. Move it to another account (restarts fresh in this worktree)`
+              : `Runs on ${agent.profile?.trim() || "its harness's own login"}. Moving accounts needs a newer daemon`}
+            onclick={(e) => accounts(e.currentTarget as HTMLElement)}
+            >{accountLabel(agent)}<svg width="7" height="7" viewBox="0 0 8 8" aria-hidden="true"><path d="M1 2.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.2" /></svg
+            ></button
+          >
         {/if}
         {#if where}
           <span class="flex-none font-mono text-[12px]" title={where.path}>{where.project} / {where.branch}</span>

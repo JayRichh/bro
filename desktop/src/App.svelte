@@ -34,6 +34,8 @@
   import { onReviewOpened, openOrchestrator } from './lib/orch.svelte';
   import { opensOnOrchestrator, orchestratorOf, placeKey } from './lib/orchestrator';
   import FileSheet from './lib/files/FileSheet.svelte';
+  import AccountsView from './lib/accounts/AccountsView.svelte';
+  import AddAccount from './lib/accounts/AddAccount.svelte';
   import WorktreesView from './lib/worktrees/WorktreesView.svelte';
   import { loadCollapsed } from './lib/worktrees/rows.svelte';
   import { listenAlerts } from './lib/alerts';
@@ -225,7 +227,7 @@
         >
       {/if}
       {#if !narrow}<AttentionStrip />{/if}
-      {#if app.home === 'overview' && !adoView && view !== 'settings' && view !== 'worktrees' && !orchView}
+      {#if app.home === 'overview' && !adoView && view !== 'settings' && view !== 'worktrees' && view !== 'accounts' && !orchView}
         <button
           class="h-6 flex-none border px-2 text-[12px] {app.showArchived ? 'border-ink bg-ink text-bg' : 'border-rule bg-transparent text-muted hover:text-ink'}"
           aria-pressed={app.showArchived}
@@ -284,6 +286,8 @@
         <Prs />
       {:else if view === 'settings'}
         <Settings />
+      {:else if view === 'accounts'}
+        <AccountsView />
       {:else if orchView && !orch}
         <StartOrchestrator inline />
       {:else if adoView}
@@ -354,6 +358,7 @@
 <BranchSwitch />
 <ReviewNotices />
 <FileSheet />
+<AddAccount />
 
 {#if app.toast}
   <div

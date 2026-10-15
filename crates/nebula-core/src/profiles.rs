@@ -14,9 +14,12 @@
 //!
 //! The session keeps the profile's name (`Agent::profile`), so a RESUME or
 //! a restart boots under the same account. A launch that names no profile
-//! takes its harness's default one ([`resolve`]) — the profile flagged
-//! `default`, else none at all: the CLI runs on whatever the daemon's own
-//! environment says, as before profiles existed.
+//! takes its project's default account for that harness when the project
+//! has one ([`PROJECT_DEFAULTS_KEY`]), else the ACCOUNT SPREAD's pick, which
+//! under `manual` is the harness's default one ([`resolve`]) — the profile
+//! flagged `default`, else none at all: the CLI runs on whatever the
+//! daemon's own environment says, as before profiles existed. The whole
+//! order is `accounts::resolve_launch`.
 //!
 //! Design after agent-office's per-account homes (`src/server/signins.ts`,
 //! MIT): the same isolating variables, the same stripped credentials, and
@@ -523,6 +526,142 @@ fn edit_file(
         .map_err(|e| format!("write {}: {e}", path.display()))
 }
 
+/// The `config.json` key holding PROJECT SETTINGS, one entry per repo path
+/// as the daemon stores it (`nebula-config`'s `ProjectSettings`).
+pub const PROJECTS_KEY: &str = "projects";
+
+/// The key, inside a `projects` entry, holding its PROJECT DEFAULT
+/// ACCOUNTS: harness id to profile name. A launch in that project naming
+/// no profile runs under its harness's entry, ahead of the ACCOUNT SPREAD
+/// and the harness's default (`accounts::resolve_launch`). One entry per
+/// harness, so a Codex default never displaces the Claude one.
+pub const PROJECT_DEFAULTS_KEY: &str = "default_profiles";
+
+/// Every project's default accounts in a raw settings object, by repo path
+/// as written: an entry this build cannot read is skipped.
+pub fn project_defaults_from(
+    obj: &serde_json::Map<String, Value>,
+) -> BTreeMap<String, BTreeMap<String, String>> {
+    let Some(projects) = obj.get(PROJECTS_KEY).and_then(Value::as_object) else {
+        return BTreeMap::new();
+    };
+    projects
+        .iter()
+        .filter_map(|(repo, entry)| {
+            let map: BTreeMap<String, String> = entry
+                .get(PROJECT_DEFAULTS_KEY)
+                .and_then(Value::as_object)?
+                .iter()
+                .filter_map(|(h, n)| Some((h.trim().to_string(), n.as_str()?.trim().to_string())))
+                .filter(|(h, n)| !h.is_empty() && !n.is_empty())
+                .collect();
+            (!map.is_empty()).then(|| (repo.clone(), map))
+        })
+        .collect()
+}
+
+/// [`project_defaults_from`] of `config.json` with `config.local.json` over
+/// it (the `projects` key of the local layer replaces the base's whole).
+pub fn load_project_defaults() -> BTreeMap<String, BTreeMap<String, String>> {
+    let read = |p: &Path| {
+        crate::settings::read_object(p)
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    };
+    let mut merged = read(&crate::paths::config_path());
+    merged.extend(read(&crate::paths::config_local_path()));
+    project_defaults_from(&merged)
+}
+
+/// The profile `profile` would be the project default of: it must exist,
+/// be usable, and is for `harness` then. `Err` says why not.
+pub fn project_default_harness(all: &[Profile], name: &str) -> Result<String, String> {
+    let Some(profile) = all.iter().find(|p| p.name.trim() == name.trim()) else {
+        return Err(format!("no profile named `{}`", name.trim()));
+    };
+    if let Some(problem) = profile.problem() {
+        return Err(problem);
+    }
+    Ok(profile.harness.trim().to_string())
+}
+
+/// Set (or with `name` None, clear) the default account of `harness` for
+/// the project at `repo` in the settings file at `path`, in place: every
+/// other key of the entry and of the file stays. An entry left saying
+/// nothing goes, as `Config::set_project` drops an all-default one.
+pub fn set_project_default_in_file(
+    path: &Path,
+    repo: &str,
+    harness: &str,
+    name: Option<&str>,
+) -> Result<(), String> {
+    let harness = harness.trim();
+    if harness.is_empty() {
+        return Err("no harness named".into());
+    }
+    if repo.trim().is_empty() {
+        return Err("no project named".into());
+    }
+    let _lock = crate::settings::lock(path).map_err(|e| e.to_string())?;
+    let mut obj = crate::settings::read_object(path)
+        .map_err(|e| format!("{}: {e}", path.display()))?
+        .unwrap_or_default();
+    let mut projects = match obj.remove(PROJECTS_KEY) {
+        None => serde_json::Map::new(),
+        Some(Value::Object(projects)) => projects,
+        Some(_) => return Err(format!("{}: `projects` is not an object", path.display())),
+    };
+    let mut entry = match projects.remove(repo) {
+        None => serde_json::Map::new(),
+        Some(Value::Object(entry)) => entry,
+        Some(_) => {
+            return Err(format!(
+                "{}: project `{repo}` is not an object",
+                path.display()
+            ))
+        }
+    };
+    let mut defaults = match entry.remove(PROJECT_DEFAULTS_KEY) {
+        Some(Value::Object(map)) => map,
+        _ => serde_json::Map::new(),
+    };
+    match name.map(str::trim).filter(|n| !n.is_empty()) {
+        Some(name) => {
+            defaults.insert(harness.to_string(), json!(name));
+        }
+        None => {
+            defaults.remove(harness);
+        }
+    }
+    if !defaults.is_empty() {
+        entry.insert(PROJECT_DEFAULTS_KEY.into(), Value::Object(defaults));
+    }
+    if !entry.is_empty() {
+        projects.insert(repo.to_string(), Value::Object(entry));
+    }
+    if !projects.is_empty() {
+        obj.insert(PROJECTS_KEY.into(), Value::Object(projects));
+    }
+    crate::settings::write_json(path, &Value::Object(obj))
+        .map_err(|e| format!("write {}: {e}", path.display()))
+}
+
+/// The settings layer an edit of `key` goes to: the one whose `key` is in
+/// force. Layers merge key by key, so a `config.local.json` holding `key`
+/// replaces `config.json`'s whole, and an edit there is the only one that
+/// shows. A local layer that is there but unreadable is refused: there is
+/// no telling which value is in force.
+pub fn layer_for(config: &Path, local: &Path, key: &str) -> Result<PathBuf, String> {
+    let held = crate::settings::read_object(local)
+        .map_err(|e| format!("{}: {e}: fix it, then try again", local.display()))?;
+    Ok(if held.is_some_and(|obj| obj.contains_key(key)) {
+        local.to_path_buf()
+    } else {
+        config.to_path_buf()
+    })
+}
+
 /// The latest PLAN USAGE a profile's sessions printed — Claude's
 /// `You've used 91% of your weekly limit · resets 2pm` — read off a
 /// session's screen by the daemon (`pty::usage`) and kept per profile, so
@@ -907,6 +1046,64 @@ mod tests {
         let obj = crate::settings::read_object(&path).unwrap().unwrap();
         assert!(!from_settings(&obj)[0].disabled);
         assert!(set_enabled_in_file(&path, "nope", true).is_err());
+    }
+
+    #[test]
+    fn a_project_default_is_set_per_harness_and_cleared_without_a_trace() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(
+            &path,
+            r#"{"theme": "dark", "projects": {"/repo": {"run_command": "make"}}}"#,
+        )
+        .unwrap();
+        set_project_default_in_file(&path, "/repo", "claude", Some("work")).unwrap();
+        set_project_default_in_file(&path, "/repo", "codex", Some("gpt")).unwrap();
+        set_project_default_in_file(&path, "/other", "claude", Some("home")).unwrap();
+        let obj = crate::settings::read_object(&path).unwrap().unwrap();
+        let all = project_defaults_from(&obj);
+        assert_eq!(all["/repo"]["claude"], "work");
+        assert_eq!(all["/repo"]["codex"], "gpt", "one entry per harness");
+        assert_eq!(all["/other"]["claude"], "home");
+        assert_eq!(obj["theme"], "dark");
+        assert_eq!(obj["projects"]["/repo"]["run_command"], "make");
+
+        set_project_default_in_file(&path, "/repo", "claude", None).unwrap();
+        set_project_default_in_file(&path, "/repo", "codex", None).unwrap();
+        set_project_default_in_file(&path, "/other", "claude", None).unwrap();
+        let obj = crate::settings::read_object(&path).unwrap().unwrap();
+        assert!(project_defaults_from(&obj).is_empty());
+        assert_eq!(
+            obj["projects"]["/repo"],
+            json!({"run_command": "make"}),
+            "the rest of the entry stays"
+        );
+        assert!(
+            obj["projects"].get("/other").is_none(),
+            "an emptied entry goes"
+        );
+        assert!(set_project_default_in_file(&path, "", "claude", Some("x")).is_err());
+    }
+
+    #[test]
+    fn a_project_default_must_name_a_usable_profile() {
+        let all = vec![profile("work", "claude"), profile("bad name", "claude")];
+        assert_eq!(project_default_harness(&all, "work").unwrap(), "claude");
+        assert!(project_default_harness(&all, "gone").is_err());
+        assert!(project_default_harness(&all, "bad name").is_err());
+    }
+
+    #[test]
+    fn the_layer_holding_a_key_takes_its_edits() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config.json");
+        let local = dir.path().join("config.local.json");
+        assert_eq!(layer_for(&config, &local, PROJECTS_KEY).unwrap(), config);
+        std::fs::write(&local, r#"{"projects": {}}"#).unwrap();
+        assert_eq!(layer_for(&config, &local, PROJECTS_KEY).unwrap(), local);
+        assert_eq!(layer_for(&config, &local, CONFIG_KEY).unwrap(), config);
+        std::fs::write(&local, "{ broken").unwrap();
+        assert!(layer_for(&config, &local, PROJECTS_KEY).is_err());
     }
 
     #[test]

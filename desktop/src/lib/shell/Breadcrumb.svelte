@@ -13,6 +13,7 @@
     prs: 'Pull requests',
     settings: 'Settings',
     orchestrator: 'Orchestrator',
+    accounts: 'Accounts',
     worktrees: 'Worktrees',
   };
 

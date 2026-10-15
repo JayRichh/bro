@@ -204,6 +204,43 @@ fn registry() -> Vec<String> {
         .collect()
 }
 
+/// Add `name` as a copy of `from`: its harness, its variables (values
+/// included: they never pass through the window) and its kind of login,
+/// but neither its default star nor its switch, and a home of its own
+/// (empty: the copy signs in separately).
+pub fn duplicate_at(config: &Path, root: &Path, from: &str, name: &str) -> Res<ProfileSaved> {
+    let Some(source) = load_at(config)
+        .into_iter()
+        .find(|p| p.name.trim() == from.trim())
+    else {
+        return Err(format!("No profile named \"{}\".", from.trim()));
+    };
+    let copy = Profile {
+        name: name.trim().to_string(),
+        harness: source.harness.trim().to_string(),
+        env: source.env,
+        default: false,
+        use_default: source.use_default,
+        disabled: false,
+    };
+    profiles::add_to_file(config, &copy)?;
+    let home = copy.home_in(root);
+    if let Some(home) = &home {
+        copy.prepare_in(root, None)
+            .map_err(|e| format!("Added, but could not make {}: {e}", home.display()))?;
+    }
+    Ok(ProfileSaved {
+        rows: list_at(config, root),
+        login: profiles::login_hint(&copy),
+        home: home.map(|h| h.display().to_string()),
+    })
+}
+
+#[tauri::command]
+pub fn profile_duplicate(from: String, name: String) -> Res<ProfileSaved> {
+    on_layer(|config, root| duplicate_at(config, root, &from, &name))
+}
+
 /// The layer the profiles come from, so the one an edit must change: the
 /// local layer's `profiles` list replaces config.json's whole (layers
 /// merge key by key), so when config.local.json holds one, every listed
@@ -381,6 +418,31 @@ mod tests {
 
         let rows = set_default_at(&config, &root, "a").unwrap();
         assert!(rows[0].default && !rows[1].default);
+    }
+
+    #[test]
+    fn a_duplicate_copies_the_harness_and_variables_but_not_the_star() {
+        let (_d, config, root, registry) = setup();
+        let mut work = form("work", "claude");
+        work.default = true;
+        work.env = "K=secret".into();
+        add_at(&config, &root, &registry, work).unwrap();
+        profiles::set_enabled_in_file(&config, "work", false).unwrap();
+        let saved = duplicate_at(&config, &root, "work", "work-2").unwrap();
+        assert_eq!(saved.login.as_deref(), Some("kete profile login work-2"));
+        assert!(root.join("work-2").join("claude").is_dir(), "its own home");
+        let copy = load_at(&config)
+            .into_iter()
+            .find(|p| p.name == "work-2")
+            .unwrap();
+        assert_eq!(copy.harness, "claude");
+        assert_eq!(copy.env.get("K").map(String::as_str), Some("secret"));
+        assert!(!copy.default && !copy.disabled);
+        assert!(duplicate_at(&config, &root, "work", "work-2")
+            .unwrap_err()
+            .contains("exists"));
+        assert!(duplicate_at(&config, &root, "gone", "x").is_err());
+        assert!(duplicate_at(&config, &root, "work", "bad name").is_err());
     }
 
     #[test]

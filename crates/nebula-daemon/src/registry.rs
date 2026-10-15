@@ -1038,23 +1038,24 @@ fn profile_env_line(env: &nebula_core::profiles::LaunchEnv) -> String {
 
 /// The PROFILE a create on `harness` runs under, by name: `asked` when
 /// the launch named one — it must exist and be an account for that
-/// harness — else the ACCOUNT SPREAD's pick (`nebula_core::accounts`):
-/// under `manual`, the harness's default, else none.
+/// harness — else the default account the project at `repo` sets for the
+/// harness (Settings, Accounts; `kete profile set-project`), else the
+/// ACCOUNT SPREAD's pick (`nebula_core::accounts::resolve_launch`): under
+/// `manual`, the harness's default, else none.
 fn resolve_profile_name(
     harness: &nebula_core::harness::HarnessDescriptor,
     asked: Option<&str>,
+    repo: Option<&Path>,
 ) -> Result<Option<String>> {
     let config = crate::config::Config::load();
-    if asked.map(str::trim).is_some_and(|a| !a.is_empty()) {
-        return nebula_core::profiles::resolve(&config.profiles, &harness.id, asked)
-            .map(|profile| profile.map(|p| p.name.trim().to_string()))
-            .map_err(anyhow::Error::msg);
-    }
-    let pick = nebula_core::accounts::pick_now(
+    let project_default = repo.and_then(|repo| config.project_default_profile(repo, &harness.id));
+    let pick = nebula_core::accounts::resolve_launch_now(
         &config.profiles,
         &harness.id,
-        nebula_core::accounts::load_policy(),
-    );
+        asked,
+        project_default,
+    )
+    .map_err(anyhow::Error::msg)?;
     tracing::debug!(choice = %pick.describe(&harness.id), "account spread");
     Ok(pick.profile.map(|p| p.name.trim().to_string()))
 }
@@ -2271,6 +2272,167 @@ pub(crate) mod tests {
         daemon.kill_session(&sref);
     }
 
+    /// A data dir whose config.json defines a Claude profile `work` and a
+    /// Codex profile `gpt`.
+    fn profiles_data_dir() -> tempfile::TempDir {
+        let data = tempfile::tempdir().unwrap();
+        std::fs::write(
+            data.path().join("config.json"),
+            r#"{"profiles": [
+                {"name": "work", "harness": "claude"},
+                {"name": "off", "harness": "claude", "disabled": true},
+                {"name": "gpt", "harness": "codex"}
+            ]}"#,
+        )
+        .unwrap();
+        data
+    }
+
+    /// A switch that cannot happen says why before anything is killed or
+    /// written: the row keeps its account and its session id.
+    #[tokio::test]
+    async fn switching_account_refuses_before_touching_the_row() {
+        let data = profiles_data_dir();
+        let _env = EnvGuard::set_all(&[
+            (env::DATA_DIR, data.path().to_str().unwrap()),
+            (env::CONFIG_FILE, ""),
+        ]);
+        let daemon = test_daemon();
+        let dir = tempfile::tempdir().unwrap();
+        seed_projects(&daemon, &["p"]);
+        seed_worktree(&daemon, "p", "w", dir.path().to_str().unwrap(), true);
+        seed_agent(&daemon, "a", "w", Some("sid-1"));
+        let id = AgentId("a".into());
+        for (to, why) in [
+            (Some("gone"), "no longer defined"),
+            (Some("gpt"), "is a codex account"),
+            (None, "already runs on its harness's own login"),
+            (Some("  "), "already runs on its harness's own login"),
+        ] {
+            let err = daemon.switch_agent_account(&id, to).await.unwrap_err();
+            assert!(err.to_string().contains(why), "{to:?}: {err}");
+        }
+        let row = daemon.store.get_agent(&id).unwrap().unwrap();
+        assert_eq!(row.profile, None);
+        assert_eq!(row.session_id.as_deref(), Some("sid-1"));
+
+        // Archived and Cloud rows never switch.
+        daemon.store.set_agent_archived(&id, true).unwrap();
+        let err = daemon
+            .switch_agent_account(&id, Some("work"))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("archived"), "{err}");
+        daemon.store.set_agent_archived(&id, false).unwrap();
+        daemon
+            .store
+            .set_agent_cloud_session_id(&id, Some("session_x"))
+            .unwrap();
+        let err = daemon
+            .switch_agent_account(&id, Some("work"))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Claude Cloud"), "{err}");
+        assert_eq!(daemon.store.get_agent(&id).unwrap().unwrap().profile, None);
+    }
+
+    /// The switch: the row takes the new account, drops its session id
+    /// (the conversation lives in the old account's config home) and the
+    /// agent boots again in the same worktree. A switched-off profile can
+    /// be named, and back to the harness's own login works too.
+    #[tokio::test]
+    async fn switching_account_restarts_fresh_on_the_new_profile() {
+        #[cfg(unix)]
+        let stand_in = "/bin/cat";
+        #[cfg(windows)]
+        let stand_in = "cmd.exe";
+        let data = profiles_data_dir();
+        let _env = EnvGuard::set_all(&[
+            (env::AGENT_CMD, stand_in),
+            (env::DATA_DIR, data.path().to_str().unwrap()),
+            (env::CONFIG_FILE, ""),
+        ]);
+        let daemon = test_daemon();
+        let dir = tempfile::tempdir().unwrap();
+        seed_projects(&daemon, &["p"]);
+        seed_worktree(&daemon, "p", "w", dir.path().to_str().unwrap(), true);
+        seed_agent(&daemon, "a", "w", Some("sid-1"));
+        let id = AgentId("a".into());
+        let sref = SessionRef::Agent(id.clone());
+
+        daemon
+            .switch_agent_account(&id, Some("work"))
+            .await
+            .unwrap();
+        let row = daemon.store.get_agent(&id).unwrap().unwrap();
+        assert_eq!(row.profile.as_deref(), Some("work"));
+        assert_eq!(row.session_id, None, "a fresh start on the new account");
+        assert_eq!(row.worktree_id.0, "w", "same worktree");
+        assert!(daemon.is_alive(&sref));
+        assert!(
+            data.path()
+                .join("profiles")
+                .join("work")
+                .join("claude")
+                .is_dir(),
+            "the new account's home was prepared for the boot"
+        );
+
+        daemon.switch_agent_account(&id, Some("off")).await.unwrap();
+        assert_eq!(
+            daemon
+                .store
+                .get_agent(&id)
+                .unwrap()
+                .unwrap()
+                .profile
+                .as_deref(),
+            Some("off"),
+            "a named profile runs even when switched off"
+        );
+        daemon.switch_agent_account(&id, None).await.unwrap();
+        assert_eq!(daemon.store.get_agent(&id).unwrap().unwrap().profile, None);
+        assert!(daemon.is_alive(&sref));
+        daemon.kill_session(&sref);
+    }
+
+    /// A create naming no profile takes its project's default account for
+    /// the harness; one naming a profile keeps it; another project gets
+    /// the usual pick (manual, no default: the CLI's own login).
+    #[test]
+    fn a_create_naming_no_profile_takes_the_project_default() {
+        let data = tempfile::tempdir().unwrap();
+        std::fs::write(
+            data.path().join("config.json"),
+            r#"{"profiles": [
+                {"name": "work", "harness": "claude"},
+                {"name": "home", "harness": "claude"}
+            ], "projects": {"/tmp/p": {"default_profiles": {"claude": "work"}}}}"#,
+        )
+        .unwrap();
+        let _env = EnvGuard::set_all(&[
+            (env::DATA_DIR, data.path().to_str().unwrap()),
+            (env::CONFIG_FILE, ""),
+        ]);
+        let claude = resolve_harness(AgentKind::Claude, None).unwrap();
+        let p = Some(Path::new("/tmp/p"));
+        assert_eq!(
+            resolve_profile_name(&claude, None, p).unwrap().as_deref(),
+            Some("work")
+        );
+        assert_eq!(
+            resolve_profile_name(&claude, Some("home"), p)
+                .unwrap()
+                .as_deref(),
+            Some("home")
+        );
+        assert_eq!(
+            resolve_profile_name(&claude, None, Some(Path::new("/tmp/q"))).unwrap(),
+            None
+        );
+        assert!(resolve_profile_name(&claude, Some("gone"), p).is_err());
+    }
+
     /// `nebula worktree <branch>` onto a row whose checkout is gone refuses
     /// before anything moves: the agent's row stays where it was and no
     /// relocation is queued, so the turn end never kills it for a respawn
@@ -3275,34 +3437,43 @@ pub(crate) mod tests {
     /// drop restoring "unset" mid-way through another's run made that run
     /// spawn the real `claude` (absent on CI, so the create failed).
     pub(crate) struct EnvGuard {
-        key: &'static str,
-        was: Option<String>,
+        was: Vec<(&'static str, Option<String>)>,
         _lock: std::sync::MutexGuard<'static, ()>,
     }
 
     impl EnvGuard {
         pub(crate) fn set(key: &'static str, value: &str) -> Self {
+            Self::set_all(&[(key, value)])
+        }
+
+        /// Several variables under the one lock: two guards in one test
+        /// would wait on each other.
+        pub(crate) fn set_all(vars: &[(&'static str, &str)]) -> Self {
             static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
             // A test that panicked holding the lock left the env restored
             // (drop still ran), so its poison means nothing here.
             let lock = LOCK
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let was = std::env::var(key).ok();
-            std::env::set_var(key, value);
-            Self {
-                key,
-                was,
-                _lock: lock,
-            }
+            let was = vars
+                .iter()
+                .map(|(key, value)| {
+                    let was = std::env::var(key).ok();
+                    std::env::set_var(key, value);
+                    (*key, was)
+                })
+                .collect();
+            Self { was, _lock: lock }
         }
     }
 
     impl Drop for EnvGuard {
         fn drop(&mut self) {
-            match self.was.take() {
-                Some(v) => std::env::set_var(self.key, v),
-                None => std::env::remove_var(self.key),
+            for (key, was) in self.was.drain(..).rev() {
+                match was {
+                    Some(v) => std::env::set_var(key, v),
+                    None => std::env::remove_var(key),
+                }
             }
         }
     }

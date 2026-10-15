@@ -144,6 +144,10 @@ export interface AccountRow {
   /** Why a profile entry cannot be used (shown, with the way to Settings). */
   problem?: string | null;
   usage: AccountUsage | null;
+  /** Its profile home; null for an own login or an adopted one. */
+  home?: string | null;
+  /** The variable names its profile sets (values stay in Rust). */
+  envKeys?: string[];
 }
 /** What the quick prompt's "auto" profile runs under now (`account_pick`). */
 export interface AutoPick {
@@ -222,6 +226,10 @@ export interface Launchables {
   profiles: { name: string; harness: string; default: boolean; disabled?: boolean }[];
   /** The account spread: `manual`, `failover`, `least_used`; absent from an old backend. */
   spread?: string;
+  /** The failover threshold, percent. */
+  spread_threshold?: string;
+  /** Project default accounts by repo path: harness id to profile name. */
+  project_accounts?: Record<string, Record<string, string>>;
   /** The Agents tab's quick prompt harness; empty from an old backend. */
   default_harness?: string;
   /** Quick prompt starts in a new worktree (Sessions tab). */
@@ -415,8 +423,16 @@ export const api = {
   profileSetEnabled: (name: string, enabled: boolean) => invoke<null>('profile_set_enabled', { name, enabled }),
   /** A new terminal in `worktree` running the account's login command; its id. */
   accountLoginRun: (worktree: string, key: string) => invoke<string>('account_login_run', { worktree, key }),
-  /** What "auto" would pick on a harness now; null: it has no profiles. */
-  accountPick: (kind: string) => invoke<AutoPick | null>('account_pick', { kind }),
+  /** What "auto" would pick on a harness now (in `project`, an id, when
+   *  given: its default account first); null: it has no profiles. */
+  accountPick: (kind: string, project: string | null = null) => invoke<AutoPick | null>('account_pick', { kind, project }),
+  /** Restart a session fresh on another account (null: its harness's own login). */
+  accountSwitch: (agent: string, profile: string | null) => invoke<void>('account_switch', { agent, profile }),
+  /** Set (null clears) a project's default account for a harness. */
+  projectSetAccount: (project: string, harness: string, profile: string | null) =>
+    invoke<void>('project_set_account', { project, harness, profile }),
+  /** A new profile copying `from`'s harness, variables and login kind. */
+  profileDuplicate: (from: string, name: string) => invoke<ProfileSaved>('profile_duplicate', { from, name }),
   createTerminal: (worktree: string) => invoke<string>('create_terminal', { worktree }),
   addProject: (path: string) => invoke<string>('add_project', { path }),
   startRun: (worktree: string) => invoke<string>('start_run', { worktree }),
