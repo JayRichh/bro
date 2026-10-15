@@ -384,11 +384,13 @@ pub(crate) fn load_worktree_files(
 pub(crate) fn open_diff_view(app: &mut App) {
     // Opened from a board card: closing it lands back on that card.
     let card = board_card(app);
+    let recorded = recorded_base(app);
     open_diff_view_inner(app);
     if let Some(Overlay::Diff(v)) = &mut app.modals.overlay {
         if v.from_card.is_none() {
             v.from_card = card;
         }
+        v.attribution.recorded = recorded;
     }
 }
 
@@ -399,7 +401,14 @@ fn board_card(app: &App) -> Option<AgentId> {
         .flatten()
 }
 
+/// The base Kete recorded for the selected worktree when it cut it.
+fn recorded_base(app: &App) -> Option<nebula_core::review_base::RecordedBase> {
+    let id = &app.selected_worktree()?.id;
+    app.tree.bases.get(id).cloned()
+}
+
 fn open_diff_view_inner(app: &mut App) {
+    let recorded = recorded_base(app);
     let Some((path, branch)) = selected_checkout(app) else {
         return;
     };
@@ -407,7 +416,7 @@ fn open_diff_view_inner(app: &mut App) {
     let asked = app.modals.diff_against;
     let Some(jobs) = app.jobs.view_jobs.clone() else {
         // No loop to land an answer on (unit tests): read inline.
-        match crate::git_diff::read_listing(&path, asked) {
+        match crate::git_diff::read_listing_with(&path, asked, recorded.as_ref()) {
             Ok(listing) => {
                 if show_graph {
                     show_graph_diff_listing(app, path, branch, listing);
@@ -463,7 +472,7 @@ fn open_diff_view_inner(app: &mut App) {
     jobs.run(move || {
         Some(crate::view_jobs::Answer::DiffListing {
             ticket,
-            result: crate::git_diff::read_listing(&path, asked),
+            result: crate::git_diff::read_listing_with(&path, asked, recorded.as_ref()),
         })
     });
 }

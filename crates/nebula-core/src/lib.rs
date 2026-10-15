@@ -20,6 +20,7 @@ pub mod protocol;
 pub mod remote;
 pub mod review_base;
 pub mod scope;
+pub mod session_snapshot;
 pub mod settings;
 pub mod shell;
 pub mod usage;

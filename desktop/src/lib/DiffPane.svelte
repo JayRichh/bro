@@ -16,12 +16,26 @@
   - `lead`: a snippet drawn at the left of the toolbar.
   - `trail`: a snippet drawn at the right end of the toolbar (a close button).
   - `pick`: drawn in place of the diff while there is no worktree (a picker).
+  - `session`: the session a review is of. With more than one session's
+    snapshots in the worktree, the header offers "This session / All in
+    this worktree" (L); all by default.
 -->
 <script lang="ts">
   import { onDestroy, onMount, tick, type Snippet } from 'svelte';
   import { app, toast } from './store.svelte';
   import { diffApi, type Blob, type DiffFile, type DiffMode, type DiffRange, type DiffSide, type Hunk, type HunkAction } from './diff-api';
-  import { againstLabel, againstTitle, canStage, type Against, type ReviewBase, type ReviewCommit } from './diff-base';
+  import {
+    againstLabel,
+    againstTitle,
+    canStage,
+    sessionOffered,
+    sessionReadable,
+    sessionTitle,
+    type Against,
+    type ReviewBase,
+    type ReviewCommit,
+    type SessionDiff,
+  } from './diff-base';
   import { fileIcon, languageOf } from './icons';
   import { blockLine, replacementModel, type ReplacementModel } from './replacement';
   import { defineMonacoTheme, termFamily, token } from './theme';
@@ -37,6 +51,7 @@
     lead,
     trail,
     pick,
+    session = null,
   }: {
     worktree: string | null;
     range?: DiffRange | null;
@@ -47,6 +62,7 @@
     lead?: Snippet;
     trail?: Snippet;
     pick?: Snippet;
+    session?: string | null;
   } = $props();
 
   /** `absent`: the status says this side has no file, so why. */
@@ -78,6 +94,10 @@
   let base = $state<ReviewBase | null>(null);
   let commits = $state<ReviewCommit[]>([]);
   let showCommits = $state(true);
+  /** The reviewed session's snapshots, and whether only its changes show. */
+  let sessionDiff = $state<SessionDiff | null>(null);
+  let onlySession = $state(false);
+  const offerSession = $derived(!range && !!session && sessionOffered(sessionDiff));
 
   /** Change stops in the shown file, as modified-side lines. */
   let stops = $state<number[]>([]);
@@ -91,7 +111,7 @@
   let busy = $state(false);
 
   /** Hunks stage and discard: a working tree read against HEAD. */
-  const working = $derived(canStage(!!range, readAgainst));
+  const working = $derived(canStage(!!range, readAgainst) && !onlySession);
   /** The working tree against the merge-base: the old side is that commit. */
   const sinceBase = $derived(!range && readAgainst === 'base' && !!base);
   const totals = $derived(
@@ -134,15 +154,27 @@
         base = null;
         commits = [];
       } else {
-        const res = await diffApi.review(wt, asked);
+        const who = session;
+        const [res, sess] = await Promise.all([
+          diffApi.review(wt, asked),
+          who ? diffApi.session(wt, who).catch(() => null) : Promise.resolve(null),
+        ]);
         if (mine !== loadSeq) return;
-        pinned = null;
+        sessionDiff = sess;
         offline = false;
         readAgainst = res.against;
         base = res.base;
         commits = res.commits;
         shownOut = { against: res.against, base: res.base };
-        list = res.files;
+        if (onlySession && sess && sessionReadable(sess)) {
+          // The session's own pair: its start snapshot to its last.
+          pinned = { base: sess.start!, tip: sess.last! };
+          list = sess.files;
+        } else {
+          if (onlySession) onlySession = false;
+          pinned = null;
+          list = res.files;
+        }
       }
       files = list;
       const again = keep && current ? list.find((f) => f.path === current!.path) : undefined;
@@ -164,8 +196,8 @@
       return {
         old: f.status === 'A' ? null : { kind: 'commit', rev: pinned.base },
         new: f.status === 'D' ? null : { kind: 'commit', rev: pinned.tip },
-        oldLabel: `Base ${short(pinned.base)}`,
-        newLabel: `Tip ${short(pinned.tip)}`,
+        oldLabel: onlySession ? `Session start ${short(pinned.base)}` : `Base ${short(pinned.base)}`,
+        newLabel: onlySession ? `Last turn ${short(pinned.tip)}` : `Tip ${short(pinned.tip)}`,
       };
     }
     // Against the base the old side is the merge-base commit, the new one
@@ -444,7 +476,18 @@
   /** The header's toggle and the palette's entry: the base, or HEAD. */
   export function toggleAgainst() {
     if (!base || range) return;
+    onlySession = false;
     against = readAgainst === 'base' ? 'head' : 'base';
+  }
+
+  /** The header's session filter (L): this session's changes, or all. */
+  export function setSessionOnly(only: boolean) {
+    if (!offerSession || only === onlySession) return;
+    if (only && !sessionReadable(sessionDiff)) {
+      toast(sessionDiff?.note ?? 'No snapshot of this session yet.');
+      return;
+    }
+    onlySession = only;
   }
 
   async function act(h: Hunk, action: HunkAction) {
@@ -487,6 +530,7 @@
     if (e.key === 'ArrowDown' || e.key === 'j') (e.preventDefault(), moveFile(1));
     else if (e.key === 'ArrowUp' || e.key === 'k') (e.preventDefault(), moveFile(-1));
     else if (e.key === 'f') showFiles = !showFiles;
+    else if (e.key === 'l' && offerSession) (e.preventDefault(), setSessionOnly(!onlySession));
   }
 
   // ---- lifecycle ----------------------------------------------------------
@@ -519,8 +563,18 @@
   });
 
   let loadedFor = '';
+  // Another session (or none): the whole worktree again.
+  let sessionFor: string | null = null;
   $effect(() => {
-    const k = `${worktree ?? ''}\u0000${range?.base ?? ''}\u0000${range?.tip ?? ''}\u0000${range ? '' : (against ?? '')}`;
+    const s = session;
+    if (s !== sessionFor) {
+      sessionFor = s;
+      onlySession = false;
+      sessionDiff = null;
+    }
+  });
+  $effect(() => {
+    const k = `${worktree ?? ''}\u0000${range?.base ?? ''}\u0000${range?.tip ?? ''}\u0000${range ? '' : (against ?? '')}\u0000${session ?? ''}\u0000${onlySession}`;
     if (ready && k !== loadedFor) {
       loadedFor = k;
       current = null;
@@ -633,10 +687,32 @@
         >{againstLabel(readAgainst, base)}</button
       >
     {/if}
+    {#if offerSession}
+      <!-- A review of one session in a worktree several worked in: its own
+           changes (start to last turn), or everyone's. -->
+      <div class="flex h-7 flex-none border border-rule" role="radiogroup" aria-label="Whose changes">
+        {#each [{ id: 'all', long: 'All in this worktree', word: 'All' }, { id: 'session', long: 'This session', word: 'Session' }] as const as c, i (c.id)}
+          {@const on = (c.id === 'session') === onlySession}
+          <button
+            role="radio"
+            aria-checked={on}
+            class="inline-flex items-center border-0 px-2 text-[12px] whitespace-nowrap
+              {i ? 'border-l border-rule' : ''} {on ? 'bg-ink text-bg' : 'bg-transparent text-muted hover:text-ink'}"
+            disabled={loading}
+            onclick={() => setSessionOnly(c.id === 'session')}
+            title={sessionTitle(c.id, sessionDiff)}
+            aria-label={c.long}
+            ><span class="@min-[720px]:hidden">{c.word}</span><span class="hidden @min-[720px]:inline">{c.long}</span></button
+          >
+        {/each}
+      </div>
+    {/if}
     <!-- The range and totals give way first when the pane is narrow. -->
     <span class="flex min-w-0 flex-auto items-center gap-3 overflow-hidden">
       {#if pinned}
-        <span class="min-w-0 truncate font-mono text-[12px] whitespace-nowrap text-ink" title="Merge-base {pinned.base}, tip {pinned.tip}"
+        <span
+          class="min-w-0 truncate font-mono text-[12px] whitespace-nowrap text-ink"
+          title={onlySession ? `Session start ${pinned.base}, last turn ${pinned.tip}` : `Merge-base ${pinned.base}, tip ${pinned.tip}`}
           >{short(pinned.base)}<span class="text-faint">...</span>{short(pinned.tip)}</span
         >
       {/if}

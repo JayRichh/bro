@@ -1392,7 +1392,7 @@ fn draw_diff_overlay(f: &mut Frame, app: &mut App, view: crate::app::DiffView) {
     ])
     .areas(area);
 
-    let (against_area, files_a) = draw_diff_against(f, &view, files_a, th);
+    let (against_area, session_area, files_a) = draw_diff_against(f, &view, files_a, th);
     let list_inner = draw_diff_file_list(f, &view, files_a, app.chrome.icons, th);
 
     // Right: the selected file's diff, scrolled — or, on a tree
@@ -1511,7 +1511,58 @@ fn draw_diff_overlay(f: &mut Frame, app: &mut App, view: crate::app::DiffView) {
         v.files_width = files_w;
         v.wide_shown = wide;
         v.against_area = against_area;
+        v.attribution.area = session_area;
     }
+}
+
+/// The REVIEW UNIT's session filter under the against toggle, when more
+/// than one session has worked in the worktree: `all in worktree` or
+/// `this session`, the one shown lit, as a toggle (`Ctrl+l`, or a
+/// click). Returns its rect (empty when not drawn) and what is left.
+fn draw_diff_session(
+    f: &mut Frame,
+    view: &crate::app::DiffView,
+    col: Rect,
+    th: Theme,
+) -> (Rect, Rect) {
+    let offered = view
+        .attribution
+        .session
+        .as_ref()
+        .is_some_and(|s| s.offered());
+    if !offered || col.height < 8 {
+        return (Rect::default(), col);
+    }
+    let [row, rest] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(col);
+    let lit = Style::default()
+        .fg(th.accent)
+        .add_modifier(Modifier::BOLD | Modifier::REVERSED);
+    let off = Style::default().fg(th.dim);
+    let (all, mine) = if view.attribution.listed {
+        (off, lit)
+    } else {
+        (lit, off)
+    };
+    let width = row.width as usize;
+    // The long words give way to short ones, and only then the key's hint.
+    const HINT: &str = " ^l";
+    let fits = |a: &str, b: &str| a.chars().count() + b.chars().count() + HINT.len() <= width;
+    let words = [
+        (" all in worktree ", " this session "),
+        (" all ", " this session "),
+        (" all ", " session "),
+    ];
+    let (a, b) = words
+        .iter()
+        .copied()
+        .find(|(a, b)| fits(a, b))
+        .unwrap_or(words[2]);
+    let mut spans = vec![Span::styled(a, all), Span::styled(b, mine)];
+    if fits(a, b) {
+        spans.push(Span::styled(HINT, off));
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), row);
+    (row, rest)
 }
 
 /// The most rows the COMMITS strip takes above the files.
@@ -1520,20 +1571,24 @@ const COMMIT_STRIP_ROWS: u16 = 5;
 /// The head of the DIFF VIEWER's file column: what the files are read
 /// against — `vs main (merge-base abc1234)` or `vs HEAD` — as a toggle
 /// (`Ctrl+g`, or a click), and under it, with a base, the COMMITS made
-/// since it, read-only. Returns the toggle's rect (empty without a base,
-/// so a click misses it) and what is left of `col` for the file list.
+/// since it, read-only; in a REVIEW UNIT with more than one session's
+/// snapshots, the session chip between the two (`draw_diff_session`).
+/// Returns the toggle's rect (empty without a base, so a click misses
+/// it), the chip's (empty when not drawn) and what is left of `col` for
+/// the file list.
 fn draw_diff_against(
     f: &mut Frame,
     view: &crate::app::DiffView,
     col: Rect,
     th: Theme,
-) -> (Rect, Rect) {
+) -> (Rect, Rect, Rect) {
     // A pull request's view is read against its own base, and says so in
     // its title already.
     if view.prefetched.is_some() || col.height < 8 {
-        return (Rect::default(), col);
+        return (Rect::default(), Rect::default(), col);
     }
     let [head, rest] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(col);
+    let (session, rest) = draw_diff_session(f, view, rest, th);
     let label = view.against_label();
     let line = match &view.base {
         Some(base) => {
@@ -1573,14 +1628,14 @@ fn draw_diff_against(
         Rect::default()
     };
     if view.base.is_none() || view.commits.is_empty() {
-        return (toggle, rest);
+        return (toggle, session, rest);
     }
     // Room for the strip and still a usable file list under it.
     let rows = (view.commits.len() as u16)
         .min(COMMIT_STRIP_ROWS)
         .min(rest.height.saturating_sub(8) / 2);
     if rows == 0 {
-        return (toggle, rest);
+        return (toggle, session, rest);
     }
     let [strip, files] =
         Layout::vertical([Constraint::Length(rows + 2), Constraint::Min(0)]).areas(rest);
@@ -1617,7 +1672,7 @@ fn draw_diff_against(
         })
         .collect();
     f.render_widget(Paragraph::new(lines), inner);
-    (toggle, files)
+    (toggle, session, files)
 }
 
 /// A unified diff line's color: added green, removed red, hunk headers in

@@ -255,6 +255,8 @@ pub struct Daemon {
     pub(crate) provision_gate: tokio::sync::Mutex<()>,
     /// ACCOUNT USAGE and SESSION CONTEXT readings (`usage.rs`), taken alone.
     pub(crate) usage: Mutex<usage::UsageBook>,
+    /// The SESSION SNAPSHOTS worker (`snapshots.rs`), taken alone.
+    snapshots: snapshots::Snapshotter,
 }
 
 mod exit;
@@ -264,6 +266,7 @@ mod ports;
 mod prewarm;
 mod projects;
 mod sessions;
+mod snapshots;
 mod spawn;
 mod status;
 mod subagents;
@@ -301,6 +304,7 @@ impl Daemon {
             orchestrator_home: Mutex::new(None),
             provision_gate: tokio::sync::Mutex::new(()),
             usage: Mutex::new(usage::UsageBook::default()),
+            snapshots: snapshots::Snapshotter::default(),
         })
     }
 
@@ -5227,5 +5231,135 @@ pub(crate) mod tests {
         }
         daemon.mark_agent_seen(&id).unwrap();
         assert!(rx.try_recv().is_err(), "nothing to say twice");
+    }
+
+    /// SESSION SNAPSHOTS: a start when the session starts (kept through a
+    /// second start), a last at each turn end, the pair diffed to the
+    /// session's own changes, and the refs gone with the row, then with
+    /// the project.
+    #[test]
+    fn session_snapshots_attribute_a_turn_and_their_refs_go_with_the_rows() {
+        use nebula_core::session_snapshot::{files_between, kept_agents};
+        let daemon = test_daemon();
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = init_repo(tmp.path());
+        let project = project_at(&daemon, &repo);
+        seed_agent(&daemon, "a1", "rt", None);
+        seed_agent(&daemon, "a2", "rt", None);
+        let (a1, a2) = (AgentId("a1".into()), AgentId("a2".into()));
+        std::fs::write(
+            repo.join("before.txt"),
+            "someone else's
+",
+        )
+        .unwrap();
+        daemon.snapshot_session_start(&a1);
+        daemon.snapshot_session_start(&a2);
+        daemon.settle_snapshots();
+        let start = daemon.session_changes(&a1).unwrap().start.unwrap();
+        assert!(start.tree.is_some());
+
+        std::fs::write(
+            repo.join("mine.txt"),
+            "a1's work
+",
+        )
+        .unwrap();
+        daemon.apply_status_effects(&a1, vec![Effect::SetStatus(AgentStatus::Finished)]);
+        // A respawn's start leaves the first one.
+        daemon.snapshot_session_start(&a1);
+        daemon.settle_snapshots();
+        let changes = daemon.session_changes(&a1).unwrap();
+        assert_eq!(changes.start.as_ref(), Some(&start));
+        assert_eq!(changes.sessions, 2);
+        let (from, to) = changes.trees().expect("both trees");
+        let files = files_between(&repo, from, to).unwrap();
+        let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, vec!["mine.txt"], "only what changed in its turn");
+        assert_eq!(daemon.session_changes(&a2).unwrap().last, None);
+        assert_eq!(kept_agents(&repo), vec!["a1".to_string(), "a2".to_string()]);
+
+        daemon.delete_agent(&a1).unwrap();
+        daemon.settle_snapshots();
+        assert_eq!(kept_agents(&repo), vec!["a2".to_string()]);
+        daemon.remove_project(&project.id).unwrap();
+        daemon.settle_snapshots();
+        assert!(kept_agents(&repo).is_empty());
+    }
+
+    /// A worktree cut from a named ref records it and where it forked, and
+    /// tells 59+ subscribers; one cut from HEAD records nothing.
+    #[tokio::test]
+    async fn a_cut_records_its_base_and_head_records_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = init_repo(tmp.path());
+        let daemon = test_daemon();
+        let project = project_at(&daemon, &repo);
+        let mut events = daemon.events.subscribe();
+        let EntityId::Worktree(id) = daemon
+            .create_worktree(&project.id, "feat", Some("main"))
+            .await
+            .unwrap()
+        else {
+            panic!("a worktree id");
+        };
+        let main = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["rev-parse", "main"])
+            .output()
+            .unwrap();
+        let main = String::from_utf8_lossy(&main.stdout).trim().to_string();
+        let bases = daemon.store.worktree_bases().unwrap();
+        assert_eq!(
+            bases,
+            vec![nebula_core::review_base::RecordedBase {
+                worktree: id,
+                refname: "main".into(),
+                sha: main,
+            }]
+        );
+        let mut told = false;
+        while let Ok(ev) = events.try_recv() {
+            if let ServerEvent::WorktreeBases { bases: sent } = ev {
+                assert_eq!(sent, bases);
+                told = true;
+            }
+        }
+        assert!(told, "subscribers hear the new base");
+        daemon
+            .create_worktree(&project.id, "spike", Some("HEAD"))
+            .await
+            .unwrap();
+        assert_eq!(daemon.store.worktree_bases().unwrap().len(), 1);
+    }
+
+    /// A worktree's delete takes its sessions' snapshot refs with it.
+    #[tokio::test]
+    async fn deleting_a_worktree_drops_its_sessions_snapshot_refs() {
+        use nebula_core::session_snapshot::kept_agents;
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = init_repo(tmp.path());
+        let daemon = test_daemon();
+        let project = project_at(&daemon, &repo);
+        let EntityId::Worktree(id) = daemon
+            .create_worktree(&project.id, "feat", Some("main"))
+            .await
+            .unwrap()
+        else {
+            panic!("a worktree id");
+        };
+        seed_agent(&daemon, "a1", id.as_str(), None);
+        seed_agent(&daemon, "keep", "rt", None);
+        daemon.snapshot_session_start(&AgentId("a1".into()));
+        daemon.snapshot_session_start(&AgentId("keep".into()));
+        daemon.settle_snapshots();
+        assert_eq!(
+            kept_agents(&repo),
+            vec!["a1".to_string(), "keep".to_string()]
+        );
+        daemon.delete_worktree(&id, true).await.unwrap();
+        daemon.settle_snapshots();
+        assert_eq!(kept_agents(&repo), vec!["keep".to_string()]);
     }
 }

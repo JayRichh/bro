@@ -127,6 +127,14 @@ fn overlay_footer_hint(app: &App, overlay: &Overlay, th: Theme) -> FooterHint {
             ),
             th,
         ),
+        Overlay::Diff(view) if view.attribution.session.as_ref().is_some_and(|s| s.offered()) => dim_hint(
+            if view.tree.is_some() {
+                "type: filter  ↑/↓: move  ←/→: fold  ⇧↑/↓: scroll  Ctrl+n/p: change  Ctrl+s: layout  Ctrl+o: context  Ctrl+y: stage  Ctrl+x: discard  Ctrl+g: vs base/HEAD  Ctrl+l: this session/all  Ctrl+t: flat list  Esc: clear/close"
+            } else {
+                "type: filter  ↑/↓: file  ⇧↑/↓: scroll  Ctrl+n/p: change  Ctrl+s: layout  Ctrl+o: context  Ctrl+y: stage  Ctrl+x: discard  Ctrl+g: vs base/HEAD  Ctrl+l: this session/all  Ctrl+t: tree  Esc: clear/close"
+            },
+            th,
+        ),
         Overlay::Diff(view) => dim_hint(
             if view.tree.is_some() {
                 "type: filter  ↑/↓: move  ←/→: fold  ⇧↑/↓: scroll  Ctrl+n/p: change  Ctrl+s: layout  Ctrl+o: context  Ctrl+y: stage  Ctrl+x: discard  Ctrl+g: vs base/HEAD  Ctrl+t: flat list  Esc: clear/close"

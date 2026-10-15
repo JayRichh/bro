@@ -209,6 +209,8 @@ impl Daemon {
             agent.recent_prompts.push(entry);
         }
         let agent = agent;
+        // Before the CLI boots: the checkout as the session finds it.
+        self.snapshot_session_start(&agent.id);
         if optimistic_run {
             // Seeded by hand, ahead of the spawn, so the CLI's own startup
             // progress-clear cannot green the row out before its turn has

@@ -78,6 +78,7 @@
   bind:against={app.diffAgainst}
   bind:shown={app.diffShown}
   keys={active}
+  session={review?.id ?? null}
 >
   {#snippet lead()}
     <select

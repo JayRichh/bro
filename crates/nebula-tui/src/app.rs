@@ -1580,6 +1580,10 @@ pub struct DiffView {
     /// Screen rect of the header's against toggle, written back during
     /// draw so a click can hit it.
     pub against_area: Rect,
+    /// Whose changes are read, and from where: the recorded base and the
+    /// REVIEW UNIT's session filter (boxed: `Overlay` keeps its variants
+    /// close in size).
+    pub attribution: Box<DiffAttribution>,
     /// The list is being read again for a toggle: an empty answer keeps
     /// the modal up (saying so) rather than closing it.
     pub keep_open: bool,
@@ -1589,6 +1593,40 @@ pub struct DiffView {
     /// The board card this diff was opened from: closing it (Esc, `⇧K`)
     /// lands the cursor back on that card, wherever reading it moved it.
     pub from_card: Option<AgentId>,
+}
+
+/// What a DIFF VIEWER knows of whose changes it reads.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DiffAttribution {
+    /// The base Kete recorded when it cut this checkout
+    /// (`ServerEvent::WorktreeBases`), read in preference to the derived
+    /// one; None for a checkout with no record, or from an older daemon.
+    pub recorded: Option<nebula_core::review_base::RecordedBase>,
+    /// The REVIEW UNIT's session filter (`Ctrl+l`, the header's chip):
+    /// the reviewed session's snapshots as the daemon answered them. None
+    /// until answered, and for a diff with no session (or a daemon older
+    /// than 59).
+    pub session: Option<SessionFilter>,
+    /// The listing on screen is the session's own (start..last snapshot),
+    /// not the worktree's: set as a listing lands (`git_diff::fill_view`).
+    pub listed: bool,
+    /// Screen rect of the header's session chip, written back during draw.
+    pub area: Rect,
+}
+
+/// The REVIEW UNIT's "This session / All in this worktree" filter.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionFilter {
+    pub changes: nebula_core::session_snapshot::SessionChanges,
+    /// Only this session's changes are asked for.
+    pub only: bool,
+}
+
+impl SessionFilter {
+    /// Worth offering: more than one session has snapshots here.
+    pub fn offered(&self) -> bool {
+        self.changes.sessions > 1
+    }
 }
 
 /// The REVIEW UNIT's card and the verb row the draw laid out.
@@ -1900,7 +1938,11 @@ impl DiffView {
     pub fn stageable(&self) -> Option<&DiffFile> {
         // Against the base the CHANGES are the base's, and the hunks
         // staging cuts are HEAD's: they would not line up.
-        if self.prefetched.is_some() || self.place != Place::Changes || self.diff_base().is_some() {
+        if self.prefetched.is_some()
+            || self.attribution.listed
+            || self.place != Place::Changes
+            || self.diff_base().is_some()
+        {
             return None;
         }
         let file = self.selected_file()?;
@@ -1984,6 +2026,15 @@ impl DiffView {
         )
     }
 
+    /// The session's two snapshots the diffs are read between, while the
+    /// list is that session's alone.
+    pub fn session_range(&self) -> Option<(&str, &str)> {
+        if !self.attribution.listed {
+            return None;
+        }
+        self.attribution.session.as_ref()?.changes.trees()
+    }
+
     /// The merge-base the diffs are read from, while reading against it.
     pub fn diff_base(&self) -> Option<&str> {
         match (&self.base, self.against) {
@@ -2006,9 +2057,10 @@ impl DiffView {
         }
     }
 
-    /// Write the reviewed ✓ marks under the scope they were made in.
+    /// Write the reviewed ✓ marks under the scope they were made in. Not
+    /// for a session's own list: marks are scoped to the base or HEAD.
     pub fn store_marks(&self) {
-        if self.prefetched.is_none() {
+        if self.prefetched.is_none() && !self.attribution.listed {
             crate::review::store_scoped(&self.root, self.marks_scope(), &self.reviewed);
         }
     }
@@ -2057,6 +2109,7 @@ impl DiffView {
             base: None,
             commits: Vec::new(),
             against_area: Rect::default(),
+            attribution: Box::default(),
             keep_open: false,
             review: None,
             from_card: None,
@@ -3489,6 +3542,10 @@ pub struct Tree {
     /// sessions listen on, as the DAEMON last reported them
     /// (`ServerEvent::WorktreePorts`). The band's rule draws the live ones.
     pub ports: std::collections::HashMap<WorktreeId, nebula_core::ports::WorktreePorts>,
+    /// The base each worktree Kete cut was cut from, by worktree
+    /// (`ServerEvent::WorktreeBases`, a 59+ daemon): what the diff and the
+    /// board read against before deriving one.
+    pub bases: std::collections::HashMap<WorktreeId, nebula_core::review_base::RecordedBase>,
 }
 
 impl Tree {

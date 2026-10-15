@@ -444,7 +444,16 @@ impl Daemon {
         self.pending_moves.lock().remove(id);
         self.forget_subagents(id);
         self.forget_context(id);
+        let refs = self
+            .store
+            .get_agent(id)?
+            .and_then(|a| self.store.get_worktree(&a.worktree_id).ok().flatten())
+            .and_then(|w| self.store.get_project(&w.project_id).ok().flatten())
+            .map(|p| p.repo_path);
         self.store.delete_agent(id)?;
+        if let Some(repo) = refs {
+            self.drop_snapshot_refs(repo, vec![id.as_str().to_string()]);
+        }
         self.broadcast(ServerEvent::EntityRemoved {
             id: EntityId::Agent(id.clone()),
         });
