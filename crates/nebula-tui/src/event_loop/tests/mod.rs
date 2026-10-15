@@ -22671,3 +22671,66 @@ fn a_refused_delete_offers_force_alone_and_flashes_in_bulk() {
         assert!(flash.ends_with("feature, other"), "{flash}");
     });
 }
+
+/// Ctrl+g inside the diff modal reaches it through the real key dispatch:
+/// a branch with a commit opens against its base, the chord flips it to
+/// HEAD (the commit leaves the list), and the pick is remembered for the
+/// next open.
+#[test]
+fn ctrl_g_in_the_diff_modal_flips_between_the_base_and_head() {
+    use nebula_core::review_base::Against;
+    let _env = crate::test_env::spawning();
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("repo");
+    std::fs::create_dir(&repo).unwrap();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}");
+    };
+    git(&["init", "-q", "-b", "main"]);
+    git(&["config", "user.email", "t@t"]);
+    git(&["config", "user.name", "t"]);
+    git(&["config", "commit.gpgsign", "false"]);
+    std::fs::write(repo.join("a.txt"), "one\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-q", "-m", "init"]);
+    git(&["checkout", "-q", "-b", "feat"]);
+    std::fs::write(repo.join("b.txt"), "agent\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-q", "-m", "agent commit"]);
+    std::fs::write(repo.join("a.txt"), "two\n").unwrap();
+
+    crate::review::with_store_path(dir.path().join("reviewed.json"), || {
+        let mut app = App::new();
+        let listing = crate::git_diff::read_listing(&repo, None).unwrap();
+        let mut view = crate::app::DiffView::new(repo.clone(), "feat".into(), Vec::new(), true);
+        crate::git_diff::fill_view(&mut view, listing);
+        assert_eq!(view.against, Against::Base);
+        assert_eq!(view.files.len(), 2);
+        app.modals.overlay = Some(Overlay::Diff(view));
+
+        let mut out = Vec::new();
+        ctrl(&mut app, 'g', &mut out);
+        let Some(Overlay::Diff(view)) = &app.modals.overlay else {
+            panic!("the modal stays up: {:?}", app.chrome.flash);
+        };
+        assert_eq!(view.against, Against::Head);
+        let paths: Vec<&str> = view.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["a.txt"]);
+        assert_eq!(app.modals.diff_against, Some(Against::Head));
+        let flash = app.chrome.flash.clone().unwrap_or_default();
+        assert!(flash.contains("vs HEAD"), "{flash}");
+
+        ctrl(&mut app, 'g', &mut out);
+        let Some(Overlay::Diff(view)) = &app.modals.overlay else {
+            unreachable!()
+        };
+        assert_eq!(view.against, Against::Base);
+        assert_eq!(app.modals.diff_against, Some(Against::Base));
+    });
+}

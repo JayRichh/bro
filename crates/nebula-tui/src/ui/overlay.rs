@@ -1466,6 +1466,16 @@ fn draw_diff_against(
                 nebula_core::review_base::Against::Base => "HEAD".to_string(),
                 nebula_core::review_base::Against::Head => base.branch.clone(),
             };
+            // The key's word gives way first, then the label clips.
+            let width = head.width as usize;
+            let label = truncate(&label, width.saturating_sub(5));
+            let used = label.chars().count() + 2;
+            let full = format!(" ^g: vs {other}");
+            let hint = if used + full.chars().count() <= width {
+                full
+            } else {
+                " ^g".to_string()
+            };
             Line::from(vec![
                 Span::styled(
                     format!(" {label} "),
@@ -1473,7 +1483,7 @@ fn draw_diff_against(
                         .fg(th.accent)
                         .add_modifier(Modifier::BOLD | Modifier::REVERSED),
                 ),
-                Span::styled(format!(" ^g: vs {other}"), Style::default().fg(th.dim)),
+                Span::styled(hint, Style::default().fg(th.dim)),
             ])
         }
         None => Line::from(Span::styled(

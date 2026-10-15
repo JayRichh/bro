@@ -203,7 +203,12 @@ pub fn resolve(root: &Path, configured: &str) -> Option<ReviewBase> {
     for line in String::from_utf8_lossy(&listed).lines() {
         let (name, target) = line.split_once('\0').unwrap_or((line, ""));
         if name == "refs/remotes/origin/HEAD" {
-            origin_head = (!target.is_empty()).then(|| target.to_string());
+            // Listed means it resolves (git skips a dangling one), so the
+            // branch it names is there too, though no pattern asked for it.
+            if !target.is_empty() {
+                origin_head = Some(target.to_string());
+                refs.push(target.to_string());
+            }
         } else {
             refs.push(name.to_string());
         }
@@ -511,6 +516,30 @@ mod tests {
         let subjects: Vec<&str> = commits.iter().map(|c| c.subject.as_str()).collect();
         assert_eq!(subjects, vec!["grow a", "add b"]);
         assert!(commits[0].short.len() >= 7);
+    }
+
+    #[test]
+    fn origins_default_branch_wins_over_a_local_main() {
+        let dir = tempfile::tempdir().unwrap();
+        let (repo, first) = repo(&dir);
+        run(&repo, &["checkout", "-q", "-b", "feat"]);
+        let trunk = commit(&repo, "t.txt", "trunk\n", "on trunk");
+        commit(&repo, "f.txt", "feat\n", "feat");
+        // origin's default is `trunk`, not the local `main` still at `first`.
+        run(&repo, &["update-ref", "refs/remotes/origin/trunk", &trunk]);
+        run(
+            &repo,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/trunk",
+            ],
+        );
+        let base = resolve(&repo, "").expect("a base");
+        assert_eq!(base.branch, "trunk");
+        assert_eq!(base.refname, "origin/trunk");
+        assert_eq!(base.sha, trunk);
+        assert_ne!(base.sha, first);
     }
 
     #[test]

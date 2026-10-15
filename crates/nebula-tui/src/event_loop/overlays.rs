@@ -588,6 +588,7 @@ fn handle_diff_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) {
                     view.scroll = view.scroll.min(view.max_scroll());
                     crate::git_diff::request_aux(view);
                     let worktree = view.stageable().is_some();
+                    let since_base = view.diff_base().is_some();
                     app.modals.diff_full_context = full;
                     let mut cfg = crate::config::Config::load();
                     cfg.diff_context = if full { "full" } else { "collapsed" }.into();
@@ -595,6 +596,9 @@ fn handle_diff_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) {
                     app.chrome.flash = Some(
                         match (full, worktree) {
                             (true, true) => "unchanged lines: the whole file",
+                            (true, false) if since_base => {
+                                "unchanged lines: the whole file, against HEAD (Ctrl+g)"
+                            }
                             (true, false) => {
                                 "unchanged lines: the whole file, for a working-tree diff"
                             }
