@@ -14,6 +14,11 @@
 //! (the core module doc has the rule) and prunes turns past
 //! [`KEEP_TURNS`].
 //!
+//! A turn's start snapshot waits behind whatever is queued ahead of it, so
+//! in a busy worktree it can land after the agent's first edits, which
+//! then drop out of the session's changes (the core module doc's one
+//! too-little case).
+//!
 //! Odd edges, each resolved toward showing too much rather than too
 //! little:
 //! - a start while a turn is still open (a restart or a death between)
@@ -326,8 +331,6 @@ fn take(store: &Store, daemon_id: &str, id: &AgentId, edge: Edge) -> Result<()> 
                 }
             };
             end_turn(store, daemon_id, repo, id, open, &point)?;
-            store.set_snapshot_last(id, &point)?;
-            keep(Slot::Last, &point.tree);
         }
     }
     Ok(())
@@ -343,7 +346,9 @@ fn end_turn(
     point: &SnapshotPoint,
 ) -> Result<()> {
     store.end_turn(id, open.n, point)?;
+    store.set_snapshot_last(id, point)?;
     if let Some(tree) = &point.tree {
+        snap::keep(repo, daemon_id, id.as_str(), Slot::Last, tree);
         snap::keep(repo, daemon_id, id.as_str(), Slot::TurnEnd(open.n), tree);
     }
     // Unavailable trees never fold a gap away, so nothing of the session's

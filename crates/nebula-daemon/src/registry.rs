@@ -5714,4 +5714,24 @@ pub(crate) mod tests {
             vec!["after.txt", "before.txt"]
         );
     }
+
+    /// A turn left open (a restart mid-turn) ends where the next one
+    /// starts, and the review shows it then, not a turn later.
+    #[test]
+    fn an_open_turn_ends_at_the_next_start() {
+        let daemon = test_daemon();
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = init_repo(tmp.path());
+        project_at(&daemon, &repo);
+        seed_agent(&daemon, "a1", "rt", None);
+        edge(&daemon, "a1", AgentStatus::Running);
+        std::fs::write(repo.join("cut.txt"), "work before the restart\n").unwrap();
+        edge(&daemon, "a1", AgentStatus::Disconnected);
+        edge(&daemon, "a1", AgentStatus::Running);
+        let a1 = AgentId("a1".into());
+        let turns = daemon.store.session_turns(&a1).unwrap();
+        assert_eq!(turns.len(), 2);
+        assert!(turns[0].end_at.is_some() && turns[1].end_at.is_none());
+        assert_eq!(session_diff(&daemon, &repo, "a1", "").0, vec!["cut.txt"]);
+    }
 }

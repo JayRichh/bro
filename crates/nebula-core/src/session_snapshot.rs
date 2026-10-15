@@ -18,8 +18,7 @@
 //! `diff(B, T)` ([`SessionChanges::trees`]) is then exactly the sum of the
 //! session's turns, files another session touched between them included:
 //! a hunk of theirs sits in both trees, the session's own hunks only in
-//! `T`. The limits, all on the side of showing too much rather than too
-//! little:
+//! `T`. The limits that show too much:
 //!
 //! - edits another session makes *during* this one's turn are inside
 //!   `s → e` and count as this session's: a turn is a window of time;
@@ -27,9 +26,13 @@
 //!   merge keeps the session's version (`-X ours`), so the other edit shows
 //!   as part of this session's diff;
 //! - a turn whose start tree could not be taken (unavailable), or a merge
-//!   git refuses, leaves `B` where it was: the gap counts as the session's;
-//! - snapshots run in order on one worker, so one taken late (another
-//!   session's add ahead of it) can move a turn's edge.
+//!   git refuses, leaves `B` where it was: the gap counts as the session's.
+//!
+//! And the one that can show too little: snapshots run in order on one
+//! worker, so a turn's start taken late (another session's add queued
+//! ahead of it) may already hold the session's first edits of that turn.
+//! They then sit in the gap, fold into `B`, and drop out of the diff. An
+//! end taken late only widens the turn (too much, as above).
 //!
 //! Turns are kept per session ([`Slot::TurnStart`], [`Slot::TurnEnd`]) for
 //! the last few only: `B` and `T` already hold the effect of every turn,
