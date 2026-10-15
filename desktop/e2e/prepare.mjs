@@ -40,7 +40,15 @@ function webview2Version() {
     const m = out.status === 0 && out.stdout.match(/pv\s+REG_SZ\s+([\d.]+)/);
     if (m && m[1] !== '0.0.0.0') return m[1];
   }
-  throw new Error('no WebView2 runtime found in the registry');
+  // No EdgeUpdate key (some images): the newest runtime folder on disk.
+  const dir = path.join(process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', 'Microsoft', 'EdgeWebView', 'Application');
+  const versions = fs.existsSync(dir) ? fs.readdirSync(dir).filter((v) => /^\d+\.\d+\.\d+\.\d+$/.test(v)) : [];
+  const cmp = (a, b) => {
+    const [x, y] = [a, b].map((v) => v.split('.').map(Number));
+    return x.reduce((d, n, i) => d || n - y[i], 0);
+  };
+  if (versions.length) return versions.sort(cmp).at(-1);
+  throw new Error('no WebView2 runtime found in the registry or under Program Files');
 }
 
 async function edgeDriver() {
