@@ -843,7 +843,7 @@ export const ACTIONS: readonly ActionRow[] = [
   {
     id: "azure_devops",
     label: "Azure DevOps",
-    hint: "On a project whose remote is on Azure DevOps (the header shows an ado button): your sprint's tasks, the active pull requests and the branches. Enter opens a task or pull request in the browser and checks a branch out in a worktree; s twice starts a task (branch, worktree, agent)",
+    hint: "On a project whose remote is on Azure DevOps (the header shows an ado button): your sprint's tasks, the active pull requests and the branches. Enter opens a task or pull request in the browser and checks a branch out in a worktree; s twice starts a task (branch, worktree, agent); on a pull request v votes and c reads its threads to reply",
     group: "PROJECTS & WORKTREES",
     word: "ADO",
     destructive: false,

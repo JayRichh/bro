@@ -6,8 +6,11 @@
 //! The lists come from the `kete ado … --json` commands this binary
 //! already ships (`crates/nebula/src/ado.rs`), run off the loop: the same
 //! sign-in (Git Credential Manager, `az`), the same cache when offline,
-//! the same team, no second Azure DevOps client in the TUI. Starting a
-//! task is `kete ado start-task`, which cuts the branch and worktree and
+//! the same team, no second Azure DevOps client in the TUI. A pull
+//! request's vote is `kete ado vote` and a reply on one of its threads
+//! `kete ado reply` (the threads read with `kete ado pr <id> --json`):
+//! the `kete_ado::prs::vote` and `reply` the desktop's Review calls.
+//! Starting a task is `kete ado start-task`, which cuts the branch and worktree and
 //! starts the agent through the daemon like any other launch; checking a
 //! branch out is the daemon's own `CreateWorktree`, as the desktop's
 //! Branches view sends it. The parsers here are pure and tested on
@@ -106,6 +109,84 @@ pub struct AdoPr {
     pub mine: bool,
 }
 
+/// One comment thread on a pull request: on a file's line, or on the PR.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AdoThread {
+    pub id: u32,
+    pub status: String,
+    pub file: Option<String>,
+    pub line: Option<u32>,
+    /// Who said what, oldest first.
+    pub comments: Vec<(String, String)>,
+}
+
+impl AdoThread {
+    /// Where it sits: `src/a.rs:12`, or the PR itself.
+    pub fn place(&self) -> String {
+        match (&self.file, self.line) {
+            (Some(f), Some(l)) => format!("{}:{l}", f.trim_start_matches('/')),
+            (Some(f), None) => f.trim_start_matches('/').to_string(),
+            _ => "on the PR".into(),
+        }
+    }
+}
+
+/// The votes a reviewer can give, as the desktop's Review lists them:
+/// the key that casts it here, the word `kete ado vote` takes, the label.
+pub const VOTES: [(char, &str, &str); 5] = [
+    ('a', "approve", "approve"),
+    ('s', "approve-with-suggestions", "approve with suggestions"),
+    ('w', "wait", "wait for author"),
+    ('x', "reject", "reject"),
+    ('0', "reset", "reset vote"),
+];
+
+/// A pull request's threads, read for a reply: `c` on the PR tab.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrThreads {
+    pub pr: u32,
+    pub title: String,
+    pub is_draft: bool,
+    pub threads: Load<Vec<AdoThread>>,
+    pub cursor: usize,
+    /// The reply being typed to the cursor's thread.
+    pub reply: Option<String>,
+    /// A reply sent and not answered yet.
+    pub sending: bool,
+}
+
+impl PrThreads {
+    pub fn thread(&self) -> Option<&AdoThread> {
+        match &self.threads {
+            Load::Ready(t) => t.get(self.cursor.min(t.len().saturating_sub(1))),
+            _ => None,
+        }
+    }
+
+    pub fn step(&mut self, delta: i64) {
+        let n = match &self.threads {
+            Load::Ready(t) => t.len(),
+            _ => 0,
+        };
+        self.cursor = crate::app::clamp_selection(self.cursor as i64 + delta, n);
+    }
+}
+
+/// A button in the overlay's bottom row: a click is its key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdoButton {
+    /// `v`: the vote choices for the PR.
+    Vote,
+    /// `c` on the list: the PR's threads; in them, a reply.
+    Comments,
+    /// One vote, by its key.
+    Cast(char),
+    /// Enter on a typed reply.
+    Send,
+    /// Esc: out of the vote choices, the reply or the threads.
+    Back,
+}
+
 /// One branch: on this machine, on the remote, or both.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AdoBranch {
@@ -149,6 +230,29 @@ struct ItemJson {
     state: String,
     assigned_to: Option<String>,
     url: String,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct PrDetailJson {
+    threads: Vec<ThreadJson>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct ThreadJson {
+    id: u32,
+    status: String,
+    file: Option<String>,
+    line: Option<u32>,
+    comments: Vec<CommentJson>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct CommentJson {
+    author: String,
+    text: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -226,6 +330,23 @@ pub fn parse_prs(json: &str) -> Result<Vec<AdoPr>, String> {
         .collect())
 }
 
+/// `kete ado pr <id> --json`: its comment threads.
+pub fn parse_threads(json: &str) -> Result<Vec<AdoThread>, String> {
+    let detail: PrDetailJson =
+        serde_json::from_str(json).map_err(|e| format!("unreadable pull request: {e}"))?;
+    Ok(detail
+        .threads
+        .into_iter()
+        .map(|t| AdoThread {
+            id: t.id,
+            status: t.status,
+            file: t.file,
+            line: t.line,
+            comments: t.comments.into_iter().map(|c| (c.author, c.text)).collect(),
+        })
+        .collect())
+}
+
 /// `git for-each-ref --format=%(refname) refs/heads refs/remotes/<remote>`
 /// as branches: local ones first (by name), then the remote's that have
 /// no local branch. The remote's `HEAD` is not a branch.
@@ -287,6 +408,14 @@ pub struct AdoView {
     /// The tab strip's cells, by tab, written back during draw.
     pub tab_hits: Vec<(Rect, AdoTab)>,
     pub scroll: usize,
+    /// `v` on a pull request: its vote choices are up, on this PR.
+    pub voting: Option<u32>,
+    /// `c` on a pull request: its threads, in place of the list.
+    pub threads: Option<PrThreads>,
+    /// The bottom row's buttons, written back during draw.
+    pub buttons: Vec<(Rect, AdoButton)>,
+    /// The threads' rows, by thread index, written back during draw.
+    pub thread_hits: Vec<(Rect, usize)>,
 }
 
 impl AdoView {
@@ -331,6 +460,8 @@ impl AdoView {
         self.tab = tab;
         self.armed = None;
         self.scroll = 0;
+        self.voting = None;
+        self.threads = None;
     }
 
     pub fn task(&self) -> Option<&AdoTask> {
@@ -374,6 +505,20 @@ pub enum AdoAnswer {
     },
     /// `kete ado start-task` finished: what to say in the footer.
     Started(Result<String, String>),
+    /// A pull request's threads (`kete ado pr <id> --json`).
+    Threads {
+        project: ProjectId,
+        pr: u32,
+        result: Result<Vec<AdoThread>, String>,
+    },
+    /// `kete ado vote` finished: what to say in the footer.
+    Voted(Result<String, String>),
+    /// `kete ado reply` finished on `pr`.
+    Replied {
+        project: ProjectId,
+        pr: u32,
+        result: Result<String, String>,
+    },
 }
 
 /// `kete ado --project <project> <args…>` with this very binary, its
@@ -497,6 +642,35 @@ mod tests {
         assert!(prs[0].mine && prs[0].is_draft);
         assert!(!prs[1].mine);
         assert_eq!(prs[1].created_by, "Sam");
+    }
+
+    #[test]
+    fn a_pull_requests_threads_read_with_their_place_and_comments() {
+        let json = r#"{"pr": {"id": 7}, "policies": [],
+            "threads": [
+              {"id": 3, "status": "active", "file": "/src/a.rs", "line": 12,
+               "comments": [{"author": "Sam", "text": "why?", "at": "t"},
+                            {"author": "Jay", "text": "because", "at": "t"}]},
+              {"id": 4, "status": "fixed", "file": null, "line": null, "comments": []}
+            ]}"#;
+        let threads = parse_threads(json).unwrap();
+        assert_eq!(threads.len(), 2);
+        assert_eq!(threads[0].place(), "src/a.rs:12");
+        assert_eq!(threads[0].comments[1], ("Jay".into(), "because".into()));
+        assert_eq!(threads[1].place(), "on the PR");
+        assert!(parse_threads("{").is_err());
+        // The words are the ones `kete ado vote` parses.
+        let words: Vec<&str> = VOTES.iter().map(|v| v.1).collect();
+        assert_eq!(
+            words,
+            [
+                "approve",
+                "approve-with-suggestions",
+                "wait",
+                "reject",
+                "reset"
+            ]
+        );
     }
 
     #[test]
