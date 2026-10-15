@@ -9,10 +9,12 @@ import {
   focusQuickPrompt,
   closeDiff,
   goHome,
+  markSeen,
   openDiff,
   openSession,
   openSettings,
   projectOf,
+  revealRepo,
   sessionWorktree,
   setHome,
   setThemePref,
@@ -29,8 +31,9 @@ import { orchestratorOf } from './orchestrator';
 import { openAccounts } from './accounts/actions';
 import { openAddAccount } from './accounts/add.svelte';
 import { moveStep, rootOf, stepInFor } from './reorder.svelte';
+import { railOrder, repoRows } from './overview/repos';
 
-/** 0 / F10: the orchestrator, or the Start form when there is none. */
+/** F10: the orchestrator, or the Start form when there is none. */
 function orchestratorKey() {
   if (orchestratorOf(app.model)) openOrchestrator();
   else askStartOrchestrator();
@@ -101,16 +104,53 @@ export function diffTarget(): string | null {
   return app.diffWorktree ?? sessionWorktree(app.session) ?? (repo ? (rootOf(repo) ?? null) : null);
 }
 
-/** Ctrl+Shift+D and the header's Diff: the diff for the checkout in
- *  context, or, from the diff, back to where it was opened. */
+/** D, Ctrl+Shift+D and the header's Diff: the diff for the checkout in
+ *  context, or, from the diff, back to where it was opened. A row focused
+ *  beside the diff that reads another checkout diffs that one instead. A
+ *  board card becomes the session too, as its Diff button makes it. */
 export function toggleDiff() {
-  if (nav.current.view === 'diff') closeDiff();
-  else openDiff(diffTarget());
+  const t = focusedTarget();
+  const want = diffTarget();
+  if (nav.current.view === 'diff' && (!t || want === app.diffWorktree)) return closeDiff();
+  if (t?.kind === 'agent' && document.activeElement?.closest('[data-card-sel]')) {
+    app.session = { Agent: t.id };
+    markSeen(app.session);
+  }
+  openDiff(want);
+}
+
+/** Views with their own f and / (a filter box, the diff's file list) and
+ *  Shift+R (the Branches view's fetch): the window's keys stand down. */
+const FINDS_ITSELF = new Set(['diff', 'tasks', 'branches']);
+const REFRESHES_ITSELF = new Set(['branches']);
+
+/** F and /: the window's find, the palette, where the view has no filter
+ *  of its own. */
+function find(): boolean {
+  if (FINDS_ITSELF.has(nav.current.view)) return false;
+  ui.help = false;
+  ui.palette = true;
+  return true;
+}
+
+/** Shift+R: ask GitHub again for the pull requests. */
+function refresh(): boolean {
+  if (REFRESHES_ITSELF.has(nav.current.view)) return false;
+  refreshPrs();
+  return true;
+}
+
+/** 1-9: the Nth repo on the rail, as a click on it. */
+function railRepo(n: number): boolean {
+  const r = railOrder(repoRows(app.model))[n - 1];
+  if (!r) return false;
+  revealRepo(r.project.id);
+  return true;
 }
 
 const split = () => nav.current.view === 'session' || nav.current.view === 'diff' || nav.current.view === 'orchestrator';
 
-/** Ctrl+Shift+M and the panes' Full pane button: the split's right side
+/** Z, Ctrl+Shift+M and the panes' Full pane button: the split's right side
  *  takes the window, or comes back down. Nothing to do with no split up. */
 export function toggleMaximize(): boolean {
   if (!split()) return false;
@@ -133,6 +173,8 @@ export function runShortcut(id: ShortcutId): boolean {
     help: () => ((ui.palette = false), (ui.help = !ui.help)),
     help_f1: () => ((ui.palette = false), (ui.help = !ui.help)),
     settings: () => openSettings(),
+    find,
+    refresh,
     back: () => nav.back(),
     forward: () => nav.forward(),
     home_board: () => setHome('board', nav.current.repo),
@@ -140,6 +182,16 @@ export function runShortcut(id: ShortcutId): boolean {
     toggle_home: toggleHome,
     open_session: () => app.session && openSession(app.session),
     open_diff: toggleDiff,
+    diff: toggleDiff,
+    repo_1: () => railRepo(1),
+    repo_2: () => railRepo(2),
+    repo_3: () => railRepo(3),
+    repo_4: () => railRepo(4),
+    repo_5: () => railRepo(5),
+    repo_6: () => railRepo(6),
+    repo_7: () => railRepo(7),
+    repo_8: () => railRepo(8),
+    repo_9: () => railRepo(9),
     quick_prompt: quickPrompt,
     quick_prompt_alt: quickPrompt,
     cycle_theme: cycleTheme,
@@ -158,6 +210,7 @@ export function runShortcut(id: ShortcutId): boolean {
     },
     toggle_archived: toggleArchived,
     maximize: toggleMaximize,
+    maximize_z: toggleMaximize,
     next_attention: () => jumpAttention(1),
     prev_attention: () => jumpAttention(-1),
     new_worktree: () => newWorktree(focusedRepo() ?? currentRepo()),
@@ -190,12 +243,12 @@ type Command = PaletteCommand & { run: () => unknown };
 /** Everything the palette offers besides jumping: the window's actions,
  *  then the shown session's own verbs. */
 export function paletteCommands(): Command[] {
-  const cmd = (id: string, label: string, group: string, run: () => unknown, key?: ShortcutId, words?: string): Command => ({
+  const cmd = (id: string, label: string, group: string, run: () => unknown, key?: ShortcutId | ShortcutId[], words?: string): Command => ({
     id,
     label,
     group,
     run,
-    keys: key ? keysOf(key) : undefined,
+    keys: key ? [key].flat().flatMap((k) => keysOf(k)) : undefined,
     words,
   });
   const out: Command[] = [
@@ -203,11 +256,13 @@ export function paletteCommands(): Command[] {
     cmd('new-worktree', 'New worktree\u2026', 'Window', () => newWorktree(currentRepo()), 'new_worktree', 'branch'),
     cmd('overview', 'Show the overview', 'Window', () => setHome('overview', nav.current.repo), 'home_overview'),
     cmd('board', 'Show the board', 'Window', () => setHome('board', nav.current.repo), 'home_board', 'kanban'),
+    cmd('home', 'Home', 'Window', () => goHome(nav.current.repo), 'go_home', 'overview board view'),
+    ...(app.session ? [cmd('session', 'Show the session', 'Window', () => app.session && openSession(app.session), ['open_session', 'go_session'], 'view')] : []),
     cmd('archived', app.showArchived ? 'Hide archived sessions' : 'Show archived sessions', 'Window', toggleArchived, 'toggle_archived'),
     cmd('next-attention', 'Next session needing you', 'Window', () => jumpAttention(1), 'next_attention', 'attention jump feedback'),
     cmd('prev-attention', 'Previous session needing you', 'Window', () => jumpAttention(-1), 'prev_attention', 'attention jump feedback'),
-    cmd('diff', 'Diff the worktree', 'Window', () => openDiff(diffTarget()), 'open_diff'),
-    ...(split() ? [cmd('maximize', app.paneMax ? 'Bring the pane back down' : 'Full pane', 'Window', toggleMaximize, 'maximize', 'maximize zoom full screen')] : []),
+    cmd('diff', 'Diff the worktree', 'Window', () => openDiff(diffTarget()), ['diff', 'open_diff']),
+    ...(split() ? [cmd('maximize', app.paneMax ? 'Bring the pane back down' : 'Full pane', 'Window', toggleMaximize, ['maximize_z', 'maximize'], 'maximize zoom full screen')] : []),
     cmd('theme', `Cycle theme (now ${app.themePref})`, 'Window', cycleTheme, 'cycle_theme', 'dark light system'),
     cmd('settings', 'Settings', 'Window', () => openSettings(), 'settings', 'preferences config'),
     cmd('presets', 'Agent presets', 'Window', () => openSettings('presets'), undefined, 'prefix postfix'),
@@ -221,7 +276,7 @@ export function paletteCommands(): Command[] {
     ...(currentRepo()
       ? []
       : [
-          cmd('refresh-prs', 'Refresh pull requests', 'Window', refreshPrs, undefined, 'pr github merged'),
+          cmd('refresh-prs', 'Refresh pull requests', 'Window', refreshPrs, 'refresh', 'pr github merged reload'),
           cmd('switch-branch', 'Switch branch\u2026', 'Window', () => pickBranchSwitch(), 'switch_branch', 'checkout git'),
         ]),
   ];

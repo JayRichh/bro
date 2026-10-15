@@ -38,7 +38,7 @@
 {#if s && (agent || terminal)}
   <div class="flex h-full min-h-0 flex-col">
     <!-- The header is the session's row: with one of its controls focused,
-         the row keys (F, Shift+R, T, Shift+O, A, Del) act on this session. -->
+         the row keys (Space, T, Shift+O, A, Del) act on this session. -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="@container flex min-w-0 flex-none flex-col gap-1 border-b border-rule px-4 py-2"
@@ -70,11 +70,11 @@
             <IconButton icon="terminal" label="New terminal in this worktree" title={withKey('New terminal in this worktree', 'new_terminal')} onclick={() => newTerminal(wt ?? undefined)} />
             <IconButton icon="editor" label="Open the worktree in the editor" title={withKey('Open the worktree in the editor', 'open_editor')} onclick={() => openEditor(wt ?? undefined)} />
           </span>
-          <IconButton icon="diff" label="Diff this worktree" word="Diff" title={withKey('Diff this worktree', 'open_diff')} onclick={() => openDiff(wt)} />
+          <IconButton icon="diff" label="Diff this worktree" word="Diff" title={withKey('Diff this worktree', ['diff', 'open_diff'])} onclick={() => openDiff(wt)} />
           <IconButton
             icon={app.paneMax ? 'restore' : 'maximize'}
             label={app.paneMax ? 'Bring the pane back down' : 'Full pane'}
-            title={withKey(app.paneMax ? 'Bring the pane back down' : 'Full pane: give the session the window', 'maximize')}
+            title={withKey(app.paneMax ? 'Bring the pane back down' : 'Full pane: give the session the window', ['maximize_z', 'maximize'])}
             pressed={app.paneMax}
             onclick={toggleMaximize}
           />

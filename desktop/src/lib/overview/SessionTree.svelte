@@ -44,7 +44,8 @@
   }
 
   function onRowKey(e: KeyboardEvent, n: Node, expanded: boolean, hasKids: boolean) {
-    if (e.key === 'Enter' || e.key === ' ') {
+    // Enter opens; Space is the follow-up, the window's row key.
+    if (e.key === 'Enter') {
       e.preventDefault();
       openNode(n);
     } else if (e.key === 'ArrowRight' && hasKids && !expanded) {
@@ -226,7 +227,7 @@
       class="{ROW} {sel ? 'bg-surface' : 'hover:bg-surface'}"
       onclick={() => openSession({ Terminal: t.id })}
       oncontextmenu={(e) => menu(e, { kind: 'terminal', id: t.id })}
-      onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), openSession({ Terminal: t.id }))}
+      onkeydown={(e) => (e.key === 'Enter' ? (e.preventDefault(), openSession({ Terminal: t.id })) : e.key === ' ' && e.preventDefault())}
     >
       <span class="pl-6"><Status tone={t.alive ? 'shell' : 'stopped'} /></span>
       <span class="flex min-w-0 items-center">

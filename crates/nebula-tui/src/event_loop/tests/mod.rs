@@ -1811,7 +1811,7 @@ fn shift_l_no_longer_opens_manual_link_creation() {
 }
 
 #[test]
-fn r_edits_a_link_and_d_deletes_it() {
+fn r_edits_a_link_and_del_deletes_it() {
     let mut app = App::new();
     seed_tree(&mut app);
     seed_link(&mut app, "https://example.dev/spec");
@@ -1828,7 +1828,7 @@ fn r_edits_a_link_and_d_deletes_it() {
     assert_eq!(p.input.trim(), "https://example.dev/spec", "prefilled");
     press(&mut app, KeyCode::Esc, KeyModifiers::NONE, &mut out);
 
-    press(&mut app, KeyCode::Char('d'), KeyModifiers::NONE, &mut out);
+    press(&mut app, KeyCode::Delete, KeyModifiers::NONE, &mut out);
     assert!(
         matches!(&app.modals.overlay, Some(Overlay::Confirm(c)) if c.title == "Delete link"),
         "expected the delete confirm, got {:?}",
@@ -7445,7 +7445,7 @@ fn create_terminal_ack_attaches_and_selects_it() {
 }
 
 #[test]
-fn d_on_terminal_row_confirms_then_closes() {
+fn del_on_terminal_row_confirms_then_closes() {
     use nebula_core::TerminalId;
     let mut app = App::new();
     seed_tree(&mut app);
@@ -7456,7 +7456,7 @@ fn d_on_terminal_row_confirms_then_closes() {
 
     handle_key(
         &mut app,
-        KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE),
         &mut out,
     );
     assert!(matches!(
@@ -7527,7 +7527,7 @@ fn menu_confirms_match_the_key_path_word_for_word() {
     let via_key = |app: &mut App, focus: Focus, row: usize| {
         app.nav.focus = focus;
         app.nav.sel_session = row;
-        press(app, KeyCode::Char('d'), KeyModifiers::NONE, &mut Vec::new());
+        press(app, KeyCode::Delete, KeyModifiers::NONE, &mut Vec::new());
         take_confirm(app)
     };
     let key_agent = via_key(&mut app, Focus::Sessions, 0);
@@ -10786,13 +10786,13 @@ fn switching_contexts_restores_the_remembered_session() {
 }
 
 #[test]
-fn backspace_opens_delete_confirm_per_panel() {
+fn del_opens_delete_confirm_per_panel() {
     let mut app = App::new();
     seed_tree(&mut app);
     let mut out = Vec::new();
 
     app.nav.focus = Focus::Projects;
-    press(&mut app, KeyCode::Backspace, KeyModifiers::NONE, &mut out);
+    press(&mut app, KeyCode::Delete, KeyModifiers::NONE, &mut out);
     assert!(
         matches!(
             &app.modals.overlay,
@@ -10805,7 +10805,7 @@ fn backspace_opens_delete_confirm_per_panel() {
 
     // The seeded worktree is the main checkout — deletion is refused.
     app.nav.focus = Focus::Worktrees;
-    press(&mut app, KeyCode::Backspace, KeyModifiers::NONE, &mut out);
+    press(&mut app, KeyCode::Delete, KeyModifiers::NONE, &mut out);
     assert!(
         app.modals.overlay.is_none(),
         "main checkout never gets a confirm"
@@ -10816,7 +10816,7 @@ fn backspace_opens_delete_confirm_per_panel() {
     );
 
     app.nav.focus = Focus::Sessions;
-    press(&mut app, KeyCode::Backspace, KeyModifiers::NONE, &mut out);
+    press(&mut app, KeyCode::Delete, KeyModifiers::NONE, &mut out);
     assert!(
         matches!(
             &app.modals.overlay,
@@ -13582,7 +13582,10 @@ fn a_duplicate_chord_warns_before_it_is_taken() {
 
         // Esc leaves it where it was.
         press(&mut app, KeyCode::Esc, KeyModifiers::NONE, &mut out);
-        assert_eq!(app.chrome.keymap.label(crate::keymap::Action::GitDiff), "g");
+        assert_eq!(
+            app.chrome.keymap.label(crate::keymap::Action::GitDiff),
+            "d g"
+        );
         assert_eq!(app.chrome.keymap.label(crate::keymap::Action::Help), "?");
     });
 }
@@ -13604,7 +13607,7 @@ fn confirming_a_duplicate_moves_the_chord_off_its_old_action() {
         assert_eq!(app.chrome.keymap.label(crate::keymap::Action::Help), "g");
         assert_eq!(
             app.chrome.keymap.label(crate::keymap::Action::GitDiff),
-            "-",
+            "d",
             "one keystroke can only mean one thing"
         );
         // The panels agree with the map.
@@ -13830,7 +13833,13 @@ fn a_rebound_key_shows_up_in_help_and_the_footer() {
 fn a_hand_edited_duplicate_is_called_out_on_the_row() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.json");
-    std::fs::write(&path, r#"{"keybindings": {"help": "g"}}"#).unwrap();
+    // Both rows set by hand: one override alone takes the chord off a row
+    // on its defaults.
+    std::fs::write(
+        &path,
+        r#"{"keybindings": {"help": "g", "git_diff": "d, g"}}"#,
+    )
+    .unwrap();
     crate::config::with_config_path(path, || {
         let mut app = App::new();
         app.chrome.keymap = crate::config::Config::load().keymap();
@@ -20355,12 +20364,7 @@ fn a_context_menu_row_is_its_hotkey() {
 
         let mut by_key = on_feat();
         let mut out = Vec::new();
-        press(
-            &mut by_key,
-            KeyCode::Char('d'),
-            KeyModifiers::NONE,
-            &mut out,
-        );
+        press(&mut by_key, KeyCode::Delete, KeyModifiers::NONE, &mut out);
         let mut by_menu = on_feat();
         run_menu_action(
             &mut by_menu,
@@ -21807,7 +21811,7 @@ fn deleting_the_last_card_asks_about_the_worktree_first() {
             .unwrap();
         app.nav.sel_session = 0;
         let mut out = Vec::new();
-        press(&mut app, KeyCode::Char('d'), KeyModifiers::NONE, &mut out);
+        press(&mut app, KeyCode::Delete, KeyModifiers::NONE, &mut out);
         let by_key = match &app.modals.overlay {
             Some(Overlay::Confirm(c)) => c.clone(),
             other => panic!("d opens the confirm, got {other:?}"),

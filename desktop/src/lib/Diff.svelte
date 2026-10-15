@@ -72,7 +72,7 @@
     <button
       class="grid size-7 flex-none place-items-center border-0 bg-transparent hover:bg-surface hover:text-ink {app.paneMax ? 'text-ink' : 'text-muted'}"
       onclick={toggleMaximize}
-      title={withKey(app.paneMax ? 'Bring the pane back down' : 'Full pane: give the diff the window', 'maximize')}
+      title={withKey(app.paneMax ? 'Bring the pane back down' : 'Full pane: give the diff the window', ['maximize_z', 'maximize'])}
       aria-label={app.paneMax ? 'Bring the pane back down' : 'Full pane'}
       aria-pressed={app.paneMax}
     >

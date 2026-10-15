@@ -674,10 +674,10 @@ fn handle_session_state_action(
                     }
                     Some(SessionRow::Terminal(_)) => {
                         app.chrome.flash =
-                            Some("terminals can't be archived: d closes them".into());
+                            Some("terminals can't be archived: Del closes them".into());
                     }
                     Some(SessionRow::Link(_)) => {
-                        app.chrome.flash = Some("links can't be archived: d deletes them".into());
+                        app.chrome.flash = Some("links can't be archived: Del deletes them".into());
                     }
                     _ => {}
                 }

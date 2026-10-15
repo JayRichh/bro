@@ -1054,7 +1054,7 @@ mod tests {
             fire_pending_prewarm(&mut app, &mut out);
             assert!(out.is_empty(), "{out:?}");
 
-            press(&mut app, KeyCode::Char('d'), KeyModifiers::NONE, &mut out);
+            press(&mut app, KeyCode::Delete, KeyModifiers::NONE, &mut out);
             assert!(app.modals.overlay.is_none(), "{:?}", app.modals.overlay);
             assert_eq!(
                 app.chrome.flash.as_deref(),

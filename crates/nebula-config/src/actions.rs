@@ -326,7 +326,7 @@ pub struct DesktopVerb {
 /// digit is bound alongside it and is the chord that actually fires there;
 /// digits are otherwise unbound on the grid.
 macro_rules! project_tab_slot {
-    ($n:literal, $id:literal, $label:literal, $cmd:literal, $digit:literal) => {
+    ($n:literal, $id:literal, $label:literal, $cmd:literal, $digit:literal, $desk:literal) => {
         ActionSpec {
             action: Action::SelectProjectTab($n),
             id: $id,
@@ -341,8 +341,10 @@ macro_rules! project_tab_slot {
             destructive: false,
             applies_to: &[AppliesTo::Repo],
             works_in: &[WorksIn::Grid, WorksIn::Board],
-            surface: Surface::Tui,
-            desktop: &[],
+            surface: Surface::Both,
+            // The window's digit is the Nth repo on its rail, in the
+            // user's order. One label for all nine: its help shows one row.
+            desktop: &[dk($desk, "Repo 1\u{2013}9 on the rail, in its order", "Views", DeskScope::Global, &[$digit])],
         }
     };
 }
@@ -481,8 +483,13 @@ pub const ACTIONS: &[ActionSpec] = &[
         destructive: false,
         applies_to: &[AppliesTo::Global],
         works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
-        surface: Surface::Tui,
-        desktop: &[],
+        surface: Surface::Both,
+        // The window's find: a view with a filter box (the ADO lists, the
+        // diff's file list) takes f and / itself; elsewhere they open the
+        // palette, the window's jump.
+        desktop: &[
+            dk("find", "Find: the view's filter, else the palette", "General", DeskScope::Global, &["f", "/"]),
+        ],
     },
     ActionSpec {
         action: Action::CommandPalette,
@@ -600,15 +607,15 @@ pub const ACTIONS: &[ActionSpec] = &[
         surface: Surface::Tui,
         desktop: &[],
     },
-    project_tab_slot!(1, "project_tab_1", "Project tab 1", "cmd+1", "1"),
-    project_tab_slot!(2, "project_tab_2", "Project tab 2", "cmd+2", "2"),
-    project_tab_slot!(3, "project_tab_3", "Project tab 3", "cmd+3", "3"),
-    project_tab_slot!(4, "project_tab_4", "Project tab 4", "cmd+4", "4"),
-    project_tab_slot!(5, "project_tab_5", "Project tab 5", "cmd+5", "5"),
-    project_tab_slot!(6, "project_tab_6", "Project tab 6", "cmd+6", "6"),
-    project_tab_slot!(7, "project_tab_7", "Project tab 7", "cmd+7", "7"),
-    project_tab_slot!(8, "project_tab_8", "Project tab 8", "cmd+8", "8"),
-    project_tab_slot!(9, "project_tab_9", "Project tab 9", "cmd+9", "9"),
+    project_tab_slot!(1, "project_tab_1", "Project tab 1", "cmd+1", "1", "repo_1"),
+    project_tab_slot!(2, "project_tab_2", "Project tab 2", "cmd+2", "2", "repo_2"),
+    project_tab_slot!(3, "project_tab_3", "Project tab 3", "cmd+3", "3", "repo_3"),
+    project_tab_slot!(4, "project_tab_4", "Project tab 4", "cmd+4", "4", "repo_4"),
+    project_tab_slot!(5, "project_tab_5", "Project tab 5", "cmd+5", "5", "repo_5"),
+    project_tab_slot!(6, "project_tab_6", "Project tab 6", "cmd+6", "6", "repo_6"),
+    project_tab_slot!(7, "project_tab_7", "Project tab 7", "cmd+7", "7", "repo_7"),
+    project_tab_slot!(8, "project_tab_8", "Project tab 8", "cmd+8", "8", "repo_8"),
+    project_tab_slot!(9, "project_tab_9", "Project tab 9", "cmd+9", "9", "repo_9"),
     ActionSpec {
         action: Action::CloseProjectTab,
         id: "close_project_tab",
@@ -681,7 +688,8 @@ pub const ACTIONS: &[ActionSpec] = &[
         hint: "Open the diff viewer for the checkout under the cursor, or, with the pane reading a pull request, that pull request's diff",
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
-        defaults: &["g"],
+        // `d` in both apps; `g`, the key it had before, stays bound.
+        defaults: &["d", "g"],
         word: "diff",
         destructive: false,
         applies_to: &[AppliesTo::Worktree, AppliesTo::Session],
@@ -689,6 +697,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         surface: Surface::Both,
         desktop: &[
             dk("open_diff", "Diff the checkout in context: the focused row, the session, the repo (again: back from the diff)", "Views", DeskScope::Anywhere, &["ctrl+shift+d"]),
+            dk("diff", "Diff the checkout in context: the focused row, the session, the repo (again: back from the diff)", "Views", DeskScope::Global, &["d"]),
         ],
     },
     ActionSpec {
@@ -750,8 +759,10 @@ pub const ACTIONS: &[ActionSpec] = &[
         destructive: false,
         applies_to: &[AppliesTo::Repo],
         works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
-        surface: Surface::Tui,
-        desktop: &[],
+        surface: Surface::Both,
+        desktop: &[
+            dk("refresh", "Refresh: ask GitHub again for the pull requests (the Branches view fetches)", "General", DeskScope::Global, &["shift+r"]),
+        ],
     },
     ActionSpec {
         action: Action::CommentPullRequest,
@@ -983,10 +994,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::Delete,
         id: "delete",
         label: "Delete selected",
-        hint: "Remove the selected row, behind a confirmation. With the PROJECT TABS holding the keys, close the tab under their cursor, behind the same kind of confirmation: x closes it outright",
+        hint: "Remove the selected row, behind a confirmation. With the PROJECT TABS holding the keys, close the tab under their cursor, behind the same kind of confirmation: x closes it outright. On a Mac keyboard Del is fn+⌫",
         group: "SESSIONS",
         scope: Scope::Global,
-        defaults: &["d", "delete", "backspace"],
+        // Del alone: `d` is the diff, and `⌫` is too easy to hit
+        // on the way out of a field.
+        defaults: &["delete"],
         word: "delete",
         destructive: true,
         applies_to: &[AppliesTo::Session, AppliesTo::Terminal],
@@ -1058,7 +1071,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
         surface: Surface::Both,
         desktop: &[
-            dk("follow_up", "Follow-up prompt", "Sessions", DeskScope::Row, &["f"]),
+            dk("follow_up", "Follow-up prompt", "Sessions", DeskScope::Row, &["space"]),
         ],
     },
     ActionSpec {
@@ -1262,9 +1275,10 @@ pub const ACTIONS: &[ActionSpec] = &[
         works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff],
         surface: Surface::Both,
         // F10 as here, but never inside a shell on the desktop (htop and mc
-        // quit on it); 0 beside it.
+        // quit on it). The window's 0 is unbound now the digits are repos:
+        // the row stays for a user's own key.
         desktop: &[
-            dk("orchestrator", "Orchestrator (start one when there is none)", "Views", DeskScope::Global, &["0"]),
+            dk("orchestrator", "Orchestrator (start one when there is none)", "Views", DeskScope::Global, &[]),
             dk("orchestrator_f10", "Orchestrator (start one when there is none)", "Views", DeskScope::Fields, &["f10"]),
         ],
     },
@@ -1289,10 +1303,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::ToggleFullScreen,
         id: "toggle_full_screen",
         label: "Full-screen session",
-        hint: "Give the session in the pane the whole screen, or bring it back down beside the cards, from inside the pane too, where it is never forwarded to the agent. From the cards it full-screens the one under the cursor. ^q and ^` also bring a full-screen session back down",
+        hint: "Give the session in the pane the whole screen, or bring it back down beside the cards. From the cards it full-screens the one under the cursor. z is typed into a locked pane like any letter; ^f works from inside it too, where it is never forwarded to the agent. ^q and ^` also bring a full-screen session back down",
         group: "GENERAL",
         scope: Scope::Global,
-        defaults: &["ctrl+f"],
+        // `z` in both apps; `^f` stays bound, the chord a locked pane
+        // lets through.
+        defaults: &["z", "ctrl+f"],
         word: "full",
         destructive: false,
         applies_to: &[AppliesTo::Session],
@@ -1303,6 +1319,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         // pane lets it through).
         desktop: &[
             dk("maximize", "Full pane: the session or diff takes the window, or comes back down", "Views", DeskScope::Anywhere, &["ctrl+shift+m"]),
+            dk("maximize_z", "Full pane: the session or diff takes the window, or comes back down", "Views", DeskScope::Global, &["z"]),
         ],
     },
     ActionSpec {
@@ -1339,10 +1356,10 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::Settings,
         id: "settings",
         label: "Settings",
-        hint: "Open this settings overlay",
+        hint: "Open this settings overlay (^, needs the kitty protocol; s arrives everywhere)",
         group: "GENERAL",
         scope: Scope::Global,
-        defaults: &["s"],
+        defaults: &["s", "ctrl+,"],
         word: "settings",
         destructive: false,
         applies_to: &[AppliesTo::Global],
@@ -1484,7 +1501,9 @@ pub const DESKTOP_ONLY: &[DesktopVerb] = &[
         destructive: false,
         applies_to: &[AppliesTo::Global],
         works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff],
-        desktop: &[dk("go_home", "Home", "Views", DeskScope::Global, &["1"])],
+        // Unbound: the digits are repos. The header's buttons, ⇧K and the
+        // palette reach the views; the row stays for a user's own key.
+        desktop: &[dk("go_home", "Home", "Views", DeskScope::Global, &[])],
     },
     DesktopVerb {
         id: "go_session",
@@ -1495,7 +1514,9 @@ pub const DESKTOP_ONLY: &[DesktopVerb] = &[
         destructive: false,
         applies_to: &[AppliesTo::Session],
         works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff],
-        desktop: &[dk("go_session", "Session", "Views", DeskScope::Global, &["2"])],
+        // Unbound: the digits are repos. The header's buttons, ⇧K and the
+        // palette reach the views; the row stays for a user's own key.
+        desktop: &[dk("go_session", "Session", "Views", DeskScope::Global, &[])],
     },
     DesktopVerb {
         id: "go_diff",
@@ -1506,7 +1527,9 @@ pub const DESKTOP_ONLY: &[DesktopVerb] = &[
         destructive: false,
         applies_to: &[AppliesTo::Worktree],
         works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff],
-        desktop: &[dk("go_diff", "Diff", "Views", DeskScope::Global, &["3"])],
+        // Unbound: the digits are repos. The header's buttons, ⇧K and the
+        // palette reach the views; the row stays for a user's own key.
+        desktop: &[dk("go_diff", "Diff", "Views", DeskScope::Global, &[])],
     },
     DesktopVerb {
         id: "close_split",
@@ -1534,7 +1557,9 @@ pub const DESKTOP_ONLY: &[DesktopVerb] = &[
         destructive: false,
         applies_to: &[AppliesTo::Session],
         works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
-        desktop: &[dk("restart", "Restart the agent", "Sessions", DeskScope::Row, &["shift+r"])],
+        // ⇧R is refresh in both apps: restart is the menus' and the
+        // palette's, with no default key.
+        desktop: &[dk("restart", "Restart the agent", "Sessions", DeskScope::Row, &[])],
     },
     DesktopVerb {
         id: "row_menu",
@@ -1573,7 +1598,8 @@ pub const DESKTOP_ONLY: &[DesktopVerb] = &[
         destructive: false,
         applies_to: &[AppliesTo::Session, AppliesTo::Terminal],
         works_in: &[WorksIn::Grid, WorksIn::Board],
-        desktop: &[dk("list_open", "Open the session", "Overview and board", DeskScope::Overview, &["enter", "space"])],
+        // Enter only: Space is the follow-up, as in the terminal app.
+        desktop: &[dk("list_open", "Open the session", "Overview and board", DeskScope::Overview, &["enter"])],
     },
     DesktopVerb {
         id: "overview_fold",
@@ -1609,17 +1635,6 @@ pub const DESKTOP_ONLY: &[DesktopVerb] = &[
             &["h", "l"],
         )],
     },
-    DesktopVerb {
-        id: "board_diff",
-        label: "Diff the card",
-        hint: "Diff the selected card's worktree",
-        group: "OVERVIEW AND BOARD",
-        word: "diff",
-        destructive: false,
-        applies_to: &[AppliesTo::Session],
-        works_in: &[WorksIn::Board],
-        desktop: &[dk("board_diff", "Board: diff the selected card", "Overview and board", DeskScope::Board, &["d"])],
-    },
 ];
 
 /// The desktop window's key rows in the order its help lists them and its
@@ -1630,6 +1645,8 @@ pub const DESKTOP_ORDER: &[&str] = &[
     "help",
     "help_f1",
     "settings",
+    "find",
+    "refresh",
     "quick_prompt",
     "quick_prompt_alt",
     "cycle_theme",
@@ -1641,6 +1658,16 @@ pub const DESKTOP_ORDER: &[&str] = &[
     "toggle_home",
     "open_session",
     "open_diff",
+    "diff",
+    "repo_1",
+    "repo_2",
+    "repo_3",
+    "repo_4",
+    "repo_5",
+    "repo_6",
+    "repo_7",
+    "repo_8",
+    "repo_9",
     "go_home",
     "go_session",
     "go_diff",
@@ -1648,6 +1675,7 @@ pub const DESKTOP_ORDER: &[&str] = &[
     "orchestrator_f10",
     "close_split",
     "maximize",
+    "maximize_z",
     "toggle_archived",
     "next_attention",
     "prev_attention",
@@ -1671,7 +1699,6 @@ pub const DESKTOP_ORDER: &[&str] = &[
     "list_open",
     "overview_fold",
     "board_lanes",
-    "board_diff",
 ];
 
 /// One registry row, either table's, as the window reads it.
@@ -1766,7 +1793,7 @@ pub fn desktop_overrides(keybindings: &BTreeMap<String, String>) -> BTreeMap<Str
 
 /// A stored chord list, `"ctrl+k, ctrl+shift+p"`, as its chords. A lone
 /// `,` is a chord (prev_attention's): an empty part after one is it.
-fn split_chords(list: &str) -> Vec<String> {
+pub fn split_chords(list: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut part = String::new();
     let mut chars = list.chars().peekable();
@@ -2131,6 +2158,59 @@ mod tests {
         }
     }
 
+    /// The one key table both apps share: a conflict resolved toward the
+    /// meaning that loses nothing, the old chords kept where harmless.
+    #[test]
+    fn both_apps_share_the_key_table() {
+        let row = |id: &str| verbs().into_iter().find(|v| v.id == id).unwrap();
+        let desk = |id: &str| -> Vec<&str> {
+            row(id)
+                .desktop
+                .iter()
+                .flat_map(|k| k.chords.iter().copied())
+                .collect()
+        };
+        assert_eq!(row("git_diff").tui, ["d", "g"]);
+        assert_eq!(desk("git_diff"), ["ctrl+shift+d", "d"]);
+        assert_eq!(row("delete").tui, ["delete"]);
+        assert_eq!(desk("delete"), ["delete"]);
+        assert_eq!(row("follow_up").tui, ["space"]);
+        assert_eq!(desk("follow_up"), ["space"]);
+        assert_eq!(desk("list_open"), ["enter"]);
+        assert_eq!(row("find_file").tui, ["f"]);
+        assert_eq!(desk("palette"), ["f", "/"]);
+        assert_eq!(row("refresh_pull_requests").tui, ["shift+r"]);
+        assert_eq!(desk("refresh_pull_requests"), ["shift+r"]);
+        assert!(desk("restart").is_empty());
+        assert_eq!(row("toggle_full_screen").tui, ["z", "ctrl+f"]);
+        assert_eq!(desk("toggle_full_screen"), ["ctrl+shift+m", "z"]);
+        assert_eq!(row("settings").tui, ["s", "ctrl+,"]);
+        assert_eq!(desk("settings"), ["ctrl+,"]);
+        assert_eq!(desk("command_palette")[0], "ctrl+k");
+        assert_eq!(row("nav_back").tui[0], "alt+left");
+        assert_eq!(desk("nav_back"), ["alt+arrowleft"]);
+        for n in 1..=9 {
+            let id = format!("project_tab_{n}");
+            assert_eq!(row(&id).tui[0], n.to_string());
+            assert_eq!(desk(&id), [n.to_string()]);
+        }
+        for id in ["go_home", "go_session", "go_diff"] {
+            assert!(desk(id).is_empty(), "{id}");
+        }
+        assert_eq!(desk("toggle_orchestrator_view"), ["f10"]);
+        // No destructive verb keeps a bare letter in either app.
+        for v in verbs() {
+            if !v.destructive {
+                continue;
+            }
+            let bare = |c: &&str| c.len() == 1 && c.chars().all(|c| c.is_ascii_alphanumeric());
+            assert!(!v.tui.iter().any(bare), "{}: {:?}", v.id, v.tui);
+            for k in v.desktop {
+                assert!(!k.chords.iter().any(bare), "{}: {:?}", k.id, k.chords);
+            }
+        }
+    }
+
     #[test]
     fn chord_lists_split_on_their_commas_only() {
         assert_eq!(
@@ -2163,7 +2243,7 @@ mod tests {
         set_desktop_override(&mut kb, "help_f1", None).unwrap();
         assert!(!kb.contains_key("desktop.help_f1"));
         assert!(set_desktop_override(&mut kb, "nope", None).is_err());
-        assert!(set_desktop_override(&mut kb, "board_diff", Some(&["x".into()])).is_err());
+        assert!(set_desktop_override(&mut kb, "board_lanes", Some(&["x".into()])).is_err());
         // A key that counts while typing takes no bare or shifted letter.
         assert!(set_desktop_override(&mut kb, "cycle_theme", Some(&["t".into()])).is_err());
         assert!(set_desktop_override(&mut kb, "back", Some(&["shift+b".into()])).is_err());

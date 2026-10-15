@@ -315,11 +315,11 @@ is one key from there: `p` opens the QUICK PROMPT, focused, so the first thing y
   rest most recently worked in first; a checkout with nothing running has no band, unless
   **Show all worktrees** (Settings → Sessions, on by default) is on, when every checkout gets
   one: an EMPTY BAND, its rule over a single line, `nothing running · p: new session · t:
-  terminal · d: delete worktree`. `j`/`k` walk onto it like any band, `p`/`n`/`t` start work in
-  that checkout, and `d` (or **Delete worktree** in its right-click menu) deletes it behind the
-  worktree's own confirm; the root's band says no `d`, since the root is never deleted. With the
+  terminal · Del: delete worktree`. `j`/`k` walk onto it like any band, `p`/`n`/`t` start work in
+  that checkout, and `Del` (or **Delete worktree** in its right-click menu) deletes it behind the
+  worktree's own confirm; the root's band says no `Del`, since the root is never deleted. With the
   setting on, deleting a worktree's last card never asks about the worktree: the band stays,
-  empty, until its own `d`, unless **Delete emptied worktree** is on, which still deletes the
+  empty, until its own `Del`, unless **Delete emptied worktree** is on, which still deletes the
   worktree with its last card. Each band is a
   titled rule over one row of cards: the rule names the checkout in its scope color (`↳ feat`,
   `⌂ main` for the root, the project is the grid's own scope, named once in the header), with
@@ -430,7 +430,7 @@ its status dot and name, what it runs on, its last prompt) then its terminals, t
   its pull request (`pr       #141 open`, with `v open PR` at the right, or `none`). A child shows
   its own title and harness and its thread's checkout, pull request and changes. The list scrolls between the project tabs and the
   strip, and the strip never moves. The bottom bar is `jk move  Enter open  p sub-prompt`.
-  `d` on a root that has children deletes the whole thread (every prompt and terminal nested
+  `Del` on a root that has children deletes the whole thread (every prompt and terminal nested
   under it) and `a` there archives every prompt in it and closes its terminals. Both ask first in
   a CONFIRM DIALOG that counts and lists what goes, `a` included with **Confirm on archive** off,
   since a closed shell does not come back with `u`. On a child, or a root with nothing under it,
@@ -483,7 +483,7 @@ its status dot and name, what it runs on, its last prompt) then its terminals, t
   into the pane beside the cards, where that session is already running, with its input locked and
   the grid still up over it, the same place a click into the pane lands. `` ^` `` hands the keys
   back to the cards, and a second `` ^` `` folds the pane away.
-- **Full-screen** is `^F` in the pane (or on a card), or the `⤢` in the pane's header: the grid and
+- **Full-screen** is `z` on a card (`^F` there and in the pane, where `z` is typed to the agent), or the `⤢` in the pane's header: the grid and
   its header give way to the session, the keys still in it. `^F` again, `^q`, `` ^` `` or the `⤡` at
   the right end of the full-screen header brings it back down into the pane beside the cards, the
   keys still in it.
@@ -500,19 +500,19 @@ its status dot and name, what it runs on, its last prompt) then its terminals, t
   behind a confirm, which leaves the clone on disk alone. There is nothing above the bands to walk
   out to: `Esc` lets the card go, a second does nothing, and `k` on the first band stays put.
 
-Every other key acts on the session under the cursor, `a` archives, `d` deletes, `g` opens its
+Every other key acts on the session under the cursor, `a` archives, `Del` deletes, `d` opens its
 diff, `/` jumps, `s` opens Settings. `a` asks first: a CONFIRM DIALOG names
 the session, `Enter` or `y` archives it and `Esc` or `n` keeps it, so a letter aimed at an agent
 that lands on the grid archives nothing, and saying yes is cheap, since `u` brings it back.
 **Confirm on archive** (Settings → Sessions, on by default) off archives at once. The
 cursor lands on the card after the one archived in its band (the one that slides up into its
 place) or, when the band's last card went, on the one before it; a band's only card leaving takes
-the band with it, and the cursor lands on the one that slid up into its slot. `d` lands
+the band with it, and the cursor lands on the one that slid up into its slot. `Del` lands
 the same way, and when the card is the last one in a linked worktree (a lone terminal counts too,
 and so does a `D` that takes every row), its confirm asks about the checkout in the same breath,
 before anything is deleted: `Delete agent 'x'? Its session and history go away.` and under it
 `Nothing else is left in worktree 'feature': delete it from disk too?`, with three answers. `Enter`
-or `y` deletes the card and then the worktree, the way `d` on its band would; `n` deletes the card
+or `y` deletes the card and then the worktree, the way `Del` on its band would; `n` deletes the card
 and keeps the checkout standing empty; `Esc` cancels, and the card stays alive. The ROOT WORKTREE
 is never offered, and an archive (`a`) never asks: an archived card is still filed under its
 checkout, so the dialog on a worktree that still holds archived sessions counts them, since the
@@ -528,7 +528,7 @@ tells a held key's repeats from a fresh press; without it a long hold still walk
 
 **`⇧A` is the ARCHIVED VIEW**: the same grid, of the project's archived sessions instead of its live
 ones, with the header counting them under their own word (`3 archived sessions`). `u` unarchives the
-card under the cursor where it stands and `d` deletes it; `⇧A` again comes back to the live
+card under the cursor where it stands and `Del` deletes it; `⇧A` again comes back to the live
 sessions. The two lists never mix (there is no group to fold, only the other grid) and `Enter`
 on an archived card says to unarchive it first, its session having been reaped when it was
 archived.

@@ -79,7 +79,7 @@
   // terminal is never attached twice).
   const orchView = $derived(view === 'orchestrator');
   const split = $derived(view === 'session' || view === 'diff' || (orchView && !!orch));
-  // Full pane (Ctrl+Shift+M): the right side takes the window. Leaving the
+  // Full pane (Z, Ctrl+Shift+M): the right side takes the window. Leaving the
   // split brings it back down, so the next split opens beside the list.
   const full = $derived(split && app.paneMax);
   $effect(() => {
@@ -131,6 +131,13 @@
     else if (e.key === 'ArrowRight') app.splitWidth = Math.max(380, w - 40);
   }
 
+  /** A button or link of its own inside a row or card: not the row (a
+   *  `data-target`) and not a board card's own face (`data-card-sel`). */
+  function ownControl(t: Element): boolean {
+    const c = t.closest('button, a[href], [role="button"], summary');
+    return !!c && !c.matches('[data-target], [data-card-sel]') && !!c.closest('[data-target]');
+  }
+
   // Every key goes through the one shortcut table (lib/shortcuts.ts),
   // which the help overlay lists too.
   function onKey(e: KeyboardEvent) {
@@ -138,6 +145,10 @@
     const t = e.target instanceof Element ? e.target : document.body;
     const inTerminal = !!t.closest('.xterm');
     const typing = inTerminal || !!t.closest('input, textarea, select, .monaco-editor');
+    // Space on a button inside a row (a card's Archive, a tree row's
+    // toggle) presses that button: the row's own Space (the follow-up)
+    // is for the row itself.
+    if (e.key === ' ' && ownControl(t)) return;
     const s = shortcutFor(e, { inTerminal, inEditor: !!t.closest('.monaco-editor'), typing, onRow: !!focusedTarget() });
     if (s && runShortcut(s.id)) e.preventDefault();
   }
@@ -244,7 +255,7 @@
           ? 'border-ink bg-ink text-bg'
           : 'border-rule bg-transparent text-muted hover:text-ink'}"
         aria-pressed={view === 'diff'}
-        title={withKey(view === 'diff' ? 'Close the diff: back to where it was opened' : 'Diff the checkout in context: the focused row, the session, the repo', 'open_diff')}
+        title={withKey(view === 'diff' ? 'Close the diff: back to where it was opened' : 'Diff the checkout in context: the focused row, the session, the repo', ['diff', 'open_diff'])}
         onclick={toggleDiff}><Icon name="diff" size={12} /><span class="hidden @min-[700px]:inline">Diff</span></button
       >
       <div class="flex h-6 flex-none border border-rule" role="radiogroup" aria-label="Home view">

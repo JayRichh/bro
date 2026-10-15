@@ -58,6 +58,12 @@ export function orderRepos(rows: RepoRow[]): RepoRow[] {
   return [...rows].sort((a, b) => a.project.sort_order - b.project.sort_order);
 }
 
+/** Repos as the rail lists them, in the user's own order: the rail is a
+ *  map, not a ranking. The digit keys count down this list. */
+export function railOrder<T extends { project: { sort_order: number } }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => a.project.sort_order - b.project.sort_order);
+}
+
 /** Nodes by status, across the given rows. */
 export function tally(rows: RepoRow[]): Record<Status, Node[]> {
   const out = {} as Record<Status, Node[]>;
