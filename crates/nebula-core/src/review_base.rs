@@ -205,6 +205,115 @@ pub fn resolve(root: &Path, configured: &str) -> Option<ReviewBase> {
     })
 }
 
+/// The base a worktree was cut from, as the daemon recorded it when it cut
+/// the checkout (`ServerEvent::WorktreeBases`): what the review reads
+/// against before any derivation, so a base branch that moves on, or a
+/// `worktree_base_branch` setting changed since, does not move the review.
+/// Worktrees cut before the record existed, adopted ones and PR checkouts
+/// have none, and derive their base as before ([`resolve`]).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RecordedBase {
+    pub worktree: crate::WorktreeId,
+    /// The ref the branch was cut from, as git was given it: `origin/main`,
+    /// `develop`, a tag.
+    pub refname: String,
+    /// The merge-base of the new checkout's HEAD with it, at the cut.
+    pub sha: String,
+}
+
+impl RecordedBase {
+    /// The branch name the header gives it: `origin/` and any `refs/…`
+    /// prefix dropped.
+    pub fn branch(&self) -> String {
+        let name = self.refname.trim();
+        let name = name
+            .strip_prefix("refs/remotes/")
+            .or_else(|| name.strip_prefix("refs/heads/"))
+            .unwrap_or(name);
+        name.strip_prefix("origin/").unwrap_or(name).to_string()
+    }
+}
+
+/// [`resolve`], preferring the base `recorded` at the cut: the merge-base
+/// of HEAD with the recorded ref while the ref is there, else the recorded
+/// merge-base itself while that commit is. Neither there (a pruned branch
+/// and a gc'd commit), or no record, derives it as [`resolve`] does. None,
+/// as there, on a detached HEAD or on the base branch itself.
+pub fn resolve_with(
+    root: &Path,
+    configured: &str,
+    recorded: Option<&RecordedBase>,
+) -> Option<ReviewBase> {
+    match recorded.map(|r| from_recorded(root, r)) {
+        Some(Recorded::Found { base, .. }) => Some(base),
+        Some(Recorded::OnBase | Recorded::Detached) => None,
+        Some(Recorded::Gone) | None => resolve(root, configured),
+    }
+}
+
+/// [`base_ref`], preferring the recorded base as [`resolve_with`] does: its
+/// ref while the clone has it, else its merge-base commit.
+pub fn base_ref_with(root: &Path, configured: &str, recorded: Option<&RecordedBase>) -> BaseRef {
+    match recorded.map(|r| from_recorded(root, r)) {
+        Some(Recorded::Found { base, via_ref }) => {
+            BaseRef::Base(if via_ref { base.refname } else { base.sha })
+        }
+        Some(Recorded::OnBase) => BaseRef::OnBase,
+        Some(Recorded::Detached) => BaseRef::Unknown,
+        Some(Recorded::Gone) | None => base_ref(root, configured),
+    }
+}
+
+/// What a [`RecordedBase`] reads as in the checkout now.
+enum Recorded {
+    /// `via_ref`: read from the recorded ref, which is still there; else
+    /// the recorded merge-base commit stands in for it.
+    Found {
+        base: ReviewBase,
+        via_ref: bool,
+    },
+    /// The checkout is on the recorded base branch.
+    OnBase,
+    Detached,
+    /// Neither the ref nor the commit is in the clone any more.
+    Gone,
+}
+
+fn from_recorded(root: &Path, recorded: &RecordedBase) -> Recorded {
+    let Some(current) = git_line(root, &["symbolic-ref", "-q", "--short", "HEAD"]) else {
+        return Recorded::Detached;
+    };
+    let branch = recorded.branch();
+    if branch == current {
+        return Recorded::OnBase;
+    }
+    let is_commit = |rev: &str| {
+        !rev.is_empty()
+            && git_ok(
+                root,
+                &["rev-parse", "--verify", "-q", &format!("{rev}^{{commit}}")],
+            )
+            .is_some()
+    };
+    let refname = recorded.refname.trim();
+    let (sha, via_ref) = if is_commit(refname) {
+        let sha = git_line(root, &["merge-base", "HEAD", refname]);
+        (sha.unwrap_or_else(|| recorded.sha.clone()), true)
+    } else if is_commit(&recorded.sha) {
+        (recorded.sha.clone(), false)
+    } else {
+        return Recorded::Gone;
+    };
+    Recorded::Found {
+        base: ReviewBase {
+            sha,
+            branch,
+            refname: refname.to_string(),
+        },
+        via_ref,
+    }
+}
+
 /// The checkout's branch, and the base ref and branch [`pick_base`]'s
 /// order finds in the clone, whether or not the checkout is on it. None
 /// on a detached HEAD or when git can't say.
@@ -726,6 +835,88 @@ mod tests {
         run(&repo, &["checkout", "-q", "--detach"]);
         assert_eq!(base_ref(&repo, ""), BaseRef::Unknown);
         assert_eq!(BaseRef::Unknown.standing(&repo), BaseStanding::default());
+    }
+
+    fn recorded(refname: &str, sha: &str) -> RecordedBase {
+        RecordedBase {
+            worktree: crate::WorktreeId("w".into()),
+            refname: refname.into(),
+            sha: sha.into(),
+        }
+    }
+
+    #[test]
+    fn a_recorded_base_names_its_branch_without_the_remote() {
+        assert_eq!(recorded("origin/main", "x").branch(), "main");
+        assert_eq!(recorded("refs/remotes/origin/dev", "x").branch(), "dev");
+        assert_eq!(recorded("refs/heads/release", "x").branch(), "release");
+        assert_eq!(recorded("v1.2", "x").branch(), "v1.2");
+    }
+
+    /// The base recorded at the cut wins over the setting and the default
+    /// branch; a ref gone since falls back to the recorded merge-base, and
+    /// a record with neither left derives the base as before.
+    #[test]
+    fn the_recorded_base_wins_then_its_sha_then_the_derivation() {
+        let dir = tempfile::tempdir().unwrap();
+        let (repo, _) = repo(&dir);
+        run(&repo, &["checkout", "-q", "-b", "develop"]);
+        let fork = commit(&repo, "d.txt", "dev\n", "dev");
+        run(&repo, &["checkout", "-q", "-b", "feat"]);
+        commit(&repo, "e.txt", "feat\n", "feat");
+        // Derived: the local main (the setting is unset).
+        assert_eq!(resolve(&repo, "").expect("a base").branch, "main");
+        let rec = recorded("develop", &fork);
+        let base = resolve_with(&repo, "", Some(&rec)).expect("a base");
+        assert_eq!(
+            (
+                base.branch.as_str(),
+                base.sha.as_str(),
+                base.refname.as_str()
+            ),
+            ("develop", fork.as_str(), "develop")
+        );
+        assert_eq!(
+            base_ref_with(&repo, "", Some(&rec)),
+            BaseRef::Base("develop".into())
+        );
+        // develop moves on: the merge-base with it still reads the fork.
+        run(&repo, &["checkout", "-q", "develop"]);
+        commit(&repo, "f.txt", "later\n", "develop moves");
+        run(&repo, &["checkout", "-q", "feat"]);
+        assert_eq!(resolve_with(&repo, "", Some(&rec)).unwrap().sha, fork);
+        // The ref is gone: the recorded merge-base stands in.
+        run(&repo, &["branch", "-q", "-D", "develop"]);
+        let base = resolve_with(&repo, "", Some(&rec)).expect("a base");
+        assert_eq!(
+            (base.branch.as_str(), base.sha.as_str()),
+            ("develop", fork.as_str())
+        );
+        assert_eq!(
+            base_ref_with(&repo, "", Some(&rec)),
+            BaseRef::Base(fork.clone())
+        );
+        // Neither there: derived, as for a worktree with no record.
+        let gone = recorded("nope", "0123456789012345678901234567890123456789");
+        assert_eq!(resolve_with(&repo, "", Some(&gone)).unwrap().branch, "main");
+        assert_eq!(resolve_with(&repo, "", None).unwrap().branch, "main");
+        assert_eq!(
+            base_ref_with(&repo, "", Some(&gone)),
+            BaseRef::Base("main".into())
+        );
+    }
+
+    #[test]
+    fn on_the_recorded_branch_or_detached_there_is_no_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let (repo, first) = repo(&dir);
+        run(&repo, &["checkout", "-q", "-b", "develop"]);
+        let rec = recorded("develop", &first);
+        assert_eq!(resolve_with(&repo, "", Some(&rec)), None);
+        assert_eq!(base_ref_with(&repo, "", Some(&rec)), BaseRef::OnBase);
+        run(&repo, &["checkout", "-q", "--detach"]);
+        assert_eq!(resolve_with(&repo, "", Some(&rec)), None);
+        assert_eq!(base_ref_with(&repo, "", Some(&rec)), BaseRef::Unknown);
     }
 
     #[test]
