@@ -2414,7 +2414,6 @@ mod tests {
 
     #[test]
     fn a_real_repo_lists_its_branches_its_remotes_and_the_ones_held_elsewhere() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let origin = repo(&dir);
         git(&origin, &["branch", "only-on-origin"]);
@@ -2448,7 +2447,6 @@ mod tests {
 
     #[test]
     fn a_clean_checkout_switches_without_asking() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         let outcome = switch(&repo, "main", &local("feature"), &Carry::Ask);
@@ -2464,7 +2462,6 @@ mod tests {
 
     #[test]
     fn a_dirty_checkout_asks_and_touches_nothing() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         std::fs::write(repo.join("b.txt"), "edited\n").unwrap();
@@ -2481,7 +2478,6 @@ mod tests {
 
     #[test]
     fn a_nested_repository_is_not_a_change_and_is_never_committed() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         let nested = repo.join(".claude/worktrees/x");
@@ -2520,7 +2516,6 @@ mod tests {
 
     #[test]
     fn stash_and_switch_leaves_the_changes_in_a_named_stash() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         std::fs::write(repo.join("a.txt"), "collides\n").unwrap();
@@ -2546,7 +2541,6 @@ mod tests {
 
     #[test]
     fn a_refused_switch_after_the_stash_applies_its_own_entry_back_by_commit() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         // Someone else's entry, already on the shared stack.
@@ -2571,7 +2565,6 @@ mod tests {
 
     #[test]
     fn a_checkout_git_abandons_part_way_is_undone_and_the_stash_applied_back() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         lfs_branch(&repo);
@@ -2597,7 +2590,6 @@ mod tests {
 
     #[test]
     fn a_part_way_checkout_leaves_an_edit_that_is_not_the_targets_alone() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         lfs_branch(&repo);
@@ -2623,7 +2615,6 @@ mod tests {
 
     #[test]
     fn a_failing_post_checkout_hook_is_still_a_switch_and_the_stash_stays_put() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         hook(&repo, "post-checkout", "echo 'lfs is missing' >&2; exit 1");
@@ -2650,7 +2641,6 @@ mod tests {
 
     #[test]
     fn bring_keeps_changes_that_do_not_collide_and_refuses_ones_that_do() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         std::fs::write(repo.join("b.txt"), "edited\n").unwrap();
@@ -2668,7 +2658,6 @@ mod tests {
 
     #[test]
     fn commit_and_switch_commits_everything_first() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         std::fs::write(repo.join("a.txt"), "collides\n").unwrap();
@@ -2693,7 +2682,6 @@ mod tests {
 
     #[test]
     fn commit_is_refused_on_a_detached_head() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         git(&repo, &["switch", "-q", "--detach", "main"]);
@@ -2710,7 +2698,6 @@ mod tests {
 
     #[test]
     fn a_commit_a_hook_refuses_puts_the_index_back_exactly() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         hook(&repo, "pre-commit", "exit 1");
@@ -2736,7 +2723,6 @@ mod tests {
 
     #[test]
     fn nothing_switches_in_the_middle_of_a_merge() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         std::fs::write(repo.join("a.txt"), "main again\n").unwrap();
@@ -2760,7 +2746,6 @@ mod tests {
 
     #[test]
     fn discard_drops_tracked_changes_and_keeps_untracked_and_newly_added_files() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         std::fs::write(repo.join("a.txt"), "collides\n").unwrap();
@@ -2777,7 +2762,6 @@ mod tests {
 
     #[test]
     fn discard_asks_again_when_the_changes_moved_since_the_prompt() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         std::fs::write(repo.join("a.txt"), "collides\n").unwrap();
@@ -2801,7 +2785,6 @@ mod tests {
 
     #[test]
     fn a_remote_branch_becomes_a_tracking_branch() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let origin = repo(&dir);
         git(
@@ -2826,7 +2809,6 @@ mod tests {
 
     #[test]
     fn create_starts_a_branch_off_head_with_the_changes_along_but_never_a_remotes_name() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let origin = repo(&dir);
         git(
@@ -2849,7 +2831,6 @@ mod tests {
 
     #[test]
     fn a_fetch_with_no_remotes_finishes_and_a_raised_quit_stops_one() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         assert!(fetch(&repo, &AtomicBool::new(false)));
@@ -2931,7 +2912,6 @@ mod tests {
 
     #[test]
     fn the_cursor_opens_on_the_newest_branch_it_can_switch_to_and_the_filter_narrows() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         git(&repo, &["branch", "release-1.2", "feature"]);
@@ -2976,7 +2956,6 @@ mod tests {
 
     #[test]
     fn enter_switches_a_clean_root_and_renames_its_row_at_once() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         let mut app = app_on(&repo);
@@ -2992,7 +2971,6 @@ mod tests {
 
     #[test]
     fn enter_with_nothing_matching_creates_the_typed_branch() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         let mut app = app_on(&repo);
@@ -3007,7 +2985,6 @@ mod tests {
 
     #[test]
     fn enter_on_the_current_branch_or_one_held_elsewhere_says_why_not() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         git(
@@ -3038,7 +3015,6 @@ mod tests {
 
     #[test]
     fn a_dirty_root_asks_and_s_stashes_then_switches() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         std::fs::write(repo.join("a.txt"), "collides\n").unwrap();
@@ -3077,7 +3053,6 @@ mod tests {
 
     #[test]
     fn discard_needs_a_second_press() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         std::fs::write(repo.join("a.txt"), "collides\n").unwrap();
@@ -3099,7 +3074,6 @@ mod tests {
 
     #[test]
     fn c_asks_for_a_message_and_commits_before_switching() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         std::fs::write(repo.join("a.txt"), "collides\n").unwrap();
@@ -3127,7 +3101,6 @@ mod tests {
 
     #[test]
     fn a_refused_bring_goes_back_to_the_prompt_with_the_reason() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         std::fs::write(repo.join("a.txt"), "collides\n").unwrap();
@@ -3150,7 +3123,6 @@ mod tests {
     /// on the list with the reason, and the count is asked for again.
     #[test]
     fn a_stopped_switch_lands_on_the_list_not_a_stale_prompt() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         std::fs::write(repo.join("a.txt"), "collides\n").unwrap();
@@ -3190,7 +3162,6 @@ mod tests {
     /// in the footer — including a dirty checkout, which has to be said.
     #[test]
     fn a_running_switch_blocks_a_second_and_its_hidden_answer_lands_in_the_footer() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         let mut app = app_on(&repo);
@@ -3318,7 +3289,6 @@ mod tests {
 
     #[test]
     fn the_list_draws_rows_tags_and_the_status_line_and_survives_a_tiny_frame() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = repo(&dir);
         std::fs::write(repo.join("b.txt"), "edited\n").unwrap();

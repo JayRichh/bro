@@ -2135,10 +2135,9 @@ mod tests {
         // extensionless file is not one there.
         let on_disk = if cfg!(windows) { "agy.exe" } else { "agy" };
         std::fs::write(dir.path().join(on_disk), "").unwrap();
-        // No other test may spawn a program while PATH points here.
-        let _env = crate::test_env::changing_path();
-        let prior = std::env::var_os("PATH");
-        std::env::set_var("PATH", dir.path());
+        // Looked up on a PATH of the temp dir alone, never by pointing the
+        // process's PATH there: every other test thread spawning git reads
+        // that one, and found no git while it pointed here.
         let hiding = Config {
             hide_uninstalled_harnesses: true,
             ..serde_json::from_str::<Config>(
@@ -2149,12 +2148,7 @@ mod tests {
             )
             .unwrap()
         };
-        let offered = hiding.offered_harnesses();
-        if let Some(prior) = prior {
-            std::env::set_var("PATH", prior);
-        } else {
-            std::env::remove_var("PATH");
-        }
+        let offered = hiding.offered_harnesses_on(dir.path().as_os_str());
         assert_eq!(offered.len(), 1);
         assert_eq!(offered[0], (AgentKind::Custom, Some("agy".into())));
     }

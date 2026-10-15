@@ -11027,7 +11027,6 @@ fn the_root_rows_menu_offers_switch_branch_and_a_worktree_row_offers_delete() {
 /// follows before the DAEMON's sync has said a word.
 #[test]
 fn the_branch_switcher_moves_a_real_root_through_the_key_path() {
-    let _env = crate::test_env::spawning();
     let dir = tempfile::tempdir().unwrap();
     let repo = test_repo(&dir);
     run_git(&repo, &["branch", "feature"]);
@@ -11164,7 +11163,6 @@ fn fake_diff_view(lines: usize) -> crate::app::DiffView {
 
 #[test]
 fn g_opens_diff_modal_and_esc_closes() {
-    let _env = crate::test_env::spawning();
     let dir = tempfile::tempdir().unwrap();
     let repo = test_repo(&dir);
     std::fs::write(repo.join("a.txt"), "changed\n").unwrap();
@@ -11192,7 +11190,6 @@ fn g_opens_diff_modal_and_esc_closes() {
 
 #[test]
 fn g_with_clean_repo_flashes_no_changes() {
-    let _env = crate::test_env::spawning();
     let dir = tempfile::tempdir().unwrap();
     let repo = test_repo(&dir);
     let mut app = App::new();
@@ -11216,7 +11213,6 @@ fn g_with_clean_repo_flashes_no_changes() {
 /// observable half).
 #[test]
 fn shift_g_opens_the_repos_remote_in_the_browser() {
-    let _env = crate::test_env::spawning();
     let dir = tempfile::tempdir().unwrap();
     let repo = test_repo(&dir);
     run_git(
@@ -11237,7 +11233,6 @@ fn shift_g_opens_the_repos_remote_in_the_browser() {
 
 #[test]
 fn shift_g_without_a_remote_says_so() {
-    let _env = crate::test_env::spawning();
     let dir = tempfile::tempdir().unwrap();
     let repo = test_repo(&dir);
     let mut app = App::new();
@@ -11255,7 +11250,6 @@ fn shift_g_without_a_remote_says_so() {
 /// and every value change marks the app dirty so a frame gets drawn.
 #[test]
 fn refresh_git_changes_tracks_the_checkout() {
-    let _env = crate::test_env::spawning();
     let dir = tempfile::tempdir().unwrap();
     let repo = test_repo(&dir);
     let mut app = App::new();
@@ -11741,7 +11735,6 @@ fn diff_order(app: &App) -> Vec<String> {
 
 #[test]
 fn ctrl_r_toggles_reviewed_and_marks_survive_reopen() {
-    let _env = crate::test_env::spawning();
     let dir = tempfile::tempdir().unwrap();
     crate::review::with_store_path(dir.path().join("reviewed.json"), || {
         let repo = test_repo(&dir);
@@ -11806,7 +11799,6 @@ fn ctrl_r_toggles_reviewed_and_marks_survive_reopen() {
 
 #[test]
 fn editing_a_reviewed_file_drops_its_mark_on_reopen() {
-    let _env = crate::test_env::spawning();
     let dir = tempfile::tempdir().unwrap();
     crate::review::with_store_path(dir.path().join("reviewed.json"), || {
         let repo = test_repo(&dir);
@@ -11836,7 +11828,6 @@ fn editing_a_reviewed_file_drops_its_mark_on_reopen() {
 
 #[test]
 fn a_commit_resets_reviewed_marks() {
-    let _env = crate::test_env::spawning();
     let dir = tempfile::tempdir().unwrap();
     crate::review::with_store_path(dir.path().join("reviewed.json"), || {
         let repo = test_repo(&dir);
@@ -14321,7 +14312,6 @@ fn finder(app: &App) -> &crate::app::FileFinder {
 
 #[test]
 fn f_opens_file_finder_listing_tracked_and_untracked() {
-    let _env = crate::test_env::spawning();
     // Pinned to the legacy behavior: with `close_finder_on_open`
     // (the default) the finder would be gone under the editor, and
     // the Ctrl+y at the end would have nothing to copy from.
@@ -14397,7 +14387,6 @@ fn f_opens_file_finder_listing_tracked_and_untracked() {
 /// editor. The same rule serves a `.md` ⌥clicked in the pane.
 #[test]
 fn a_markdown_file_from_the_finder_or_a_clicked_path_is_read_first() {
-    let _env = crate::test_env::spawning();
     let dir = tempfile::tempdir().unwrap();
     let repo = test_repo(&dir);
     std::fs::write(repo.join("notes.md"), "# Notes\n\n- one\n").unwrap();
@@ -14460,7 +14449,6 @@ fn a_markdown_file_from_the_finder_or_a_clicked_path_is_read_first() {
 
 #[test]
 fn close_finder_on_open_leaves_only_the_editor_modal() {
-    let _env = crate::test_env::spawning();
     let dir = tempfile::tempdir().unwrap();
     let repo = test_repo(&dir);
     // Default-on: the finder is gone by the time the editor is up, so
@@ -14497,7 +14485,6 @@ fn close_finder_on_open_leaves_only_the_editor_modal() {
 
 #[test]
 fn a_failed_editor_spawn_keeps_the_finder_open() {
-    let _env = crate::test_env::spawning();
     let dir = tempfile::tempdir().unwrap();
     let repo = test_repo(&dir);
     with_default_config(|| {
@@ -14547,7 +14534,6 @@ fn file_finder_escape_clears_query_then_closes() {
 
 #[test]
 fn file_overlays_launch_the_configured_editor() {
-    let _env = crate::test_env::spawning();
     let dir = tempfile::tempdir().unwrap();
     let repo = test_repo(&dir);
     let cfg_dir = tempfile::tempdir().unwrap();
@@ -14629,7 +14615,6 @@ fn tree_rows(app: &App) -> Vec<String> {
 /// filter ignores it, and the choice made on the markdown file holds.
 #[test]
 fn ctrl_r_flips_a_markdown_preview_between_the_page_and_its_source() {
-    let _env = crate::test_env::spawning();
     let dir = tempfile::tempdir().unwrap();
     let repo = test_repo(&dir);
     std::fs::write(repo.join("notes.md"), "# Notes\n\n- one\n").unwrap();
@@ -14698,7 +14683,6 @@ fn ctrl_r_flips_a_markdown_preview_between_the_page_and_its_source() {
 
 #[test]
 fn t_opens_tree_browser_folds_dirs_and_filters_hierarchies() {
-    let _env = crate::test_env::spawning();
     let dir = tempfile::tempdir().unwrap();
     let repo = test_repo(&dir);
     std::fs::create_dir_all(repo.join("src/sub")).unwrap();
@@ -14784,7 +14768,6 @@ fn t_opens_tree_browser_folds_dirs_and_filters_hierarchies() {
 
 #[test]
 fn tree_browser_ctrl_u_clears_filter() {
-    let _env = crate::test_env::spawning();
     let dir = tempfile::tempdir().unwrap();
     let repo = test_repo(&dir);
     std::fs::create_dir_all(repo.join("src")).unwrap();
@@ -14838,7 +14821,6 @@ fn b_without_worktree_flashes() {
 
 #[test]
 fn tree_browser_renders_tree_and_preview_panes() {
-    let _env = crate::test_env::spawning();
     let dir = tempfile::tempdir().unwrap();
     let repo = test_repo(&dir); // commits a.txt containing "orig"
     let mut app = App::new();
@@ -14861,7 +14843,6 @@ fn tree_browser_renders_tree_and_preview_panes() {
 
 #[test]
 fn file_preview_gets_a_line_number_gutter_but_listings_dont() {
-    let _env = crate::test_env::spawning();
     let dir = tempfile::tempdir().unwrap();
     let repo = test_repo(&dir);
     std::fs::create_dir_all(repo.join("src")).unwrap();
@@ -14899,7 +14880,6 @@ fn file_preview_gets_a_line_number_gutter_but_listings_dont() {
 
 #[test]
 fn embedded_editor_takes_over_the_preview_pane() {
-    let _env = crate::test_env::spawning();
     let dir = tempfile::tempdir().unwrap();
     let repo = test_repo(&dir);
     let mut app = App::new();
@@ -14958,7 +14938,6 @@ fn fake_grep_view(hits: Vec<crate::grep_search::GrepHit>) -> GrepView {
 
 #[test]
 fn shift_f_opens_grep_and_typing_searches() {
-    let _env = crate::test_env::spawning();
     let dir = tempfile::tempdir().unwrap();
     let repo = test_repo(&dir);
     std::fs::write(repo.join("hay.txt"), "one\nneedle here\n").unwrap();
@@ -15007,7 +14986,6 @@ fn shift_f_without_worktree_flashes() {
 
 #[test]
 fn grep_enter_spawns_editor_and_ctrl_q_closes_it() {
-    let _env = crate::test_env::spawning();
     // Pinned to the legacy behavior — the "lands back on the
     // results" half of this test is what `close_finder_on_open`
     // off buys you.
@@ -15065,7 +15043,6 @@ fn grep_enter_spawns_editor_and_ctrl_q_closes_it() {
 
 #[test]
 fn close_finder_on_open_also_closes_the_grep_overlay() {
-    let _env = crate::test_env::spawning();
     let dir = tempfile::tempdir().unwrap();
     let repo = test_repo(&dir);
     with_default_config(|| {
@@ -20696,7 +20673,6 @@ fn a_click_on_a_list_row_is_enter_on_it() {
 /// so missed the reader when Enter learned it.
 #[test]
 fn a_click_on_a_finder_row_is_enter_on_it() {
-    let _env = crate::test_env::spawning();
     let dir = tempfile::tempdir().unwrap();
     let repo = test_repo(&dir);
     std::fs::write(repo.join("notes.md"), "# Notes\n\n- one\n").unwrap();
@@ -22828,7 +22804,6 @@ fn a_refused_delete_offers_force_alone_and_flashes_in_bulk() {
 #[test]
 fn ctrl_g_in_the_diff_modal_flips_between_the_base_and_head() {
     use nebula_core::review_base::Against;
-    let _env = crate::test_env::spawning();
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().join("repo");
     std::fs::create_dir(&repo).unwrap();
