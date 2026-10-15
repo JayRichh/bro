@@ -325,6 +325,8 @@ export interface ProfileRenamed {
   projects: string[];
   /** Archived sessions still naming the old name. */
   archived: string[];
+  /** Sessions the daemon moved onto the new name (protocol 59). */
+  followed: number;
 }
 export interface QuickLaunch {
   project: string;

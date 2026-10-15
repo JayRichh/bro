@@ -653,6 +653,13 @@ impl ClientConnection {
                 reply_done(&self.out_tx, req_id, result).await;
                 Ok(true)
             }
+            ClientRequest::RenameProfileSessions { req_id, old, new } => {
+                let result = self
+                    .blocking_daemon(move |daemon| daemon.rename_profile_sessions(&old, &new))
+                    .await;
+                reply_done(&self.out_tx, req_id, result).await;
+                Ok(true)
+            }
             ClientRequest::MoveAgent {
                 req_id,
                 id,

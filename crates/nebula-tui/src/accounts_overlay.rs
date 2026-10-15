@@ -490,13 +490,16 @@ pub struct Outcome {
     pub message: String,
     /// The account key whose login runs next, in a new terminal.
     pub sign_in: Option<String>,
+    /// A rename the daemon's sessions follow: (old, new), sent as
+    /// `ClientRequest::RenameProfileSessions`.
+    pub rename_sessions: Option<(String, String)>,
 }
 
 impl Outcome {
     fn said(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
-            sign_in: None,
+            ..Self::default()
         }
     }
 }
@@ -532,6 +535,10 @@ pub struct AccountsView {
     /// An account just added: the cursor lands on it once the rows are
     /// read again.
     pub pending_focus: Option<String>,
+    /// The daemon rewrites the sessions' stored profile name on a rename
+    /// (`RENAME_PROFILE_PROTOCOL`): a session on the profile no longer
+    /// refuses one.
+    pub sessions_follow: bool,
     /// Drawn rect, for click-outside.
     pub area: Rect,
 }
@@ -564,6 +571,7 @@ impl AccountsView {
             threshold: accounts::DEFAULT_THRESHOLD.to_string(),
             hits: Vec::new(),
             pending_focus: None,
+            sessions_follow: false,
             area: Rect::default(),
         }
     }
@@ -687,11 +695,13 @@ impl AccountsView {
     }
 
     /// `r`: the rename form on the selected profile, refused up front
-    /// while a session names it (`profiles::rename_blocker`).
+    /// while a session names it (`profiles::rename_blocker`) unless the
+    /// daemon's sessions follow a rename.
     pub fn open_rename(&mut self, agents: &[nebula_core::Agent]) -> Result<(), String> {
         let profile = self.selected_profile()?;
         let from = profile.name.trim().to_string();
-        if let Some(why) = profiles::rename_blocker(agents, &from) {
+        if let Some(why) = profiles::rename_blocker(agents, &from).filter(|_| !self.sessions_follow)
+        {
             return Err(why);
         }
         self.mode = Mode::Form(AccountForm {
@@ -816,6 +826,7 @@ impl AccountsView {
             Some(account) => Outcome {
                 message: format!("added {}: signing it in", profile.name),
                 sign_in: Some(account),
+                ..Outcome::default()
             },
             None if form.adopt => Outcome::said(format!(
                 "added {} on {}'s current login",
@@ -869,30 +880,48 @@ impl AccountsView {
             Some(account) => Outcome {
                 message: format!("added {}: signing it in", copy.name),
                 sign_in: Some(account),
+                ..Outcome::default()
             },
             None => Outcome::said(format!("added {}", copy.name)),
         })
     }
 
     /// The rename's Enter: `profiles::rename` moves the home and every
-    /// name in the settings (it takes the settings locks itself).
+    /// name in the settings (it takes the settings locks itself). Where
+    /// the daemon's sessions follow, `profiles::rename_following`, and
+    /// the outcome carries the request that moves them.
     fn rename(
         &mut self,
         from: &str,
         form: &AccountForm,
         agents: &[nebula_core::Agent],
     ) -> Result<Outcome, String> {
-        let done = profiles::rename(
-            &self.config,
-            &self.local,
-            &self.root,
-            from,
-            &form.name,
-            agents,
-        )?;
+        let done = if self.sessions_follow {
+            profiles::rename_following(&self.config, &self.local, &self.root, from, &form.name)?
+        } else {
+            profiles::rename(
+                &self.config,
+                &self.local,
+                &self.root,
+                from,
+                &form.name,
+                agents,
+            )?
+        };
         let new = done.profile.name.clone();
         self.focus_key(&new);
+        let named = agents
+            .iter()
+            .filter(|a| a.profile.as_deref().map(str::trim) == Some(from.trim()))
+            .count();
         let mut message = format!("renamed {from} to {new}");
+        if self.sessions_follow && named > 0 {
+            message.push_str(&format!(
+                "; {named} session{} follow{} (a running one on its next restart)",
+                if named == 1 { "" } else { "s" },
+                if named == 1 { "s" } else { "" }
+            ));
+        }
         if !done.projects.is_empty() {
             message.push_str(&format!(
                 ", the default of {} repo{}",
@@ -907,7 +936,11 @@ impl AccountsView {
                 if done.archived.len() == 1 { "" } else { "s" }
             ));
         }
-        Ok(Outcome::said(message))
+        let mut outcome = Outcome::said(message);
+        if self.sessions_follow && named > 0 {
+            outcome.rename_sessions = Some((from.trim().to_string(), new));
+        }
+        Ok(outcome)
     }
 
     /// The remove's yes; with `purge` its home (the login) goes too. The

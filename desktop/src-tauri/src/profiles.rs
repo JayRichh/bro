@@ -244,6 +244,9 @@ pub struct ProfileRenamed {
     pub projects: Vec<String>,
     /// Archived sessions that still name the old one.
     pub archived: Vec<String>,
+    /// Sessions the daemon moved onto the new name (protocol 59).
+    #[serde(default)]
+    pub followed: usize,
 }
 
 /// Rename `old` to `new` through `profiles::rename` (the path `kete
@@ -259,22 +262,30 @@ pub fn rename_at(
     agents: &[nebula_core::Agent],
 ) -> Res<ProfileRenamed> {
     let done = profiles::rename(config, local, root, old, new, agents)?;
-    Ok(ProfileRenamed {
+    Ok(renamed(done))
+}
+
+fn renamed(done: profiles::Renamed) -> ProfileRenamed {
+    ProfileRenamed {
         name: done.profile.name,
         home: done.home.map(|(_, to)| to.display().to_string()),
         projects: done.projects,
         archived: done.archived,
-    })
+        followed: 0,
+    }
 }
 
-/// Rename an account, checked against the daemon's sessions: refused
-/// while the window is not connected, since the sessions naming it are
-/// unknown then.
-#[tauri::command]
-pub fn profile_rename(
-    client: tauri::State<'_, std::sync::Arc<crate::daemon::Client>>,
-    old: String,
-    new: String,
+/// The rename against `client`'s daemon: one that rewrites the sessions'
+/// stored name (`RENAME_PROFILE_PROTOCOL`) is not refused by them, and
+/// is asked to move them once the settings say the new name; an older one
+/// refuses while one names it (`rename_at`).
+pub async fn rename_on(
+    client: &crate::daemon::Client,
+    config: &Path,
+    local: &Path,
+    root: &Path,
+    old: &str,
+    new: &str,
 ) -> Res<ProfileRenamed> {
     let model = client.snapshot();
     if !model.connected {
@@ -283,15 +294,45 @@ pub fn profile_rename(
                 .into(),
         );
     }
-    let agents = model.agents;
-    rename_at(
+    if client.daemon_protocol() < nebula_core::RENAME_PROFILE_PROTOCOL {
+        return rename_at(config, local, root, old, new, &model.agents);
+    }
+    let mut out = renamed(profiles::rename_following(config, local, root, old, new)?);
+    let followed = model
+        .agents
+        .iter()
+        .filter(|a| a.profile.as_deref().map(str::trim) == Some(old.trim()))
+        .count();
+    if followed > 0 {
+        let (old, new) = (old.trim().to_string(), out.name.clone());
+        crate::sessions::ack(client, |req_id| {
+            nebula_core::ClientRequest::RenameProfileSessions { req_id, old, new }
+        })
+        .await
+        .map_err(|e| format!("Renamed, but the sessions still name the old one: {e}"))?;
+        out.followed = followed;
+    }
+    Ok(out)
+}
+
+/// Rename an account, checked against the daemon's sessions: refused
+/// while the window is not connected, since the sessions naming it are
+/// unknown then (`rename_on`).
+#[tauri::command]
+pub async fn profile_rename(
+    client: tauri::State<'_, std::sync::Arc<crate::daemon::Client>>,
+    old: String,
+    new: String,
+) -> Res<ProfileRenamed> {
+    rename_on(
+        &client,
         &nebula_core::paths::config_path(),
         &nebula_core::paths::config_local_path(),
         &profiles::profiles_root(),
         &old,
         &new,
-        &agents,
     )
+    .await
 }
 
 /// The layer the profiles come from, so the one an edit must change: the
@@ -508,6 +549,67 @@ mod tests {
         assert!(saved.home.unwrap().ends_with("work"));
         assert!(root.join("work").is_dir(), "kept unless purged");
         assert!(remove_at(&config, &root, "work", false).is_err());
+    }
+
+    fn agent_on(profile: &str) -> nebula_core::Agent {
+        nebula_core::Agent {
+            id: nebula_core::AgentId("a".into()),
+            worktree_id: nebula_core::WorktreeId("w".into()),
+            name: "fix".into(),
+            status: nebula_core::AgentStatus::Fresh,
+            archived: false,
+            archived_at: 0,
+            unseen: false,
+            status_changed_at: 0,
+            kind: nebula_core::AgentKind::Claude,
+            custom_harness: None,
+            model: None,
+            effort: None,
+            session_id: None,
+            cloud_session_id: None,
+            issue_url: None,
+            role: nebula_core::AgentRole::Worker,
+            sort_order: 0,
+            alive: true,
+            recent_prompts: Vec::new(),
+            profile: Some(profile.into()),
+            parent: None,
+        }
+    }
+
+    /// A session on the profile refuses the rename on a 58 daemon; a 59
+    /// one takes it and is asked to move the session onto the new name.
+    #[tokio::test]
+    async fn a_new_daemon_moves_the_sessions_on_a_renamed_profile() {
+        let (_d, config, root, registry) = setup();
+        let local = config.with_file_name("config.local.json");
+        add_at(&config, &root, &registry, form("work", "claude")).unwrap();
+        let (client, mut rx) = crate::daemon::Client::connected_for_test();
+        client.set_model(|m| {
+            m.protocol_version = 58;
+            m.agents.push(agent_on("work"));
+        });
+        let err = rename_on(&client, &config, &local, &root, "work", "max2")
+            .await
+            .unwrap_err();
+        assert!(err.contains("has sessions"), "{err}");
+
+        client.set_model(|m| m.protocol_version = nebula_core::RENAME_PROFILE_PROTOCOL);
+        let (out, seen) = crate::sessions::testkit::run(
+            &client,
+            &mut rx,
+            rename_on(&client, &config, &local, &root, "work", "max2"),
+            crate::sessions::testkit::ok,
+        )
+        .await;
+        let out = out.unwrap();
+        assert_eq!((out.name.as_str(), out.followed), ("max2", 1));
+        assert!(matches!(
+            seen.as_slice(),
+            [nebula_core::ClientRequest::RenameProfileSessions { old, new, .. }]
+                if old == "work" && new == "max2"
+        ));
+        assert!(root.join("max2").join("claude").is_dir());
     }
 
     #[test]

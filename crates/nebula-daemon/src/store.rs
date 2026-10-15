@@ -913,6 +913,25 @@ impl Store {
         Ok(())
     }
 
+    /// Every row naming profile `old` names `new` instead
+    /// (`RenameProfileSessions`), archived ones included: the rows changed.
+    pub fn rename_agent_profile(&self, old: &str, new: &str) -> Result<Vec<AgentId>> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        let ids = {
+            let mut stmt = tx.prepare("SELECT id FROM agents WHERE trim(profile) = ?1")?;
+            let rows = stmt.query_map(params![old], |r| r.get::<_, String>(0))?;
+            rows.map(|r| r.map(AgentId))
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        tx.execute(
+            "UPDATE agents SET profile = ?2 WHERE trim(profile) = ?1",
+            params![old, new],
+        )?;
+        tx.commit()?;
+        Ok(ids)
+    }
+
     pub fn set_agent_model(&self, id: &AgentId, model: Option<&str>) -> Result<()> {
         self.conn.lock().execute(
             "UPDATE agents SET model = ?2 WHERE id = ?1",

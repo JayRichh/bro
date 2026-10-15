@@ -541,6 +541,32 @@ impl Daemon {
         Ok(())
     }
 
+    /// `RenameProfileSessions`: the profile `old` is called `new` now
+    /// (its home moved and the settings rewritten by the client), so every
+    /// row naming it follows, archived ones too, and each is broadcast. A
+    /// live session is not touched: it keeps the home it started in until
+    /// it restarts, when it boots under the new name.
+    pub fn rename_profile_sessions(self: &Arc<Self>, old: &str, new: &str) -> Result<()> {
+        let (old, new) = (old.trim(), new.trim());
+        if old.is_empty() || new.is_empty() {
+            bail!("a profile needs a name");
+        }
+        if old == new {
+            return Ok(());
+        }
+        let ids = self.store.rename_agent_profile(old, new)?;
+        tracing::info!(
+            from = old,
+            to = new,
+            sessions = ids.len(),
+            "profile renamed"
+        );
+        for id in ids {
+            self.broadcast_agent(&id)?;
+        }
+        Ok(())
+    }
+
     /// Queue a message on a Cloud session without leaving nebula.
     /// `claude -p <msg> --cloud <id>` is fire-and-forget — the CLI prints
     /// "Sent to cloud session." and returns, and the reply only ever shows

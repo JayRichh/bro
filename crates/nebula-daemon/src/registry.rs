@@ -2353,6 +2353,58 @@ pub(crate) mod tests {
         assert_eq!(daemon.store.get_agent(&id).unwrap().unwrap().profile, None);
     }
 
+    /// A renamed profile: every row naming it follows, archived ones too,
+    /// and a row on another profile (or none) is left alone.
+    #[tokio::test]
+    async fn a_renamed_profile_is_followed_by_every_session_naming_it() {
+        let daemon = test_daemon();
+        let dir = tempfile::tempdir().unwrap();
+        seed_projects(&daemon, &["p"]);
+        seed_worktree(&daemon, "p", "w", dir.path().to_str().unwrap(), true);
+        for (id, profile) in [
+            ("a", Some(" work")),
+            ("b", Some("work")),
+            ("c", Some("home")),
+            ("d", None),
+        ] {
+            seed_agent(&daemon, id, "w", None);
+            daemon
+                .store
+                .set_agent_profile(&AgentId(id.into()), profile)
+                .unwrap();
+        }
+        daemon
+            .store
+            .set_agent_archived(&AgentId("b".into()), true)
+            .unwrap();
+        let mut rx = daemon.events.subscribe();
+        daemon.rename_profile_sessions("work", " max2 ").unwrap();
+        let profile = |id: &str| {
+            daemon
+                .store
+                .get_agent(&AgentId(id.into()))
+                .unwrap()
+                .unwrap()
+                .profile
+        };
+        assert_eq!(profile("a").as_deref(), Some("max2"));
+        assert_eq!(
+            profile("b").as_deref(),
+            Some("max2"),
+            "archived ones follow"
+        );
+        assert_eq!(profile("c").as_deref(), Some("home"));
+        assert_eq!(profile("d"), None);
+        let mut upserts = 0;
+        while let Ok(ev) = rx.try_recv() {
+            if matches!(ev, ServerEvent::EntityUpserted { .. }) {
+                upserts += 1;
+            }
+        }
+        assert_eq!(upserts, 2, "each row that changed is broadcast");
+        assert!(daemon.rename_profile_sessions("", "x").is_err());
+    }
+
     /// The switch: the row takes the new account, drops its session id
     /// (the conversation lives in the old account's config home) and the
     /// agent boots again in the same worktree. A switched-off profile can
