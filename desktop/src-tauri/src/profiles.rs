@@ -1,4 +1,5 @@
-//! Profiles from the window: list, add, edit, remove and pick the default,
+//! Profiles from the window: list, add, edit, duplicate, rename, remove
+//! (and purge) and pick the default,
 //! through `nebula_core::profiles` exactly as `kete profile` does (the
 //! harness checked against the registry, the PROFILE HOME made on add).
 //! The window never signs a profile in: where one needs a login it shows
@@ -54,6 +55,8 @@ pub struct ProfileSaved {
     /// The sign-in command to run next, when the profile needs one.
     pub login: Option<String>,
     pub home: Option<String>,
+    /// The remove deleted the home.
+    pub purged: bool,
 }
 
 fn rows(all: &[Profile], root: &Path) -> Vec<ProfileRow> {
@@ -66,7 +69,7 @@ fn rows(all: &[Profile], root: &Path) -> Vec<ProfileRow> {
             env_keys: p.env.keys().cloned().collect(),
             home: p.home_in(root).map(|h| h.display().to_string()),
             problem: p.problem(),
-            login: profiles::login_hint(p),
+            login: nebula_core::accounts::login_command(Some(p), &p.harness),
             usage: profiles::read_usage_in(root, p.name.trim()).map(|u| u.summary()),
         })
         .collect()
@@ -134,8 +137,9 @@ pub fn add_at(
     }
     Ok(ProfileSaved {
         rows: list_at(config, root),
-        login: profiles::login_hint(&profile),
+        login: sign_in_next(&profile, home.as_deref()),
         home: home.map(|h| h.display().to_string()),
+        purged: false,
     })
 }
 
@@ -166,29 +170,30 @@ pub fn update_at(
     }
     Ok(ProfileSaved {
         rows: list_at(config, root),
-        login: profiles::login_hint(&profile),
+        login: sign_in_next(&profile, home.as_deref()),
         home: home.map(|h| h.display().to_string()),
+        purged: false,
     })
 }
 
-/// Remove a profile. Its home (the login) stays on disk; the answer says
-/// where, and the CLI's `--purge` is how to delete it.
-pub fn remove_at(config: &Path, root: &Path, name: &str) -> Res<ProfileSaved> {
-    let profile = load_at(config)
-        .into_iter()
-        .find(|p| p.name.trim() == name.trim());
-    if !profiles::remove_from_file(config, name)? {
-        return Err(format!("No profile named \"{}\".", name.trim()));
-    }
-    let home = profile
-        .and_then(|p| p.home_in(root))
-        .filter(|h| h.exists())
-        .map(|h| h.display().to_string());
+/// Remove a profile, and with `purge` its home (the login in it) too:
+/// `profiles::remove_in_file`, the path `kete profile remove [--purge]`
+/// takes. Kept, the answer says where the home stays.
+pub fn remove_at(config: &Path, root: &Path, name: &str, purge: bool) -> Res<ProfileSaved> {
+    let removed = profiles::remove_in_file(config, root, name, purge)?;
     Ok(ProfileSaved {
         rows: list_at(config, root),
         login: None,
-        home,
+        home: removed.home.map(|h| h.display().to_string()),
+        purged: removed.purged,
     })
+}
+
+/// The sign-in to run next for a profile just made: a fresh home always
+/// needs one; an adopted login is left to its row's login state.
+fn sign_in_next(profile: &Profile, home: Option<&Path>) -> Option<String> {
+    home?;
+    nebula_core::accounts::login_command(Some(profile), &profile.harness)
 }
 
 pub fn set_default_at(config: &Path, root: &Path, name: &str) -> Res<Vec<ProfileRow>> {
@@ -204,26 +209,12 @@ fn registry() -> Vec<String> {
         .collect()
 }
 
-/// Add `name` as a copy of `from`: its harness, its variables (values
-/// included: they never pass through the window) and its kind of login,
-/// but neither its default star nor its switch, and a home of its own
-/// (empty: the copy signs in separately).
+/// Add `name` as a copy of `from` (`profiles::duplicate_in_file`): its
+/// harness, its variables (values included: they never pass through the
+/// window) and its kind of login, but neither its default star nor its
+/// switch, and a home of its own (empty: the copy signs in separately).
 pub fn duplicate_at(config: &Path, root: &Path, from: &str, name: &str) -> Res<ProfileSaved> {
-    let Some(source) = load_at(config)
-        .into_iter()
-        .find(|p| p.name.trim() == from.trim())
-    else {
-        return Err(format!("No profile named \"{}\".", from.trim()));
-    };
-    let copy = Profile {
-        name: name.trim().to_string(),
-        harness: source.harness.trim().to_string(),
-        env: source.env,
-        default: false,
-        use_default: source.use_default,
-        disabled: false,
-    };
-    profiles::add_to_file(config, &copy)?;
+    let copy = profiles::duplicate_in_file(config, from, name)?;
     let home = copy.home_in(root);
     if let Some(home) = &home {
         copy.prepare_in(root, None)
@@ -231,14 +222,76 @@ pub fn duplicate_at(config: &Path, root: &Path, from: &str, name: &str) -> Res<P
     }
     Ok(ProfileSaved {
         rows: list_at(config, root),
-        login: profiles::login_hint(&copy),
+        login: sign_in_next(&copy, home.as_deref()),
         home: home.map(|h| h.display().to_string()),
+        purged: false,
     })
 }
 
 #[tauri::command]
 pub fn profile_duplicate(from: String, name: String) -> Res<ProfileSaved> {
     on_layer(|config, root| duplicate_at(config, root, &from, &name))
+}
+
+/// What a rename did, for the window to say.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileRenamed {
+    pub name: String,
+    /// Where its home is now; None for an adopted login.
+    pub home: Option<String>,
+    /// The repos (as written) whose default account it is.
+    pub projects: Vec<String>,
+    /// Archived sessions that still name the old one.
+    pub archived: Vec<String>,
+}
+
+/// Rename `old` to `new` through `profiles::rename` (the path `kete
+/// profile rename` takes): refused while one of `agents` names it, the
+/// home moved, the project defaults and the reading following. It takes
+/// the settings locks itself.
+pub fn rename_at(
+    config: &Path,
+    local: &Path,
+    root: &Path,
+    old: &str,
+    new: &str,
+    agents: &[nebula_core::Agent],
+) -> Res<ProfileRenamed> {
+    let done = profiles::rename(config, local, root, old, new, agents)?;
+    Ok(ProfileRenamed {
+        name: done.profile.name,
+        home: done.home.map(|(_, to)| to.display().to_string()),
+        projects: done.projects,
+        archived: done.archived,
+    })
+}
+
+/// Rename an account, checked against the daemon's sessions: refused
+/// while the window is not connected, since the sessions naming it are
+/// unknown then.
+#[tauri::command]
+pub fn profile_rename(
+    client: tauri::State<'_, std::sync::Arc<crate::daemon::Client>>,
+    old: String,
+    new: String,
+) -> Res<ProfileRenamed> {
+    let model = client.snapshot();
+    if !model.connected {
+        return Err(
+            "Not connected to the kete daemon: a rename checks the sessions on the account first."
+                .into(),
+        );
+    }
+    let agents = model.agents;
+    rename_at(
+        &nebula_core::paths::config_path(),
+        &nebula_core::paths::config_local_path(),
+        &profiles::profiles_root(),
+        &old,
+        &new,
+        &agents,
+    )
 }
 
 /// The layer the profiles come from, so the one an edit must change: the
@@ -293,8 +346,9 @@ pub fn profile_update(form: ProfileForm, keep_env: bool) -> Res<ProfileSaved> {
 }
 
 #[tauri::command]
-pub fn profile_remove(name: String) -> Res<ProfileSaved> {
-    on_layer(|config, root| remove_at(config, root, &name))
+pub fn profile_remove(name: String, purge: Option<bool>) -> Res<ProfileSaved> {
+    let purge = purge.unwrap_or(false);
+    on_layer(|config, root| remove_at(config, root, &name, purge))
 }
 
 #[tauri::command]
@@ -446,14 +500,32 @@ mod tests {
     }
 
     #[test]
-    fn a_remove_leaves_the_home_and_says_where() {
+    fn a_remove_keeps_the_home_unless_purged_and_says_where() {
         let (_d, config, root, registry) = setup();
         add_at(&config, &root, &registry, form("work", "claude")).unwrap();
-        let saved = remove_at(&config, &root, "work").unwrap();
+        let saved = remove_at(&config, &root, "work", false).unwrap();
         assert!(saved.rows.is_empty());
         assert!(saved.home.unwrap().ends_with("work"));
-        assert!(root.join("work").is_dir(), "never purged from the window");
-        assert!(remove_at(&config, &root, "work").is_err());
+        assert!(root.join("work").is_dir(), "kept unless purged");
+        assert!(remove_at(&config, &root, "work", false).is_err());
+    }
+
+    #[test]
+    fn a_purge_deletes_the_home_and_a_rename_moves_it() {
+        let (_d, config, root, registry) = setup();
+        let local = config.with_file_name("config.local.json");
+        add_at(&config, &root, &registry, form("work", "claude")).unwrap();
+        add_at(&config, &root, &registry, form("gone", "claude")).unwrap();
+        let saved = remove_at(&config, &root, "gone", true).unwrap();
+        assert!(saved.purged);
+        assert!(!root.join("gone").exists(), "purged");
+
+        let done = rename_at(&config, &local, &root, "work", "max2", &[]).unwrap();
+        assert_eq!(done.name, "max2");
+        assert!(done.home.unwrap().ends_with("max2"));
+        assert!(root.join("max2").join("claude").is_dir());
+        assert_eq!(list_at(&config, &root)[0].name, "max2");
+        assert!(rename_at(&config, &local, &root, "work", "x", &[]).is_err());
     }
 }
 
@@ -498,7 +570,7 @@ mod wrappers {
             assert!(dir.path().join("config.json").is_file());
             assert!(dir.path().join("profiles").join("work").is_dir());
             assert_eq!(super::profiles_list().len(), 1);
-            super::profile_remove("work".into()).unwrap();
+            super::profile_remove("work".into(), None).unwrap();
             assert!(super::profiles_list().is_empty());
 
             // Profiles the local layer defines are edited there.
@@ -515,7 +587,7 @@ mod wrappers {
             let held: serde_json::Value =
                 serde_json::from_str(&std::fs::read_to_string(&local).unwrap()).unwrap();
             assert_eq!(held["profiles"][0]["default"], true);
-            super::profile_remove("loc".into()).unwrap();
+            super::profile_remove("loc".into(), None).unwrap();
             assert!(super::profiles_list().is_empty());
             assert_eq!(std::fs::read_to_string(&config).unwrap(), config_before);
             assert!(!dir.path().join("config.json.lock").exists());

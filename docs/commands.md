@@ -21,12 +21,13 @@ kete worktree [name]      move this session into a worktree           (agents ru
 kete spawn <task>         start another agent session beside it       (agents run this)
 kete open <file>…         show files/images/diagrams in file tabs     (agents run this)
 kete sessions             list every session across every project     (agents run this)
+kete session move-account restart a session fresh on another account
 kete read <session>       read recent context from another session    (agents run this)
 kete ask <session> <q>    ask another session and print its answer    (agents run this)
 kete orchestrator <cmd>   start the one orchestrator; its own verbs   (see Orchestrator)
 kete ado <cmd>            Azure DevOps tasks, task worktrees, PRs     (see Azure DevOps)
 kete config <cmd>         back up, restore or locate this machine's settings
-kete profile <cmd>        several accounts per harness: add, sign in, list, remove
+kete profile <cmd>        several accounts per harness: add, sign in, rename, spread, remove
 kete setup terminal       install a Nerd Font and add a "Kete" Windows Terminal profile
 kete browser              serve this TUI in a web browser via ttyd
 kete ssh <host>           open kete on a remote host over ssh
@@ -186,6 +187,15 @@ kete profile enable <name>    # pickable again by launches that name no profile
 kete profile disable <name>   # never picked unless named
 kete profile remove <name> [--purge]
                                 # drop it; --purge deletes its home (and the login) too
+kete profile duplicate <src> <new>
+                                # a copy: same harness, variables and kind of login, its own home
+kete profile rename <old> <new>
+                                # its home, project defaults and usage reading follow; refused
+                                # while a session (running or stopped) runs on it
+kete profile spread <manual|failover|least-used> [--threshold N]
+                                # the account a launch naming none runs on; N is 50, 70, 80, 90, 95
+kete session move-account <session> [<profile> | --own-login]
+                                # restart a session fresh on another account of its harness
 ```
 
 See [Profiles](profiles.md).

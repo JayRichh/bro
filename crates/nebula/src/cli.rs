@@ -240,6 +240,16 @@ pub(crate) enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// One session's account.
+    ///
+    /// `kete session move-account <session> <profile>` restarts a session
+    /// fresh on another account of its harness, as the apps' "Move to
+    /// account" does.
+    #[command(after_help = SESSION_EXAMPLES)]
+    Session {
+        #[command(subcommand)]
+        command: SessionCommand,
+    },
     /// Read another session's recent context.
     ///
     /// Resolves a session by id or unambiguous fuzzy name, then prints clean
@@ -920,6 +930,10 @@ Examples:
   kete profile add main --harness claude --use-default --default
   kete profile add max2 --harness claude
   kete profile login max2        sign the new account in
+  kete profile duplicate max2 max3      same harness and variables, its own login
+  kete profile rename max2 work         its home and project defaults follow
+  kete profile remove max3 --purge      its home (the login) goes too
+  kete profile spread failover --threshold 80
   kete profile edit max2 --env HTTPS_PROXY=http://proxy:8080
   kete profile set-project . max2       max2 for Claude sessions in this repo
   kete profile set-project app --clear claude
@@ -961,6 +975,39 @@ pub(crate) enum ProfileCommand {
         /// Delete the profile's home too.
         #[arg(long)]
         purge: bool,
+    },
+    /// Rename a profile: its home moves to the new name, and every
+    /// project default naming it follows.
+    ///
+    /// Refused while a session (running, or stopped and able to resume)
+    /// runs on it: move those to another account or archive them first.
+    Rename {
+        /// The profile's name now.
+        old: String,
+        /// Letters, digits, `-` and `_`; unique across harnesses.
+        new: String,
+    },
+    /// Add a profile as a copy of another: its harness, variables and kind
+    /// of login, but not its default star or its switch, in a home of its
+    /// own (sign it in separately).
+    Duplicate {
+        /// The profile to copy.
+        from: String,
+        /// The new profile's name.
+        name: String,
+    },
+    /// Set the account spread: which account a launch naming none runs on.
+    ///
+    /// manual: the harness's default profile. failover: the default until
+    /// its 5h or weekly use reaches --threshold percent, then the next
+    /// enabled profile. least-used: the enabled profile with the least use.
+    Spread {
+        /// manual, failover or least-used.
+        #[arg(value_name = "MODE")]
+        mode: String,
+        /// Percent at which failover moves on: 50, 70, 80, 90 or 95.
+        #[arg(long, value_name = "N")]
+        threshold: Option<String>,
     },
     /// Change a profile. The name stays: it names the profile's home. Only
     /// what is given changes; --env replaces the variables, --clear-env
@@ -1049,6 +1096,35 @@ pub(crate) enum SetupCommand {
         /// for tests.
         #[arg(long, value_name = "PATH", hide = true)]
         wt_settings: Option<std::path::PathBuf>,
+    },
+}
+
+const SESSION_EXAMPLES: &str = "\
+Examples:
+  kete session move-account fix-auth max2
+                       restart it fresh on max2
+  kete session move-account fix-auth --own-login
+                       back on its harness's own login";
+
+#[derive(Subcommand)]
+pub(crate) enum SessionCommand {
+    /// Restart a session on another account of its harness.
+    ///
+    /// The session boots again FRESH in the same worktree: each account
+    /// keeps its conversations in its own config dir, so the old
+    /// conversation stays with the old account. Refused for an archived or
+    /// Cloud session, a profile of another harness, and one not defined.
+    #[command(after_help = SESSION_EXAMPLES)]
+    MoveAccount {
+        /// The session: its id, its name, or part of one name.
+        #[arg(value_name = "NAME")]
+        session: String,
+        /// The profile to run on.
+        #[arg(required_unless_present = "own_login", conflicts_with = "own_login")]
+        profile: Option<String>,
+        /// Run on the harness's own login, no profile.
+        #[arg(long)]
+        own_login: bool,
     },
 }
 

@@ -17,6 +17,9 @@
   let name = $state('');
   let adopt = $state(false);
   let makeDefault = $state(false);
+  // Extra variables for its sessions, KEY=VALUE per line (an API key, a proxy).
+  let env = $state('');
+  let showEnv = $state(false);
   let touched = $state(false);
   let busy = $state(false);
   let error = $state<string | null>(null);
@@ -37,6 +40,8 @@
       busy = false;
       adopt = addSheet.adopt;
       makeDefault = false;
+      env = '';
+      showEnv = false;
       api
         .profileHarnesses()
         .then((h) => {
@@ -61,7 +66,7 @@
     busy = true;
     error = null;
     try {
-      const out = await api.profileAdd({ name: name.trim(), harness, default: makeDefault, useDefault: adopt, env: '' });
+      const out = await api.profileAdd({ name: name.trim(), harness, default: makeDefault, useDefault: adopt, env });
       refreshLaunchables();
       const rows = await api.accounts();
       app.accounts = rows;
@@ -88,7 +93,7 @@
   function onKey(e: KeyboardEvent) {
     e.stopPropagation();
     if (e.key === 'Escape') (e.preventDefault(), closeAddAccount());
-    else if (e.key === 'Enter' && (e.target as HTMLElement).tagName !== 'BUTTON') (e.preventDefault(), create());
+    else if (e.key === 'Enter' && !['BUTTON', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) (e.preventDefault(), create());
   }
 
   // The signing panel asks for the list every 2s while it is up: the row
@@ -155,7 +160,7 @@
           aria-describedby="add-account-name-hint"
         />
         <span id="add-account-name-hint" class="text-[12px] {touched && problem ? 'text-fail' : 'text-muted'}"
-          >{touched && problem ? problem : 'Letters, digits, - and _. It names the account\u2019s own home, so it cannot change later.'}</span
+          >{touched && problem ? problem : 'Letters, digits, - and _. It names the account\u2019s own home; Rename in Accounts moves it later.'}</span
         >
       </label>
       <label class="flex items-start gap-2 text-[13px] text-ink">
@@ -174,6 +179,24 @@
           {#if hasDefault}<span class="block text-[12px] text-muted">Takes the star from the current default.</span>{/if}</span
         >
       </label>
+      {#if showEnv}
+        <label class="flex flex-col gap-1">
+          <span class={label}>Variables</span>
+          <textarea
+            class="{field} h-16 resize-y py-1 font-mono text-[12px]"
+            bind:value={env}
+            placeholder="HTTPS_PROXY=http://proxy:8080"
+            spellcheck="false"
+            aria-describedby="add-account-env-hint"></textarea>
+          <span id="add-account-env-hint" class="text-[12px] text-muted">KEY=VALUE, one per line, set on its sessions. Stored in config.json as typed.</span>
+        </label>
+      {:else}
+        <button
+          class="w-fit border-0 bg-transparent p-0 text-[13px] text-ink underline underline-offset-4"
+          onclick={() => (showEnv = true)}
+          title="Extra variables for its sessions: an API key, a proxy">Add variables</button
+        >
+      {/if}
       {#if error}<p class="m-0 text-[13px] text-fail" role="alert">{error}</p>{/if}
     </div>
     <div class="flex items-center justify-between gap-2 border-t border-rule px-4 py-2.5">

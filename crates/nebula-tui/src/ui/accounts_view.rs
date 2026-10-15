@@ -303,6 +303,7 @@ fn list_buttons(view: &AccountsView) -> Vec<Button> {
         button("a", "add", KeyCode::Char('a')),
         button("\u{21b5}", "edit", KeyCode::Enter),
         button("c", "duplicate", KeyCode::Char('c')),
+        button("r", "rename", KeyCode::Char('r')),
         button("x", "remove", KeyCode::Char('x')),
         button("d", "default", KeyCode::Char('d')),
         button(
@@ -316,13 +317,13 @@ fn list_buttons(view: &AccountsView) -> Vec<Button> {
     ];
     for b in &mut out[1..] {
         b.on = match b.key {
-            "\u{21b5}" | "c" | "x" => profile,
+            "\u{21b5}" | "c" | "r" | "x" => profile,
             "d" | "\u{2423}" | "p" => usable,
             "l" => row.is_some_and(|r| r.problem.is_none()),
             _ => row.is_some(),
         };
     }
-    out[3].danger = true;
+    out[4].danger = true;
     out
 }
 
@@ -379,11 +380,17 @@ fn draw_form(l: &mut Layout, form: &AccountForm, th: Theme) {
             "It runs on the CLI's current login: no home of its own, nothing to sign in."
         }
         FormKind::Add => "Its sign-in runs next, in a new terminal session.",
+        FormKind::Edit { .. } if form.clear_env => {
+            "Saving drops every variable it sets. Typed ones replace them instead."
+        }
         FormKind::Edit { .. } => {
-            "The name stays (it names the home). Empty variables keep the ones it has."
+            "The name stays (r renames it from the list). Empty variables keep the ones it has; Del clears them."
         }
         FormKind::Duplicate { .. } => {
             "A copy with the same variables and kind of login, in a home of its own: it signs in separately."
+        }
+        FormKind::Rename { .. } => {
+            "Its home, the repos it is the default of, and its usage reading move to the new name."
         }
     };
     l.push(Line::from(Span::styled(
@@ -401,18 +408,22 @@ fn draw_form(l: &mut Layout, form: &AccountForm, th: Theme) {
         FormKind::Add => "add",
         FormKind::Edit { .. } => "save",
         FormKind::Duplicate { .. } => "duplicate",
+        FormKind::Rename { .. } => "rename",
     };
-    l.buttons(
-        vec![
-            button("Enter", save, KeyCode::Enter),
-            button("Tab", "next field", KeyCode::Tab),
-            button("Esc", "back", KeyCode::Esc),
-        ],
-        th,
-    );
+    let mut buttons = vec![
+        button("Enter", save, KeyCode::Enter),
+        button("Tab", "next field", KeyCode::Tab),
+    ];
+    if form.can_clear_env() {
+        let mut clear = button("Del", "clear variables", KeyCode::Delete);
+        clear.danger = true;
+        buttons.push(clear);
+    }
+    buttons.push(button("Esc", "back", KeyCode::Esc));
+    l.buttons(buttons, th);
 }
 
-fn draw_remove(l: &mut Layout, message: &str, th: Theme) {
+fn draw_remove(l: &mut Layout, message: &str, home: bool, th: Theme) {
     l.push(Line::from(Span::styled(
         " Remove account",
         Style::default().fg(th.err).add_modifier(Modifier::BOLD),
@@ -426,9 +437,25 @@ fn draw_remove(l: &mut Layout, message: &str, th: Theme) {
         )));
     }
     l.push(Line::from(""));
-    let mut remove = button("y", "remove", KeyCode::Char('y'));
+    let mut buttons = Vec::new();
+    let mut remove = button(
+        "y",
+        if home {
+            "remove, keep its home"
+        } else {
+            "remove"
+        },
+        KeyCode::Char('y'),
+    );
     remove.danger = true;
-    l.buttons(vec![remove, button("n", "keep it", KeyCode::Char('n'))], th);
+    buttons.push(remove);
+    if home {
+        let mut purge = button("p", "remove and delete its home", KeyCode::Char('p'));
+        purge.danger = true;
+        buttons.push(purge);
+    }
+    buttons.push(button("n", "keep it", KeyCode::Char('n')));
+    l.buttons(buttons, th);
 }
 
 /// `text` broken at spaces into lines of at most `width` columns.
@@ -512,7 +539,7 @@ pub(super) fn draw(f: &mut Frame, app: &mut App, mut view: AccountsView) {
     match &view.mode {
         Mode::List => draw_list(&mut l, &view, now, th),
         Mode::Form(form) => draw_form(&mut l, form, th),
-        Mode::Remove { message, .. } => draw_remove(&mut l, message, th),
+        Mode::Remove { message, home, .. } => draw_remove(&mut l, message, home.is_some(), th),
         Mode::UseFor { cursor } => draw_use_for(&mut l, &view, *cursor, th),
     }
     f.render_widget(Paragraph::new(l.lines), inner);

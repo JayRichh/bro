@@ -48,7 +48,11 @@ kete profile list
 kete profile default max2                                         # launches with no pick take it
 kete profile disable max2                                         # never picked unless named
 kete profile enable max2
+kete profile duplicate max2 max3                                  # same harness and variables, its own login
+kete profile rename max3 work                                     # its home and project defaults follow
 kete profile remove max2 [--purge]                                # --purge deletes its home too
+kete profile spread failover --threshold 80                       # which account an unpicked launch takes
+kete session move-account fix-auth work                           # restart a session fresh on another account
 ```
 
 - **`add`:** `--use-default` points the profile at the CLI's own default config (`~/.claude`, `~/.codex`, `~/.copilot`). It moves no dir and copies nothing, so the login you already have becomes one of the profiles the picker cycles through. `--default` makes the profile what a launch takes when it names none; there is one default per harness. `--env KEY=VALUE` (repeatable) fills its `env`.
@@ -56,6 +60,14 @@ kete profile remove max2 [--purge]                                # --purge dele
 - **`list`:** every account (each profile, then each harness's own login that has a reading, e.g. `claude (own login)`): harness, `*` for the default and `(off)` for a disabled one, a bar and percent for its session (5h) and weekly use (Copilot: its monthly allowances), and whether it is signed in. One that is not shows the `kete profile login <name>` to run. The account spread in force is printed last.
 - **`enable` / `disable`:** a disabled profile is never picked for a launch that names no profile (not as the default, not by a spread) and pickers leave it out. Sessions already under it keep it, and a launch that names it still runs.
 - **`remove`:** drops the entry and keeps the home, so adding the name back signs nothing in again. `--purge` also deletes the home, and only ever a directory directly inside `<data dir>/profiles`. An adopted login's config is never touched.
+- **`duplicate`:** a new profile with the source's harness, variables and kind of login, but not its default star or its off switch, in an empty home of its own: sign it in separately.
+- **`rename`:** moves the profile's home to the new name, renames the entry in place (its other fields kept), points every project default naming it at the new name, and carries its kept usage reading over. Refused while a session names the profile, running or stopped (a stopped one would fail to resume: only the daemon can change the name a session stores): move those to another account or archive them first. Archived sessions that still name it are listed after the rename. Refused too when a directory of the new name already sits in `<data dir>/profiles` (a home a remove left behind).
+- **`spread`:** sets the [account spread](#account-spread): `manual`, `failover` or `least-used`; `--threshold` takes one of 50, 70, 80, 90, 95.
+- **`kete session move-account <session> <profile>`** (or `--own-login`): restarts a session fresh on another account of its harness, as the apps' **Move to account** does. The session is its id, its name, or part of one name; two matches are refused. Its conversation stays with the old account.
+
+## In the apps
+
+The desktop window's **Accounts** view (`Shift+U`, or Settings → Accounts → **Manage accounts**) and the TUI's Accounts overlay (`⇧U`) do everything the commands above do: add (with variables), edit, duplicate, rename, switch on or off, make default, use for a repo, sign in, move a session onto it, set the spread, and remove, with a choice to delete the home too. Both run the same `nebula_core::profiles` functions as the CLI. A rename is offered greyed, its tooltip naming the sessions in the way, while a session names the account. Editing keeps the variables unless they are replaced; **Clear** (desktop) or `Del` (TUI) drops them all.
 
 ## In the TUI
 

@@ -76,12 +76,18 @@ pub(crate) fn refresh(app: &mut App) {
 /// What a key did: a message for the footer, an account to sign in.
 type Done = Option<Result<Outcome, String>>;
 
+/// Why a rename waits for the daemon: only it knows every session that
+/// names the account, and one left on the old name could not resume.
+const RENAME_OFFLINE: &str =
+    "not connected to the kete daemon: a rename checks the sessions on the account first";
+
 /// The list's keys: j/k move, Space/e switch a profile on or off, d/*
-/// make it the default, a add, Enter edit, c duplicate, x/Delete remove,
-/// l sign in, p use for a repo, m move the grid's session onto it, s/t
-/// the spread and its threshold, Esc (or q) closes.
+/// make it the default, a add, Enter edit, c duplicate, r rename, x/Delete
+/// remove, l sign in, p use for a repo, m move the grid's session onto it,
+/// s/t the spread and its threshold, Esc (or q) closes.
 fn list_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) -> Done {
     let agents = app.tree.agents.clone();
+    let connected = !matches!(app.chrome.conn, crate::app::ConnState::Disconnected);
     let Some(Overlay::Accounts(view)) = &mut app.modals.overlay else {
         return None;
     };
@@ -112,6 +118,8 @@ fn list_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) -> Done 
         }
         KeyCode::Enter => view.open_edit().err().map(Err),
         KeyCode::Char('c') => view.open_duplicate().err().map(Err),
+        KeyCode::Char('r') if !connected => Some(Err(RENAME_OFFLINE.into())),
+        KeyCode::Char('r') => view.open_rename(&agents).err().map(Err),
         KeyCode::Char('x') | KeyCode::Delete => view.open_remove(&agents).err().map(Err),
         KeyCode::Char('p') => view.open_use_for().err().map(Err),
         KeyCode::Char('s') => Some(view.cycle_spread()),
@@ -132,9 +140,11 @@ fn list_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) -> Done 
 }
 
 /// A form's keys: Tab / ↓ / ↑ walk the fields, ←/→ (or Space) step the
-/// harness and flip a box, typing fills a text field, Enter saves, Esc
-/// goes back to the list.
+/// harness and flip a box, typing fills a text field, Delete clears an
+/// edit's variables, Enter saves, Esc goes back to the list.
 fn form_key(app: &mut App, key: KeyEvent) -> Done {
+    let agents = app.tree.agents.clone();
+    let connected = !matches!(app.chrome.conn, crate::app::ConnState::Disconnected);
     let Some(Overlay::Accounts(view)) = &mut app.modals.overlay else {
         return None;
     };
@@ -145,7 +155,12 @@ fn form_key(app: &mut App, key: KeyEvent) -> Done {
         .collect();
     let harnesses = view.harnesses.clone();
     if key.code == KeyCode::Enter {
-        return Some(view.submit_form());
+        let renaming =
+            matches!(&view.mode, Mode::Form(f) if matches!(f.kind, FormKind::Rename { .. }));
+        if renaming && !connected {
+            return Some(Err(RENAME_OFFLINE.into()));
+        }
+        return Some(view.submit_form(&agents));
     }
     let Mode::Form(form) = &mut view.mode else {
         return None;
@@ -179,6 +194,15 @@ fn form_key(app: &mut App, key: KeyEvent) -> Done {
         KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if field == Field::Default => {
             form.make_default = !form.make_default;
         }
+        KeyCode::Delete if form.can_clear_env() => {
+            form.clear_env = true;
+            form.env.clear();
+            form.field = form
+                .fields()
+                .iter()
+                .position(|f| *f == Field::Env)
+                .unwrap_or(form.field);
+        }
         KeyCode::Backspace if AccountForm::is_text(field) => {
             let text = if field == Field::Name {
                 &mut form.name
@@ -209,13 +233,16 @@ fn form_key(app: &mut App, key: KeyEvent) -> Done {
     None
 }
 
-/// The remove's keys: y / Enter remove, n / Esc keep.
+/// The remove's keys: y / Enter remove (the home stays), p removes and
+/// deletes the home when there is one, n / Esc keep.
 fn remove_key(app: &mut App, key: KeyEvent) -> Done {
     let Some(Overlay::Accounts(view)) = &mut app.modals.overlay else {
         return None;
     };
+    let has_home = matches!(&view.mode, Mode::Remove { home: Some(_), .. });
     match key.code {
-        KeyCode::Char('y') | KeyCode::Enter => Some(view.confirm_remove()),
+        KeyCode::Char('y') | KeyCode::Enter => Some(view.confirm_remove(false)),
+        KeyCode::Char('p') if has_home => Some(view.confirm_remove(true)),
         KeyCode::Char('n') | KeyCode::Esc => {
             view.mode = Mode::List;
             None
@@ -1175,6 +1202,136 @@ mod tests {
                     saved().get("projects").is_none(),
                     "none again, no trace left"
                 );
+            },
+        );
+    }
+
+    /// The routed config's profiles root: where the overlay makes homes
+    /// under tests.
+    fn profiles_root() -> std::path::PathBuf {
+        let (config, _) = crate::config::Config::layer_paths();
+        config.parent().unwrap().join("profiles")
+    }
+
+    /// The add form takes variables; an edit's Delete clears them, which
+    /// an empty field alone never does.
+    #[test]
+    fn add_takes_variables_and_edit_clears_them_with_delete() {
+        with_config_json("{}", || {
+            let mut app = App::new();
+            let mut out = Vec::new();
+            open_overlay(&mut app, &mut out);
+            key(&mut app, KeyCode::Char('a'), &mut out);
+            for _ in 0..3 {
+                key(&mut app, KeyCode::Tab, &mut out);
+            }
+            let Mode::Form(form) = &view(&app).mode else {
+                panic!("no form");
+            };
+            assert_eq!(form.current(), Field::Env);
+            typed(&mut app, "K=v; L=w", &mut out);
+            key(&mut app, KeyCode::Enter, &mut out);
+            let s = saved();
+            assert_eq!(
+                s["profiles"][0]["env"],
+                serde_json::json!({"K": "v", "L": "w"})
+            );
+
+            key(&mut app, KeyCode::Enter, &mut out);
+            assert!(draw(&mut app).contains("[Del] clear variables"));
+            key(&mut app, KeyCode::Enter, &mut out);
+            assert_eq!(
+                saved()["profiles"][0]["env"],
+                serde_json::json!({"K": "v", "L": "w"}),
+                "an empty field keeps them"
+            );
+            key(&mut app, KeyCode::Enter, &mut out);
+            click(&mut app, AccountsHit::Key(KeyCode::Delete), &mut out);
+            assert!(draw(&mut app).contains("clear: drops K, L"));
+            key(&mut app, KeyCode::Enter, &mut out);
+            assert!(saved()["profiles"][0].get("env").is_none(), "cleared");
+        });
+    }
+
+    /// `r` renames: refused while a session runs on the account, then the
+    /// home, the repo's default and the cursor follow the new name.
+    #[test]
+    fn rename_moves_the_home_and_waits_for_the_sessions_on_it() {
+        with_config_json(
+            r#"{"profiles":[{"name":"work","harness":"claude"}],"projects":{"/tmp/demo":{"default_profiles":{"claude":"work"}}}}"#,
+            || {
+                std::fs::create_dir_all(profiles_root().join("work").join("claude")).unwrap();
+                let mut app = App::new();
+                seed_tree(&mut app);
+                app.tree.agents[0].profile = Some("work".into());
+                let mut out = Vec::new();
+                open_overlay(&mut app, &mut out);
+                // Offline, the sessions on it are unknown: no rename.
+                key(&mut app, KeyCode::Char('r'), &mut out);
+                assert_eq!(view(&app).mode, Mode::List);
+                let flash = app.chrome.flash.clone().unwrap_or_default();
+                assert!(flash.contains("not connected"), "{flash}");
+                app.chrome.conn = crate::app::ConnState::Connected;
+                key(&mut app, KeyCode::Char('r'), &mut out);
+                assert_eq!(view(&app).mode, Mode::List, "refused up front");
+                let flash = app.chrome.flash.clone().unwrap_or_default();
+                assert!(flash.contains("has sessions"), "{flash}");
+
+                app.tree.agents[0].profile = None;
+                click(&mut app, AccountsHit::Key(KeyCode::Char('r')), &mut out);
+                assert!(draw(&mut app).contains("Rename work"));
+                for _ in 0.."work".len() {
+                    key(&mut app, KeyCode::Backspace, &mut out);
+                }
+                typed(&mut app, "max2", &mut out);
+                key(&mut app, KeyCode::Enter, &mut out);
+                let s = saved();
+                assert_eq!(s["profiles"][0]["name"], "max2");
+                assert_eq!(
+                    s["projects"]["/tmp/demo"]["default_profiles"]["claude"],
+                    "max2"
+                );
+                assert!(profiles_root().join("max2").join("claude").is_dir());
+                assert!(!profiles_root().join("work").exists());
+                assert_eq!(view(&app).mode, Mode::List);
+                assert_eq!(view(&app).selected().map(|r| r.key.as_str()), Some("max2"));
+            },
+        );
+    }
+
+    /// The remove's `p` deletes the home with the profile; with no home
+    /// on disk there is nothing for it to do.
+    #[test]
+    fn remove_with_p_deletes_the_home_too() {
+        with_config_json(
+            r#"{"profiles":[{"name":"work","harness":"claude"},{"name":"bare","harness":"claude"}]}"#,
+            || {
+                std::fs::create_dir_all(profiles_root().join("work").join("claude")).unwrap();
+                let mut app = App::new();
+                let mut out = Vec::new();
+                open_overlay(&mut app, &mut out);
+                key(&mut app, KeyCode::Char('x'), &mut out);
+                let Mode::Remove { message, home, .. } = &view(&app).mode else {
+                    panic!("no confirm");
+                };
+                assert!(message.contains("p deletes it"), "{message}");
+                assert_eq!(
+                    home.as_deref(),
+                    Some(profiles_root().join("work").as_path())
+                );
+                click(&mut app, AccountsHit::Key(KeyCode::Char('p')), &mut out);
+                assert!(!profiles_root().join("work").exists(), "purged");
+                assert_eq!(saved()["profiles"][0]["name"], "bare");
+
+                key(&mut app, KeyCode::Char('x'), &mut out);
+                key(&mut app, KeyCode::Char('p'), &mut out);
+                assert!(
+                    matches!(view(&app).mode, Mode::Remove { home: None, .. }),
+                    "no home, no purge"
+                );
+                assert!(!draw(&mut app).contains("delete its home"));
+                key(&mut app, KeyCode::Char('y'), &mut out);
+                assert_eq!(saved()["profiles"], serde_json::json!([]));
             },
         );
     }

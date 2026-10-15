@@ -24,7 +24,7 @@
    *  settings rows but lists (agent_presets.json, config.json profiles). */
   const LOCAL_TABS = [
     { id: 'presets', title: 'Presets' },
-    { id: 'profiles', title: 'Profiles' },
+    { id: 'profiles', title: 'Accounts' },
   ];
 
   let schema = $state<SettingsSchema | null>(null);

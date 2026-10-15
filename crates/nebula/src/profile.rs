@@ -1,10 +1,12 @@
 //! `kete profile`: the PROFILES list from the command line — list, add,
-//! remove, pick the default, and sign one in.
+//! duplicate, rename, remove, pick the default and the spread, and sign
+//! one in.
 //!
 //! The list is `config.json`'s `profiles` key (`nebula_core::profiles`),
 //! edited as raw JSON so every other key, and every field a newer kete
-//! wrote, survives. Nothing here talks to the daemon: it reads the list
-//! fresh at each spawn. `login` runs the harness's own sign-in in this
+//! wrote, survives. The daemon reads the list fresh at each spawn; only a
+//! rename (which a session naming the profile refuses) and `set-project`
+//! (which looks the project up) ask it anything. `login` runs the harness's own sign-in in this
 //! terminal with the profile's environment applied, so the credentials it
 //! writes land in the PROFILE HOME (`<data dir>/profiles/<name>/`).
 
@@ -26,6 +28,21 @@ pub enum ProfileOp {
     Remove {
         name: String,
         purge: bool,
+    },
+    /// A new name: its home, project defaults and reading move with it.
+    Rename {
+        old: String,
+        new: String,
+    },
+    /// A copy of `from` under `name`, with a home of its own.
+    Duplicate {
+        from: String,
+        name: String,
+    },
+    /// The ACCOUNT SPREAD, and with `threshold` failover's percent.
+    Spread {
+        mode: String,
+        threshold: Option<String>,
     },
     /// Change what is given; the name stays (it names the home).
     Edit {
@@ -66,7 +83,12 @@ pub fn run_profile(op: ProfileOp) -> Result<()> {
     // that one for both layers. The base layer's edit locks it itself.
     let _lock = match &op {
         // A project default edits the `projects` key: its own layer.
-        ProfileOp::List | ProfileOp::Login { .. } | ProfileOp::SetProject { .. } => None,
+        // A rename and a spread take the settings locks themselves.
+        ProfileOp::List
+        | ProfileOp::Login { .. }
+        | ProfileOp::SetProject { .. }
+        | ProfileOp::Rename { .. }
+        | ProfileOp::Spread { .. } => None,
         _ if config == local => Some(
             nebula_core::settings::lock(&base)
                 .with_context(|| format!("lock {}", base.display()))?,
@@ -116,29 +138,57 @@ pub fn run_profile(op: ProfileOp) -> Result<()> {
             Ok(())
         }
         ProfileOp::Remove { name, purge } => {
-            let profile = profiles::load()
-                .into_iter()
-                .find(|p| p.name.trim() == name.trim());
-            if !profiles::remove_from_file(&config, &name).map_err(anyhow::Error::msg)? {
-                bail!("no profile named `{name}`");
-            }
-            println!("removed profile `{}`", name.trim());
             // The home holds the login: kept unless asked, so adding the
             // name back signs nothing in again. Never an adopted login's —
             // that is the CLI's own default config, and not ours.
-            if let Some(home) = profile.as_ref().and_then(Profile::home) {
-                if purge {
-                    purge_home(&home)?;
-                    println!("deleted {}", home.display());
-                } else if home.exists() {
+            let removed =
+                profiles::remove_in_file(&config, &profiles::profiles_root(), &name, purge)
+                    .map_err(anyhow::Error::msg)?;
+            println!("removed profile `{}`", name.trim());
+            match removed.home {
+                Some(home) if removed.purged => println!("deleted {}", home.display()),
+                Some(home) => println!(
+                    "its home stays at {} (kete profile remove --purge deletes it)",
+                    home.display()
+                ),
+                None => {}
+            }
+            Ok(())
+        }
+        ProfileOp::Rename { old, new } => rename(&base, &local, &old, &new),
+        ProfileOp::Duplicate { from, name } => {
+            let copy =
+                profiles::duplicate_in_file(&config, &from, &name).map_err(anyhow::Error::msg)?;
+            match copy.home() {
+                Some(home) => {
+                    copy.prepare(None)
+                        .with_context(|| format!("create {}", home.display()))?;
                     println!(
-                        "its home stays at {} (kete profile remove --purge deletes it)",
+                        "added profile `{}` ({}), a copy of `{}`, home {}",
+                        copy.name,
+                        copy.harness,
+                        from.trim(),
                         home.display()
                     );
+                }
+                None => println!(
+                    "added profile `{}` ({}), a copy of `{}`, on the CLI's default login",
+                    copy.name,
+                    copy.harness,
+                    from.trim()
+                ),
+            }
+            if let Some(command) = nebula_core::accounts::login_command(Some(&copy), &copy.harness)
+            {
+                if nebula_core::accounts::login_state(Some(&copy), &copy.harness)
+                    != nebula_core::accounts::LoginState::LoggedIn
+                {
+                    println!("sign it in with: {command}");
                 }
             }
             Ok(())
         }
+        ProfileOp::Spread { mode, threshold } => spread(&mode, threshold.as_deref()),
         ProfileOp::Edit {
             name,
             harness,
@@ -166,7 +216,9 @@ pub fn run_profile(op: ProfileOp) -> Result<()> {
                     .with_context(|| format!("create {}", home.display()))?;
             }
             println!("saved profile `{}` ({})", profile.name, profile.harness);
-            if let Some(hint) = profiles::login_hint(&profile) {
+            if let Some(hint) =
+                nebula_core::accounts::login_command(Some(&profile), &profile.harness)
+            {
                 if nebula_core::accounts::login_state(Some(&profile), &profile.harness)
                     == nebula_core::accounts::LoginState::NeedsLogin
                 {
@@ -322,6 +374,16 @@ fn set_project(
 /// The daemon's projects and worktrees, over one connection (the daemon
 /// is started when none runs, as `kete ado` does).
 async fn fetch_projects() -> Result<(Vec<nebula_core::Project>, Vec<nebula_core::Worktree>)> {
+    let (projects, worktrees, _) = fetch_tree().await?;
+    Ok((projects, worktrees))
+}
+
+/// The daemon's projects, worktrees and sessions, from one snapshot.
+async fn fetch_tree() -> Result<(
+    Vec<nebula_core::Project>,
+    Vec<nebula_core::Worktree>,
+    Vec<nebula_core::Agent>,
+)> {
     use nebula_core::codec::{read_frame, write_frame};
     use nebula_core::{ClientRequest, ServerEvent};
     let mut conn = nebula_tui::ipc::connect_or_spawn().await?;
@@ -331,12 +393,116 @@ async fn fetch_projects() -> Result<(Vec<nebula_core::Project>, Vec<nebula_core:
             Some(ServerEvent::Snapshot {
                 projects,
                 worktrees,
+                agents,
                 ..
-            }) => return Ok((projects, worktrees)),
+            }) => return Ok((projects, worktrees, agents)),
             Some(_) => continue,
             None => bail!("the daemon closed the connection before sending its projects"),
         }
     }
+}
+
+/// `kete profile rename`: the sessions are asked of the daemon (a session
+/// naming the profile refuses it), then `profiles::rename` moves the
+/// home and rewrites every name in the settings.
+fn rename(base: &Path, local: &Path, old: &str, new: &str) -> Result<()> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let (_, _, agents) = rt.block_on(fetch_tree())?;
+    let signed_in = profiles::load()
+        .iter()
+        .find(|p| p.name.trim() == old.trim())
+        .is_some_and(|p| {
+            nebula_core::accounts::login_state(Some(p), &p.harness)
+                == nebula_core::accounts::LoginState::LoggedIn
+        });
+    let done = profiles::rename(base, local, &profiles::profiles_root(), old, new, &agents)
+        .map_err(anyhow::Error::msg)?;
+    println!("renamed `{}` to `{}`", old.trim(), done.profile.name);
+    if let Some((_, to)) = &done.home {
+        println!("its home is now {}", to.display());
+    }
+    if !done.projects.is_empty() {
+        println!(
+            "default {} account of {} now names `{}`",
+            done.profile.harness,
+            done.projects.join(", "),
+            done.profile.name
+        );
+    }
+    if !done.archived.is_empty() {
+        println!(
+            "{} archived session(s) still name `{}` ({}): move one to an account before restoring it",
+            done.archived.len(),
+            old.trim(),
+            done.archived.join(", ")
+        );
+    }
+    // Some sign-ins key their stored login by the config dir's path: say
+    // so when a signed-in home reads as signed out once moved.
+    let profile = &done.profile;
+    if signed_in
+        && nebula_core::accounts::login_state(Some(profile), &profile.harness)
+            == nebula_core::accounts::LoginState::NeedsLogin
+    {
+        if let Some(command) = nebula_core::accounts::login_command(Some(profile), &profile.harness)
+        {
+            println!("it reads as signed out now: sign it in with: {command}");
+        }
+    }
+    Ok(())
+}
+
+/// `kete profile spread <mode> [--threshold N]`: the ACCOUNT SPREAD as
+/// the Accounts views set it, through the same settings write.
+fn spread(mode: &str, threshold: Option<&str>) -> Result<()> {
+    let word = parse_spread(mode)?;
+    let threshold = threshold.map(parse_threshold).transpose()?;
+    nebula_tui::config::Config::update(|c| {
+        c.account_spread = word.to_string();
+        if let Some(t) = &threshold {
+            c.account_spread_threshold = t.clone();
+        }
+    })
+    .context("save the spread")?;
+    let at = match &threshold {
+        Some(t) => t.clone(),
+        None => nebula_core::accounts::load_policy().threshold.to_string(),
+    };
+    println!(
+        "account spread: {}",
+        match nebula_core::accounts::Spread::parse(word) {
+            nebula_core::accounts::Spread::Manual => "manual (the default profile)".to_string(),
+            nebula_core::accounts::Spread::Failover => format!("failover at {at}%"),
+            nebula_core::accounts::Spread::LeastUsed => "least used".to_string(),
+        }
+    );
+    Ok(())
+}
+
+/// A spread as config.json spells it, from `manual`, `failover`,
+/// `least-used` or `least_used`.
+fn parse_spread(mode: &str) -> Result<&'static str> {
+    let mode = mode.trim().to_ascii_lowercase();
+    match mode.as_str() {
+        "manual" | "failover" | "least-used" | "least_used" => {
+            Ok(nebula_core::accounts::Spread::parse(&mode).as_str())
+        }
+        _ => bail!("unknown spread `{mode}`: expected manual, failover or least-used"),
+    }
+}
+
+/// A failover threshold the Accounts views offer (`90` or `90%`).
+fn parse_threshold(text: &str) -> Result<String> {
+    let t = text.trim().trim_end_matches('%');
+    if nebula_core::accounts::THRESHOLDS.contains(&t) {
+        return Ok(t.to_string());
+    }
+    bail!(
+        "threshold {text}: expected one of {}",
+        nebula_core::accounts::THRESHOLDS.join(", ")
+    )
 }
 
 /// The project `query` names: its id, its name (any case; refused when two
@@ -468,10 +634,12 @@ fn render_list(
             Some(problem) => format!("! {problem}"),
             None => match login(profile, harness) {
                 LoginState::LoggedIn => "signed in".to_string(),
-                LoginState::NeedsLogin => match profile.and_then(profiles::login_hint) {
-                    Some(hint) => format!("needs login: {hint}"),
-                    None => "needs login".to_string(),
-                },
+                LoginState::NeedsLogin => {
+                    match nebula_core::accounts::login_command(profile, harness) {
+                        Some(hint) => format!("needs login: {hint}"),
+                        None => "needs login".to_string(),
+                    }
+                }
                 LoginState::Unknown => String::new(),
             },
         };
@@ -603,25 +771,6 @@ fn profiles_layer(config: &Path, local: &Path) -> Result<PathBuf> {
             config.to_path_buf()
         },
     )
-}
-
-/// Delete a PROFILE HOME — only ever a directory directly inside
-/// `<data dir>/profiles`, checked on the resolved paths.
-fn purge_home(home: &std::path::Path) -> Result<()> {
-    if !home.exists() {
-        return Ok(());
-    }
-    let root = nebula_core::paths::canonical(&profiles::profiles_root())
-        .context("resolve the profiles dir")?;
-    let target = nebula_core::paths::canonical(home).context("resolve the profile home")?;
-    if target.parent() != Some(root.as_path()) {
-        bail!(
-            "refusing to delete {}: not a profile home under {}",
-            target.display(),
-            root.display()
-        );
-    }
-    std::fs::remove_dir_all(&target).with_context(|| format!("delete {}", target.display()))
 }
 
 #[cfg(test)]

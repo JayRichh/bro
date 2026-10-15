@@ -213,7 +213,7 @@ export function paletteCommands(): Command[] {
     cmd('presets', 'Agent presets', 'Window', () => openSettings('presets'), undefined, 'prefix postfix'),
     cmd('accounts', 'Accounts', 'Window', openAccounts, 'accounts', 'profiles login usage spread subscription'),
     cmd('add-account', 'Add an account\u2026', 'Window', () => openAddAccount(), undefined, 'profile login new subscription'),
-    cmd('profiles', 'Profiles', 'Window', () => openSettings('profiles'), undefined, 'accounts login'),
+    cmd('profiles', 'Profiles', 'Window', openAccounts, undefined, 'accounts login'),
     cmd('help', 'Keyboard shortcuts', 'Window', () => (ui.help = true), 'help_f1', 'help keys'),
     cmd('add-repo', 'Add a repo\u2026', 'Window', () => addRepo(), undefined, 'project folder'),
     ...orchestratorCommands(),
