@@ -4,9 +4,17 @@
   // can't drift from the keys.
   import { tick } from 'svelte';
   import { ui } from './ui/ui.svelte';
-  import { helpGroups, keyLabel, type Scope } from './shortcuts';
+  import { learn } from './learn.svelte';
+  import { RARE, SHORTCUTS, keyLabel, taskGroups, type Scope } from './shortcuts';
 
-  const groups = helpGroups();
+  // Grouped by task; the rare and unbound keys wait behind Show all.
+  let all = $state(false);
+  const groups = $derived(taskGroups(undefined, all));
+  const hidden = $derived(SHORTCUTS.filter((s) => !s.keys.length || RARE.has(s.id)).length);
+  function whatsNew() {
+    ui.help = false;
+    learn.whatsNew = true;
+  }
   const WHERE: Record<Scope, string> = {
     anywhere: 'anywhere',
     fields: 'not in a terminal',
@@ -47,6 +55,17 @@
       <span class="min-w-0 truncate font-mono text-[12px] text-muted">most verbs have a button too: the headers, a card's hover strip, or right-click</span>
       <span class="flex-1"></span>
       <button
+        class="flex-none border border-rule bg-transparent px-1.5 text-[12px] leading-5 text-ink hover:border-rule-strong"
+        title="What changed in the last few releases, and the keys that moved"
+        onclick={whatsNew}>What's new</button
+      >
+      <button
+        class="flex-none border px-1.5 text-[12px] leading-5 {all ? 'border-ink bg-ink text-bg' : 'border-rule bg-transparent text-ink hover:border-rule-strong'}"
+        aria-pressed={all}
+        title={all ? 'Show the everyday keys only' : `Show all: ${hidden} rarer or unbound keys too`}
+        onclick={() => (all = !all)}>Show all</button
+      >
+      <button
         class="flex-none border border-rule bg-transparent px-1.5 font-mono text-[11px] leading-5 text-muted hover:border-rule-strong hover:text-ink"
         title="Close (Esc)"
         aria-label="Close the keyboard shortcuts"
@@ -57,7 +76,7 @@
       {#each groups as g (g.group)}
         <section class="break-inside-avoid pt-4" aria-label={g.group}>
           <h3 class="m-0 border-b border-rule-strong pb-1 text-[13px] font-semibold">
-            {g.group}{#if g.group === 'Sessions'}<span class="ml-2 font-mono text-[11px] font-normal text-muted">on a focused row or card</span>{/if}
+            {g.group}{#if g.group === 'Act on a session'}<span class="ml-2 font-mono text-[11px] font-normal text-muted">on a focused row or card</span>{/if}
           </h3>
           <ul class="m-0 list-none p-0">
             {#each g.rows as s (s.label)}
@@ -67,6 +86,7 @@
                   {#if s.scope && WHERE[s.scope]}<span class="ml-1 font-mono text-[11px] text-muted">{WHERE[s.scope]}</span>{/if}
                 </span>
                 <span class="flex flex-none gap-1">
+                  {#if !s.keys.length}<span class="font-mono text-[11px] text-faint">unbound</span>{/if}
                   {#each s.keys as k (k)}<kbd class="border border-rule px-1.5 font-mono text-[11px] leading-5">{keyLabel(k)}</kbd>{/each}
                 </span>
               </li>

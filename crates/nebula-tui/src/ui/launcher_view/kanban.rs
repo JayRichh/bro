@@ -37,6 +37,18 @@ fn lane_color(lane: Lane, th: Theme) -> Color {
     }
 }
 
+/// The empty-state copy ([`nebula_config::learn::EMPTY`]) a lane shows
+/// with no cards.
+fn lane_empty_id(lane: Lane) -> &'static str {
+    match lane {
+        Lane::Running => "lane_running",
+        Lane::NeedsInput => "lane_needs",
+        Lane::Review => "lane_review",
+        Lane::Ship => "lane_ship",
+        Lane::Done => "lane_done",
+    }
+}
+
 /// The narrowest the lanes go beside a docked review: five of 14 columns
 /// and their gaps, so a card still shows its name.
 const DOCKED_LANES_W: u16 = Lane::ALL.len() as u16 * 15 - 1;
@@ -172,10 +184,27 @@ pub(super) fn draw(f: &mut Frame, app: &mut App, body: Rect) {
         // on screen; the others show their top.
         let start = at.map_or(0, |row| (row + 1).saturating_sub(fit));
         if cards.is_empty() {
-            if let Some(line) = row_rect(r, LANE_HEAD_H as usize) {
+            // An empty lane says what lands in it (and, for Running, the
+            // key that starts something), wrapped to the lane.
+            let copy = Rect {
+                y: r.y + LANE_HEAD_H,
+                height: r.height.saturating_sub(LANE_HEAD_H).min(4),
+                ..r
+            };
+            if copy.height > 0 {
+                // The key hint on a row of its own, so a narrow lane never
+                // splits `p:` from what it does.
+                let (text, hint) = crate::learn::empty_parts(app, lane_empty_id(lane));
+                let mut lines = vec![Line::from(Span::styled(text, Style::default().fg(th.dim)))];
+                if let Some(hint) = hint {
+                    lines.push(Line::from(Span::styled(
+                        truncate(&hint, copy.width as usize),
+                        Style::default().fg(th.accent),
+                    )));
+                }
                 f.render_widget(
-                    Paragraph::new(Span::styled("-", Style::default().fg(th.dim))),
-                    line,
+                    Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: true }),
+                    copy,
                 );
             }
             lane_hits.push((r, HitTarget::KanbanLane(i)));
@@ -253,10 +282,14 @@ pub(super) fn draw(f: &mut Frame, app: &mut App, body: Rect) {
     }
     if total == 0 {
         if let Some(line) = row_rect(area, (area.height / 2) as usize) {
+            let start = crate::learn::empty_line(app, "board");
             let what = if app.launcher.kanban_all {
-                "no sessions in any project: p starts one"
+                start
             } else {
-                "no sessions in this project: p starts one, Tab shows every project's"
+                format!(
+                    "{start}  {}: every project",
+                    crate::ui::key_hint(app, crate::keymap::Action::FocusNext)
+                )
             };
             f.render_widget(
                 Paragraph::new(Span::styled(what, Style::default().fg(th.dim)))

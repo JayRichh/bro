@@ -313,6 +313,9 @@ const SWEEP_FRAME: Duration = crate::app::SWEEP_FRAME;
 /// `Some(entry)` = quit via the hosts picker: the caller should exec
 /// `nebula ssh` at it now that the terminal is restored.
 pub async fn run_app() -> Result<Option<crate::hosts::HostEntry>> {
+    // Before the daemon is reached (and maybe started): is this a first
+    // install? WHAT'S NEW skips one.
+    crate::learn::note_startup();
     let conn = ipc::connect_or_spawn().await?;
     let mut channels = ipc::split_connection(conn);
     channels.tx.send(ClientRequest::Subscribe).await?;

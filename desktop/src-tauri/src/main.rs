@@ -14,6 +14,7 @@ mod daemon;
 mod files;
 mod git;
 mod launch;
+mod learn;
 mod orchestrator;
 mod order;
 mod pr_poll;
@@ -849,6 +850,8 @@ fn main() {
     // daemon runs) before the client works out where the daemon is. This
     // window has no console to say so on; `kete` says it when it moves them.
     let _ = nebula_core::paths::migrate_legacy_dirs();
+    // Before anything writes a settings file: is this a first install?
+    learn::note_startup();
     let client = Client::new();
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -959,6 +962,9 @@ fn main() {
             settings_io::settings_import,
             settings::desktop_prefs,
             settings::desktop_set_collapsed,
+            learn::learn_state,
+            learn::learn_seen,
+            learn::learn_tips,
             settings::config_problem,
             settings::actions_list,
             settings::desktop_key_set,

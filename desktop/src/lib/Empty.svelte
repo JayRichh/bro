@@ -1,8 +1,18 @@
 <script lang="ts">
+  // The home views with nothing in them: what goes here and the one thing
+  // to do, as a button with its key (the copy is nebula-config's learn.rs,
+  // shared with the terminal app).
   import { app, focusQuickPrompt } from './store.svelte';
   import { api } from './api';
+  import { addRepo } from './commands';
+  import { emptyCopy } from './learn';
+  import { keyLabel, withKey } from './shortcuts';
+  import { verbKeys } from './verbs';
 
   const noProjects = $derived(app.model.projects.length === 0);
+  const noRepos = emptyCopy('no_repos');
+  const start = $derived(emptyCopy(app.home === 'board' ? 'board' : 'overview'));
+  const startKey = $derived(verbKeys('quick_prompt')[0]);
   const primary =
     'mt-4 inline-flex items-center gap-2 border border-rule-strong bg-ink px-3 py-1.5 text-[14px] font-medium text-bg hover:bg-transparent hover:text-ink';
 </script>
@@ -21,15 +31,17 @@
     {/if}
   {:else if noProjects}
     <p class="m-0 max-w-[60ch] text-[14px] text-muted">
-      A repo holds your worktrees and the sessions running in them. Use <strong class="font-medium text-ink">Add a repo</strong> in the
-      rail, or run <code class="border border-rule bg-surface px-1 font-mono text-[12px] text-ink">kete add .</code> in a terminal.
-    </p>
-  {:else}
-    <p class="m-0 max-w-[60ch] text-[14px] text-muted">
-      Every session you start shows up here under its repo, the ones waiting on you first.
+      {noRepos.text} Or run <code class="border border-rule bg-surface px-1 font-mono text-[12px] text-ink">kete add .</code> in a terminal.
     </p>
     <div>
-      <button class={primary} onclick={() => focusQuickPrompt()}>New session <kbd>P</kbd></button>
+      <button class={primary} title="Pick a folder to add as a repo (also in the rail and the palette)" onclick={() => addRepo()}>Add a repo</button>
+    </div>
+  {:else}
+    <p class="m-0 max-w-[60ch] text-[14px] text-muted">{start.text}</p>
+    <div>
+      <button class={primary} title={withKey('New session: the quick prompt', ['quick_prompt', 'quick_prompt_alt'])} onclick={() => focusQuickPrompt()}
+        >New session{#if startKey}<kbd class="font-mono text-[12px]">{keyLabel(startKey)}</kbd>{/if}</button
+      >
     </div>
   {/if}
 </div>

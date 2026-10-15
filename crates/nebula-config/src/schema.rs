@@ -115,6 +115,7 @@ impl SettingKind {
             SettingKind::AccountSpread => nebula_core::accounts::SPREAD_KEY,
             SettingKind::AccountSpreadThreshold => nebula_core::accounts::THRESHOLD_KEY,
             SettingKind::UsageStatusline => "usage_statusline",
+            SettingKind::ShowTips => "show_tips",
         }
     }
 }
@@ -228,6 +229,7 @@ fn flag(cfg: &mut Config, kind: SettingKind) -> Option<&mut bool> {
         SettingKind::ShowAllWorktrees => &mut cfg.show_all_worktrees,
         SettingKind::AskBeforeArchive => &mut cfg.ask_before_archive,
         SettingKind::ConfirmDragMove => &mut cfg.confirm_drag_move,
+        SettingKind::ShowTips => &mut cfg.show_tips,
         SettingKind::UsageStatusline => &mut cfg.usage_statusline,
         SettingKind::Animations => &mut cfg.animations,
         SettingKind::BlackBackground => &mut cfg.black_background,

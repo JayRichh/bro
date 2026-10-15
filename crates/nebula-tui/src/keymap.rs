@@ -1058,6 +1058,7 @@ mod tests {
                             | Action::MergePullRequest
                             | Action::FocusScope
                             | Action::ScopeAccount
+                            | Action::WhatsNew
                     ),
                     "{} ships with no chord",
                     spec.id

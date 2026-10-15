@@ -11,12 +11,20 @@ macro_rules! main_loop_body {
     // The repo nebula was started in, for the first run's "open this
     // folder" — looked up once, off the tree the snapshot has not sent yet.
     app.launcher.launch_repo = crate::app::launch_repo();
+    // A first install (noted before the daemon was reached), which
+    // WHAT'S NEW skips.
+    let fresh = crate::learn::fresh();
     // The CONFIG WATCH's baseline is taken before the read, so a write
     // landing between the two still reads as a change on the first beat.
     app.chrome.config_watch.arm();
     let cfg = crate::config::Config::load();
     apply_config(&mut app, &cfg);
     app.chrome.keymap = cfg.keymap();
+    // LEARN IN PLACE: the tips armed from the config, and the WHAT'S NEW
+    // page once after an upgrade.
+    if crate::learn::arm(&mut app, &cfg, fresh, true) {
+        crate::learn::open_whats_new(&mut app);
+    }
     // Every pull request the last run knew about, painted before the
     // daemon's snapshot even lands; the lookups below refresh them all in
     // the background (`pr_cache`).
@@ -137,6 +145,8 @@ macro_rules! main_loop_body {
             if app.git_changes_stale() {
                 request_git_changes(&mut app, &git_tx);
             }
+            // A FIRST-USE TIP for what is about to be on screen, if one is due.
+            crate::learn::observe(&mut app);
             let began = std::time::Instant::now();
             draw_frame($terminal, &mut app)?;
             if let Some(perf) = &mut perf {

@@ -40,6 +40,7 @@ pub mod key_combo;
 pub mod keymap;
 pub mod keys;
 pub mod launcher;
+pub mod learn;
 pub mod links;
 pub(crate) mod list_hit;
 pub mod localhost;

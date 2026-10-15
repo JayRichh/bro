@@ -212,6 +212,9 @@ pub enum Action {
     /// running it; its last row is the full help ([`Action::Help`]).
     Verbs,
     Help,
+    /// The WHAT'S NEW page (`crate::learn::WHATS_NEW`): unbound by default,
+    /// in the palette and on the Help overlay.
+    WhatsNew,
     Quit,
     // The menus' verbs, rebindable but unbound by default: each acts on
     // the selection, as its menu row does on the row it was opened on.
@@ -1684,6 +1687,21 @@ pub const ACTIONS: &[ActionSpec] = &[
         ],
     },
     ActionSpec {
+        action: Action::WhatsNew,
+        id: "whats_new",
+        label: "What's new",
+        hint: "What changed in the last few releases, and the keys that moved: shown once after an upgrade, here any time after (Help has it too)",
+        group: "GENERAL",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "what's new",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Both,
+        desktop: &[dk("whats_new", "What's new", "General", DeskScope::Global, &[])],
+    },
+    ActionSpec {
         action: Action::Quit,
         id: "quit",
         label: "Quit kete",
@@ -1948,6 +1966,7 @@ pub const DESKTOP_ORDER: &[&str] = &[
     "verbs",
     "help",
     "help_f1",
+    "whats_new",
     "settings",
     "find",
     "refresh",
@@ -2655,6 +2674,65 @@ pub fn render_ts() -> String {
     out.push_str(&format!(
         "\n/** How many verbs the verb bar shows before `? more`. */\nexport const PRIMARY_SHOWN = {PRIMARY_SHOWN};\n"
     ));
+    out.push_str(&render_learn_ts());
+    out
+}
+
+/// The LEARN IN PLACE copy ([`crate::learn`]) as the window imports it:
+/// the tips, the What's new page and the empty states.
+fn render_learn_ts() -> String {
+    use crate::learn::{EMPTY, KEYS_CHANGED, TIPS, WHATS_NEW};
+    let mut out = String::from(
+        "\n/** First-use tips (nebula-config learn.rs): `{verb}` / `{verb|words}` name a key. */\n",
+    );
+    out.push_str("export const TIPS: readonly { id: string; text: string }[] = [\n");
+    for t in TIPS {
+        out.push_str(&format!(
+            "  {{ id: {}, text: {} }},\n",
+            ts_str(t.id),
+            ts_str(t.text)
+        ));
+    }
+    out.push_str("];\n\n/** The What's new page, newest release first. */\n");
+    out.push_str(
+        "export const WHATS_NEW: readonly { version: string; title: string; items: readonly string[] }[] = [\n",
+    );
+    for r in WHATS_NEW {
+        out.push_str(&format!(
+            "  {{ version: {}, title: {}, items: {} }},\n",
+            ts_str(r.version),
+            ts_str(r.title),
+            ts_strs(r.items)
+        ));
+    }
+    out.push_str("];\n\n/** The What's new page's keys-changed table. */\n");
+    out.push_str(
+        "export const KEYS_CHANGED: readonly { verb: string; tui: string; desktop: string }[] = [\n",
+    );
+    for k in KEYS_CHANGED {
+        out.push_str(&format!(
+            "  {{ verb: {}, tui: {}, desktop: {} }},\n",
+            ts_str(k.verb),
+            ts_str(k.tui),
+            ts_str(k.desktop)
+        ));
+    }
+    out.push_str(
+        "];\n\n/** What an empty lane, list or view says, and the verb that fills it. */\n",
+    );
+    out.push_str(
+        "export const EMPTY: readonly { id: string; text: string; verb: ActionId | null; does: string }[] = [\n",
+    );
+    for e in EMPTY {
+        let verb = e.verb.map(ts_str).unwrap_or_else(|| "null".into());
+        out.push_str(&format!(
+            "  {{ id: {}, text: {}, verb: {verb}, does: {} }},\n",
+            ts_str(e.id),
+            ts_str(e.text),
+            ts_str(e.does)
+        ));
+    }
+    out.push_str("];\n");
     out
 }
 
@@ -2726,7 +2804,7 @@ mod tests {
         // jump, the window's Ctrl+K is `command_palette`; `move_up` walks
         // the cursor where the window's reorders, `reorder_up`): the
         // window's key ids are their own namespace.
-        assert_eq!(ACTIONS.len(), 90);
+        assert_eq!(ACTIONS.len(), 91);
         for id in [
             "palette",
             "move_up",

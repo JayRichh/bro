@@ -6,7 +6,8 @@
   // click. Dropped on its header, a session moves there and a worktree
   // lands above or below it (by the pointer's half; the root stays
   // first). Its sessions and terminals follow it, folded away with it.
-  import { app, toast } from '../store.svelte';
+  import { app, focusQuickPrompt, toast } from '../store.svelte';
+  import { emptyCopy } from '../learn';
   import { api } from '../api';
   import { openMenu } from '../ui/ui.svelte';
   import { age } from '../status';
@@ -200,5 +201,15 @@
   </div>
   {#if !folded && !empty}
     <SessionTree {repo} forest={group.forest} terminals={group.terminals} />
+  {:else if !folded}
+    <!-- An empty worktree (Show all worktrees): what goes here, and how. -->
+    <p class="m-0 flex items-center gap-3 border-b border-rule py-1.5 pl-10 text-[13px] text-muted">
+      {emptyCopy('no_sessions').text}
+      <button
+        class="border-0 bg-transparent p-0 text-ink underline underline-offset-4 hover:no-underline"
+        title={withKey('New session in this worktree: the quick prompt', ['quick_prompt', 'quick_prompt_alt'])}
+        onclick={() => focusQuickPrompt({ project: repo, worktree: w.id })}>Start one here</button
+      >
+    </p>
   {/if}
 </div>

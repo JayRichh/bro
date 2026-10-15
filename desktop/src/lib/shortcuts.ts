@@ -249,3 +249,86 @@ export function typingSafe(scope: Scope, chord: string): boolean {
   const fkey = !!n && Number(n[1]) >= 1 && Number(n[1]) <= 24;
   return parts.slice(0, -1).some((m) => m === 'ctrl' || m === 'alt') || fkey;
 }
+
+/** The help's groups, by task rather than by where a key lives. */
+export const TASKS = ['Navigate', 'Act on a session', 'Review & ship', 'Window'] as const;
+export type Task = (typeof TASKS)[number];
+
+/** Each key row's task. A row not listed takes its registry group's
+ *  (`TASK_OF_GROUP`), so a key added later still lands somewhere. */
+const TASK_OF: Record<string, Task> = {
+  palette: 'Navigate',
+  palette_alt: 'Navigate',
+  verbs: 'Navigate',
+  find: 'Navigate',
+  quick_prompt: 'Act on a session',
+  quick_prompt_alt: 'Act on a session',
+  new_worktree: 'Act on a session',
+  refresh: 'Review & ship',
+  diff: 'Review & ship',
+  open_diff: 'Review & ship',
+  go_diff: 'Review & ship',
+  open_pr: 'Review & ship',
+  close_split: 'Window',
+  maximize: 'Window',
+  maximize_z: 'Window',
+  toggle_archived: 'Window',
+  accounts: 'Window',
+  orchestrator: 'Window',
+  orchestrator_f10: 'Window',
+  open_editor: 'Window',
+  open_remote: 'Window',
+};
+const TASK_OF_GROUP: Record<string, Task> = {
+  General: 'Window',
+  Views: 'Navigate',
+  Sessions: 'Act on a session',
+  'Overview and board': 'Navigate',
+  Review: 'Review & ship',
+};
+
+/** Rows the help keeps behind Show all: rare, or one of a run (the repo
+ *  digits after the first). Unbound rows are hidden too. */
+export const RARE: ReadonlySet<string> = new Set([
+  'repo_2',
+  'repo_3',
+  'repo_4',
+  'repo_5',
+  'repo_6',
+  'repo_7',
+  'repo_8',
+  'repo_9',
+  'cycle_theme',
+  'open_remote',
+  'duplicate',
+  'move_up',
+  'move_down',
+  'overview_fold',
+  'back',
+  'forward',
+]);
+
+export function taskOf(s: Pick<Shortcut, 'id' | 'group'>): Task {
+  return TASK_OF[s.id] ?? TASK_OF_GROUP[s.group] ?? 'Window';
+}
+
+/** The help overlay's groups: by task, in `TASKS` order. Without `all`
+ *  the rare rows and every unbound one are left out (the digits read as
+ *  one row, `Repo 1 to 9 on the rail`). */
+export function taskGroups(table: Shortcut[] = SHORTCUTS, all = false): { group: Task; rows: HelpRow[]; hidden: number }[] {
+  const out = TASKS.map((group) => ({ group, rows: [] as HelpRow[], hidden: 0 }));
+  for (const s of table) {
+    const g = out.find((x) => x.group === taskOf(s))!;
+    if (!all && (!s.keys.length || RARE.has(s.id))) {
+      g.hidden++;
+      continue;
+    }
+    const label = !all && s.id === 'repo_1' ? 'Repo 1 to 9 on the rail' : s.label;
+    const same = g.rows.find((r) => r.label === label);
+    if (same) {
+      same.keys.push(...s.keys);
+      if (s.scope === 'anywhere' || same.scope !== s.scope) same.scope = null;
+    } else g.rows.push({ label, keys: [...s.keys], scope: s.scope });
+  }
+  return out.filter((g) => g.rows.length);
+}

@@ -5,6 +5,7 @@
 import { sheet as files } from '../files/files.svelte';
 import { addSheet } from '../accounts/add.svelte';
 import { shipSheet } from '../ship/state.svelte';
+import { learn } from '../learn.svelte';
 
 export type MenuItem = {
   label: string;
@@ -119,6 +120,7 @@ export function layerOpen(): boolean {
     ui.dialog ||
     ui.palette ||
     ui.help ||
+    learn.whatsNew ||
     ui.review ||
     ui.startOrchestrator ||
     ui.branchSwitch ||

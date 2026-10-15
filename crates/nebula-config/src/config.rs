@@ -446,6 +446,7 @@ pub enum SettingKind {
     AccountSpread,
     AccountSpreadThreshold,
     UsageStatusline,
+    ShowTips,
 }
 
 /// One harness field row in the Agents tab. The tab renders one section
@@ -550,6 +551,7 @@ impl SettingKind {
             | SettingKind::KanbanScope
             | SettingKind::Icons => (2026, 10, 13),
             SettingKind::OrchestratorView => (2026, 10, 14),
+            SettingKind::ShowTips => (2026, 10, 15),
         }
     }
 
@@ -627,6 +629,12 @@ pub const SETTINGS_TABS: &[SettingsTab] = &[
                 kind: SettingKind::OrchestratorView,
                 label: "Open on the orchestrator",
                 hint: "Start on the orchestrator's view (F10) when there is one: auto = only in a narrow terminal, always, or never",
+                group: "",
+            },
+            SettingSpec {
+                kind: SettingKind::ShowTips,
+                label: "Show tips",
+                hint: "A one-line tip the first time you meet something (the ? menu, the scope chip, the board's lanes, drag, the review), each once; off hides them all",
                 group: "",
             },
         ]),
@@ -1551,6 +1559,20 @@ pub struct Config {
     /// `^N` flips the one box that is up; the next box starts from this
     /// again. Off by default.
     pub quick_prompt_new_worktree: bool,
+    /// SHOW TIPS: the one-line first-use tips ([`crate::learn::TIPS`]),
+    /// each shown once. On by default, a config predating the key too.
+    pub show_tips: bool,
+    /// The tips already shown, by [`crate::learn::Tip::id`]: shared by
+    /// both apps, so one seen in the terminal app is not shown again in
+    /// the window. Left out of the file while empty. No settings row:
+    /// turning Show tips off and on again doesn't bring them back.
+    #[serde(skip_serializing_if = "BTreeSet::is_empty")]
+    pub tips_seen: BTreeSet<String>,
+    /// The release whose WHAT'S NEW page was last shown (`0.52`, major.minor
+    /// of [`crate::learn::current_version`]): an app that runs a newer one
+    /// shows the page once and writes it here. Left out while empty.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub whats_new_seen: String,
     /// Hotkey overrides, keyed by `keymap::ActionSpec::id`; the value is a
     /// comma-separated chord list (`"j, down"`), and an empty string means
     /// deliberately unbound. Only rows that differ from the defaults are
@@ -1768,6 +1790,9 @@ impl Default for Config {
             follow_new_session: true,
             confirm_drag_move: true,
             quick_prompt_new_worktree: false,
+            show_tips: true,
+            tips_seen: BTreeSet::new(),
+            whats_new_seen: String::new(),
             keybindings: BTreeMap::new(),
             skipped: BTreeSet::new(),
         }
@@ -2894,6 +2919,7 @@ impl Config {
             SettingKind::QuickPromptFocus => on_off(self.quick_prompt_focus).into(),
             SettingKind::FollowNewSession => on_off(self.follow_new_session).into(),
             SettingKind::ConfirmDragMove => on_off(self.confirm_drag_move).into(),
+            SettingKind::ShowTips => on_off(self.show_tips).into(),
             SettingKind::QuickPromptNewWorktree => on_off(self.quick_prompt_new_worktree).into(),
         }
     }
@@ -3055,6 +3081,9 @@ impl Config {
             }
             SettingKind::ConfirmDragMove => {
                 self.confirm_drag_move = !self.confirm_drag_move;
+            }
+            SettingKind::ShowTips => {
+                self.show_tips = !self.show_tips;
             }
             SettingKind::QuickPromptNewWorktree => {
                 self.quick_prompt_new_worktree = !self.quick_prompt_new_worktree;

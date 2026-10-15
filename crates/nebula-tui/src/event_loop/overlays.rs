@@ -67,8 +67,24 @@ fn handle_help_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) {
         return;
     };
     match overlay {
-        Overlay::Help(_) => {
-            if matches!(
+        // The WHAT'S NEW page scrolls; F1 or `?` turns to the keys.
+        Overlay::Help(view) if view.whats_new => match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => app.modals.overlay = None,
+            KeyCode::Char('j') | KeyCode::Down => view.scroll = view.scroll.saturating_add(1),
+            KeyCode::Char('k') | KeyCode::Up => view.scroll = view.scroll.saturating_sub(1),
+            KeyCode::PageDown | KeyCode::Char(' ') => view.scroll = view.scroll.saturating_add(10),
+            KeyCode::PageUp => view.scroll = view.scroll.saturating_sub(10),
+            KeyCode::F(1) | KeyCode::Char('?') => {
+                view.whats_new = false;
+                view.scroll = 0;
+            }
+            _ => {}
+        },
+        Overlay::Help(view) => {
+            if key.code == KeyCode::Char('w') {
+                view.whats_new = true;
+                view.scroll = 0;
+            } else if matches!(
                 key.code,
                 KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') | KeyCode::F(1)
             ) {

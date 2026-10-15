@@ -527,6 +527,7 @@ pub(crate) fn reload_foreign_config(app: &mut App) -> bool {
 /// (`reload_foreign_config`) so a new setting can't reach one and miss
 /// another — the overlay is a live editor, not a restart-to-apply screen.
 pub(crate) fn apply_config(app: &mut App, cfg: &crate::config::Config) {
+    crate::learn::sync(app, cfg);
     app.chrome.theme = app.chrome.live_theme.resolve(&cfg.theme);
     app.chrome.animations = cfg.animations;
     app.chrome.black_background = cfg.black_background;

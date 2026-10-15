@@ -26,6 +26,7 @@ import { menuFor, newWorktree, parseTarget, refreshPrs, runRowKey, type Target }
 import { pickBranchSwitch } from './worktrees/switcher.svelte';
 import { ask, openMenu, ui, type MenuEntry, type MenuItem } from './ui/ui.svelte';
 import { selection } from './selection.svelte';
+import { learn } from './learn.svelte';
 import { PRIMARY, type ActionId } from './actions.gen';
 import { deskKeysOf, menuLabel, verbKeys } from './verbs';
 import { attentionSessions, stepRing, type PaletteCommand } from './palette';
@@ -264,6 +265,7 @@ export function runShortcut(id: ShortcutId): boolean {
     verbs: openVerbs,
     help: () => ((ui.palette = false), (ui.help = !ui.help)),
     help_f1: () => ((ui.palette = false), (ui.help = !ui.help)),
+    whats_new: () => ((ui.palette = false), (ui.help = false), (learn.whatsNew = true)),
     settings: () => openSettings(),
     find,
     refresh,
@@ -377,6 +379,7 @@ export function paletteCommands(): Command[] {
     cmd('add-account', 'Add an account\u2026', 'Window', () => openAddAccount(), undefined, 'profile login new subscription'),
     cmd('profiles', 'Profiles', 'Window', openAccounts, undefined, 'accounts login'),
     cmd('help', 'Keyboard shortcuts', 'Window', () => (ui.help = true), 'help_f1', 'help keys'),
+    cmd('whats-new', "What's new", 'Window', () => (learn.whatsNew = true), 'whats_new', 'changes release notes changelog keys moved'),
     cmd('add-repo', 'Add a repo\u2026', 'Window', () => addRepo(), undefined, 'project folder'),
     ...orchestratorCommands(),
     // With a repo in view these come from its menu, below.
@@ -425,7 +428,9 @@ export function paletteCommands(): Command[] {
   return out;
 }
 
-async function addRepo() {
+/** Ask for a folder and add it as a repo (the rail's Add a repo, the
+ *  palette's, the empty window's). */
+export async function addRepo() {
   const v = await ask.prompt({
     title: 'Add a repo',
     fields: [{ key: 'path', label: 'Folder', placeholder: 'C:\\path\\to\\repo', mono: true }],

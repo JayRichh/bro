@@ -10,7 +10,7 @@
 //! and its pull request are on the DETAIL STRIP pinned under the list
 //! ([`draw_strip`]).
 
-use super::{draw_panel_edge_marks, session_look, truncate, EMPTY_BAND_DELETE, EMPTY_BAND_HINT};
+use super::{draw_panel_edge_marks, empty_band_hint, session_look, truncate};
 use crate::app::{App, Focus, HitTarget};
 use crate::keymap::Action;
 use crate::launcher::{Band, BandsLayout, Card, CardRef, PanelLayout, RowPr, NESTED_ROW_H};
@@ -216,10 +216,7 @@ pub(super) fn draw_bands(
 /// column the roots use, saying what can be done there.
 fn draw_empty(buf: &mut Buffer, app: &App, r: Rect, band: &Band, lit: bool) {
     let th = app.chrome.theme;
-    let mut text = String::from(EMPTY_BAND_HINT);
-    if !band.is_main {
-        text.push_str(EMPTY_BAND_DELETE);
-    }
+    let text = empty_band_hint(app, band.is_main);
     let fg = if lit { th.accent } else { th.nested_dim };
     // Four cells: the caret column and the scope mark's, each with its
     // space, so the words start where a root's title does.

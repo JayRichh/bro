@@ -3,6 +3,9 @@
 use super::*;
 
 pub(super) fn handle_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) {
+    // A FIRST-USE TIP up long enough to read goes with the next key,
+    // which still does what it does.
+    crate::learn::on_key(app, std::time::Instant::now());
     // The editor modal sits above every overlay: all keys forward to it —
     // vim needs Esc — except Ctrl+Q, the same hatch the terminal lock uses.
     if app.pane.vim.is_some() {
@@ -367,6 +370,7 @@ fn handle_global_action(
     match action {
         Action::Quit
         | Action::Help
+        | Action::WhatsNew
         | Action::Settings
         | Action::Metrics
         | Action::FocusNext
@@ -473,6 +477,7 @@ fn handle_navigation_action(
     match action {
         Action::Quit => app.modals.overlay = Some(Overlay::Confirm(confirm_quit())),
         Action::Help => app.modals.overlay = Some(Overlay::Help(HelpView::default())),
+        Action::WhatsNew => crate::learn::open_whats_new(app),
         Action::Settings => open_settings(app),
         Action::Metrics => open_metrics(app, out),
         // Tab walks forward and stops dead at the terminal pane —

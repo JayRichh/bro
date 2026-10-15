@@ -585,7 +585,11 @@ const HELP_RIGHT: &[HelpSection] = &[
     ),
 ];
 
-fn draw_help_overlay(f: &mut Frame, app: &mut App, _: crate::app::HelpView) {
+fn draw_help_overlay(f: &mut Frame, app: &mut App, view: crate::app::HelpView) {
+    if view.whats_new {
+        draw_whats_new(f, app, view);
+        return;
+    }
     let th = app.chrome.theme;
     // Grouped keymap in two columns: reads by task instead of one
     // giant list, and at ~24 rows it fits a stock terminal window
@@ -648,6 +652,19 @@ fn draw_help_overlay(f: &mut Frame, app: &mut App, _: crate::app::HelpView) {
         .title(" Help ");
     let inner = block.inner(area);
     f.render_widget(block, area);
+    // The WHAT'S NEW page, a key and a click away on the top border.
+    let wn_label = " w: what's new ";
+    let wn_w = (wn_label.chars().count() as u16).min(area.width.saturating_sub(12));
+    let wn_rect = Rect {
+        x: area.right().saturating_sub(wn_w + 2),
+        y: area.y,
+        width: wn_w,
+        height: 1,
+    };
+    f.render_widget(
+        Paragraph::new(Span::styled(wn_label, Style::default().fg(th.accent))),
+        wn_rect,
+    );
     let [left_a, right_a] =
         Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(inner);
     let hover = match &app.modals.overlay {
@@ -725,6 +742,62 @@ fn draw_help_overlay(f: &mut Frame, app: &mut App, _: crate::app::HelpView) {
     if let Some(Overlay::Help(h)) = &mut app.modals.overlay {
         h.area = area;
         h.buttons = buttons;
+        h.buttons.push((wn_rect, Action::WhatsNew));
+    }
+}
+
+/// The WHAT'S NEW page (`learn.rs`): the last few releases in a line or
+/// four each, then the keys that changed, scrolled with j/k. Its foot
+/// names the way to every key (a button, as the keys page's rows are).
+fn draw_whats_new(f: &mut Frame, app: &mut App, view: crate::app::HelpView) {
+    let th = app.chrome.theme;
+    let screen = f.area();
+    let width = HELP_W.min(screen.width.saturating_sub(2));
+    let lines = crate::learn::whats_new_lines(width.saturating_sub(2), th);
+    // Rows the wrapped page takes, so the box is no taller than it.
+    let inner_w = usize::from(width.saturating_sub(2)).max(1);
+    let rows: u16 = lines
+        .iter()
+        .map(|l| (l.width().max(1).div_ceil(inner_w)) as u16)
+        .sum();
+    let height = (rows + 4).min(screen.height.saturating_sub(2)).max(6);
+    let area = centered_rect(screen, width, height);
+    let inner = render_modal_frame(f, area, " What's new in 0.49 to 0.52 ", th);
+    let [body, _, foot] = Layout::vertical([
+        Constraint::Min(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .areas(inner);
+    let max_scroll = rows.saturating_sub(body.height);
+    let scroll = view.scroll.min(max_scroll);
+    f.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .scroll((scroll, 0)),
+        body,
+    );
+    // The foot: how to move, and every key as a button.
+    let keys = key_hint(app, Action::Help);
+    let more = if max_scroll > 0 { "j/k: scroll  " } else { "" };
+    let lead = format!(" {more}Esc: close  ");
+    let all = format!("{keys}: all keys");
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(lead.clone(), Style::default().fg(th.dim)),
+            Span::styled(all.clone(), Style::default().fg(th.accent)),
+        ])),
+        foot,
+    );
+    let button = Rect {
+        x: foot.x + lead.chars().count() as u16,
+        width: (all.chars().count() as u16).min(foot.width),
+        ..foot
+    };
+    if let Some(Overlay::Help(h)) = &mut app.modals.overlay {
+        h.area = area;
+        h.scroll = scroll;
+        h.buttons = vec![(button, Action::Help)];
     }
 }
 

@@ -181,9 +181,10 @@
     {/each}
   {:else}
     <p class="m-0 flex items-center gap-3 border-b border-rule py-2 pl-6 text-[13px] text-muted">
-      No sessions.
+      No sessions in this repo yet.
       <button
         class="border-0 bg-transparent p-0 text-ink underline underline-offset-4 hover:no-underline"
+        title={withKey('New session on this repo: the quick prompt', ['quick_prompt', 'quick_prompt_alt'])}
         onclick={() => focusQuickPrompt({ project: row.project.id })}>Start one here</button
       >
     </p>

@@ -180,7 +180,11 @@ fn draw_view(f: &mut Frame, app: &mut App, body: Rect) {
         // task" would be advice about the wrong list, so the ARCHIVED
         // VIEW gets the plain empty line and the way back out of it.
         if app.launcher.show_archived {
-            draw_list_empty(f, app, g.area, NO_ARCHIVED);
+            let what = format!(
+                "nothing archived in this project: {} back to the live sessions",
+                crate::ui::key_hint(app, crate::keymap::Action::ToggleArchived)
+            );
+            draw_list_empty(f, app, g.area, &what);
         } else {
             draw_empty(f, app, g.area);
         }
@@ -302,9 +306,6 @@ impl HeadCount {
         }
     }
 }
-
-/// What the ARCHIVED VIEW says with nothing in it.
-const NO_ARCHIVED: &str = "nothing archived in this project: ⇧A back to the live sessions";
 
 /// The header over the grid: the PROJECT TABS on the left, each with its
 /// status dots, how many cards the grid holds on the right — and how many
@@ -1334,10 +1335,23 @@ fn draw_bands(
         .push((g.area, HitTarget::PanelBg(Focus::Sessions)));
 }
 
-/// What an EMPTY BAND says under its rule, the root's without the delete
-/// it refuses.
-const EMPTY_BAND_HINT: &str = "nothing running · p: new session · t: terminal";
-const EMPTY_BAND_DELETE: &str = " · Del: delete worktree";
+/// What an EMPTY BAND says under its rule, the user's own keys named: the
+/// root's without the delete it refuses.
+pub(crate) fn empty_band_hint(app: &App, is_main: bool) -> String {
+    let k = |a| crate::ui::key_hint(app, a);
+    let mut text = format!(
+        "nothing running · {}: new session · {}: terminal",
+        k(crate::keymap::Action::QuickPrompt),
+        k(crate::keymap::Action::NewTerminal)
+    );
+    if !is_main {
+        text.push_str(&format!(
+            " · {}: delete worktree",
+            k(crate::keymap::Action::Delete)
+        ));
+    }
+    text
+}
 
 /// The line under an EMPTY BAND's rule — a checkout with nothing running
 /// in it, drawn only with **Show all worktrees** on — in place of the row
@@ -1362,10 +1376,7 @@ fn draw_empty_band(
     let Some(placed) = crate::launcher::place(window, scroll, row) else {
         return;
     };
-    let mut text = String::from(EMPTY_BAND_HINT);
-    if !band.is_main {
-        text.push_str(EMPTY_BAND_DELETE);
-    }
+    let text = empty_band_hint(app, band.is_main);
     let fg = if lit { th.accent } else { th.dim };
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(

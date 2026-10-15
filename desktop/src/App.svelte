@@ -43,6 +43,11 @@
   import { listenAlerts } from './lib/alerts';
   import { noteFocus } from './lib/selection.svelte';
   import VerbBar from './lib/VerbBar.svelte';
+  import TipBar from './lib/TipBar.svelte';
+  import WhatsNew from './lib/WhatsNew.svelte';
+  import { loadLearn, offerTip } from './lib/learn.svelte';
+  import { selection } from './lib/selection.svelte';
+  import { isEverything } from './lib/scope';
 
   const media = window.matchMedia('(prefers-color-scheme: dark)');
   let osDark = $state(media.matches);
@@ -62,6 +67,19 @@
 
   // Back and forward land on a place; the selection follows it.
   $effect(() => follow(nav.current));
+
+  // LEARN IN PLACE: a concept's first-use tip the first time it is on
+  // screen (the board offers its lanes and drag). Each effect reads the
+  // tip state too, so one that waited on another tip tries again.
+  $effect(() => {
+    if (app.review) offerTip('review');
+  });
+  $effect(() => {
+    if (!isEverything(app.model.scope) || (app.home === 'board' && app.model.projects.length > 1)) offerTip('scope');
+  });
+  $effect(() => {
+    if (selection.target) offerTip('verbs');
+  });
 
   const view = $derived(nav.current.view);
 
@@ -227,6 +245,7 @@
     listenAlerts().catch(() => {});
     boot();
     applyStartup();
+    loadLearn();
   });
 </script>
 
@@ -375,6 +394,9 @@
       {/if}
     </div>
 
+    <!-- The first-use tip, one line, while one is up. -->
+    <TipBar />
+
     <QuickPrompt />
 
     {#if !app.model.connected && app.booted && app.model.projects.length}
@@ -393,6 +415,7 @@
 <Dialog />
 <Palette />
 <Help />
+<WhatsNew />
 <StartOrchestrator />
 <ReviewSheet />
 <BranchSwitch />
