@@ -71,6 +71,15 @@ pub async fn connect_or_spawn() -> Result<Connection> {
     }
 }
 
+/// Connect to the daemon only when one is already listening: None when
+/// nothing is, and none is started.
+pub async fn connect_existing() -> Result<Option<Connection>> {
+    match try_connect(&paths::socket_path()).await {
+        Ok(stream) => handshake(stream).await.map(Some),
+        Err(_) => Ok(None),
+    }
+}
+
 async fn try_connect(sock: &std::path::Path) -> Result<Stream> {
     Ok(crate::platform::connect(sock).await?)
 }
