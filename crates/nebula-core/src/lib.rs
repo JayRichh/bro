@@ -1,4 +1,5 @@
 pub mod accounts;
+pub mod board;
 pub mod branch_name;
 pub mod clock;
 pub mod codec;
@@ -9,6 +10,7 @@ pub mod harness;
 pub mod host;
 pub mod ids;
 pub mod mem;
+pub mod order;
 pub mod paths;
 pub mod platform;
 pub mod ports;

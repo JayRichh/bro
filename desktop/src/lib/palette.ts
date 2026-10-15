@@ -27,7 +27,8 @@ export interface PaletteItem {
   hint: string;
   /** Chords for an action row. */
   keys?: string[];
-  /** 0 needs you, 1 running, 2 unread, 3 the rest. */
+  /** A session's is the model's (0 needs you, 1 running, 2 unread, 3 the
+   *  rest); repos, worktrees and PRs are 3, actions 4. */
   tier: number;
   /** Newer first within a tier. */
   stamp: number;
@@ -44,12 +45,8 @@ export interface PaletteCommand {
   group: string;
 }
 
-function tierOf(status: string, unseen: boolean): number {
-  if (status === 'needs_feedback') return 0;
-  if (status === 'running') return 1;
-  if (unseen) return 2;
-  return 3;
-}
+/** What a session row says at the right, by its tier. */
+const TIER_HINT = ['needs you', 'running', 'unread'];
 
 export function buildItems(m: Model, commands: PaletteCommand[]): PaletteItem[] {
   const out: PaletteItem[] = [];
@@ -58,13 +55,15 @@ export function buildItems(m: Model, commands: PaletteCommand[]): PaletteItem[] 
     if (a.archived) continue;
     const w = m.worktrees.find((x) => x.id === a.worktree_id);
     const repo = w ? projectName(w.project_id) : '';
+    // The model's tier (nebula-core's rule); 3 until it has one.
+    const tier = m.cards[a.id]?.tier ?? 3;
     out.push({
       target: { kind: 'session', id: a.id },
       text: [repo, w?.branch, a.name].filter(Boolean).join('/'),
       crumb: repo,
       label: a.name,
-      hint: a.status === 'needs_feedback' ? 'needs you' : a.status === 'running' ? 'running' : a.unseen ? 'unread' : 'session',
-      tier: tierOf(a.status, a.unseen),
+      hint: TIER_HINT[tier] ?? 'session',
+      tier,
       stamp: a.status_changed_at,
       idle: true,
     });

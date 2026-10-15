@@ -8,7 +8,6 @@ import {
   laneDrop,
   placeId,
   projectIds,
-  refill,
   rootFirst,
   stepId,
   treeSiblings,
@@ -188,27 +187,17 @@ describe('laneDrop', () => {
 });
 
 describe('board lanes', () => {
-  it('newest first across checkouts, the user order inside an ordered one', () => {
-    const cards = [
-      agent('a1', 'A', { status_changed_at: 50, sort_order: 2 }),
-      agent('b1', 'B', { status_changed_at: 40 }),
-      agent('a2', 'A', { status_changed_at: 30, sort_order: 0 }),
-      agent('a3', 'A', { status_changed_at: 10, sort_order: 1 }),
-    ];
-    expect(refill(cards, () => false).map((a) => a.id)).toEqual(['a1', 'b1', 'a2', 'a3']);
-    // A's cards take back A's slots (0, 2, 3) in its order: a2, a3, a1.
-    expect(refill(cards, (w) => w === 'A').map((a) => a.id)).toEqual(['a2', 'b1', 'a3', 'a1']);
-  });
-
-  it('lanes() reads which checkouts are ordered from the model', () => {
+  it('lanes() lays out the cards in the order the model gives them', () => {
+    // The Tauri side orders each lane (nebula-core `order::refill`); the
+    // window only looks the ids up, skipping one it does not have.
     const m = model({
-      agents: [
-        agent('x', 'A', { status_changed_at: 20, sort_order: 1 }),
-        agent('y', 'A', { status_changed_at: 10, sort_order: 0 }),
-        agent('z', 'B', { status_changed_at: 30 }),
-      ],
+      agents: [agent('x', 'A'), agent('y', 'A'), agent('z', 'B')],
+      lanes: { needs: [], running: ['x'], unseen: [], done: ['z', 'gone', 'y'], pr: [] },
     });
-    expect(lanes(m).done.map((a) => a.id)).toEqual(['z', 'y', 'x']);
+    const l = lanes(m);
+    expect(l.done.map((a) => a.id)).toEqual(['z', 'y']);
+    expect(l.running.map((a) => a.id)).toEqual(['x']);
+    expect(l.pr).toEqual([]);
   });
 });
 

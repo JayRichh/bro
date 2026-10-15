@@ -37,6 +37,8 @@ const empty: Model = {
   subagents: [],
   accounts: {},
   contexts: {},
+  cards: {},
+  lanes: { needs: [], running: [], unseen: [], done: [], pr: [] },
 };
 
 export const app = $state({

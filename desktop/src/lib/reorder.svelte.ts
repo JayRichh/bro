@@ -181,7 +181,7 @@ export function moveStep(t: { kind: string; id: string; viaSub?: boolean }, dir:
     if (!a) return false;
     const peers =
       where === 'board'
-        ? lanes(m)[laneOf(a, m.prs[a.worktree_id])].filter((x) => x.worktree_id === a.worktree_id).map((x) => x.id)
+        ? lanes(m)[laneOf(m, a)].filter((x) => x.worktree_id === a.worktree_id).map((x) => x.id)
         : treeSiblings(m, a.id, app.showArchived);
     void sendReorder({ kind: 'agents', worktree: a.worktree_id }, stepId((where === 'board' ? boardIds : agentIds)(m, a.worktree_id), peers, a.id, dir));
     return true;

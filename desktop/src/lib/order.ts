@@ -14,12 +14,15 @@
 //   recently worked in (the terminal app's bands);
 // - sessions: the user's order, or else oldest status change first; the
 //   board's lanes keep status age across checkouts and the user's order
-//   among one checkout's cards (`refill`).
+//   among one checkout's cards (nebula-core `order::refill`, laid out by the
+//   Tauri side into `Model.lanes`).
 
 import type { Agent, Model, Worktree } from './api';
 import type { Lane } from './status';
 
-/** Whether a scope's rows carry a user order. */
+/** Whether a scope's rows carry a user order (nebula-core's
+ *  `order::has_user_order`, kept here for the repo and worktree lists the
+ *  window sorts itself). */
 export function hasUserOrder(rows: { sort_order: number }[]): boolean {
   return rows.some((r) => r.sort_order > 0);
 }
@@ -161,25 +164,6 @@ export function laneDrop(from: Lane, to: Lane | 'archived'): LaneDrop {
   return { act: 'refuse', reason: why[to] };
 }
 
-/**
- * A lane's cards: newest status change first across checkouts, and the
- * user's order among the cards of a checkout that has one. Each such
- * checkout's cards take back the slots they hold, in `sort_order`, so the
- * checkouts stay interleaved by age.
- */
-export function refill(cards: Agent[], ordered: (worktree: string) => boolean): Agent[] {
-  const out = [...cards].sort((x, y) => y.status_changed_at - x.status_changed_at);
-  const slots = new Map<string, number[]>();
-  out.forEach((a, i) => {
-    if (ordered(a.worktree_id)) slots.set(a.worktree_id, [...(slots.get(a.worktree_id) ?? []), i]);
-  });
-  for (const at of slots.values()) {
-    const mine = at.map((i) => out[i]).sort((x, y) => x.sort_order - y.sort_order);
-    at.forEach((i, k) => (out[i] = mine[k]));
-  }
-  return out;
-}
-
 /** A checkout's sessions as the board shows them, for a drop or a step
  *  there: the user's order, or newest first while it has none (the order
  *  its cards stand in down a lane), so the first move keeps the rest put. */
@@ -187,9 +171,4 @@ export function boardIds(m: Model, worktree: string): string[] {
   const here = m.agents.filter((a) => a.worktree_id === worktree);
   if (hasUserOrder(here)) return orderedAgents(here).map((a) => a.id);
   return [...here].sort((x, y) => y.status_changed_at - x.status_changed_at).map((a) => a.id);
-}
-
-/** The checkouts whose sessions carry a user order. */
-export function orderedWorktrees(m: Model): Set<string> {
-  return new Set(m.agents.filter((a) => a.sort_order > 0).map((a) => a.worktree_id));
 }

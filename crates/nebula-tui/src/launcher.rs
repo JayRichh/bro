@@ -197,70 +197,19 @@ fn row_pr(app: &App, worktree: &WorktreeId, project: &ProjectId, branch: &str) -
 /// A column of the KANBAN (`⇧K`, Settings → Appearance → **Kanban**): the
 /// session cards sorted by what each one wants from you, left to right
 /// from the most urgent — the board the STATUS DOTS already sketch,
-/// laid out as one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Lane {
-    /// Waiting on you: a permission prompt or a question (the red dot).
-    NeedsInput,
-    /// Mid-turn (the yellow dot).
-    Running,
-    /// A finished turn nobody has read yet (the blue dot).
-    Unseen,
-    /// Read, idle, or never run — nothing for you to do.
-    Done,
-    /// Idle and read, its checkout's pull request still open: work handed
-    /// on to review rather than finished.
-    PrOpen,
-}
+/// laid out as one. The rule is nebula-core's, shared with the desktop.
+pub use nebula_core::board::Lane;
 
-impl Lane {
-    /// The board's columns, left to right.
-    pub const ALL: [Lane; 5] = [
-        Lane::NeedsInput,
-        Lane::Running,
-        Lane::Unseen,
-        Lane::Done,
-        Lane::PrOpen,
-    ];
-
-    pub fn title(self) -> &'static str {
-        match self {
-            Lane::NeedsInput => "Needs you",
-            Lane::Running => "Running",
-            Lane::Unseen => "Unread",
-            Lane::Done => "Done",
-            Lane::PrOpen => "PR open",
-        }
-    }
-
-    /// Its place in [`Lane::ALL`].
-    pub fn index(self) -> usize {
-        Lane::ALL.iter().position(|l| *l == self).unwrap_or(0)
-    }
-}
-
-/// The lane `row`'s card goes in. One lane per card, the most urgent that
-/// applies: waiting on you over working over unread, and an open pull
-/// request only once nothing else about the session needs you — a
-/// session asking a question on a branch under review is asking a
-/// question first.
+/// The lane `row`'s card goes in: [`nebula_core::board::lane_of`], with
+/// the row's pull request open while it is open or a draft.
 pub fn lane_of(row: &LauncherRow) -> Lane {
-    use nebula_core::AgentStatus;
-    match row.agent.status {
-        AgentStatus::NeedsFeedback => Lane::NeedsInput,
-        AgentStatus::Running => Lane::Running,
-        _ if row.agent.unseen => Lane::Unseen,
-        _ if row.pr.as_ref().is_some_and(|pr| {
-            matches!(
-                pr.standing,
-                crate::pull_request::Standing::Open | crate::pull_request::Standing::Draft
-            )
-        }) =>
-        {
-            Lane::PrOpen
-        }
-        _ => Lane::Done,
-    }
+    let pr_open = row.pr.as_ref().is_some_and(|pr| {
+        matches!(
+            pr.standing,
+            crate::pull_request::Standing::Open | crate::pull_request::Standing::Draft
+        )
+    });
+    nebula_core::board::lane_of(&row.agent, &nebula_core::board::CardFacts { pr_open })
 }
 
 /// The KANBAN's cards, lane by lane in [`Lane::ALL`] order, each lane in

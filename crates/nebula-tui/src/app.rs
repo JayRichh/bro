@@ -5198,7 +5198,7 @@ impl App {
                 .tree
                 .agents
                 .iter()
-                .any(|a| !a.archived && a.unseen && a.status == AgentStatus::Finished)
+                .any(|a| !a.archived && nebula_core::board::is_unread(a))
             && self
                 .launcher
                 .launcher_tabs

@@ -18,7 +18,7 @@ use crate::app::{
 };
 use crate::filter_list::{FilterList, FilterMatch};
 use crate::pull_request::{Standing, Trouble};
-use nebula_core::{Agent, AgentId, AgentStatus, Project, ProjectId, WorktreeId};
+use nebula_core::{AgentId, AgentStatus, Project, ProjectId, WorktreeId};
 use ratatui::layout::Rect;
 use std::collections::HashMap;
 
@@ -51,14 +51,10 @@ pub enum PaletteTarget {
 /// finished a turn nobody has read (UNSEEN); every other row — read and
 /// never-run sessions, and every project, worktree and pull request — sorts under those in RECENCY ORDER, so the checkout you were
 /// just in is the first thing after what needs you. ARCHIVED sessions have
-/// no tier because they have no row — see [`build_palette_items`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum PaletteTier {
-    NeedsFeedback,
-    Running,
-    Unseen,
-    Rest,
-}
+/// no tier because they have no row — see [`build_palette_items`]. A
+/// session's tier is nebula-core's [`nebula_core::board::attention`], the
+/// order the daemon's orchestrator triages in too.
+pub type PaletteTier = nebula_core::board::Attention;
 
 /// One searchable row of the `/` palette. `text` is the string the fuzzy
 /// filter runs over: every row carries its full path from the project
@@ -346,18 +342,6 @@ pub fn attention_sessions(tree: &Tree) -> Vec<AgentId> {
         .collect()
 }
 
-/// The tier a session row sorts into — its own status, read against the
-/// UNSEEN flag the DONE BADGE counts. Archived sessions never reach here:
-/// they are not rows at all.
-fn session_tier(a: &Agent) -> PaletteTier {
-    match a.status {
-        AgentStatus::NeedsFeedback => PaletteTier::NeedsFeedback,
-        AgentStatus::Running => PaletteTier::Running,
-        AgentStatus::Finished if a.unseen => PaletteTier::Unseen,
-        _ => PaletteTier::Rest,
-    }
-}
-
 /// Every jumpable entity: each project in tree order, then their
 /// worktrees, then their sessions, then the open pull requests nebula has
 /// fetched. ARCHIVED SESSIONS ARE NEVER ROWS, whatever the SESSIONS
@@ -435,7 +419,7 @@ fn build_palette_items(
                     stamped: a.status_changed_at,
                     status: Some(a.status),
                     unseen: a.unseen,
-                    tier: session_tier(a),
+                    tier: nebula_core::board::attention(a),
                     interacted: last_interaction_ms(a, now),
                     standing: None,
                     trouble: None,
@@ -481,7 +465,7 @@ fn build_palette_items(
 mod tests {
     use super::*;
     use crate::text_input::TextInput;
-    use nebula_core::{AgentKind, Worktree};
+    use nebula_core::{Agent, AgentKind, Worktree};
 
     fn agent(id: &str, wt: &str, status: AgentStatus, unseen: bool, stamp: i64) -> Agent {
         Agent {

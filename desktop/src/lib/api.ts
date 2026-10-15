@@ -86,10 +86,6 @@ export interface PrInfo {
   state?: 'open' | 'merged' | 'closed';
 }
 
-/** A PR still taking work (drafts too); merged and closed ones are history. */
-export function prOpen(pr: PrInfo | undefined): pr is PrInfo {
-  return !!pr && (pr.state ?? 'open') === 'open';
-}
 /** One measured plan limit (`nebula_core::usage::UsageWindow`). */
 export interface UsageWindow {
   kind: 'session' | 'weekly' | 'model_weekly' | 'monthly';
@@ -156,6 +152,16 @@ export interface AutoPick {
   profile: string | null;
   line: string;
 }
+/** A board lane (`nebula_core::board::Lane`): needs you, running, unread,
+ *  done, PR open, left to right. */
+export type Lane = 'needs' | 'running' | 'unseen' | 'done' | 'pr';
+/** A session's place on the board and in the attention order, worked out
+ *  by the Tauri side with nebula-core's rule (src-tauri `board.rs`). */
+export interface Card {
+  lane: Lane;
+  /** 0 needs you, 1 running, 2 unread (finished, unseen), 3 the rest. */
+  tier: number;
+}
 export interface Model {
   connected: boolean;
   error: string | null;
@@ -173,6 +179,11 @@ export interface Model {
   accounts?: Record<string, AccountUsage>;
   /** Context by agent id. */
   contexts?: Record<string, ContextUsage>;
+  /** Each session's lane and tier by agent id, archived ones too. */
+  cards: Record<string, Card>;
+  /** The board's cards by lane, in the order it shows them: live
+   *  sessions only, the orchestrator left out. */
+  lanes: Record<Lane, string[]>;
 }
 
 /** `SessionRef` exactly as serde spells it: externally tagged. */

@@ -1,11 +1,11 @@
 // What a session's status means on screen: its kanban lane, its dot, its
-// words. Lane rules mirror the TUI's (`launcher::lane_of`): the most urgent
-// that applies, an open pull request only once nothing else needs you.
+// words. The lane is not worked out here: the Tauri side reads it off
+// nebula-core's rule (the terminal app's too) and sends it in the model
+// (`Model.cards`, `Model.lanes`).
 
-import { prOpen, type Agent, type Model, type PrInfo, type Subagent, type TerminalTab } from './api';
-import { orderedWorktrees, refill } from './order';
+import type { Agent, Lane, Model, PrInfo, Subagent, TerminalTab } from './api';
 
-export type Lane = 'needs' | 'running' | 'unseen' | 'done' | 'pr';
+export type { Lane };
 
 /** A session's state on screen: a square plus a word, never colour alone. */
 export type Tone =
@@ -28,13 +28,10 @@ export const LANES: { id: Lane; title: string; tone: Tone }[] = [
   { id: 'pr', title: 'PR open', tone: 'pr' },
 ];
 
-export function laneOf(a: Agent, pr: PrInfo | undefined): Lane {
-  if (a.status === 'needs_feedback') return 'needs';
-  if (a.status === 'running') return 'running';
-  if (a.unseen) return 'unseen';
-  // A merged or closed PR is history: the card is done.
-  if (prOpen(pr)) return 'pr';
-  return 'done';
+/** The lane session `a`'s card is in, as the model says; a session the
+ *  model has no card for yet is done. */
+export function laneOf(m: Model, a: Agent): Lane {
+  return m.cards[a.id]?.lane ?? 'done';
 }
 
 /** A pull request's kind in a word or two: `PR`, `draft PR`, `merged PR`,
@@ -143,13 +140,11 @@ export function placeOf(m: Model, worktreeId: string): Placed {
   };
 }
 
+/** The board's cards, lane by lane, in the order the model lays them out
+ *  (newest first, the user's order inside an ordered checkout). */
 export function lanes(m: Model): Record<Lane, Agent[]> {
+  const byId = new Map(m.agents.map((a) => [a.id, a]));
   const out: Record<Lane, Agent[]> = { needs: [], running: [], unseen: [], done: [], pr: [] };
-  const visible = m.agents.filter((a) => !a.archived && a.role !== 'orchestrator');
-  for (const a of visible) out[laneOf(a, m.prs[a.worktree_id])].push(a);
-  // Newest first, but a checkout the user ordered keeps that order among
-  // its own cards (order.ts `refill`).
-  const ordered = orderedWorktrees(m);
-  for (const l of Object.keys(out) as Lane[]) out[l] = refill(out[l], (w) => ordered.has(w));
+  for (const l of LANES) out[l.id] = (m.lanes[l.id] ?? []).flatMap((id) => byId.get(id) ?? []);
   return out;
 }

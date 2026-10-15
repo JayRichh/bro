@@ -675,18 +675,11 @@ async fn ensure_own_repo(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// The attention tier a session sorts into: what the user's `/` palette
-/// uses, so the orchestrator triages in the order the user would.
+/// The attention tier a session sorts into: nebula-core's, what the user's
+/// `/` palette uses, so the orchestrator triages in the order the user
+/// would. A terminal sorts after every session.
 fn attention_tier(agent: Option<&Agent>) -> u8 {
-    match agent {
-        Some(a) => match a.status {
-            AgentStatus::NeedsFeedback => 0,
-            AgentStatus::Running => 1,
-            AgentStatus::Finished if a.unseen => 2,
-            _ => 3,
-        },
-        None => 4,
-    }
+    agent.map_or(4, |a| nebula_core::board::attention(a).rank())
 }
 
 /// `kete sessions` rows in attention order, each grown by role, parent,
@@ -704,7 +697,7 @@ fn attention_ordered(
                 SessionRef::Terminal(_) => None,
             };
             let state = match agent {
-                Some(a) if a.status == AgentStatus::Finished && a.unseen => "unread".to_string(),
+                Some(a) if nebula_core::board::is_unread(a) => "unread".to_string(),
                 _ => summary.status.clone(),
             };
             OrchestratorSession {
