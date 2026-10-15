@@ -4,9 +4,13 @@
   // many sessions run on it, an enabled switch and the default star. A
   // row that needs a login shows the command (and can run it in a new
   // terminal); a broken profile shows what is wrong and the way to fix it.
+  // The heading opens the Accounts view, where everything else lives.
   import { onMount } from 'svelte';
   import { api, type AccountRow } from '../api';
-  import { app, focusQuickPrompt, openSession, openSettings, refreshAccounts, refreshLaunchables, sessionWorktree, toast } from '../store.svelte';
+  import { app, focusQuickPrompt, openSession, openSettings, refreshAccounts, refreshLaunchables, toast } from '../store.svelte';
+  import { nav } from '../shell/history.svelte';
+  import { openAccounts, runLogin as startLogin } from './actions';
+  import { openAddAccount } from './add.svelte';
   import UsageBar from './UsageBar.svelte';
   import { bars, liveUsage, loginTitle, mergeRows, ownLoginSessionHarnesses, sessionsOn, shownAt, staleAt, starTitle, usageTitle, windowLabel } from './usage';
 
@@ -47,30 +51,8 @@
     }
   }
 
-  /** The worktree a login terminal opens in: the open session's, else the
-   *  first repo's main checkout. */
-  function loginWorktree(): string | null {
-    const open = sessionWorktree(app.session);
-    if (open) return open;
-    const first = app.model.projects[0]?.id;
-    const wts = app.model.worktrees.filter((w) => w.project_id === first);
-    return (wts.find((w) => w.is_main) ?? wts[0])?.id ?? null;
-  }
-
   async function runLogin(r: AccountRow) {
-    const wt = loginWorktree();
-    if (!wt) {
-      toast('Add a repo first: the login runs in a terminal in one. Or copy the command.');
-      return;
-    }
-    try {
-      const terminal = await api.accountLoginRun(wt, r.key);
-      loginOpen = null;
-      openSession({ Terminal: terminal });
-      toast(`Signing ${r.name} in: finish in the terminal, then the row updates.`);
-    } catch (e) {
-      toast(String(e));
-    }
+    if (await startLogin(r)) loginOpen = null;
   }
 
   // The list is read from disk: ask again when the window comes back, every
@@ -110,8 +92,30 @@
   });
 </script>
 
-{#if rows.length}
-  <h2 class="m-0 {heading}">Accounts</h2>
+<!-- Always drawn, empty too: an empty list is who most needs Add. -->
+<div class="flex items-center pr-3 {heading}">
+  <h2 class="m-0 min-w-0 flex-1 text-[12px] font-medium">
+    <button
+      class="border-0 bg-transparent p-0 text-left text-[12px] font-medium hover:text-ink hover:underline hover:underline-offset-4 {nav.current.view === 'accounts'
+        ? 'text-ink'
+        : 'text-muted'}"
+      onclick={openAccounts}
+      title="Open Accounts: every login, its use, its sessions, and the account spread (Shift+U)"
+      aria-current={nav.current.view === 'accounts' ? 'page' : undefined}>Accounts</button
+    >
+  </h2>
+  <button
+    class="grid size-[18px] flex-none place-items-center border-0 bg-transparent p-0 text-muted hover:text-ink"
+    onclick={() => openAddAccount()}
+    title="Add an account: a harness, a name, then sign it in"
+    aria-label="Add an account"
+  >
+    <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M5 1v8M1 5h8" stroke="currentColor" stroke-width="1.3" /></svg>
+  </button>
+</div>
+{#if !rows.length}
+  <p class="m-0 px-4 py-1 text-[12px] text-muted">Sessions run on each CLI's own login. Add an account to run several.</p>
+{:else}
   <ul class="m-0 list-none p-0" aria-label="Accounts">
     {#each rows as r (r.key)}
       {@const u = liveUsage(r, app.model.accounts ?? {})}

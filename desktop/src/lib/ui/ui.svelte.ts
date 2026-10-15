@@ -3,6 +3,7 @@
 // keyboard help. One of each at a time; Esc closes the top one.
 
 import { sheet as files } from '../files/files.svelte';
+import { addSheet } from '../accounts/add.svelte';
 
 export type MenuItem = {
   label: string;
@@ -105,5 +106,15 @@ export const ask = {
 
 /** Is any layer up (so page keys stand down)? */
 export function layerOpen(): boolean {
-  return !!(ui.menu || ui.dialog || ui.palette || ui.help || ui.review || ui.startOrchestrator || ui.branchSwitch || files.open);
+  return !!(
+    ui.menu ||
+    ui.dialog ||
+    ui.palette ||
+    ui.help ||
+    ui.review ||
+    ui.startOrchestrator ||
+    ui.branchSwitch ||
+    files.open ||
+    addSheet.phase === 'form'
+  );
 }

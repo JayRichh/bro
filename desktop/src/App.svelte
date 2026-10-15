@@ -32,6 +32,8 @@
   import { onReviewOpened, openOrchestrator } from './lib/orch.svelte';
   import { opensOnOrchestrator, orchestratorOf, placeKey } from './lib/orchestrator';
   import FileSheet from './lib/files/FileSheet.svelte';
+  import AccountsView from './lib/accounts/AccountsView.svelte';
+  import AddAccount from './lib/accounts/AddAccount.svelte';
   import { listenAlerts } from './lib/alerts';
 
   const media = window.matchMedia('(prefers-color-scheme: dark)');
@@ -178,7 +180,7 @@
       <Breadcrumb />
       <span class="flex-1"></span>
       <AttentionStrip />
-      {#if app.home === 'overview' && !adoView && view !== 'settings' && !orchView}
+      {#if app.home === 'overview' && !adoView && view !== 'settings' && view !== 'accounts' && !orchView}
         <button
           class="h-6 flex-none border px-2 text-[12px] {app.showArchived ? 'border-ink bg-ink text-bg' : 'border-rule bg-transparent text-muted hover:text-ink'}"
           aria-pressed={app.showArchived}
@@ -209,6 +211,8 @@
         <Prs />
       {:else if view === 'settings'}
         <Settings />
+      {:else if view === 'accounts'}
+        <AccountsView />
       {:else if orchView && !orch}
         <StartOrchestrator inline />
       {:else if adoView}
@@ -279,6 +283,7 @@
 <BranchSwitch />
 <ReviewNotices />
 <FileSheet />
+<AddAccount />
 
 {#if app.toast}
   <div

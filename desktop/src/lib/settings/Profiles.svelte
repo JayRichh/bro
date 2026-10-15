@@ -3,17 +3,18 @@
   // `kete profile` edits. The window never signs one in: a profile that
   // needs a login shows the command to run in a terminal.
   import { onMount } from 'svelte';
-  import { api, type ProfileForm, type ProfileRow } from '../api';
+  import { api, type ProfileForm, type ProfileRow, type ProfileSaved } from '../api';
   import { app, refreshLaunchables, toast } from '../store.svelte';
   import { removeWarning } from '../accounts/pick';
   import { ask } from '../ui/ui.svelte';
+  import ProfileEditor from '../accounts/ProfileEditor.svelte';
+  import { openAccounts } from '../accounts/actions';
 
   let rows = $state<ProfileRow[]>([]);
   let harnesses = $state<string[]>([]);
-  let editing = $state<{ isNew: boolean; form: ProfileForm; envKeys: string[]; replaceEnv: boolean } | null>(null);
+  let editing = $state<{ isNew: boolean; form: ProfileForm; envKeys: string[] } | null>(null);
   let error = $state<string | null>(null);
   let notice = $state<{ text: string; command?: string } | null>(null);
-  let saving = $state(false);
 
   async function load() {
     try {
@@ -27,28 +28,19 @@
   function edit(r: ProfileRow | null) {
     error = null;
     editing = r
-      ? { isNew: false, form: { name: r.name, harness: r.harness, default: r.default, useDefault: r.useDefault, env: '' }, envKeys: r.envKeys, replaceEnv: false }
-      : { isNew: true, form: { name: '', harness: harnesses[0] ?? 'claude', default: false, useDefault: false, env: '' }, envKeys: [], replaceEnv: true };
+      ? { isNew: false, form: { name: r.name, harness: r.harness, default: r.default, useDefault: r.useDefault, env: '' }, envKeys: r.envKeys }
+      : { isNew: true, form: { name: '', harness: harnesses[0] ?? 'claude', default: false, useDefault: false, env: '' }, envKeys: [] };
   }
 
-  async function save() {
-    if (!editing) return;
-    saving = true;
-    try {
-      const e = editing;
-      const out = e.isNew ? await api.profileAdd(e.form) : await api.profileUpdate(e.form, !e.replaceEnv);
-      rows = out.rows;
-      notice = out.login
-        ? { text: `${e.isNew ? 'Added' : 'Saved'} ${e.form.name}. Sign it in from a terminal:`, command: out.login }
-        : { text: `${e.isNew ? 'Added' : 'Saved'} ${e.form.name}${out.home ? `, home ${out.home}` : ', on the CLI\'s default login'}.` };
-      editing = null;
-      error = null;
-      refreshLaunchables();
-    } catch (err) {
-      error = String(err);
-    } finally {
-      saving = false;
-    }
+  function saved(out: ProfileSaved, form: ProfileForm) {
+    const isNew = editing?.isNew ?? false;
+    rows = out.rows;
+    notice = out.login
+      ? { text: `${isNew ? 'Added' : 'Saved'} ${form.name}. Sign it in from a terminal:`, command: out.login }
+      : { text: `${isNew ? 'Added' : 'Saved'} ${form.name}${out.home ? `, home ${out.home}` : ", on the CLI's default login"}.` };
+    editing = null;
+    error = null;
+    refreshLaunchables();
   }
 
   async function remove(r: ProfileRow) {
@@ -88,8 +80,6 @@
 
   onMount(load);
 
-  const field =
-    'h-7 border border-rule bg-bg px-2 text-[13px] text-ink outline-none placeholder:text-faint hover:border-rule-strong focus:border-rule-strong disabled:text-faint';
   const label = 'font-mono text-[12px] text-muted';
   const btn = 'h-7 border border-rule bg-transparent px-2.5 text-[13px] text-ink hover:border-rule-strong disabled:text-faint';
 </script>
@@ -106,6 +96,7 @@
     <h2 class="m-0 text-[15px] font-semibold text-ink">Profiles</h2>
     <span class={label}>the same list as kete profile</span>
     <span class="flex-1"></span>
+    <button class={btn} onclick={openAccounts} title="Every account with its use, login and sessions (Shift+U)">Accounts view</button>
     <button class={btn} onclick={() => edit(null)}>Add profile</button>
   </div>
   <p class="m-0 mt-2 max-w-[68ch] text-[13px] text-muted">
@@ -152,58 +143,18 @@
   </ul>
 
   {#if editing}
-    {@const f = editing.form}
-    <section class="mt-5 border border-rule-strong" aria-label={editing.isNew ? 'Add profile' : `Edit ${f.name}`}>
-      <h3 class="m-0 border-b border-rule px-4 py-2 text-[14px] font-semibold text-ink">{editing.isNew ? 'Add profile' : `Edit ${f.name}`}</h3>
-      <div class="grid grid-cols-[120px_minmax(0,1fr)] items-center gap-x-4 gap-y-2.5 px-4 py-3">
-        <span class={label}>name</span>
-        <div class="flex items-center gap-3">
-          <input class="{field} w-64 font-mono text-[12px]" bind:value={f.name} disabled={!editing.isNew} placeholder="work" spellcheck="false" />
-          <span class="text-[12px] text-muted">{editing.isNew ? 'letters, digits, - and _' : 'the name names its home, so it stays'}</span>
-        </div>
-        <span class={label}>harness</span>
-        <select class="{field} w-64 font-mono text-[12px]" bind:value={f.harness}>
-          {#each harnesses as h (h)}<option value={h}>{h}</option>{/each}
-        </select>
-        <span class={label}>login</span>
-        <div class="flex h-7 w-fit border border-rule" role="radiogroup" aria-label="Login">
-          {#each [[false, 'Its own home'], [true, "The CLI's default login"]] as [v, word], i (word)}
-            <button
-              role="radio"
-              aria-checked={f.useDefault === v}
-              class="border-0 px-2.5 text-[12px] {i ? 'border-l border-rule' : ''} {f.useDefault === v ? 'bg-ink text-bg' : 'bg-transparent text-muted hover:text-ink'}"
-              onclick={() => (f.useDefault = v as boolean)}>{word}</button
-            >
-          {/each}
-        </div>
-        <span class={label}>default</span>
-        <label class="flex items-center gap-2 text-[13px] text-ink">
-          <input type="checkbox" class="size-3.5 accent-[var(--color-ink)]" bind:checked={f.default} />
-          Use this profile when a launch on {f.harness} picks none
-        </label>
-        <span class="{label} self-start pt-1.5">environment</span>
-        <div class="flex flex-col gap-1.5">
-          {#if !editing.isNew && !editing.replaceEnv}
-            <div class="flex items-center gap-3 text-[13px] text-muted">
-              {editing.envKeys.length ? `Keeps ${editing.envKeys.join(', ')}` : 'None set.'}
-              <button class="border-0 bg-transparent p-0 text-[13px] text-ink underline underline-offset-4" onclick={() => editing && (editing.replaceEnv = true)}
-                >{editing.envKeys.length ? 'Replace' : 'Add variables'}</button
-              >
-            </div>
-          {:else}
-            <textarea class="{field} h-20 resize-y py-1 font-mono text-[12px]" bind:value={f.env} placeholder="HTTPS_PROXY=http://proxy:8080" spellcheck="false"
-            ></textarea>
-            <span class="text-[12px] text-muted">KEY=VALUE, one per line. Values are stored in config.json as typed.</span>
-          {/if}
-        </div>
+    {#key editing}
+      <div class="mt-5">
+        <ProfileEditor
+          isNew={editing.isNew}
+          initial={editing.form}
+          envKeys={editing.envKeys}
+          {harnesses}
+          taken={rows.map((r) => r.name)}
+          onsaved={saved}
+          oncancel={() => (editing = null)}
+        />
       </div>
-      {#if error}<p class="m-0 px-4 pb-2 text-[13px] text-fail">{error}</p>{/if}
-      <div class="flex justify-end gap-2 border-t border-rule px-4 py-2.5">
-        <button class={btn} onclick={() => (editing = null)}>Cancel</button>
-        <button class="h-7 border-0 bg-ink px-3 text-[13px] font-medium text-bg disabled:bg-faint" disabled={saving} onclick={save}
-          >{editing.isNew ? 'Add profile' : 'Save'}</button
-        >
-      </div>
-    </section>
+    {/key}
   {/if}
 </div>

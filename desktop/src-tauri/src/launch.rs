@@ -50,9 +50,24 @@ pub struct Launched {
 /// profile: the profile to send (None = the CLI's own login) and the line
 /// that says why. None when the harness has no profiles at all, so
 /// nothing changes and nothing is said.
+#[cfg(test)]
 pub fn spread_pick(
     cfg: &Config,
     harness: &str,
+    now_secs: i64,
+    usage: impl Fn(&str) -> Option<nebula_core::usage::AccountUsage>,
+) -> Option<(Option<String>, String)> {
+    spread_pick_for(cfg, harness, None, now_secs, usage)
+}
+
+/// [`spread_pick`] in a project whose default account for `harness` is
+/// `project_default`: that one first when it can run
+/// (`accounts::pick_for_project`), so a quick prompt launch keeps the
+/// order the daemon keeps.
+pub fn spread_pick_for(
+    cfg: &Config,
+    harness: &str,
+    project_default: Option<&str>,
     now_secs: i64,
     usage: impl Fn(&str) -> Option<nebula_core::usage::AccountUsage>,
 ) -> Option<(Option<String>, String)> {
@@ -63,7 +78,14 @@ pub fn spread_pick(
         Some(&cfg.account_spread),
         Some(&cfg.account_spread_threshold),
     );
-    let pick = nebula_core::accounts::pick(&cfg.profiles, harness, policy, now_secs, usage);
+    let pick = nebula_core::accounts::pick_for_project(
+        &cfg.profiles,
+        harness,
+        project_default,
+        policy,
+        now_secs,
+        usage,
+    );
     Some((
         pick.profile.map(|p| p.name.trim().to_string()),
         pick.describe(harness),
@@ -110,13 +132,25 @@ pub struct AutoPick {
     pub line: String,
 }
 
+#[cfg(test)]
 pub fn auto_pick(
     cfg: &Config,
     harness: &str,
     now_secs: i64,
     usage: impl Fn(&str) -> Option<nebula_core::usage::AccountUsage>,
 ) -> Option<AutoPick> {
-    let (profile, line) = spread_pick(cfg, harness, now_secs, usage)?;
+    auto_pick_for(cfg, harness, None, now_secs, usage)
+}
+
+/// [`auto_pick`] in a project with `project_default` for the harness.
+pub fn auto_pick_for(
+    cfg: &Config,
+    harness: &str,
+    project_default: Option<&str>,
+    now_secs: i64,
+    usage: impl Fn(&str) -> Option<nebula_core::usage::AccountUsage>,
+) -> Option<AutoPick> {
+    let (profile, line) = spread_pick_for(cfg, harness, project_default, now_secs, usage)?;
     Some(AutoPick {
         spread: nebula_core::accounts::Spread::parse(&cfg.account_spread)
             .as_str()
@@ -126,13 +160,50 @@ pub fn auto_pick(
     })
 }
 
-/// [`auto_pick`] against the kept readings, now. None for a harness with
-/// no profiles, where auto is simply its own login.
+/// The default account the project at `repo` sets for `harness`
+/// (`profiles::PROJECT_DEFAULTS_KEY`, carried in the project entry's
+/// unknown keys).
+pub fn project_default<'a>(
+    cfg: &'a Config,
+    repo: &std::path::Path,
+    harness: &str,
+) -> Option<&'a str> {
+    cfg.projects
+        .get(repo)?
+        .other
+        .get(nebula_core::profiles::PROJECT_DEFAULTS_KEY)?
+        .get(harness.trim())?
+        .as_str()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+}
+
+/// The repo path of project `id` in the daemon's model.
+fn repo_of(client: &Client, id: &str) -> Option<std::path::PathBuf> {
+    client
+        .snapshot()
+        .projects
+        .iter()
+        .find(|p| p.id.0 == id)
+        .map(|p| p.repo_path.clone())
+}
+
+/// [`auto_pick`] against the kept readings, now, in `project` (an id) when
+/// one is given. None for a harness with no profiles, where auto is simply
+/// its own login.
 #[tauri::command]
-pub fn account_pick(kind: String) -> Option<AutoPick> {
-    auto_pick(
-        &Config::load(),
+pub fn account_pick(
+    client: State<'_, Arc<Client>>,
+    kind: String,
+    project: Option<String>,
+) -> Option<AutoPick> {
+    let cfg = Config::load();
+    let repo = project.and_then(|p| repo_of(&client, &p));
+    auto_pick_for(
+        &cfg,
         &kind,
+        repo.as_deref()
+            .and_then(|r| project_default(&cfg, r, &kind)),
         nebula_core::clock::now_secs() as i64,
         nebula_core::usage::read_account,
     )
@@ -176,9 +247,12 @@ pub async fn quick_launch_in(
     let mut profile = spec.profile.filter(|p| !p.trim().is_empty());
     let mut picked = None;
     if profile.is_none() {
-        if let Some((name, why)) = spread_pick(
+        let repo = repo_of(client, &spec.project);
+        if let Some((name, why)) = spread_pick_for(
             cfg,
             &spec.kind,
+            repo.as_deref()
+                .and_then(|r| project_default(cfg, r, &spec.kind)),
             nebula_core::clock::now_secs() as i64,
             nebula_core::usage::read_account,
         ) {
@@ -410,6 +484,27 @@ mod tests {
             "what the quick prompt's auto option says it will pick"
         );
         assert_eq!(auto_pick(&cfg, "codex", 0, used), None);
+
+        // The project's default comes before the spread.
+        let cfg: Config = serde_json::from_value(serde_json::json!({
+            "account_spread": "failover",
+            "profiles": [{"name": "work", "harness": "claude", "default": true}, {"name": "home", "harness": "claude"}],
+            "projects": {"/repo": {"default_profiles": {"claude": "work"}}},
+        }))
+        .unwrap();
+        let repo = std::path::Path::new("/repo");
+        let proj = project_default(&cfg, repo, "claude");
+        assert_eq!(proj, Some("work"));
+        assert_eq!(project_default(&cfg, repo, "codex"), None);
+        assert_eq!(
+            project_default(&cfg, std::path::Path::new("/else"), "claude"),
+            None
+        );
+        assert_eq!(
+            spread_pick_for(&cfg, "claude", proj, 0, used),
+            Some((Some("work".into()), "claude: work (project default)".into())),
+            "over its threshold, but the project names it"
+        );
     }
 
     /// Off profiles are offered after the rest, never as the default; two

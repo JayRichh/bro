@@ -26,6 +26,8 @@ import { ask, openMenu, ui, type MenuItem } from './ui/ui.svelte';
 import { attentionSessions, stepRing, type PaletteCommand } from './palette';
 import { askStartOrchestrator, openOrchestrator, orchestratorCommands } from './orch.svelte';
 import { orchestratorOf } from './orchestrator';
+import { openAccounts } from './accounts/actions';
+import { openAddAccount } from './accounts/add.svelte';
 
 /** 0 / F10: the orchestrator, or the Start form when there is none. */
 function orchestratorKey() {
@@ -98,8 +100,9 @@ export function runShortcut(id: ShortcutId): boolean {
     go_diff: () => openDiff(app.diffWorktree ?? sessionWorktree(app.session)),
     orchestrator: orchestratorKey,
     orchestrator_f10: orchestratorKey,
+    accounts: openAccounts,
     close_split: () => {
-      if (!split() && nav.current.view !== 'settings') return false;
+      if (!split() && nav.current.view !== 'settings' && nav.current.view !== 'accounts') return false;
       if (nav.current.view === 'diff') return closeDiff();
       goHome(nav.current.repo);
     },
@@ -155,6 +158,8 @@ export function paletteCommands(): Command[] {
     cmd('theme', `Cycle theme (now ${app.themePref})`, 'Window', cycleTheme, 'cycle_theme', 'dark light system'),
     cmd('settings', 'Settings', 'Window', () => openSettings(), 'settings', 'preferences config'),
     cmd('presets', 'Agent presets', 'Window', () => openSettings('presets'), undefined, 'prefix postfix'),
+    cmd('accounts', 'Accounts', 'Window', openAccounts, 'accounts', 'profiles login usage spread subscription'),
+    cmd('add-account', 'Add an account\u2026', 'Window', () => openAddAccount(), undefined, 'profile login new subscription'),
     cmd('profiles', 'Profiles', 'Window', () => openSettings('profiles'), undefined, 'accounts login'),
     cmd('help', 'Keyboard shortcuts', 'Window', () => (ui.help = true), 'help_f1', 'help keys'),
     cmd('add-repo', 'Add a repo\u2026', 'Window', () => addRepo(), undefined, 'project folder'),

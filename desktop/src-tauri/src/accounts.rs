@@ -47,6 +47,10 @@ pub struct AccountRow {
     /// or switches, only the way to Settings, Profiles.
     pub problem: Option<String>,
     pub usage: Option<AccountUsage>,
+    /// Its PROFILE HOME; None for an own login or an adopted one.
+    pub home: Option<String>,
+    /// The variable names its profile sets; values never leave Rust.
+    pub env_keys: Vec<String>,
 }
 
 /// The rows: profiles in config order (broken ones too, with their
@@ -84,6 +88,8 @@ pub fn rows(
                     login_hint: None,
                     problem: Some(problem),
                     usage: None,
+                    home: None,
+                    env_keys: p.env.keys().cloned().collect(),
                 };
             }
             let check = login(Some(p), &harness);
@@ -99,6 +105,8 @@ pub fn rows(
                 login_hint: accounts::login_command(Some(p), &harness),
                 problem: None,
                 usage: reading(&name),
+                home: p.home().map(|h| h.display().to_string()),
+                env_keys: p.env.keys().cloned().collect(),
                 profile: true,
                 name,
                 harness,
@@ -121,6 +129,8 @@ pub fn rows(
             expired: check.expired,
             login_hint: accounts::login_command(None, harness),
             problem: None,
+            home: None,
+            env_keys: Vec::new(),
             harness: harness.clone(),
         });
     }
@@ -202,6 +212,97 @@ pub async fn account_login_run(
     .and_then(|r| r.login_hint)
     .ok_or_else(|| format!("no login command for `{key}`"))?;
     run_in_new_terminal(&client, worktree, &line).await
+}
+
+/// Refuse unless the connected daemon takes `SwitchAgentAccount`: an older
+/// one would drop the whole connection on the unknown request.
+pub fn require_switch(client: &Client) -> Res<()> {
+    match client.daemon_protocol() {
+        0 => Err("Not connected to the kete daemon.".into()),
+        v if v < nebula_core::SWITCH_ACCOUNT_PROTOCOL => {
+            Err(crate::orchestrator::RELOAD_HINT.into())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Move a session to another account: the daemon restarts it fresh on
+/// `profile` (None: its harness's own login) in the same worktree.
+pub async fn switch_account_in(client: &Client, agent: String, profile: Option<String>) -> Res<()> {
+    require_switch(client)?;
+    let profile = profile
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty());
+    crate::sessions::ack(client, |req_id| ClientRequest::SwitchAgentAccount {
+        req_id,
+        id: nebula_core::AgentId(agent),
+        profile,
+    })
+    .await
+    .map(drop)
+}
+
+#[tauri::command]
+pub async fn account_switch(
+    client: tauri::State<'_, Arc<Client>>,
+    agent: String,
+    profile: Option<String>,
+) -> Res<()> {
+    switch_account_in(&client, agent, profile).await
+}
+
+/// Set (or with `profile` None, clear) the default account of `harness`
+/// for the project at `repo` in the settings file at `config`. A profile
+/// must exist and be an account for `harness`.
+pub fn set_project_account_at(
+    config: &Path,
+    all: &[Profile],
+    repo: &str,
+    harness: &str,
+    profile: Option<&str>,
+) -> Res<()> {
+    let profile = profile.map(str::trim).filter(|p| !p.is_empty());
+    if let Some(name) = profile {
+        let of = profiles::project_default_harness(all, name)?;
+        if of != harness.trim() {
+            return Err(format!("{name} is a {of} account, not {}.", harness.trim()));
+        }
+    }
+    profiles::set_project_default_in_file(config, repo, harness, profile)
+}
+
+/// The window's "Default account" for a project (by id): written under its
+/// repo path in the layer whose `projects` key is in force, under the
+/// settings lock.
+#[tauri::command]
+pub fn project_set_account(
+    client: tauri::State<'_, Arc<Client>>,
+    project: String,
+    harness: String,
+    profile: Option<String>,
+) -> Res<()> {
+    let repo = client
+        .snapshot()
+        .projects
+        .iter()
+        .find(|p| p.id.0 == project)
+        .map(|p| p.repo_path.to_string_lossy().into_owned())
+        .ok_or_else(|| "That repo is gone.".to_string())?;
+    let config = nebula_core::paths::config_path();
+    let local = nebula_core::paths::config_local_path();
+    let layer = profiles::layer_for(&config, &local, profiles::PROJECTS_KEY)?;
+    let _lock = if layer == local {
+        Some(nebula_core::settings::lock(&config).map_err(|e| e.to_string())?)
+    } else {
+        None
+    };
+    set_project_account_at(
+        &layer,
+        &profiles::load(),
+        &repo,
+        &harness,
+        profile.as_deref(),
+    )
 }
 
 #[cfg(test)]
@@ -376,6 +477,68 @@ mod tests {
         assert!(!std::fs::read_to_string(&config)
             .unwrap()
             .contains("disabled"));
+    }
+
+    /// A 55 daemon never gets the switch (it would drop the connection);
+    /// a 56 one gets the request with the profile trimmed, or none.
+    #[tokio::test]
+    async fn a_switch_goes_only_to_a_daemon_that_takes_it() {
+        use crate::sessions::testkit::{ok, run};
+        let (client, mut rx) = Client::connected_for_test();
+        client.set_model(|m| m.protocol_version = 55);
+        let refused = switch_account_in(&client, "a1".into(), Some("work".into())).await;
+        assert_eq!(refused.unwrap_err(), crate::orchestrator::RELOAD_HINT);
+        assert!(rx.try_recv().is_err(), "nothing may reach a 55 daemon");
+
+        client.set_model(|m| m.protocol_version = nebula_core::SWITCH_ACCOUNT_PROTOCOL);
+        for (asked, sent) in [
+            (Some(" work "), Some("work")),
+            (Some(""), None),
+            (None, None),
+        ] {
+            let (out, seen) = run(
+                &client,
+                &mut rx,
+                switch_account_in(&client, "a1".into(), asked.map(str::to_string)),
+                ok,
+            )
+            .await;
+            out.unwrap();
+            let ClientRequest::SwitchAgentAccount { id, profile, .. } = &seen[0] else {
+                panic!("{seen:?}")
+            };
+            assert_eq!((id.0.as_str(), profile.as_deref()), ("a1", sent));
+        }
+    }
+
+    #[test]
+    fn a_project_account_must_be_one_of_its_harness() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config.json");
+        let mut gpt = profile("gpt", "codex");
+        gpt.disabled = true;
+        let all = vec![profile("work", "claude"), gpt];
+        set_project_account_at(&config, &all, "/repo", "claude", Some("work")).unwrap();
+        let err =
+            set_project_account_at(&config, &all, "/repo", "claude", Some("gpt")).unwrap_err();
+        assert!(err.contains("codex account"), "{err}");
+        assert!(set_project_account_at(&config, &all, "/repo", "claude", Some("gone")).is_err());
+        set_project_account_at(&config, &all, "/repo", "codex", Some("gpt")).unwrap();
+        let obj = nebula_core::settings::read_object(&config)
+            .unwrap()
+            .unwrap();
+        let defaults = profiles::project_defaults_from(&obj);
+        assert_eq!(defaults["/repo"]["claude"], "work");
+        assert_eq!(
+            defaults["/repo"]["codex"], "gpt",
+            "a switched-off one may be set"
+        );
+        set_project_account_at(&config, &all, "/repo", "claude", None).unwrap();
+        set_project_account_at(&config, &all, "/repo", "codex", Some(" ")).unwrap();
+        let obj = nebula_core::settings::read_object(&config)
+            .unwrap()
+            .unwrap();
+        assert!(profiles::project_defaults_from(&obj).is_empty());
     }
 
     /// Run login: a shell in the worktree, the command typed into it.

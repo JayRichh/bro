@@ -30,6 +30,7 @@ export type ShortcutId =
   | 'next_attention'
   | 'prev_attention'
   | 'new_worktree'
+  | 'accounts'
   | 'rename'
   | 'archive'
   | 'unarchive'
@@ -103,6 +104,8 @@ export const SHORTCUTS: Shortcut[] = [
   // The terminal app's `.` and `,`: the palette's attention order, every repo.
   { id: 'next_attention', keys: ['.'], scope: 'global', label: 'Next session needing you', group: 'Views' },
   { id: 'prev_attention', keys: [','], scope: 'global', label: 'Previous session needing you', group: 'Views' },
+  // The terminal app's Shift+U accounts overlay.
+  { id: 'accounts', keys: ['shift+u'], scope: 'global', label: 'Accounts: every login, its use, and who runs on it', group: 'Views' },
 
   { id: 'rename', keys: ['r'], scope: 'row', label: 'Rename', group: 'Sessions' },
   { id: 'archive', keys: ['a'], scope: 'row', label: 'Archive', group: 'Sessions' },

@@ -15,6 +15,15 @@ describe('the quick prompt profile picker', () => {
     expect(initialProfile([p('home')], undefined)).toBe(AUTO);
     expect(initialProfile([], 'manual')).toBe(AUTO);
   });
+  it("starts on the repo's default account before the spread or the star", () => {
+    const list = [p('work', { default: true }), p('home'), p('off', { disabled: true })];
+    expect(initialProfile(list, 'failover', 'home')).toBe('home');
+    expect(initialProfile(list, 'manual', 'home')).toBe('home');
+    // One that cannot run falls through, as the daemon's order does.
+    expect(initialProfile(list, 'manual', 'off')).toBe('work');
+    expect(initialProfile(list, 'failover', 'gone')).toBe(AUTO);
+    expect(initialProfile(list, 'manual', null)).toBe('work');
+  });
   it('keeps auto and listed names, drops a vanished one', () => {
     const list = [p('work')];
     expect(stillOffered(AUTO, list)).toBe(true);

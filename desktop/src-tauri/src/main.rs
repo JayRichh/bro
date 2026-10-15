@@ -403,6 +403,12 @@ struct Launchables {
     /// The ACCOUNT SPREAD (`manual`, `failover`, `least_used`): off
     /// `manual`, the quick prompt starts on "auto" so the spread chooses.
     spread: String,
+    /// The failover threshold, percent, as config.json writes it.
+    spread_threshold: String,
+    /// PROJECT DEFAULT ACCOUNTS by repo path as the daemon stores it:
+    /// harness id to profile name.
+    project_accounts:
+        std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
 }
 
 /// What the quick prompt offers: the harnesses the TUI's New session
@@ -415,6 +421,8 @@ fn launchables() -> Launchables {
     let profiles = launch::launch_profiles(&nebula_core::profiles::load());
     let spread = nebula_core::accounts::Spread::parse(&cfg.account_spread);
     Launchables {
+        spread_threshold: cfg.account_spread_threshold.clone(),
+        project_accounts: nebula_core::profiles::load_project_defaults(),
         spread: spread.as_str().into(),
         harnesses,
         profiles,
@@ -795,6 +803,9 @@ fn main() {
             profiles::profile_remove,
             profiles::profile_set_default,
             accounts::accounts_list,
+            accounts::account_switch,
+            accounts::project_set_account,
+            profiles::profile_duplicate,
             accounts::profile_set_enabled,
             accounts::account_login_run,
             settings::settings_schema,
