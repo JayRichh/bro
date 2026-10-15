@@ -15,6 +15,9 @@ export default defineConfig({
       'monaco-esm': path.resolve(import.meta.dirname, 'node_modules/monaco-editor/esm/vs'),
     },
   },
+  // Dev only: pre-bundled, the `?worker` import loses its default export
+  // (the Diff view then fails to load), so the worker is served as is.
+  optimizeDeps: { exclude: ['monaco-esm', 'monaco-editor'] },
   server: {
     port: 1420,
     strictPort: true,

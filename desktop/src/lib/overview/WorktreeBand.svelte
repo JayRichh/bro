@@ -117,7 +117,7 @@
       draggable={!w.is_main}
       ondragstart={(e) => startDrag(e, { kind: 'worktree', id: w.id, project: w.project_id })}
       ondragend={() => ((over = null), endDrag())}
-      class="flex min-w-0 flex-1 cursor-default items-center gap-2 self-stretch outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rule-strong"
+      class="flex min-w-0 flex-1 cursor-default items-center gap-2 self-stretch overflow-hidden outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rule-strong"
       onclick={() => toggleCollapsed(key)}
       onkeydown={onKey}
     >
@@ -125,7 +125,8 @@
         ><path d={folded ? 'M3.5 1.5L7 5 3.5 8.5' : 'M1.5 3.5L5 7l3.5-3.5'} fill="none" stroke="currentColor" stroke-width="1.4" /></svg
       >
       <span class="w-3 flex-none text-center font-mono text-[13px] text-muted" aria-hidden="true">{w.is_main ? '\u2302' : '\u21b3'}</span>
-      <span class="min-w-0 truncate font-mono text-[13px] font-medium text-ink">{w.branch}</span>
+      <!-- The branch keeps its name (up to half the row); the counts after it clip. -->
+      <span class="max-w-[50%] min-w-0 flex-none truncate font-mono text-[13px] font-medium text-ink">{w.branch}</span>
       {#if git}
         {#if git.ahead || git.behind}
           <span class="{meta} text-muted" title="Against {git.upstream}: {git.ahead ?? 0} ahead, {git.behind ?? 0} behind"
@@ -167,7 +168,7 @@
 
     <!-- The verbs: on hover or focus, the menu button always. -->
     <span
-      class="flex flex-none items-center gap-0.5 opacity-0 group-focus-within/wt:opacity-100 group-hover/wt:opacity-100 @max-[760px]/wt:hidden"
+      class="flex flex-none items-center gap-0.5 opacity-0 group-focus-within/wt:opacity-100 group-hover/wt:opacity-100 @max-[960px]/wt:hidden"
     >
       {#each verbs.filter((v) => v.id !== 'run') as v (v.id)}
         <button

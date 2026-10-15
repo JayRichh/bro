@@ -380,7 +380,7 @@
                 {#if u?.plan}<span aria-hidden="true">&middot;</span><span title="Plan">{u.plan}</span>{/if}
               </div>
               <div class="pl-6 text-[12px] {st.tone}" title={r.problem ?? loginTitle(r)}>
-                {st.text}{#if r.disabled && !r.problem}<span class="text-muted"> &middot; switched off</span>{/if}
+                {st.text}{#if r.disabled && !r.problem}<span class="text-muted">{' \u00b7 switched off'}</span>{/if}
               </div>
               {#if r.problem}<p class="m-0 pl-6 text-[12px] text-fail">{r.problem}</p>{/if}
             </div>

@@ -601,7 +601,8 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="@container flex h-full min-h-0 flex-col" onkeydowncapture={onPaneKey}>
-  <div class="flex h-10 min-w-0 flex-none items-center gap-3 border-b border-rule pr-2 pl-2 text-[13px]">
+  <!-- Too narrow for one row (the split's narrowest pane), the tools wrap to a second. -->
+  <div class="flex min-h-10 min-w-0 flex-none flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-rule py-1.5 pr-2 pl-2 text-[13px] @min-[720px]:gap-x-3">
     <button
       class="grid size-7 flex-none place-items-center border-0 bg-transparent text-muted hover:bg-surface hover:text-ink {showFiles ? '' : 'text-ink'}"
       onclick={() => (showFiles = !showFiles)}
@@ -669,12 +670,12 @@
           ><path d="M3.5 10L8 5.5l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" /></svg
         >
       </button>
-      <span class="min-w-[74px] border-x border-rule px-2 text-center font-mono text-[12px] leading-[26px] text-muted" aria-live="polite"
+      <span class="hidden min-w-[74px] border-x border-rule px-2 text-center font-mono text-[12px] leading-[26px] text-muted @min-[620px]:block" aria-live="polite"
         >{#if !current}&nbsp;{:else if !stops.length}no changes{:else if stopAt >= 0}{stopAt + 1} of {stops.length}{:else}{stops.length}
           {stops.length === 1 ? 'change' : 'changes'}{/if}</span
       >
       <button
-        class="grid h-full w-7 place-items-center border-0 bg-transparent text-muted enabled:hover:bg-surface enabled:hover:text-ink disabled:text-faint"
+        class="grid h-full w-7 place-items-center border-0 border-l border-rule bg-transparent @min-[620px]:border-l-0 text-muted enabled:hover:bg-surface enabled:hover:text-ink disabled:text-faint"
         onclick={() => step(1)}
         disabled={!current}
         title="Next change (F7)"
@@ -706,7 +707,7 @@
           >
           <!-- In a narrow pane only the mode in use keeps its word, and in a very
                narrow one none does, so the close button stays in view. -->
-          <span class={on ? 'hidden @min-[560px]:inline' : 'hidden @min-[860px]:inline'}>{m.label}</span>
+          <span class={on ? 'hidden @min-[720px]:inline' : 'hidden @min-[960px]:inline'}>{m.label}</span>
         </button>
       {/each}
     </div>
@@ -727,7 +728,7 @@
       <span class="size-1.5 flex-none bg-faint" aria-hidden="true"></span>offline, using cached refs
     </div>
   {/if}
-  <div class="grid min-h-0 flex-1 {showFiles ? 'grid-cols-[minmax(200px,248px)_1fr]' : 'grid-cols-[1fr]'}">
+  <div class="grid min-h-0 flex-1 {showFiles ? 'grid-cols-[minmax(160px,min(248px,40%))_1fr]' : 'grid-cols-[1fr]'}">
     {#if showFiles}
       <div class="flex min-h-0 flex-col border-r border-rule bg-bg">
       {#if base && !range}

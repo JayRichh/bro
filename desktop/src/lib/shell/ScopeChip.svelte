@@ -61,7 +61,7 @@
 </script>
 
 <div
-  class="flex h-6 max-w-[42cqw] min-w-0 flex-none items-center border {all ? 'border-rule' : 'border-ink'}"
+  class="flex h-6 max-w-[36cqw] min-w-0 flex-none items-center border {all ? 'border-rule' : 'border-ink'}"
   role="group"
   aria-label="Scope"
 >

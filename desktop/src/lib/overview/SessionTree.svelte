@@ -107,7 +107,7 @@
 
   const ROW =
     'group relative grid min-h-9 cursor-default items-center border-b border-rule pr-4 outline-none ' +
-    'grid-cols-[112px_minmax(0,1.15fr)_minmax(0,170px)_minmax(0,2fr)_44px] ' +
+    'grid-cols-[112px_minmax(200px,1.5fr)_minmax(0,170px)_minmax(0,2fr)_44px] ' +
     '@max-[760px]:grid-cols-[104px_minmax(0,1fr)_44px] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rule-strong';
 </script>
 
