@@ -76,12 +76,18 @@ pub(crate) fn refresh(app: &mut App) {
 /// What a key did: a message for the footer, an account to sign in.
 type Done = Option<Result<Outcome, String>>;
 
+/// Why a rename waits for the daemon: only it knows every session that
+/// names the account, and one left on the old name could not resume.
+const RENAME_OFFLINE: &str =
+    "not connected to the kete daemon: a rename checks the sessions on the account first";
+
 /// The list's keys: j/k move, Space/e switch a profile on or off, d/*
 /// make it the default, a add, Enter edit, c duplicate, r rename, x/Delete
 /// remove, l sign in, p use for a repo, m move the grid's session onto it,
 /// s/t the spread and its threshold, Esc (or q) closes.
 fn list_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) -> Done {
     let agents = app.tree.agents.clone();
+    let connected = !matches!(app.chrome.conn, crate::app::ConnState::Disconnected);
     let Some(Overlay::Accounts(view)) = &mut app.modals.overlay else {
         return None;
     };
@@ -112,6 +118,7 @@ fn list_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) -> Done 
         }
         KeyCode::Enter => view.open_edit().err().map(Err),
         KeyCode::Char('c') => view.open_duplicate().err().map(Err),
+        KeyCode::Char('r') if !connected => Some(Err(RENAME_OFFLINE.into())),
         KeyCode::Char('r') => view.open_rename(&agents).err().map(Err),
         KeyCode::Char('x') | KeyCode::Delete => view.open_remove(&agents).err().map(Err),
         KeyCode::Char('p') => view.open_use_for().err().map(Err),
@@ -137,6 +144,7 @@ fn list_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) -> Done 
 /// edit's variables, Enter saves, Esc goes back to the list.
 fn form_key(app: &mut App, key: KeyEvent) -> Done {
     let agents = app.tree.agents.clone();
+    let connected = !matches!(app.chrome.conn, crate::app::ConnState::Disconnected);
     let Some(Overlay::Accounts(view)) = &mut app.modals.overlay else {
         return None;
     };
@@ -147,6 +155,11 @@ fn form_key(app: &mut App, key: KeyEvent) -> Done {
         .collect();
     let harnesses = view.harnesses.clone();
     if key.code == KeyCode::Enter {
+        let renaming =
+            matches!(&view.mode, Mode::Form(f) if matches!(f.kind, FormKind::Rename { .. }));
+        if renaming && !connected {
+            return Some(Err(RENAME_OFFLINE.into()));
+        }
         return Some(view.submit_form(&agents));
     }
     let Mode::Form(form) = &mut view.mode else {
@@ -1253,6 +1266,12 @@ mod tests {
                 app.tree.agents[0].profile = Some("work".into());
                 let mut out = Vec::new();
                 open_overlay(&mut app, &mut out);
+                // Offline, the sessions on it are unknown: no rename.
+                key(&mut app, KeyCode::Char('r'), &mut out);
+                assert_eq!(view(&app).mode, Mode::List);
+                let flash = app.chrome.flash.clone().unwrap_or_default();
+                assert!(flash.contains("not connected"), "{flash}");
+                app.chrome.conn = crate::app::ConnState::Connected;
                 key(&mut app, KeyCode::Char('r'), &mut out);
                 assert_eq!(view(&app).mode, Mode::List, "refused up front");
                 let flash = app.chrome.flash.clone().unwrap_or_default();

@@ -873,14 +873,16 @@ pub fn rename(
         new,
     );
 
+    // A directory of the new name holds someone's login (a remove that kept
+    // its home): never taken over, whether or not there is a home to move.
+    if let Some(to) = renamed.home_in(root).filter(|to| to.exists()) {
+        return Err(format!(
+            "{} already exists (a removed profile's home?): delete it or pick another name",
+            to.display()
+        ));
+    }
     let home = match (current.home_in(root), renamed.home_in(root)) {
         (Some(from), Some(to)) if from.exists() => {
-            if to.exists() {
-                return Err(format!(
-                    "{} already exists (a removed profile's home?): delete it or pick another name",
-                    to.display()
-                ));
-            }
             std::fs::rename(&from, &to).map_err(|e| {
                 format!(
                     "could not move {} to {}: {e} (is a program still using it?)",
@@ -912,7 +914,12 @@ pub fn rename(
     }
     // The reading follows the name; a failure here only loses the bars
     // until the next session's turn.
-    let _ = std::fs::rename(usage_path_in(root, old), usage_path_in(root, new));
+    // A stale reading under the new name is replaced, not kept beside it
+    // (Windows refuses a rename onto an existing file).
+    if usage_path_in(root, old).exists() {
+        let _ = std::fs::remove_file(usage_path_in(root, new));
+        let _ = std::fs::rename(usage_path_in(root, old), usage_path_in(root, new));
+    }
     let archived = agents
         .iter()
         .filter(|a| a.archived && a.profile.as_deref().map(str::trim) == Some(old))
@@ -1335,6 +1342,10 @@ mod tests {
         // A home a remove left behind under the new name is not taken over.
         std::fs::create_dir_all(root.join("left")).unwrap();
         assert!(refused("left", &[]).contains("already exists"));
+        // ... nor by a profile with no home of its own on disk yet.
+        std::fs::remove_dir_all(root.join("work")).unwrap();
+        assert!(refused("left", &[]).contains("already exists"));
+        std::fs::create_dir_all(root.join("work").join("claude")).unwrap();
         assert_eq!(std::fs::read_to_string(&config).unwrap(), before);
         assert!(root.join("work").join("claude").is_dir(), "nothing moved");
     }

@@ -164,10 +164,12 @@
     }
   }
 
+  const RENAME_OFFLINE = 'Not connected to the kete daemon: a rename checks the sessions on the account first.';
+
   /** Rename: refused while a session names it; the home, the repos it is
    *  the default of and its reading move with the name. */
   async function rename(r: AccountRow) {
-    const blocked = renameBlocker(r.name, app.model.agents);
+    const blocked = app.model.connected ? renameBlocker(r.name, app.model.agents) : RENAME_OFFLINE;
     if (blocked) return toast(blocked);
     const taken = app.accounts.filter((x) => x.profile && x.key !== r.key).map((x) => x.name);
     const v = await ask.prompt({
@@ -199,8 +201,9 @@
     if (!r.profile || e.ctrlKey || e.metaKey || e.altKey) return;
     const t = e.target as HTMLElement;
     if (t.closest('input, textarea, select, [contenteditable="true"]')) return;
-    if (e.key === 'r' || e.key === 'R') (e.preventDefault(), rename(r));
-    else if (e.key === 'Delete') (e.preventDefault(), remove(r));
+    // The window's own r and Delete act on the open session: not here.
+    if (e.key === 'r' || e.key === 'R') (e.preventDefault(), e.stopPropagation(), rename(r));
+    else if (e.key === 'Delete') (e.preventDefault(), e.stopPropagation(), remove(r));
   }
 
   async function signIn(r: AccountRow) {
@@ -431,7 +434,7 @@
                   >
                 {/if}
                 {#if r.name !== '(no name)'}
-                  {@const blocked = renameBlocker(r.name, app.model.agents)}
+                  {@const blocked = app.model.connected ? renameBlocker(r.name, app.model.agents) : RENAME_OFFLINE}
                   <button
                     class="{btn} {blocked ? 'text-faint' : ''}"
                     onclick={() => rename(r)}

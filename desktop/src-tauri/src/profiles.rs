@@ -267,14 +267,23 @@ pub fn rename_at(
     })
 }
 
-/// Rename an account, checked against the daemon's sessions.
+/// Rename an account, checked against the daemon's sessions: refused
+/// while the window is not connected, since the sessions naming it are
+/// unknown then.
 #[tauri::command]
 pub fn profile_rename(
     client: tauri::State<'_, std::sync::Arc<crate::daemon::Client>>,
     old: String,
     new: String,
 ) -> Res<ProfileRenamed> {
-    let agents = client.snapshot().agents;
+    let model = client.snapshot();
+    if !model.connected {
+        return Err(
+            "Not connected to the kete daemon: a rename checks the sessions on the account first."
+                .into(),
+        );
+    }
+    let agents = model.agents;
     rename_at(
         &nebula_core::paths::config_path(),
         &nebula_core::paths::config_local_path(),
