@@ -336,7 +336,12 @@ fn managed_group(endpoint: &str, event: &str, matcher: Option<&str>) -> Value {
 /// Merge nebula's managed hooks for Claude Code into
 /// `<cwd>/.claude/settings.local.json`, plus the permission rule that lets
 /// the auto-title `nebula rename` run unprompted, and attribution off: no
-/// co-author trailer on its commits, no footer on its PRs.
+/// co-author trailer on its commits, no footer on its PRs. The file is
+/// kept out of `git status` through the repository's shared
+/// `info/exclude`: Kete writes it before Claude ever runs, so Claude's own
+/// ignore of it may not be there yet, and a fresh worktree read as one
+/// changed file (a Review card with nothing done) that an agent's
+/// `git add -A` then committed.
 pub fn install_claude_hooks(cwd: &Path) -> Result<()> {
     install_managed_hooks(
         &cwd.join(CLAUDE_DIR),
@@ -345,8 +350,16 @@ pub fn install_claude_hooks(cwd: &Path) -> Result<()> {
         CLAUDE_EVENTS,
         CLAUDE_ALLOW_RULES,
         claude_attribution_off,
-    )
+    )?;
+    // Not a git checkout (a bare folder): nothing to keep it out of.
+    match git_common_dir(cwd) {
+        Ok(common) => ensure_excluded(&common, CLAUDE_SETTINGS_EXCLUDE),
+        Err(_) => Ok(()),
+    }
 }
+
+/// [`CLAUDE_SETTINGS_FILE`] as a line of `info/exclude`.
+const CLAUDE_SETTINGS_EXCLUDE: &str = ".claude/settings.local.json";
 
 /// The hidden subcommand kete's Claude statusLine runs (`kete
 /// _statusline`), and what marks a `statusLine` as kete's.
@@ -1216,6 +1229,25 @@ mod tests {
         install_copilot_worktree_settings(&main).unwrap();
         let exclude = std::fs::read_to_string(main.join(".git/info/exclude")).unwrap();
         assert_eq!(exclude, ".github/copilot/settings.local.json\n");
+    }
+
+    /// Claude's settings file stays out of `git status` in a checkout,
+    /// once however often it is installed, and a folder that is no git
+    /// checkout still gets its hooks.
+    #[test]
+    fn claude_settings_are_excluded_from_git() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path().join("main");
+        std::fs::create_dir_all(main.join(".git")).unwrap();
+        install_claude_hooks(&main).unwrap();
+        install_claude_hooks(&main).unwrap();
+        let exclude = std::fs::read_to_string(main.join(".git/info/exclude")).unwrap();
+        assert_eq!(exclude, ".claude/settings.local.json\n");
+
+        let plain = tmp.path().join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        install_claude_hooks(&plain).unwrap();
+        assert!(plain.join(".claude/settings.local.json").exists());
     }
 
     #[test]
