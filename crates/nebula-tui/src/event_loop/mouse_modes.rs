@@ -394,7 +394,7 @@ fn handle_diff_mouse(
                     return true;
                 }
                 // The header's session chip: this session, or all.
-                if view.session_area.contains(mouse_pos) {
+                if view.attribution.area.contains(mouse_pos) {
                     app.chrome.flash = Some(crate::git_diff::toggle_session(view));
                     app.chrome.dirty = true;
                     return true;

@@ -662,13 +662,13 @@ pub fn diff_between(root: &Path, file: &DiffFile, from: &str, to: &str) -> Strin
 /// read the list again as the reviewed session's changes alone, or as
 /// everything in the worktree. Says what it did, or why it could not.
 pub fn toggle_session(view: &mut DiffView) -> String {
-    let Some(filter) = view.session.as_deref() else {
+    let Some(filter) = view.attribution.session.as_ref() else {
         return "no session to narrow to: this diff is not a session's review".into();
     };
     if !filter.offered() {
         return "one session has worked here: all of it is this session's".into();
     }
-    let only = !view.session_listed;
+    let only = !view.attribution.listed;
     let trees = filter
         .changes
         .trees()
@@ -679,7 +679,7 @@ pub fn toggle_session(view: &mut DiffView) -> String {
             _ => "no turn of this session has ended yet".into(),
         };
     }
-    if let Some(filter) = view.session.as_deref_mut() {
+    if let Some(filter) = view.attribution.session.as_mut() {
         filter.only = only;
     }
     view.keep_open = true;
@@ -689,7 +689,7 @@ pub fn toggle_session(view: &mut DiffView) -> String {
         view.base.as_deref().cloned(),
         view.commits.clone(),
     );
-    let recorded = view.recorded.clone();
+    let recorded = view.attribution.recorded.clone();
     let read = move || match &trees {
         Some((from, to)) if only => read_session_listing(&root, from, to, against, base, commits),
         _ => read_listing_with(&root, Some(against), recorded.as_ref()),
@@ -731,8 +731,8 @@ pub fn land_session_changes(
     if asked != Some(&changes.agent) {
         return;
     }
-    let only = view.session.as_ref().is_some_and(|s| s.only);
-    view.session = Some(Box::new(crate::app::SessionFilter { changes, only }));
+    let only = view.attribution.session.as_ref().is_some_and(|s| s.only);
+    view.attribution.session = Some(crate::app::SessionFilter { changes, only });
 }
 
 /// The working tree's changes since commit `base` as the list's files:
@@ -770,9 +770,9 @@ pub fn toggle_against(view: &mut DiffView) -> Option<nebula_core::review_base::A
     let want = view.against.other();
     view.keep_open = true;
     let root = view.root.clone();
-    let recorded = view.recorded.clone();
+    let recorded = view.attribution.recorded.clone();
     // Against the base or HEAD is the worktree's whole list again.
-    if let Some(filter) = view.session.as_deref_mut() {
+    if let Some(filter) = view.attribution.session.as_mut() {
         filter.only = false;
     }
     match view.jobs.clone() {
@@ -812,8 +812,8 @@ pub fn fill_view(view: &mut DiffView, listing: crate::view_jobs::DiffListing) {
     // Read against something else now: every diff in hand is the other's.
     let base_changed = view.against != listing.against
         || view.base.as_ref().map(|b| &b.sha) != listing.base.as_ref().map(|b| &b.sha)
-        || view.session_listed != listing.session;
-    view.session_listed = listing.session;
+        || view.attribution.listed != listing.session;
+    view.attribution.listed = listing.session;
     let head_changed = head_changed || base_changed;
     view.against = listing.against;
     view.base = listing.base.map(Box::new);
@@ -1737,16 +1737,16 @@ mod tests {
                 &mut view,
                 session_changes("other", Some(start.clone()), Some(last.clone()), 2),
             );
-            assert!(view.session.is_none());
+            assert!(view.attribution.session.is_none());
             land_session_changes(
                 &mut view,
                 session_changes("a1", Some(start.clone()), Some(last.clone()), 2),
             );
-            assert!(view.session.as_ref().unwrap().offered());
+            assert!(view.attribution.session.as_ref().unwrap().offered());
 
             let said = toggle_session(&mut view);
             assert!(said.contains("this session"), "{said}");
-            assert!(view.session_listed);
+            assert!(view.attribution.listed);
             let paths: Vec<&str> = view.files.iter().map(|f| f.path.as_str()).collect();
             assert_eq!(paths, vec!["mine.txt"]);
             assert_eq!(view.session_range(), Some((start.as_str(), last.as_str())));
@@ -1759,7 +1759,7 @@ mod tests {
 
             let said = toggle_session(&mut view);
             assert!(said.contains("all changes"), "{said}");
-            assert!(!view.session_listed);
+            assert!(!view.attribution.listed);
             let back: Vec<String> = view.files.iter().map(|f| f.path.clone()).collect();
             assert_eq!(back, all);
         });
@@ -1771,12 +1771,12 @@ mod tests {
         assert!(toggle_session(&mut view).contains("not a session's review"));
         reviewing(&mut view, "a1");
         land_session_changes(&mut view, session_changes("a1", Some("t".into()), None, 1));
-        assert!(!view.session.as_ref().unwrap().offered());
+        assert!(!view.attribution.session.as_ref().unwrap().offered());
         assert!(toggle_session(&mut view).contains("one session"));
         land_session_changes(&mut view, session_changes("a1", Some("t".into()), None, 2));
         assert!(toggle_session(&mut view).contains("no turn"));
         land_session_changes(&mut view, session_changes("a1", None, Some("t".into()), 2));
         assert!(toggle_session(&mut view).contains("too big"));
-        assert!(!view.session_listed);
+        assert!(!view.attribution.listed);
     }
 }

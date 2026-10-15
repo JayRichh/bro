@@ -851,7 +851,7 @@ fn a_review_offers_its_session_filter_when_the_daemon_answers() {
         let Some(Overlay::Diff(view)) = &app.modals.overlay else {
             unreachable!()
         };
-        let chip = view.session_area;
+        let chip = view.attribution.area;
         assert!(chip.width > 0, "the chip can be clicked");
         mouse_at(
             &mut app,
@@ -862,7 +862,7 @@ fn a_review_offers_its_session_filter_when_the_daemon_answers() {
         let Some(Overlay::Diff(view)) = &app.modals.overlay else {
             panic!("the review stays up");
         };
-        assert!(view.session_listed);
+        assert!(view.attribution.listed);
         let paths: Vec<&str> = view.files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(paths, vec!["mine.txt"]);
         // Ctrl+l: the whole worktree again.
@@ -875,7 +875,7 @@ fn a_review_offers_its_session_filter_when_the_daemon_answers() {
         let Some(Overlay::Diff(view)) = &app.modals.overlay else {
             unreachable!()
         };
-        assert!(!view.session_listed);
+        assert!(!view.attribution.listed);
         assert!(view.files.len() > 1);
     });
 }

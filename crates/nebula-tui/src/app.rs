@@ -1580,20 +1580,10 @@ pub struct DiffView {
     /// Screen rect of the header's against toggle, written back during
     /// draw so a click can hit it.
     pub against_area: Rect,
-    /// The base Kete recorded when it cut this checkout
-    /// (`ServerEvent::WorktreeBases`), read in preference to the derived
-    /// one; None for a checkout with no record, or from an older daemon.
-    pub recorded: Option<nebula_core::review_base::RecordedBase>,
-    /// The REVIEW UNIT's session filter (`Ctrl+l`, the header's chip):
-    /// the reviewed session's snapshots as the daemon answered them, and
-    /// whether the list shows only its changes. None until answered, and
-    /// for a diff with no session (or a daemon older than 59).
-    pub session: Option<Box<SessionFilter>>,
-    /// The listing on screen is the session's own (start..last snapshot),
-    /// not the worktree's: set as a listing lands (`git_diff::fill_view`).
-    pub session_listed: bool,
-    /// Screen rect of the header's session chip, written back during draw.
-    pub session_area: Rect,
+    /// Whose changes are read, and from where: the recorded base and the
+    /// REVIEW UNIT's session filter (boxed: `Overlay` keeps its variants
+    /// close in size).
+    pub attribution: Box<DiffAttribution>,
     /// The list is being read again for a toggle: an empty answer keeps
     /// the modal up (saying so) rather than closing it.
     pub keep_open: bool,
@@ -1603,6 +1593,25 @@ pub struct DiffView {
     /// The board card this diff was opened from: closing it (Esc, `⇧K`)
     /// lands the cursor back on that card, wherever reading it moved it.
     pub from_card: Option<AgentId>,
+}
+
+/// What a DIFF VIEWER knows of whose changes it reads.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DiffAttribution {
+    /// The base Kete recorded when it cut this checkout
+    /// (`ServerEvent::WorktreeBases`), read in preference to the derived
+    /// one; None for a checkout with no record, or from an older daemon.
+    pub recorded: Option<nebula_core::review_base::RecordedBase>,
+    /// The REVIEW UNIT's session filter (`Ctrl+l`, the header's chip):
+    /// the reviewed session's snapshots as the daemon answered them. None
+    /// until answered, and for a diff with no session (or a daemon older
+    /// than 59).
+    pub session: Option<SessionFilter>,
+    /// The listing on screen is the session's own (start..last snapshot),
+    /// not the worktree's: set as a listing lands (`git_diff::fill_view`).
+    pub listed: bool,
+    /// Screen rect of the header's session chip, written back during draw.
+    pub area: Rect,
 }
 
 /// The REVIEW UNIT's "This session / All in this worktree" filter.
@@ -1930,7 +1939,7 @@ impl DiffView {
         // Against the base the CHANGES are the base's, and the hunks
         // staging cuts are HEAD's: they would not line up.
         if self.prefetched.is_some()
-            || self.session_listed
+            || self.attribution.listed
             || self.place != Place::Changes
             || self.diff_base().is_some()
         {
@@ -2020,10 +2029,10 @@ impl DiffView {
     /// The session's two snapshots the diffs are read between, while the
     /// list is that session's alone.
     pub fn session_range(&self) -> Option<(&str, &str)> {
-        if !self.session_listed {
+        if !self.attribution.listed {
             return None;
         }
-        self.session.as_ref()?.changes.trees()
+        self.attribution.session.as_ref()?.changes.trees()
     }
 
     /// The merge-base the diffs are read from, while reading against it.
@@ -2051,7 +2060,7 @@ impl DiffView {
     /// Write the reviewed ✓ marks under the scope they were made in. Not
     /// for a session's own list: marks are scoped to the base or HEAD.
     pub fn store_marks(&self) {
-        if self.prefetched.is_none() && !self.session_listed {
+        if self.prefetched.is_none() && !self.attribution.listed {
             crate::review::store_scoped(&self.root, self.marks_scope(), &self.reviewed);
         }
     }
@@ -2100,10 +2109,7 @@ impl DiffView {
             base: None,
             commits: Vec::new(),
             against_area: Rect::default(),
-            recorded: None,
-            session: None,
-            session_listed: false,
-            session_area: Rect::default(),
+            attribution: Box::default(),
             keep_open: false,
             review: None,
             from_card: None,

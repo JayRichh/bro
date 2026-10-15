@@ -1511,7 +1511,7 @@ fn draw_diff_overlay(f: &mut Frame, app: &mut App, view: crate::app::DiffView) {
         v.files_width = files_w;
         v.wide_shown = wide;
         v.against_area = against_area;
-        v.session_area = session_area;
+        v.attribution.area = session_area;
     }
 }
 
@@ -1525,7 +1525,11 @@ fn draw_diff_session(
     col: Rect,
     th: Theme,
 ) -> (Rect, Rect) {
-    let offered = view.session.as_ref().is_some_and(|s| s.offered());
+    let offered = view
+        .attribution
+        .session
+        .as_ref()
+        .is_some_and(|s| s.offered());
     if !offered || col.height < 8 {
         return (Rect::default(), col);
     }
@@ -1534,7 +1538,7 @@ fn draw_diff_session(
         .fg(th.accent)
         .add_modifier(Modifier::BOLD | Modifier::REVERSED);
     let off = Style::default().fg(th.dim);
-    let (all, mine) = if view.session_listed {
+    let (all, mine) = if view.attribution.listed {
         (off, lit)
     } else {
         (lit, off)

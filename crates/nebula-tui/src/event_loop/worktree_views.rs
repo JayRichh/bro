@@ -390,7 +390,7 @@ pub(crate) fn open_diff_view(app: &mut App) {
         if v.from_card.is_none() {
             v.from_card = card;
         }
-        v.recorded = recorded;
+        v.attribution.recorded = recorded;
     }
 }
 
