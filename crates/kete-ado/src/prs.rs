@@ -798,13 +798,26 @@ pub async fn create(ctx: &PrCtx, pr: NewPr) -> Result<CreateResult, AdoError> {
     crate::naming::validate_branch_name(&target, &[]).map_err(AdoError::Local)?;
     refuse_protected_source(ctx, &source, &target).await?;
 
-    let base = fetch_target(repo_path, &ctx.ado.remote_name, &target).await;
-    let (repo, remote, src) = (
-        repo_path.to_path_buf(),
-        ctx.ado.remote_name.clone(),
-        source.clone(),
-    );
-    let note = tokio::task::spawn_blocking(move || -> Result<Option<String>, AdoError> {
+    let note = clean_and_push(repo_path, &ctx.ado.remote_name, &source, &target).await?;
+    let outcome = open(ctx, &source, &target, &pr).await?;
+    Ok(CreateResult { outcome, note })
+}
+
+/// Steps 1 and 2 of [`create`], for any forge: fetch `target` from
+/// `remote`, clean co-author lines and footers from `source`'s unpushed
+/// commits, then `git push --set-upstream`. The note when pushed commits
+/// still carry co-author lines. `target` goes into a fetch refspec, so it
+/// must be a branch name.
+pub async fn clean_and_push(
+    repo: &Path,
+    remote: &str,
+    source: &str,
+    target: &str,
+) -> Result<Option<String>, AdoError> {
+    crate::naming::validate_branch_name(target, &[]).map_err(AdoError::Local)?;
+    let base = fetch_target(repo, remote, target).await;
+    let (repo, remote, src) = (repo.to_path_buf(), remote.to_string(), source.to_string());
+    tokio::task::spawn_blocking(move || -> Result<Option<String>, AdoError> {
         // Publishing: commits shared with a local upstream are about to be
         // pushed too, so they are cleaned as well.
         crate::attribution::rewrite_unpushed(&repo, base.as_deref(), &src, LocalUpstream::Clean)
@@ -815,9 +828,7 @@ pub async fn create(ctx: &PrCtx, pr: NewPr) -> Result<CreateResult, AdoError> {
         Ok(base.and_then(|b| pushed_trailers_note(&repo, &b, &remote, &src)))
     })
     .await
-    .map_err(|e| AdoError::Local(e.to_string()))??;
-    let outcome = open(ctx, &source, &target, &pr).await?;
-    Ok(CreateResult { outcome, note })
+    .map_err(|e| AdoError::Local(e.to_string()))?
 }
 
 /// [`create`] cleans and pushes its source, so a source that is the target
@@ -944,6 +955,51 @@ pub async fn publish(ctx: &PrCtx, id: u32) -> Result<(), AdoError> {
         )
         .await?;
     Ok(())
+}
+
+/// Complete (merge) PR `id` with `strategy` (`squash`, `noFastForward`,
+/// `rebase` or `rebaseMerge`), deleting its source branch on the server
+/// when `delete_source`. Pinned to the source commit the PR was last
+/// merged at, so a push that lands meanwhile is never merged unseen. A
+/// draft is refused before anything is sent; branch policies that block
+/// come back as ADO's refusal. The PR's status after the call:
+/// `completed`, or `active` when ADO queued it behind its policies.
+pub async fn complete(
+    ctx: &PrCtx,
+    id: u32,
+    strategy: &str,
+    delete_source: bool,
+) -> Result<String, AdoError> {
+    let path = format!("{}/{id}", pulls_path(&ctx.repo_id));
+    let pr: Value = ctx.ado.client.get(&path).await?;
+    if pr.get("isDraft").and_then(Value::as_bool) == Some(true) {
+        return Err(AdoError::Local(format!(
+            "!{id} is a draft: publish it before it can be completed."
+        )));
+    }
+    let status = str_at(&pr, &["status"]);
+    if status != "active" {
+        return Err(AdoError::Local(format!("!{id} is already {status}.")));
+    }
+    let commit = str_at(&pr, &["lastMergeSourceCommit", "commitId"]);
+    if commit.is_empty() {
+        return Err(AdoError::Local(format!(
+            "!{id} has no merge commit yet: Azure DevOps is still checking it. Try again shortly."
+        )));
+    }
+    let body = serde_json::json!({
+        "status": "completed",
+        "lastMergeSourceCommit": {"commitId": commit},
+        "completionOptions": {
+            "mergeStrategy": strategy,
+            "deleteSourceBranch": delete_source,
+        },
+    });
+    let v: Value = ctx.ado.client.patch_json(&path, &body).await?;
+    Ok(v.get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("completed")
+        .to_string())
 }
 
 /// Vote on a PR as me: 10, 5, 0, -5 or -10.
@@ -2299,5 +2355,53 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(e, AdoError::Local(_)));
+    }
+
+    /// Completing pins the merge to the PR's last merged source commit and
+    /// sends the strategy and branch delete; a draft never reaches the PATCH.
+    #[tokio::test]
+    async fn complete_patches_with_the_merge_commit_and_refuses_a_draft() {
+        let s = MockServer::start();
+        let get = s.mock(|w, t| {
+            w.method(GET)
+                .path("/_apis/git/repositories/r1/pullrequests/7");
+            t.status(200).json_body(json!({
+                "pullRequestId": 7, "status": "active", "isDraft": false,
+                "lastMergeSourceCommit": {"commitId": "abc123"}
+            }));
+        });
+        let patch = s.mock(|w, t| {
+            w.method(httpmock::Method::PATCH)
+                .path("/_apis/git/repositories/r1/pullrequests/7")
+                .json_body_partial(
+                    r#"{"status":"completed","lastMergeSourceCommit":{"commitId":"abc123"},"completionOptions":{"mergeStrategy":"squash","deleteSourceBranch":true}}"#,
+                );
+            t.status(200).json_body(json!({"pullRequestId": 7, "status": "completed"}));
+        });
+        let ctx = ctx_for(&s.base_url(), Path::new("."));
+        assert_eq!(
+            complete(&ctx, 7, "squash", true).await.unwrap(),
+            "completed"
+        );
+        get.assert();
+        patch.assert();
+
+        let s = MockServer::start();
+        s.mock(|w, t| {
+            w.method(GET)
+                .path("/_apis/git/repositories/r1/pullrequests/8");
+            t.status(200).json_body(json!({
+                "pullRequestId": 8, "status": "active", "isDraft": true,
+                "lastMergeSourceCommit": {"commitId": "abc123"}
+            }));
+        });
+        let patch = s.mock(|w, t| {
+            w.method(httpmock::Method::PATCH);
+            t.status(200).json_body(json!({}));
+        });
+        let ctx = ctx_for(&s.base_url(), Path::new("."));
+        let e = complete(&ctx, 8, "squash", false).await.unwrap_err();
+        assert!(e.user_message().contains("draft"), "{e:?}");
+        assert_eq!(patch.hits(), 0);
     }
 }
