@@ -28,7 +28,11 @@ pub(crate) fn overlay_area(overlay: &Overlay) -> Rect {
         Overlay::Prompt(v) => v.area,
         Overlay::Help(v) => v.area,
         Overlay::Settings(v) => v.area,
-        Overlay::Diff(v) => v.area,
+        // The REVIEW UNIT's verb row sits under the diff's box.
+        Overlay::Diff(v) => match &v.review {
+            Some(r) if r.dock.width > 0 => v.area.union(r.dock),
+            _ => v.area,
+        },
         Overlay::Palette(v) => v.area,
         Overlay::Files(v) => v.area,
         Overlay::Grep(v) => v.area,

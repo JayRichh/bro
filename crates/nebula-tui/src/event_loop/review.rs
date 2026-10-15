@@ -71,6 +71,7 @@ pub(crate) fn open(app: &mut App, out: &mut Vec<ClientRequest>) {
                 agent: agent.clone(),
                 worktree,
                 verbs: Vec::new(),
+                dock: ratatui::layout::Rect::default(),
             }));
             view.from_card = Some(agent);
         }

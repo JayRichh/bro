@@ -1594,6 +1594,9 @@ pub struct ReviewDock {
     pub worktree: WorktreeId,
     /// Each verb's cells on the row, written back by the draw.
     pub verbs: Vec<(Rect, ReviewVerb)>,
+    /// The whole dock, its verb row included, as the draw laid it out:
+    /// what a click inside of counts as the review's, not the board's.
+    pub dock: Rect,
 }
 
 /// The REVIEW UNIT's verbs, in the order its row lists them.

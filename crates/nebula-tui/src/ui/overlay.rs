@@ -1354,7 +1354,8 @@ fn draw_diff_overlay(f: &mut Frame, app: &mut App, view: crate::app::DiffView) {
     // The REVIEW UNIT docks beside the board, in the room the board left
     // it, its verb row along the foot; anywhere else the modal centers.
     let dock = app.launcher.review_dock;
-    let docked = view.review.is_some() && dock.width > 0 && dock.height > 2;
+    let docked =
+        view.review.is_some() && app.launcher.launcher_kanban && dock.width > 0 && dock.height > 2;
     let area = if docked {
         Rect {
             height: dock.height - 1,
@@ -1374,6 +1375,7 @@ fn draw_diff_overlay(f: &mut Frame, app: &mut App, view: crate::app::DiffView) {
         if let Some(Overlay::Diff(v)) = &mut app.modals.overlay {
             if let Some(r) = &mut v.review {
                 r.verbs = verbs;
+                r.dock = dock;
             }
         }
     }

@@ -802,9 +802,10 @@ pub(super) fn escape(app: &mut App) {
         app.chrome.dirty = true;
     } else if !app.launcher.launcher_unaimed {
         clear_aim(app);
-    } else if !app.launcher.scope.is_everything() {
+    } else if !view::effective_scope(app).is_everything() {
         // Nothing left to let go of on the cards: the SCOPE CHIP is
-        // next, back to everything (its `✕`).
+        // next, back to everything (its `✕`; on the board's "this
+        // project" too).
         super::board::widen_scope(app, 0);
         app.chrome.flash = Some("scope: everything".into());
     }

@@ -261,6 +261,10 @@ fn focus_here_narrows_the_board_and_the_chip_widens_it() {
         assert!(crate::config::Config::load().kanban_scope == "project");
         let text = draw_at(&mut app, 200, 50);
         assert!(text.contains("all ▸ demo ✕"), "the chip says it: {text}");
+        // Esc clears that too, once the card is let go of.
+        key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+        key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+        assert!(app.launcher.kanban_all, "everything again");
     });
 }
 
@@ -754,6 +758,29 @@ fn enter_on_a_review_card_docks_its_diff_beside_the_board() {
             "the dock comes back"
         );
 
+        // A click on a verb of the row is that verb: the PR, the composer.
+        draw_at(&mut app, 200, 50);
+        let Some(Overlay::Diff(view)) = &app.modals.overlay else {
+            unreachable!()
+        };
+        let pr = view
+            .review
+            .as_ref()
+            .and_then(|r| r.verbs.iter().find(|v| v.1 == ReviewVerb::Pr))
+            .map(|v| v.0)
+            .expect("the PR verb on the row");
+        mouse_at(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            pr.x + 1,
+            pr.y,
+        );
+        assert!(
+            ship_view(&app).back.is_some(),
+            "the composer, over the dock"
+        );
+        key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+
         // A click on the board beside the dock closes it onto the card.
         draw_at(&mut app, 200, 50);
         mouse_at(&mut app, MouseEventKind::Down(MouseButton::Left), 2, 20);
@@ -780,8 +807,6 @@ fn shift_k_from_a_cards_diff_keeps_the_boards_place() {
             "{:?}",
             app.modals.overlay
         );
-        // The cursor wandered while the diff was up.
-        select_card(&mut app, "a1");
         key(&mut app, KeyCode::Char('K'), KeyModifiers::SHIFT);
         assert!(app.modals.overlay.is_none());
         assert!(app.launcher.launcher_kanban);
@@ -807,6 +832,7 @@ fn the_board_pieces_draw_at_small_sizes() {
                 agent: AgentId("a2".into()),
                 worktree: WorktreeId("w2".into()),
                 verbs: Vec::new(),
+                dock: Rect::default(),
             }));
             app.modals.overlay = Some(Overlay::Diff(view));
             draw_at(&mut app, w, h);
