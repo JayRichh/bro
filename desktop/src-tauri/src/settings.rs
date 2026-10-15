@@ -6,6 +6,7 @@
 
 use crate::daemon::{Client, Model};
 use crate::Res;
+use nebula_config::actions;
 use nebula_config::desktop::DesktopPrefs;
 use nebula_config::schema::{self, ProjectRef, Target};
 use nebula_config::Config;
@@ -84,6 +85,59 @@ pub fn settings_reset() -> Res<()> {
 #[tauri::command]
 pub fn desktop_prefs() -> DesktopPrefs {
     DesktopPrefs::load()
+}
+
+/// The verb registry, and the window's own key overrides from
+/// config.json's `keybindings` (key id to chords; an empty list is a
+/// deliberate unbind). The window's defaults are compiled in from
+/// `actions.gen.ts`; this is what the user changed.
+#[derive(Debug, Serialize)]
+pub struct ActionsList {
+    pub verbs: Vec<actions::Verb>,
+    pub overrides: BTreeMap<String, Vec<String>>,
+}
+
+#[tauri::command]
+pub fn actions_list() -> ActionsList {
+    let (path, local) = nebula_config::layer_paths();
+    actions_list_at(&path, &local)
+}
+
+pub fn actions_list_at(path: &std::path::Path, local: &std::path::Path) -> ActionsList {
+    ActionsList {
+        verbs: actions::verbs(),
+        overrides: actions::desktop_overrides(&Config::load_at(path, local).keybindings),
+    }
+}
+
+/// Bind one of the window's keys (`chords`, empty to unbind) or put it
+/// back to its default (None). Writes only `keybindings`, and only the
+/// window's entries in it: the terminal app's stay as they are.
+#[tauri::command]
+pub fn desktop_key_set(
+    id: String,
+    chords: Option<Vec<String>>,
+) -> Res<BTreeMap<String, Vec<String>>> {
+    let (path, local) = nebula_config::layer_paths();
+    desktop_key_set_at(&path, &local, &id, chords.as_deref())
+}
+
+pub fn desktop_key_set_at(
+    path: &std::path::Path,
+    local: &std::path::Path,
+    id: &str,
+    chords: Option<&[String]>,
+) -> Res<BTreeMap<String, Vec<String>>> {
+    // Check it on what is stored first, so a refused one writes nothing.
+    let mut trial = Config::load_at(path, local).keybindings;
+    actions::set_desktop_override(&mut trial, id, chords)?;
+    let mut outcome = Ok(());
+    let cfg = Config::update_in(path, local, |cfg| {
+        outcome = actions::set_desktop_override(&mut cfg.keybindings, id, chords)
+    })
+    .map_err(|e| e.to_string())?;
+    outcome?;
+    Ok(actions::desktop_overrides(&cfg.keybindings))
 }
 
 /// The overview groups the user has folded, saved whole.
@@ -350,6 +404,31 @@ mod tests {
             is_main: true,
             sort_order: 0,
         }
+    }
+
+    #[test]
+    fn a_desktop_key_writes_beside_the_terminal_apps() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let local = dir.path().join("config.local.json");
+        std::fs::write(
+            &path,
+            json!({"keybindings": {"quit": "ctrl+q"}, "theme": "x"}).to_string(),
+        )
+        .unwrap();
+        let over = desktop_key_set_at(&path, &local, "palette", Some(&["ctrl+j".into()])).unwrap();
+        assert_eq!(over["palette"], vec!["ctrl+j"]);
+        assert!(desktop_key_set_at(&path, &local, "list_move", Some(&["x".into()])).is_err());
+        let stored: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(stored["keybindings"]["quit"], "ctrl+q");
+        assert_eq!(stored["keybindings"]["desktop.palette"], "ctrl+j");
+        assert_eq!(
+            actions_list_at(&path, &local).overrides["palette"],
+            vec!["ctrl+j"]
+        );
+        desktop_key_set_at(&path, &local, "palette", None).unwrap();
+        assert!(actions_list_at(&path, &local).overrides.is_empty());
     }
 }
 

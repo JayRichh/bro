@@ -13,6 +13,7 @@
   import { openAddAccount } from './add.svelte';
   import UsageBar from './UsageBar.svelte';
   import { bars, liveUsage, loginTitle, mergeRows, ownLoginSessionHarnesses, sessionsOn, shownAt, staleAt, starTitle, usageTitle, windowLabel } from './usage';
+  import { withKey } from '../shortcuts';
 
   let { heading }: { heading: string } = $props();
 
@@ -100,7 +101,7 @@
         ? 'text-ink'
         : 'text-muted'}"
       onclick={openAccounts}
-      title="Open Accounts: every login, its use, its sessions, and the account spread (Shift+U)"
+      title={withKey('Open Accounts: every login, its use, its sessions, and the account spread', 'accounts')}
       aria-current={nav.current.view === 'accounts' ? 'page' : undefined}>Accounts</button
     >
   </h2>

@@ -1,57 +1,20 @@
 // Every keyboard shortcut the window answers, in one table: App.svelte
 // dispatches through it, the help overlay (? or F1) lists it, and the
-// command palette shows each action's keys from it. Row keys follow the
-// terminal app's (r rename, a archive, u unarchive, m move, Shift+P duplicate)
-// where the window has no other use for the letter.
+// command palette shows each action's keys from it. The rows and their
+// default chords come from the verb registry (crates/nebula-config's
+// actions.rs, through the generated actions.gen.ts); the user's own
+// bindings from Settings, Hotkeys are laid over them at startup and on
+// each change (`applyOverrides`). Row keys follow the terminal app's (r
+// rename, a archive, u unarchive, m move, Shift+P duplicate) where the
+// window has no other use for the letter.
 
-export type ShortcutId =
-  | 'palette'
-  | 'palette_alt'
-  | 'help'
-  | 'help_f1'
-  | 'settings'
-  | 'back'
-  | 'forward'
-  | 'home_board'
-  | 'home_overview'
-  | 'toggle_home'
-  | 'open_session'
-  | 'open_diff'
-  | 'quick_prompt'
-  | 'quick_prompt_alt'
-  | 'cycle_theme'
-  | 'go_home'
-  | 'go_session'
-  | 'go_diff'
-  | 'orchestrator'
-  | 'orchestrator_f10'
-  | 'close_split'
-  | 'maximize'
-  | 'toggle_archived'
-  | 'next_attention'
-  | 'prev_attention'
-  | 'new_worktree'
-  | 'accounts'
-  | 'rename'
-  | 'archive'
-  | 'unarchive'
-  | 'delete'
-  | 'restart'
-  | 'move'
-  | 'duplicate'
-  | 'follow_up'
-  | 'new_terminal'
-  | 'open_editor'
-  | 'open_remote'
-  | 'switch_branch'
-  | 'row_menu'
-  | 'move_up'
-  | 'move_down'
-  | 'list_move'
-  | 'list_open'
-  | 'overview_fold'
-  | 'board_lanes'
-  | 'board_diff';
+import { DESK_KEYS, type ActionId, type DeskGroup, type DeskKeyId, type DeskScope } from './actions.gen';
+import { SHORTCUTS } from './keytable.svelte';
+
+/** A key row's id: the window's own, and its config key. Some read as a
+ *  terminal app verb of another meaning (`palette` here is its
+ *  `command_palette`), so they are never the registry's `ActionId`. */
+export type ShortcutId = DeskKeyId;
 
 /**
  * Where a key counts:
@@ -62,9 +25,10 @@ export type ShortcutId =
  * - `row`: like `global`, acting on the focused session row or card;
  * - `overview`, `board`: the home view's own walking keys, handled by
  *   Overview.svelte and Board.svelte (listed here for the help and the
- *   clash test; App.svelte never dispatches them).
+ *   clash test; App.svelte never dispatches them, and they can't be
+ *   rebound).
  */
-export type Scope = 'anywhere' | 'fields' | 'global' | 'row' | 'overview' | 'board';
+export type Scope = DeskScope;
 
 export interface Shortcut {
   id: ShortcutId;
@@ -72,71 +36,63 @@ export interface Shortcut {
   keys: string[];
   scope: Scope;
   label: string;
-  group: 'General' | 'Views' | 'Sessions' | 'Overview and board';
+  group: DeskGroup;
   /** The diff editor (Monaco) binds this chord itself: it stands down
    *  while the focus is in one. */
   editorOwns?: boolean;
 }
 
-export const SHORTCUTS: Shortcut[] = [
-  { id: 'palette', keys: ['ctrl+k'], scope: 'fields', label: 'Command palette', group: 'General', editorOwns: true },
-  { id: 'palette_alt', keys: ['ctrl+shift+p'], scope: 'anywhere', label: 'Command palette', group: 'General' },
-  { id: 'help', keys: ['?'], scope: 'global', label: 'Keyboard shortcuts', group: 'General' },
-  { id: 'help_f1', keys: ['f1'], scope: 'anywhere', label: 'Keyboard shortcuts', group: 'General' },
-  { id: 'settings', keys: ['ctrl+,'], scope: 'anywhere', label: 'Settings', group: 'General' },
-  { id: 'quick_prompt', keys: ['p', 'n'], scope: 'global', label: 'Quick prompt', group: 'General' },
-  { id: 'quick_prompt_alt', keys: ['ctrl+shift+n'], scope: 'anywhere', label: 'Quick prompt', group: 'General' },
-  { id: 'cycle_theme', keys: ['ctrl+shift+l'], scope: 'anywhere', label: 'Cycle theme: system, light, dark', group: 'General' },
-  { id: 'new_worktree', keys: ['shift+n'], scope: 'global', label: 'New worktree in this repo', group: 'General' },
+// The live table, kept in a rune module so a tooltip drawn from it
+// redraws when the user rebinds a key.
+export { SHORTCUTS };
 
-  { id: 'back', keys: ['alt+arrowleft'], scope: 'fields', label: 'Back', group: 'Views' },
-  { id: 'forward', keys: ['alt+arrowright'], scope: 'fields', label: 'Forward', group: 'Views' },
-  { id: 'home_board', keys: ['ctrl+shift+b'], scope: 'anywhere', label: 'Board', group: 'Views' },
-  { id: 'home_overview', keys: ['ctrl+shift+o'], scope: 'anywhere', label: 'Overview', group: 'Views' },
-  { id: 'toggle_home', keys: ['shift+k'], scope: 'global', label: 'Switch overview and board', group: 'Views' },
-  { id: 'open_session', keys: ['ctrl+shift+t'], scope: 'anywhere', label: 'Show the session', group: 'Views' },
-  { id: 'open_diff', keys: ['ctrl+shift+d'], scope: 'anywhere', label: 'Diff the checkout in context: the focused row, the session, the repo (again: back from the diff)', group: 'Views' },
-  { id: 'go_home', keys: ['1'], scope: 'global', label: 'Home', group: 'Views' },
-  { id: 'go_session', keys: ['2'], scope: 'global', label: 'Session', group: 'Views' },
-  { id: 'go_diff', keys: ['3'], scope: 'global', label: 'Diff', group: 'Views' },
-  // F10 as in the terminal app, but never inside a shell (htop and mc quit on it).
-  { id: 'orchestrator', keys: ['0'], scope: 'global', label: 'Orchestrator (start one when there is none)', group: 'Views' },
-  { id: 'orchestrator_f10', keys: ['f10'], scope: 'fields', label: 'Orchestrator (start one when there is none)', group: 'Views' },
-  { id: 'close_split', keys: ['escape'], scope: 'global', label: 'Close the split or Settings (a full pane comes back down first)', group: 'Views' },
-  // The terminal app's full-screen session is Ctrl+F; here Ctrl+F is the
-  // diff editor's find and the shell's forward-char, so the window's own
-  // chord takes Shift too (the terminal pane lets it through).
-  { id: 'maximize', keys: ['ctrl+shift+m'], scope: 'anywhere', label: 'Full pane: the session or diff takes the window, or comes back down', group: 'Views' },
-  { id: 'toggle_archived', keys: ['shift+a'], scope: 'global', label: 'Show or hide archived sessions', group: 'Views' },
-  // The terminal app's `.` and `,`: the palette's attention order, every repo.
-  { id: 'next_attention', keys: ['.'], scope: 'global', label: 'Next session needing you', group: 'Views' },
-  { id: 'prev_attention', keys: [','], scope: 'global', label: 'Previous session needing you', group: 'Views' },
-  // The terminal app's Shift+U accounts overlay.
-  { id: 'accounts', keys: ['shift+u'], scope: 'global', label: 'Accounts: every login, its use, and who runs on it', group: 'Views' },
+/** A key row's default chords. */
+export function defaultKeys(id: ShortcutId): string[] {
+  return [...(DESK_KEYS.find((k) => k.id === id)?.chords ?? [])];
+}
 
-  { id: 'rename', keys: ['r'], scope: 'row', label: 'Rename', group: 'Sessions' },
-  { id: 'archive', keys: ['a'], scope: 'row', label: 'Archive', group: 'Sessions' },
-  { id: 'unarchive', keys: ['u'], scope: 'row', label: 'Unarchive', group: 'Sessions' },
-  { id: 'delete', keys: ['delete'], scope: 'row', label: 'Delete (asks first)', group: 'Sessions' },
-  { id: 'restart', keys: ['shift+r'], scope: 'row', label: 'Restart the agent', group: 'Sessions' },
-  { id: 'move', keys: ['m'], scope: 'row', label: 'Move to another worktree', group: 'Sessions' },
-  { id: 'duplicate', keys: ['shift+p'], scope: 'row', label: 'Duplicate into the quick prompt', group: 'Sessions' },
-  { id: 'follow_up', keys: ['f'], scope: 'row', label: 'Follow-up prompt', group: 'Sessions' },
-  { id: 'new_terminal', keys: ['t'], scope: 'row', label: 'New terminal in its worktree', group: 'Sessions' },
-  { id: 'open_editor', keys: ['shift+o'], scope: 'row', label: 'Open its worktree in the editor', group: 'Sessions' },
-  { id: 'open_remote', keys: ['shift+g'], scope: 'row', label: 'Open the repo remote in the browser', group: 'Sessions' },
-  { id: 'switch_branch', keys: ['c'], scope: 'row', label: 'Switch the repo root checkout to another branch', group: 'Sessions' },
-  { id: 'row_menu', keys: ['shift+f10', 'contextmenu'], scope: 'row', label: 'Actions menu', group: 'Sessions' },
-  // The keyboard's drag: a session, worktree or repo one place up or down.
-  { id: 'move_up', keys: ['alt+arrowup'], scope: 'row', label: 'Move up: the session, worktree or repo (or drag it)', group: 'Sessions' },
-  { id: 'move_down', keys: ['alt+arrowdown'], scope: 'row', label: 'Move down: the session, worktree or repo (or drag it)', group: 'Sessions' },
+/** The registry verb a key row runs. */
+export function actionOf(id: ShortcutId): ActionId | undefined {
+  return DESK_KEYS.find((k) => k.id === id)?.action;
+}
 
-  { id: 'list_move', keys: ['j', 'k', 'arrowdown', 'arrowup'], scope: 'overview', label: 'Move through the rows (cards on the board)', group: 'Overview and board' },
-  { id: 'list_open', keys: ['enter', 'space'], scope: 'overview', label: 'Open the session', group: 'Overview and board' },
-  { id: 'overview_fold', keys: ['arrowright', 'arrowleft'], scope: 'overview', label: 'Overview: unfold, fold nested sessions', group: 'Overview and board' },
-  { id: 'board_lanes', keys: ['h', 'l'], scope: 'board', label: 'Board: across lanes (also the side arrows)', group: 'Overview and board' },
-  { id: 'board_diff', keys: ['d'], scope: 'board', label: 'Board: diff the selected card', group: 'Overview and board' },
+/** The home views' walking keys: listed, never rebound. */
+export function isFixed(scope: Scope): boolean {
+  return scope === 'overview' || scope === 'board';
+}
+
+/** Lay the user's bindings (key id to chords; an empty list unbinds) over
+ *  the defaults. An id this build doesn't know is ignored. */
+export function applyOverrides(over: Partial<Record<string, string[]>>, table: Shortcut[] = SHORTCUTS) {
+  for (const s of table) {
+    const k = DESK_KEYS.find((d) => d.id === s.id);
+    if (!k) continue;
+    const mine = isFixed(k.scope) ? undefined : over[s.id];
+    s.keys = [...(mine ?? k.chords)];
+  }
+}
+
+const CONTEXTS: KeyContext[] = [
+  { inTerminal: false, typing: false, onRow: false },
+  { inTerminal: false, typing: false, onRow: true },
+  { inTerminal: false, typing: true, onRow: false },
+  { inTerminal: true, typing: true, onRow: false },
 ];
+
+/** Two scopes a chord could both fire in: some key context takes both,
+ *  or one is a home view's walking key and the other a window key (which
+ *  would take it from the view). */
+export function overlaps(a: Scope, b: Scope): boolean {
+  if (isFixed(a) || isFixed(b)) return true;
+  return CONTEXTS.some((ctx) => inScope(a, ctx) && inScope(b, ctx));
+}
+
+/** The other rows `chord` would clash with if `id` took it. */
+export function clashes(id: ShortcutId, chord: string, table: Shortcut[] = SHORTCUTS): Shortcut[] {
+  const me = table.find((s) => s.id === id);
+  if (!me) return [];
+  return table.filter((s) => s.id !== id && s.keys.includes(chord) && overlaps(me.scope, s.scope));
+}
 
 /** The chord a key event spells: modifiers in ctrl, alt, shift order, then
  *  the key lower-cased. A printable non-letter (`?`, `,`) carries no shift:
@@ -241,4 +197,22 @@ export function helpGroups(table: Shortcut[] = SHORTCUTS): { group: string; rows
     } else g.rows.push({ label: s.label, keys: [...s.keys], scope: s.scope });
   }
   return out;
+}
+
+/** A key that only modifies the next: a capture waits past it. */
+export function isModifierKey(key: string): boolean {
+  return key === 'Control' || key === 'Shift' || key === 'Alt' || key === 'Meta' || key === 'AltGraph' || key === 'OS';
+}
+
+/** Whether `chord` may go on a row of `scope` (nebula-config's
+ *  `typing_safe`): a row that counts while a field or terminal has the
+ *  keys takes only a chord typing never sends, one with Ctrl or Alt, or an
+ *  F key. Shift alone is a capital letter. */
+export function typingSafe(scope: Scope, chord: string): boolean {
+  if (scope !== 'anywhere' && scope !== 'fields') return true;
+  const parts = chord.split('+');
+  const key = parts[parts.length - 1];
+  const n = /^f(\d{1,2})$/.exec(key);
+  const fkey = !!n && Number(n[1]) >= 1 && Number(n[1]) <= 24;
+  return parts.slice(0, -1).some((m) => m === 'ctrl' || m === 'alt') || fkey;
 }

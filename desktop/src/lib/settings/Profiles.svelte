@@ -9,6 +9,7 @@
   import { ask } from '../ui/ui.svelte';
   import ProfileEditor from '../accounts/ProfileEditor.svelte';
   import { openAccounts } from '../accounts/actions';
+  import { withKey } from '../shortcuts';
 
   let rows = $state<ProfileRow[]>([]);
   let harnesses = $state<string[]>([]);
@@ -96,7 +97,7 @@
     <h2 class="m-0 text-[15px] font-semibold text-ink">Profiles</h2>
     <span class={label}>the same list as kete profile</span>
     <span class="flex-1"></span>
-    <button class={btn} onclick={openAccounts} title="Every account with its use, login and sessions (Shift+U)">Accounts view</button>
+    <button class={btn} onclick={openAccounts} title={withKey('Every account with its use, login and sessions', 'accounts')}>Accounts view</button>
     <button class={btn} onclick={() => edit(null)}>Add profile</button>
   </div>
   <p class="m-0 mt-2 max-w-[68ch] text-[13px] text-muted">

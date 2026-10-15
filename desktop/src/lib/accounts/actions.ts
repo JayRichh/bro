@@ -7,7 +7,7 @@ import { api, type AccountRow, type Agent } from '../api';
 import { app, openSession, refreshAccounts, refreshLaunchables, sessionWorktree, toast } from '../store.svelte';
 import { nav } from '../shell/history.svelte';
 import { ask, type MenuEntry } from '../ui/ui.svelte';
-import { keysOf } from '../shortcuts';
+import { keysOf, withKey } from '../shortcuts';
 import { sessionHarness } from './usage';
 import { canSwitch, projectAccount, switchConfirm, switchTargets, type SwitchTarget } from './view';
 import { watchSignIn } from './add.svelte';
@@ -55,7 +55,7 @@ export async function moveToAccount(id: string) {
   if (!canSwitch(app.model)) return toast(SWITCH_UNAVAILABLE);
   if (!app.accounts.length) await api.accounts().then((r) => (app.accounts = r)).catch(() => {});
   const targets = switchTargets(a, app.accounts);
-  if (!targets.length) return toast(`There is no other ${sessionHarness(a)} account. Add one in Accounts (Shift+U).`);
+  if (!targets.length) return toast(`There is no other ${sessionHarness(a)} account. Add one in ${withKey('Accounts', 'accounts')}.`);
   const own = '\u0000own';
   const pick = await ask.pick({
     title: `Move "${a.name}" to (restarts fresh)`,
@@ -77,7 +77,7 @@ export async function pickProjectAccount(project: string) {
   const p = app.model.projects.find((x) => x.id === project);
   if (!p) return;
   const profiles = app.launch.profiles;
-  if (!profiles.length) return toast('No accounts to pick from yet. Add one in Accounts (Shift+U).');
+  if (!profiles.length) return toast(`No accounts to pick from yet. Add one in ${withKey('Accounts', 'accounts')}.`);
   const harnesses = [...new Set(profiles.map((x) => x.harness))];
   const CLEAR = '\u0000clear\u0000';
   const clear = (h: string) => `${CLEAR}${h}`;

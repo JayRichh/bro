@@ -102,7 +102,7 @@
     void dropAgent(n.agent.worktree_id, d.id, n.agent.id, at.place);
   }
 
-  const reorderHint = withKey('drag to reorder', ['move_up', 'move_down']);
+  const reorderHint = $derived(withKey('drag to reorder', ['move_up', 'move_down']));
 
   const ROW =
     'group relative grid min-h-9 cursor-default items-center border-b border-rule pr-4 outline-none ' +

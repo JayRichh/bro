@@ -825,6 +825,8 @@ fn main() {
             settings::desktop_prefs,
             settings::desktop_set_collapsed,
             settings::config_problem,
+            settings::actions_list,
+            settings::desktop_key_set,
             settings::run_commands,
             diff_files,
             diff_pair,

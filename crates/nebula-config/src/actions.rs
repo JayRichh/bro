@@ -1,12 +1,20 @@
-//! The rebindable actions as data: every key the TUI's grid reacts to,
-//! with its stable config id, label, hint, Hotkeys-tab group, scope and
-//! default chords. The chord parsing and dispatch (`KeyChord`, `Keymap`)
-//! stay in the TUI, which needs a terminal backend for them; this table is
-//! here so the desktop window can list the same bindings.
+//! The verb registry, as data: every key the TUI's grid reacts to, with
+//! its stable config id, label, hint, Hotkeys-tab group, scope and default
+//! chords, and what both apps need to say about a verb (its one word, what
+//! it acts on, where it works, whether it destroys anything) and the
+//! desktop window's own default keys for it. Verbs only the window has are
+//! in [`DESKTOP_ONLY`]. The chord parsing and dispatch (`KeyChord`,
+//! `Keymap`) stay in the TUI, which needs a terminal backend for them; the
+//! window reads this table through the generated `desktop/src/lib/
+//! actions.gen.ts` ([`render_ts`]).
+
+use serde::Serialize;
+use std::collections::BTreeMap;
 
 /// Which mode a binding is live in. The same chord may mean different
 /// things in each, so conflicts are only conflicts within one scope.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Scope {
     /// The launcher grid, and a terminal pane that isn't input-locked.
     Global,
@@ -180,6 +188,101 @@ pub enum Action {
     Quit,
 }
 
+/// What a verb acts on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AppliesTo {
+    /// Nothing in particular: the app itself, a view, a list.
+    Global,
+    Repo,
+    Worktree,
+    /// An agent session.
+    Session,
+    /// A shell terminal (and, in the TUI, the pane's PTY).
+    Terminal,
+    Account,
+}
+
+/// Where a verb means something.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorksIn {
+    /// The TUI's grid of cards; the desktop's overview.
+    Grid,
+    /// The kanban board, in either app.
+    Board,
+    /// A session's pane (the TUI's) or view (the desktop's).
+    Pane,
+    Diff,
+    /// A modal over the rest.
+    Overlay,
+}
+
+/// Which app answers a verb.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Surface {
+    Both,
+    /// The terminal app only: the desktop has no key for it.
+    Tui,
+    /// The desktop window only: never in the TUI's [`ACTIONS`].
+    Desktop,
+}
+
+/// Where a desktop key counts, as `desktop/src/lib/shortcuts.ts` reads it:
+/// `anywhere` even in a field or terminal, `fields` in a field but not a
+/// terminal, `global` with neither, `row` on a focused row or card, and
+/// `overview` / `board` for the home views' own walking keys (listed, not
+/// rebindable: those views handle them).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeskScope {
+    Anywhere,
+    Fields,
+    Global,
+    Row,
+    Overview,
+    Board,
+}
+
+/// One of the desktop window's key rows. A verb may have two when its
+/// chords count in different places (Ctrl+K in fields, Ctrl+Shift+P even
+/// in a terminal). `id` is the window's own and its config key under
+/// [`DESKTOP_PREFIX`]: never rename one.
+#[derive(Debug, Serialize)]
+pub struct DeskKey {
+    pub id: &'static str,
+    /// What the window's help and its Hotkeys rows call it.
+    pub label: &'static str,
+    /// The window's help section.
+    pub group: &'static str,
+    pub scope: DeskScope,
+    /// The diff editor (Monaco) binds this chord itself: the key stands
+    /// down while the focus is in one.
+    pub editor_owns: bool,
+    /// Spelled as `chordOf` spells a key event: `ctrl+shift+b`,
+    /// `alt+arrowleft`, `escape`, `?`.
+    pub chords: &'static [&'static str],
+}
+
+/// A desktop key row that the diff editor doesn't own.
+const fn dk(
+    id: &'static str,
+    label: &'static str,
+    group: &'static str,
+    scope: DeskScope,
+    chords: &'static [&'static str],
+) -> DeskKey {
+    DeskKey {
+        id,
+        label,
+        group,
+        scope,
+        editor_owns: false,
+        chords,
+    }
+}
+
 /// One rebindable row: what it does, where it's live, and what it starts as.
 pub struct ActionSpec {
     pub action: Action,
@@ -191,6 +294,30 @@ pub struct ActionSpec {
     pub group: &'static str,
     pub scope: Scope,
     pub defaults: &'static [&'static str],
+    /// The verb in a word, for a footer or the verb bar.
+    pub word: &'static str,
+    /// Loses something no key brings back: it asks first.
+    pub destructive: bool,
+    pub applies_to: &'static [AppliesTo],
+    pub works_in: &'static [WorksIn],
+    pub surface: Surface,
+    /// The desktop window's default keys for this verb, empty on a
+    /// [`Surface::Tui`] row.
+    pub desktop: &'static [DeskKey],
+}
+
+/// A verb only the desktop window has: an [`ActionSpec`] less the TUI's
+/// action, scope and chords.
+pub struct DesktopVerb {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub hint: &'static str,
+    pub group: &'static str,
+    pub word: &'static str,
+    pub destructive: bool,
+    pub applies_to: &'static [AppliesTo],
+    pub works_in: &'static [WorksIn],
+    pub desktop: &'static [DeskKey],
 }
 
 /// One positional PROJECT TAB shortcut. `⌘N` is what a browser user
@@ -210,6 +337,12 @@ macro_rules! project_tab_slot {
             // The digit first: it arrives everywhere, and ⌘N is a silent
             // alias Help and the footer leave out (`shown_chords`).
             defaults: &[$digit, $cmd],
+            word: "tab",
+            destructive: false,
+            applies_to: &[AppliesTo::Repo],
+            works_in: &[WorksIn::Grid, WorksIn::Board],
+            surface: Surface::Tui,
+            desktop: &[],
         }
     };
 }
@@ -224,6 +357,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "NAVIGATE",
         scope: Scope::Global,
         defaults: &["tab"],
+        word: "fold",
+        destructive: false,
+        applies_to: &[AppliesTo::Worktree],
+        works_in: &[WorksIn::Grid],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::FocusLeft,
@@ -233,6 +372,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "NAVIGATE",
         scope: Scope::Global,
         defaults: &["h", "left"],
+        word: "left",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::FocusRight,
@@ -242,6 +387,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "NAVIGATE",
         scope: Scope::Global,
         defaults: &["l", "right"],
+        word: "right",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::MoveDown,
@@ -251,6 +402,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "NAVIGATE",
         scope: Scope::Global,
         defaults: &["j", "down"],
+        word: "down",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::MoveUp,
@@ -260,6 +417,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "NAVIGATE",
         scope: Scope::Global,
         defaults: &["k", "up"],
+        word: "up",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::HalfPageDown,
@@ -269,6 +432,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "NAVIGATE",
         scope: Scope::Global,
         defaults: &["ctrl+d"],
+        word: "page",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::HalfPageUp,
@@ -278,6 +447,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "NAVIGATE",
         scope: Scope::Global,
         defaults: &["ctrl+u"],
+        word: "page",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::Activate,
@@ -287,6 +462,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "NAVIGATE",
         scope: Scope::Global,
         defaults: &["enter"],
+        word: "open",
+        destructive: false,
+        applies_to: &[AppliesTo::Session, AppliesTo::Terminal],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::Palette,
@@ -296,6 +477,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "NAVIGATE",
         scope: Scope::Global,
         defaults: &["/"],
+        word: "jump",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::CommandPalette,
@@ -305,6 +492,15 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "NAVIGATE",
         scope: Scope::Global,
         defaults: &["ctrl+k"],
+        word: "commands",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff],
+        surface: Surface::Both,
+        desktop: &[
+            DeskKey { id: "palette", label: "Command palette", group: "General", scope: DeskScope::Fields, editor_owns: true, chords: &["ctrl+k"] },
+            dk("palette_alt", "Command palette", "General", DeskScope::Anywhere, &["ctrl+shift+p"]),
+        ],
     },
     ActionSpec {
         action: Action::NavBack,
@@ -314,6 +510,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "NAVIGATE",
         scope: Scope::Global,
         defaults: &["alt+left", "<"],
+        word: "back",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff],
+        surface: Surface::Both,
+        desktop: &[
+            dk("back", "Back", "Views", DeskScope::Fields, &["alt+arrowleft"]),
+        ],
     },
     ActionSpec {
         action: Action::NavForward,
@@ -323,6 +527,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "NAVIGATE",
         scope: Scope::Global,
         defaults: &["alt+right", ">"],
+        word: "forward",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff],
+        surface: Surface::Both,
+        desktop: &[
+            dk("forward", "Forward", "Views", DeskScope::Fields, &["alt+arrowright"]),
+        ],
     },
     ActionSpec {
         action: Action::NextAttention,
@@ -332,6 +544,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "NAVIGATE",
         scope: Scope::Global,
         defaults: &["."],
+        word: "next",
+        destructive: false,
+        applies_to: &[AppliesTo::Session],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Both,
+        desktop: &[
+            dk("next_attention", "Next session needing you", "Views", DeskScope::Global, &["."]),
+        ],
     },
     ActionSpec {
         action: Action::PrevAttention,
@@ -341,6 +561,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "NAVIGATE",
         scope: Scope::Global,
         defaults: &[","],
+        word: "prev",
+        destructive: false,
+        applies_to: &[AppliesTo::Session],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Both,
+        desktop: &[
+            dk("prev_attention", "Previous session needing you", "Views", DeskScope::Global, &[","]),
+        ],
     },
     ActionSpec {
         action: Action::NextProjectTab,
@@ -350,6 +578,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "NAVIGATE",
         scope: Scope::Global,
         defaults: &["]"],
+        word: "tab",
+        destructive: false,
+        applies_to: &[AppliesTo::Repo],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::PrevProjectTab,
@@ -359,6 +593,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "NAVIGATE",
         scope: Scope::Global,
         defaults: &["["],
+        word: "tab",
+        destructive: false,
+        applies_to: &[AppliesTo::Repo],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     project_tab_slot!(1, "project_tab_1", "Project tab 1", "cmd+1", "1"),
     project_tab_slot!(2, "project_tab_2", "Project tab 2", "cmd+2", "2"),
@@ -377,6 +617,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "NAVIGATE",
         scope: Scope::Global,
         defaults: &["x"],
+        word: "close",
+        destructive: false,
+        applies_to: &[AppliesTo::Repo],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::ProjectDropdown,
@@ -390,6 +636,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         // and Terminal.app's nothing. `⌘P` stays bound behind it as the
         // one chord a LOCKED PANE lets through in Ghostty and kitty.
         defaults: &["+", "cmd+p"],
+        word: "projects",
+        destructive: false,
+        applies_to: &[AppliesTo::Repo],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     // ---- PROJECTS & WORKTREES ----
     ActionSpec {
@@ -400,6 +652,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
         defaults: &["o"],
+        word: "add",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::New,
@@ -409,6 +667,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
         defaults: &["n"],
+        word: "new",
+        destructive: false,
+        applies_to: &[AppliesTo::Worktree],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::GitDiff,
@@ -418,6 +682,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
         defaults: &["g"],
+        word: "diff",
+        destructive: false,
+        applies_to: &[AppliesTo::Worktree, AppliesTo::Session],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff],
+        surface: Surface::Both,
+        desktop: &[
+            dk("open_diff", "Diff the checkout in context: the focused row, the session, the repo (again: back from the diff)", "Views", DeskScope::Anywhere, &["ctrl+shift+d"]),
+        ],
     },
     ActionSpec {
         action: Action::OpenRepo,
@@ -427,6 +699,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
         defaults: &["shift+g"],
+        word: "remote",
+        destructive: false,
+        applies_to: &[AppliesTo::Repo],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Both,
+        desktop: &[
+            dk("open_remote", "Open the repo remote in the browser", "Sessions", DeskScope::Row, &["shift+g"]),
+        ],
     },
     ActionSpec {
         action: Action::OpenPullRequest,
@@ -436,6 +716,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
         defaults: &["shift+v"],
+        word: "PR",
+        destructive: false,
+        applies_to: &[AppliesTo::Worktree, AppliesTo::Session],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::OpenIssue,
@@ -445,6 +731,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
         defaults: &["shift+i"],
+        word: "issue",
+        destructive: false,
+        applies_to: &[AppliesTo::Session],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::RefreshPullRequests,
@@ -454,6 +746,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
         defaults: &["shift+r"],
+        word: "reload",
+        destructive: false,
+        applies_to: &[AppliesTo::Repo],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::CommentPullRequest,
@@ -463,6 +761,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
         defaults: &["y"],
+        word: "comment",
+        destructive: false,
+        applies_to: &[AppliesTo::Worktree, AppliesTo::Session],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::Issues,
@@ -472,6 +776,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
         defaults: &["i"],
+        word: "issues",
+        destructive: false,
+        applies_to: &[AppliesTo::Repo],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::PullRequests,
@@ -481,6 +791,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
         defaults: &["v"],
+        word: "PRs",
+        destructive: false,
+        applies_to: &[AppliesTo::Repo],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::SwitchBranch,
@@ -490,6 +806,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
         defaults: &["c"],
+        word: "branch",
+        destructive: false,
+        applies_to: &[AppliesTo::Repo],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Both,
+        desktop: &[
+            dk("switch_branch", "Switch the repo root checkout to another branch", "Sessions", DeskScope::Row, &["c"]),
+        ],
     },
     ActionSpec {
         action: Action::Ado,
@@ -499,6 +823,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
         defaults: &["shift+b"],
+        word: "ADO",
+        destructive: false,
+        applies_to: &[AppliesTo::Repo],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::OpenWorktree,
@@ -508,6 +838,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
         defaults: &["shift+enter", "shift+o", "alt+enter"],
+        word: "editor",
+        destructive: false,
+        applies_to: &[AppliesTo::Worktree],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Both,
+        desktop: &[
+            dk("open_editor", "Open its worktree in the editor", "Sessions", DeskScope::Row, &["shift+o"]),
+        ],
     },
     ActionSpec {
         action: Action::OpenInBrowser,
@@ -517,6 +855,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
         defaults: &["w"],
+        word: "browser",
+        destructive: false,
+        applies_to: &[AppliesTo::Worktree],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::Screenshot,
@@ -526,6 +870,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
         defaults: &["shift+w"],
+        word: "shot",
+        destructive: false,
+        applies_to: &[AppliesTo::Worktree],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     // ---- SESSIONS ----
     ActionSpec {
@@ -536,6 +886,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "SESSIONS",
         scope: Scope::Global,
         defaults: &["t"],
+        word: "terminal",
+        destructive: false,
+        applies_to: &[AppliesTo::Worktree],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Both,
+        desktop: &[
+            dk("new_terminal", "New terminal in its worktree", "Sessions", DeskScope::Row, &["t"]),
+        ],
     },
     // `t`'s shift pair: the same terminal, outside nebula.
     ActionSpec {
@@ -546,6 +904,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "SESSIONS",
         scope: Scope::Global,
         defaults: &["shift+t"],
+        word: "ghostty",
+        destructive: false,
+        applies_to: &[AppliesTo::Worktree],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::Rename,
@@ -555,6 +919,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "SESSIONS",
         scope: Scope::Global,
         defaults: &["r"],
+        word: "rename",
+        destructive: false,
+        applies_to: &[AppliesTo::Session, AppliesTo::Terminal],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Both,
+        desktop: &[
+            dk("rename", "Rename", "Sessions", DeskScope::Row, &["r"]),
+        ],
     },
     ActionSpec {
         action: Action::Archive,
@@ -564,6 +936,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "SESSIONS",
         scope: Scope::Global,
         defaults: &["a"],
+        word: "archive",
+        destructive: false,
+        applies_to: &[AppliesTo::Session],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Both,
+        desktop: &[
+            dk("archive", "Archive", "Sessions", DeskScope::Row, &["a"]),
+        ],
     },
     ActionSpec {
         action: Action::Unarchive,
@@ -573,6 +953,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "SESSIONS",
         scope: Scope::Global,
         defaults: &["u"],
+        word: "unarchive",
+        destructive: false,
+        applies_to: &[AppliesTo::Session],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Both,
+        desktop: &[
+            dk("unarchive", "Unarchive", "Sessions", DeskScope::Row, &["u"]),
+        ],
     },
     ActionSpec {
         action: Action::ToggleArchived,
@@ -582,6 +970,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "SESSIONS",
         scope: Scope::Global,
         defaults: &["shift+a"],
+        word: "archived",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Both,
+        desktop: &[
+            dk("toggle_archived", "Show or hide archived sessions", "Views", DeskScope::Global, &["shift+a"]),
+        ],
     },
     ActionSpec {
         action: Action::Delete,
@@ -591,6 +987,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "SESSIONS",
         scope: Scope::Global,
         defaults: &["d", "delete", "backspace"],
+        word: "delete",
+        destructive: true,
+        applies_to: &[AppliesTo::Session, AppliesTo::Terminal],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Both,
+        desktop: &[
+            dk("delete", "Delete (asks first)", "Sessions", DeskScope::Row, &["delete"]),
+        ],
     },
     ActionSpec {
         action: Action::DeleteAll,
@@ -600,6 +1004,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "SESSIONS",
         scope: Scope::Global,
         defaults: &["shift+d"],
+        word: "delete all",
+        destructive: true,
+        applies_to: &[AppliesTo::Worktree],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::AgentPresets,
@@ -609,6 +1019,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "SESSIONS",
         scope: Scope::Global,
         defaults: &["e"],
+        word: "presets",
+        destructive: false,
+        applies_to: &[AppliesTo::Worktree],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::QuickPrompt,
@@ -618,6 +1034,15 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "SESSIONS",
         scope: Scope::Global,
         defaults: &["p"],
+        word: "prompt",
+        destructive: false,
+        applies_to: &[AppliesTo::Worktree],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Both,
+        desktop: &[
+            dk("quick_prompt", "Quick prompt", "General", DeskScope::Global, &["p", "n"]),
+            dk("quick_prompt_alt", "Quick prompt", "General", DeskScope::Anywhere, &["ctrl+shift+n"]),
+        ],
     },
     ActionSpec {
         action: Action::FollowUp,
@@ -627,6 +1052,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "SESSIONS",
         scope: Scope::Global,
         defaults: &["space"],
+        word: "reply",
+        destructive: false,
+        applies_to: &[AppliesTo::Session],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Both,
+        desktop: &[
+            dk("follow_up", "Follow-up prompt", "Sessions", DeskScope::Row, &["f"]),
+        ],
     },
     ActionSpec {
         action: Action::DuplicateSession,
@@ -636,6 +1069,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "SESSIONS",
         scope: Scope::Global,
         defaults: &["shift+p"],
+        word: "duplicate",
+        destructive: false,
+        applies_to: &[AppliesTo::Session],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Both,
+        desktop: &[
+            dk("duplicate", "Duplicate into the quick prompt", "Sessions", DeskScope::Row, &["shift+p"]),
+        ],
     },
     ActionSpec {
         action: Action::MoveSession,
@@ -645,6 +1086,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "SESSIONS",
         scope: Scope::Global,
         defaults: &["m"],
+        word: "move",
+        destructive: false,
+        applies_to: &[AppliesTo::Session],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Both,
+        desktop: &[
+            dk("move", "Move to another worktree", "Sessions", DeskScope::Row, &["m"]),
+        ],
     },
     ActionSpec {
         action: Action::ReorderUp,
@@ -656,6 +1105,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         // ⌥↑ is the desktop's chord; ⇧↑ beside it arrives where Option is
         // not Meta.
         defaults: &["alt+up", "shift+up"],
+        word: "up",
+        destructive: false,
+        applies_to: &[AppliesTo::Session, AppliesTo::Worktree, AppliesTo::Repo],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Both,
+        desktop: &[
+            dk("move_up", "Move up: the session, worktree or repo (or drag it)", "Sessions", DeskScope::Row, &["alt+arrowup"]),
+        ],
     },
     ActionSpec {
         action: Action::ReorderDown,
@@ -665,6 +1122,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "SESSIONS",
         scope: Scope::Global,
         defaults: &["alt+down", "shift+down"],
+        word: "down",
+        destructive: false,
+        applies_to: &[AppliesTo::Session, AppliesTo::Worktree, AppliesTo::Repo],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Both,
+        desktop: &[
+            dk("move_down", "Move down: the session, worktree or repo (or drag it)", "Sessions", DeskScope::Row, &["alt+arrowdown"]),
+        ],
     },
     ActionSpec {
         action: Action::Subagents,
@@ -674,6 +1139,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "SESSIONS",
         scope: Scope::Global,
         defaults: &["shift+s"],
+        word: "tree",
+        destructive: false,
+        applies_to: &[AppliesTo::Repo, AppliesTo::Session],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     // ---- FILES ----
     ActionSpec {
@@ -684,6 +1155,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "FILES",
         scope: Scope::Global,
         defaults: &["f"],
+        word: "find",
+        destructive: false,
+        applies_to: &[AppliesTo::Worktree],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::Grep,
@@ -693,6 +1170,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "FILES",
         scope: Scope::Global,
         defaults: &["shift+f"],
+        word: "grep",
+        destructive: false,
+        applies_to: &[AppliesTo::Worktree],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::TreeBrowser,
@@ -702,6 +1185,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "FILES",
         scope: Scope::Global,
         defaults: &["b"],
+        word: "files",
+        destructive: false,
+        applies_to: &[AppliesTo::Worktree],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     // ---- TERMINAL ----
     ActionSpec {
@@ -712,6 +1201,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "TERMINAL",
         scope: Scope::Terminal,
         defaults: &["ctrl+q", "ctrl+]", "ctrl+shift+h"],
+        word: "unlock",
+        destructive: false,
+        applies_to: &[AppliesTo::Session, AppliesTo::Terminal],
+        works_in: &[WorksIn::Pane],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     // ---- GENERAL ----
     ActionSpec {
@@ -729,6 +1224,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         // beside them — the shift of the `` ` `` that walks the pane's
         // tabs, which is the key everything else about the pane is on.
         defaults: &["ctrl+`", "ctrl+~", "~"],
+        word: "pane",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Pane],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::ToggleKanban,
@@ -738,6 +1239,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "GENERAL",
         scope: Scope::Global,
         defaults: &["shift+k"],
+        word: "board",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Both,
+        desktop: &[
+            dk("toggle_home", "Switch overview and board", "Views", DeskScope::Global, &["shift+k"]),
+        ],
     },
     ActionSpec {
         action: Action::ToggleOrchestratorView,
@@ -747,6 +1256,17 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "GENERAL",
         scope: Scope::Global,
         defaults: &["f10"],
+        word: "orchestrator",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff],
+        surface: Surface::Both,
+        // F10 as here, but never inside a shell on the desktop (htop and mc
+        // quit on it); 0 beside it.
+        desktop: &[
+            dk("orchestrator", "Orchestrator (start one when there is none)", "Views", DeskScope::Global, &["0"]),
+            dk("orchestrator_f10", "Orchestrator (start one when there is none)", "Views", DeskScope::Fields, &["f10"]),
+        ],
     },
     ActionSpec {
         action: Action::Accounts,
@@ -756,6 +1276,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "GENERAL",
         scope: Scope::Global,
         defaults: &["shift+u"],
+        word: "accounts",
+        destructive: false,
+        applies_to: &[AppliesTo::Account],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Both,
+        desktop: &[
+            dk("accounts", "Accounts: every login, its use, and who runs on it", "Views", DeskScope::Global, &["shift+u"]),
+        ],
     },
     ActionSpec {
         action: Action::ToggleFullScreen,
@@ -765,6 +1293,17 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "GENERAL",
         scope: Scope::Global,
         defaults: &["ctrl+f"],
+        word: "full",
+        destructive: false,
+        applies_to: &[AppliesTo::Session],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff],
+        surface: Surface::Both,
+        // On the desktop ^F is the diff editor's find and the shell's
+        // forward-char, so the window's chord takes Shift too (its terminal
+        // pane lets it through).
+        desktop: &[
+            dk("maximize", "Full pane: the session or diff takes the window, or comes back down", "Views", DeskScope::Anywhere, &["ctrl+shift+m"]),
+        ],
     },
     ActionSpec {
         action: Action::PaneTabs,
@@ -774,6 +1313,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "GENERAL",
         scope: Scope::Global,
         defaults: &["`"],
+        word: "terminals",
+        destructive: false,
+        applies_to: &[AppliesTo::Terminal],
+        works_in: &[WorksIn::Grid, WorksIn::Pane],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::Hosts,
@@ -783,6 +1328,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "GENERAL",
         scope: Scope::Global,
         defaults: &["shift+h"],
+        word: "hosts",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::Settings,
@@ -792,6 +1343,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "GENERAL",
         scope: Scope::Global,
         defaults: &["s"],
+        word: "settings",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff],
+        surface: Surface::Both,
+        desktop: &[
+            dk("settings", "Settings", "General", DeskScope::Anywhere, &["ctrl+,"]),
+        ],
     },
     ActionSpec {
         action: Action::Metrics,
@@ -801,6 +1360,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "GENERAL",
         scope: Scope::Global,
         defaults: &["shift+m"],
+        word: "memory",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
     ActionSpec {
         action: Action::Help,
@@ -810,6 +1375,15 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "GENERAL",
         scope: Scope::Global,
         defaults: &["?"],
+        word: "help",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff],
+        surface: Surface::Both,
+        desktop: &[
+            dk("help", "Keyboard shortcuts", "General", DeskScope::Global, &["?"]),
+            dk("help_f1", "Keyboard shortcuts", "General", DeskScope::Anywhere, &["f1"]),
+        ],
     },
     ActionSpec {
         action: Action::Quit,
@@ -819,6 +1393,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "GENERAL",
         scope: Scope::Global,
         defaults: &["q", "ctrl+c"],
+        word: "quit",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
     },
 ];
 
@@ -834,4 +1414,802 @@ pub fn index_of(action: Action) -> Option<usize> {
 /// what a key did (the KEY COMBO DISPLAY, for one).
 pub fn spec_of(action: Action) -> Option<&'static ActionSpec> {
     index_of(action).and_then(spec_at)
+}
+
+/// Verbs only the desktop window has: its views, its theme, its split and
+/// the home views' walking keys. Never in [`ACTIONS`], which the TUI's
+/// keymap indexes by position.
+pub const DESKTOP_ONLY: &[DesktopVerb] = &[
+    DesktopVerb {
+        id: "cycle_theme",
+        label: "Cycle theme",
+        hint: "Step the window's theme through system, light and dark",
+        group: "GENERAL",
+        word: "theme",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff],
+        desktop: &[dk("cycle_theme", "Cycle theme: system, light, dark", "General", DeskScope::Anywhere, &["ctrl+shift+l"])],
+    },
+    DesktopVerb {
+        id: "new_worktree",
+        label: "New worktree",
+        hint: "Cut a new worktree in the focused or shown repo",
+        group: "PROJECTS & WORKTREES",
+        word: "worktree",
+        destructive: false,
+        applies_to: &[AppliesTo::Repo],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff],
+        desktop: &[dk("new_worktree", "New worktree in this repo", "General", DeskScope::Global, &["shift+n"])],
+    },
+    DesktopVerb {
+        id: "home_board",
+        label: "Board",
+        hint: "Show the board: the sessions as lanes by status",
+        group: "VIEWS",
+        word: "board",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff],
+        desktop: &[dk("home_board", "Board", "Views", DeskScope::Anywhere, &["ctrl+shift+b"])],
+    },
+    DesktopVerb {
+        id: "home_overview",
+        label: "Overview",
+        hint: "Show the overview: the repos, their worktrees and sessions",
+        group: "VIEWS",
+        word: "overview",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff],
+        desktop: &[dk("home_overview", "Overview", "Views", DeskScope::Anywhere, &["ctrl+shift+o"])],
+    },
+    DesktopVerb {
+        id: "open_session",
+        label: "Show the session",
+        hint: "Bring back the session last shown, in the split",
+        group: "VIEWS",
+        word: "session",
+        destructive: false,
+        applies_to: &[AppliesTo::Session],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Diff],
+        desktop: &[dk("open_session", "Show the session", "Views", DeskScope::Anywhere, &["ctrl+shift+t"])],
+    },
+    DesktopVerb {
+        id: "go_home",
+        label: "Home",
+        hint: "The home view, overview or board, with nothing open beside it",
+        group: "VIEWS",
+        word: "home",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff],
+        desktop: &[dk("go_home", "Home", "Views", DeskScope::Global, &["1"])],
+    },
+    DesktopVerb {
+        id: "go_session",
+        label: "Session",
+        hint: "The session last shown",
+        group: "VIEWS",
+        word: "session",
+        destructive: false,
+        applies_to: &[AppliesTo::Session],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff],
+        desktop: &[dk("go_session", "Session", "Views", DeskScope::Global, &["2"])],
+    },
+    DesktopVerb {
+        id: "go_diff",
+        label: "Diff",
+        hint: "The diff last shown, or the shown session's worktree's",
+        group: "VIEWS",
+        word: "diff",
+        destructive: false,
+        applies_to: &[AppliesTo::Worktree],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff],
+        desktop: &[dk("go_diff", "Diff", "Views", DeskScope::Global, &["3"])],
+    },
+    DesktopVerb {
+        id: "close_split",
+        label: "Close the split",
+        hint: "Close the session or diff beside the home view, or Settings; a full pane comes back down first",
+        group: "VIEWS",
+        word: "close",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Pane, WorksIn::Diff],
+        desktop: &[dk(
+            "close_split",
+            "Close the split or Settings (a full pane comes back down first)",
+            "Views",
+            DeskScope::Global,
+            &["escape"],
+        )],
+    },
+    DesktopVerb {
+        id: "restart",
+        label: "Restart the agent",
+        hint: "Restart the focused session's agent, resuming its conversation",
+        group: "SESSIONS",
+        word: "restart",
+        destructive: false,
+        applies_to: &[AppliesTo::Session],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        desktop: &[dk("restart", "Restart the agent", "Sessions", DeskScope::Row, &["shift+r"])],
+    },
+    DesktopVerb {
+        id: "row_menu",
+        label: "Actions menu",
+        hint: "The focused row's or card's actions, as a right-click shows them",
+        group: "SESSIONS",
+        word: "actions",
+        destructive: false,
+        applies_to: &[AppliesTo::Repo, AppliesTo::Worktree, AppliesTo::Session, AppliesTo::Terminal],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        desktop: &[dk("row_menu", "Actions menu", "Sessions", DeskScope::Row, &["shift+f10", "contextmenu"])],
+    },
+    DesktopVerb {
+        id: "list_move",
+        label: "Move through the rows",
+        hint: "Walk the overview's rows, or the board's cards in a lane",
+        group: "OVERVIEW AND BOARD",
+        word: "move",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        desktop: &[dk(
+            "list_move",
+            "Move through the rows (cards on the board)",
+            "Overview and board",
+            DeskScope::Overview,
+            &["j", "k", "arrowdown", "arrowup"],
+        )],
+    },
+    DesktopVerb {
+        id: "list_open",
+        label: "Open the session",
+        hint: "Open the session on the focused row or card",
+        group: "OVERVIEW AND BOARD",
+        word: "open",
+        destructive: false,
+        applies_to: &[AppliesTo::Session, AppliesTo::Terminal],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        desktop: &[dk("list_open", "Open the session", "Overview and board", DeskScope::Overview, &["enter", "space"])],
+    },
+    DesktopVerb {
+        id: "overview_fold",
+        label: "Unfold, fold",
+        hint: "Unfold or fold the overview row's nested sessions",
+        group: "OVERVIEW AND BOARD",
+        word: "fold",
+        destructive: false,
+        applies_to: &[AppliesTo::Worktree, AppliesTo::Session],
+        works_in: &[WorksIn::Grid],
+        desktop: &[dk(
+            "overview_fold",
+            "Overview: unfold, fold nested sessions",
+            "Overview and board",
+            DeskScope::Overview,
+            &["arrowright", "arrowleft"],
+        )],
+    },
+    DesktopVerb {
+        id: "board_lanes",
+        label: "Across lanes",
+        hint: "Step to the board's lane on either side",
+        group: "OVERVIEW AND BOARD",
+        word: "lanes",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Board],
+        desktop: &[dk(
+            "board_lanes",
+            "Board: across lanes (also the side arrows)",
+            "Overview and board",
+            DeskScope::Board,
+            &["h", "l"],
+        )],
+    },
+    DesktopVerb {
+        id: "board_diff",
+        label: "Diff the card",
+        hint: "Diff the selected card's worktree",
+        group: "OVERVIEW AND BOARD",
+        word: "diff",
+        destructive: false,
+        applies_to: &[AppliesTo::Session],
+        works_in: &[WorksIn::Board],
+        desktop: &[dk("board_diff", "Board: diff the selected card", "Overview and board", DeskScope::Board, &["d"])],
+    },
+];
+
+/// The desktop window's key rows in the order its help lists them and its
+/// key handler tries them (the first row a chord matches wins).
+pub const DESKTOP_ORDER: &[&str] = &[
+    "palette",
+    "palette_alt",
+    "help",
+    "help_f1",
+    "settings",
+    "quick_prompt",
+    "quick_prompt_alt",
+    "cycle_theme",
+    "new_worktree",
+    "back",
+    "forward",
+    "home_board",
+    "home_overview",
+    "toggle_home",
+    "open_session",
+    "open_diff",
+    "go_home",
+    "go_session",
+    "go_diff",
+    "orchestrator",
+    "orchestrator_f10",
+    "close_split",
+    "maximize",
+    "toggle_archived",
+    "next_attention",
+    "prev_attention",
+    "accounts",
+    "rename",
+    "archive",
+    "unarchive",
+    "delete",
+    "restart",
+    "move",
+    "duplicate",
+    "follow_up",
+    "new_terminal",
+    "open_editor",
+    "open_remote",
+    "switch_branch",
+    "row_menu",
+    "move_up",
+    "move_down",
+    "list_move",
+    "list_open",
+    "overview_fold",
+    "board_lanes",
+    "board_diff",
+];
+
+/// One registry row, either table's, as the window reads it.
+#[derive(Debug, Serialize)]
+pub struct Verb {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub hint: &'static str,
+    pub group: &'static str,
+    pub word: &'static str,
+    pub destructive: bool,
+    pub applies_to: &'static [AppliesTo],
+    pub works_in: &'static [WorksIn],
+    pub surface: Surface,
+    /// The TUI's default chords, in its own spelling; empty on a desktop
+    /// verb.
+    pub tui: &'static [&'static str],
+    pub tui_scope: Option<Scope>,
+    pub desktop: &'static [DeskKey],
+}
+
+/// Every verb: the TUI's [`ACTIONS`], then [`DESKTOP_ONLY`].
+pub fn verbs() -> Vec<Verb> {
+    let tui = ACTIONS.iter().map(|s| Verb {
+        id: s.id,
+        label: s.label,
+        hint: s.hint,
+        group: s.group,
+        word: s.word,
+        destructive: s.destructive,
+        applies_to: s.applies_to,
+        works_in: s.works_in,
+        surface: s.surface,
+        tui: s.defaults,
+        tui_scope: Some(s.scope),
+        desktop: s.desktop,
+    });
+    let desk = DESKTOP_ONLY.iter().map(|d| Verb {
+        id: d.id,
+        label: d.label,
+        hint: d.hint,
+        group: d.group,
+        word: d.word,
+        destructive: d.destructive,
+        applies_to: d.applies_to,
+        works_in: d.works_in,
+        surface: Surface::Desktop,
+        tui: &[],
+        tui_scope: None,
+        desktop: d.desktop,
+    });
+    tui.chain(desk).collect()
+}
+
+/// The desktop's key rows in [`DESKTOP_ORDER`], each with its verb's id.
+pub fn desktop_keys() -> Vec<(&'static str, &'static DeskKey)> {
+    let all: Vec<(&'static str, &'static DeskKey)> = ACTIONS
+        .iter()
+        .flat_map(|s| s.desktop.iter().map(move |k| (s.id, k)))
+        .chain(
+            DESKTOP_ONLY
+                .iter()
+                .flat_map(|d| d.desktop.iter().map(move |k| (d.id, k))),
+        )
+        .collect();
+    DESKTOP_ORDER
+        .iter()
+        .filter_map(|id| all.iter().find(|(_, k)| k.id == *id).copied())
+        .collect()
+}
+
+// ---- the desktop's overrides ----
+
+/// The desktop window's overrides share the config file's `keybindings`
+/// object with the TUI's, as flat string entries under this prefix
+/// (`"desktop.palette": "ctrl+k, ctrl+shift+p"`): a nested object would
+/// fail to parse as the map of strings older builds read, and drop the
+/// TUI's overrides with it. An empty string is a deliberate unbind, as
+/// in the TUI.
+pub const DESKTOP_PREFIX: &str = "desktop.";
+
+/// The desktop's entries of a `keybindings` map: key id to its chords.
+pub fn desktop_overrides(keybindings: &BTreeMap<String, String>) -> BTreeMap<String, Vec<String>> {
+    keybindings
+        .iter()
+        .filter_map(|(k, v)| {
+            let id = k.strip_prefix(DESKTOP_PREFIX)?;
+            Some((id.to_string(), split_chords(v)))
+        })
+        .collect()
+}
+
+/// A stored chord list, `"ctrl+k, ctrl+shift+p"`, as its chords. A lone
+/// `,` is a chord (prev_attention's): an empty part after one is it.
+fn split_chords(list: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut part = String::new();
+    let mut chars = list.chars().peekable();
+    while let Some(c) = chars.next() {
+        // `,` ends a chord unless it is the chord's key: the first thing
+        // in the part, or after a `+`.
+        let key = c == ',' && (part.trim().is_empty() || part.ends_with('+'));
+        if c == ',' && !key {
+            out.push(std::mem::take(&mut part));
+            continue;
+        }
+        part.push(c);
+        if key {
+            // Its own separator, if one follows.
+            while chars.peek() == Some(&' ') {
+                chars.next();
+            }
+            if chars.peek() == Some(&',') {
+                chars.next();
+                out.push(std::mem::take(&mut part));
+            }
+        }
+    }
+    out.push(part);
+    out.into_iter()
+        .map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty())
+        .collect()
+}
+
+/// `tui` (the TUI keymap's overrides) as the whole of the TUI's part of
+/// `keybindings`, the desktop's entries kept as they were.
+pub fn merge_tui_overrides(
+    keybindings: &mut BTreeMap<String, String>,
+    tui: BTreeMap<String, String>,
+) {
+    keybindings.retain(|k, _| k.starts_with(DESKTOP_PREFIX));
+    keybindings.extend(tui);
+}
+
+/// Whether `chord` may go on a key row of `scope`. A row that counts while
+/// a field or terminal has the keys (`anywhere`, `fields`) takes only a
+/// chord typing never sends: one with Ctrl or Alt, or an F key. Shift
+/// alone is a capital letter. The window checks the same before it asks.
+pub fn typing_safe(scope: DeskScope, chord: &str) -> bool {
+    if !matches!(scope, DeskScope::Anywhere | DeskScope::Fields) {
+        return true;
+    }
+    let key = chord.rsplit('+').next().unwrap_or_default();
+    let fkey = key
+        .strip_prefix('f')
+        .and_then(|n| n.parse::<u8>().ok())
+        .is_some_and(|n| (1..=24).contains(&n));
+    let mods: Vec<&str> = chord.split('+').collect();
+    let held = mods[..mods.len().saturating_sub(1)]
+        .iter()
+        .any(|m| *m == "ctrl" || *m == "alt");
+    held || fkey
+}
+
+/// Set (`Some`) or clear back to its default (`None`) one desktop key's
+/// override. Refuses an unknown id, a home view's walking keys (those
+/// views handle them themselves) and a chord typing would send on a row
+/// that counts while typing ([`typing_safe`]).
+pub fn set_desktop_override(
+    keybindings: &mut BTreeMap<String, String>,
+    id: &str,
+    chords: Option<&[String]>,
+) -> Result<(), String> {
+    let (_, key) = desktop_keys()
+        .into_iter()
+        .find(|(_, k)| k.id == id)
+        .ok_or_else(|| format!("no desktop key {id:?}"))?;
+    if matches!(key.scope, DeskScope::Overview | DeskScope::Board) {
+        return Err(format!("{} is fixed: the view handles it", key.label));
+    }
+    let entry = format!("{DESKTOP_PREFIX}{id}");
+    let Some(chords) = chords else {
+        keybindings.remove(&entry);
+        return Ok(());
+    };
+    let mut list: Vec<String> = Vec::new();
+    for c in chords {
+        let c = c.trim().to_ascii_lowercase();
+        if !c.is_empty() && !typing_safe(key.scope, &c) {
+            return Err(format!(
+                "{c} would fire while typing: {} counts in fields, so its keys take Ctrl, Alt or an F key",
+                key.label
+            ));
+        }
+        if !c.is_empty() && !list.contains(&c) {
+            list.push(c);
+        }
+    }
+    if list
+        .iter()
+        .map(String::as_str)
+        .eq(key.chords.iter().copied())
+    {
+        keybindings.remove(&entry);
+    } else {
+        keybindings.insert(entry, list.join(", "));
+    }
+    Ok(())
+}
+
+// ---- the window's copy ----
+
+/// Where the window's copy of this table lives, from this crate.
+pub const TS_PATH: &str = "../../desktop/src/lib/actions.gen.ts";
+
+/// A string as a TS literal in plain ASCII (the window's sources must be:
+/// `desktop/scripts/check-encoding.mjs`): JSON, with every other character
+/// a `\u` escape.
+fn ts_str(s: &str) -> String {
+    let json = serde_json::to_string(s).expect("a string serializes");
+    let mut out = String::with_capacity(json.len());
+    for c in json.chars() {
+        if c.is_ascii() {
+            out.push(c);
+        } else {
+            let mut buf = [0u16; 2];
+            for unit in c.encode_utf16(&mut buf) {
+                out.push_str(&format!("\\u{unit:04x}"));
+            }
+        }
+    }
+    out
+}
+
+fn ts_enum<T: Serialize>(v: &T) -> String {
+    let value = serde_json::to_value(v).expect("a variant serializes");
+    ts_str(value.as_str().unwrap_or_default())
+}
+
+fn ts_list<T: Serialize>(items: &[T]) -> String {
+    let items: Vec<String> = items.iter().map(ts_enum).collect();
+    format!("[{}]", items.join(", "))
+}
+
+fn ts_strs(items: &[&str]) -> String {
+    let items: Vec<String> = items.iter().map(|s| ts_str(s)).collect();
+    format!("[{}]", items.join(", "))
+}
+
+fn ts_union(name: &str, items: &[String]) -> String {
+    let mut out = format!("export type {name} =\n");
+    for (i, item) in items.iter().enumerate() {
+        let end = if i + 1 == items.len() { ";" } else { "" };
+        out.push_str(&format!("  | {item}{end}\n"));
+    }
+    out
+}
+
+const TS_HEAD: &str = "\
+// Generated from crates/nebula-config/src/actions.rs: do not edit. The
+// nebula-config test actions_gen_ts_is_current fails when this file and
+// that table differ; KETE_BLESS=1 cargo test -p nebula-config actions_gen
+// rewrites it.
+
+";
+
+const TS_TYPES: &str = "\
+/** One verb. `tui` is the terminal app's default chords in its own
+ *  spelling; `desktop` names the window's key rows for it. */
+export interface ActionRow {
+  id: ActionId;
+  label: string;
+  hint: string;
+  group: string;
+  word: string;
+  destructive: boolean;
+  appliesTo: readonly AppliesTo[];
+  worksIn: readonly WorksIn[];
+  surface: Surface;
+  tui: readonly string[];
+  desktop: readonly DeskKeyId[];
+}
+
+/** One of the window's key rows: its default chords, spelled as
+ *  `chordOf` spells a key event, and where they count. */
+export interface DeskKey {
+  id: DeskKeyId;
+  action: ActionId;
+  label: string;
+  group: DeskGroup;
+  scope: DeskScope;
+  editorOwns: boolean;
+  chords: readonly string[];
+}
+
+";
+
+/// `desktop/src/lib/actions.gen.ts`: the registry as the window imports it.
+/// The `actions_gen_ts_is_current` test fails when the committed file and
+/// this differ; `KETE_BLESS=1` rewrites it.
+pub fn render_ts() -> String {
+    let verbs = verbs();
+    let keys = desktop_keys();
+    let mut groups: Vec<&str> = Vec::new();
+    for (_, k) in &keys {
+        if !groups.contains(&k.group) {
+            groups.push(k.group);
+        }
+    }
+    let ids: Vec<String> = verbs.iter().map(|v| ts_str(v.id)).collect();
+    let key_ids: Vec<String> = keys.iter().map(|(_, k)| ts_str(k.id)).collect();
+    let group_names: Vec<String> = groups.iter().map(|g| ts_str(g)).collect();
+    let mut out = String::from(TS_HEAD);
+    out.push_str(&ts_union("ActionId", &ids));
+    out.push('\n');
+    out.push_str(&ts_union("DeskKeyId", &key_ids));
+    out.push('\n');
+    out.push_str(&ts_union("DeskGroup", &group_names));
+    out.push('\n');
+    let applies = [
+        AppliesTo::Global,
+        AppliesTo::Repo,
+        AppliesTo::Worktree,
+        AppliesTo::Session,
+        AppliesTo::Terminal,
+        AppliesTo::Account,
+    ];
+    let works = [
+        WorksIn::Grid,
+        WorksIn::Board,
+        WorksIn::Pane,
+        WorksIn::Diff,
+        WorksIn::Overlay,
+    ];
+    let surfaces = [Surface::Both, Surface::Tui, Surface::Desktop];
+    let scopes = [
+        DeskScope::Anywhere,
+        DeskScope::Fields,
+        DeskScope::Global,
+        DeskScope::Row,
+        DeskScope::Overview,
+        DeskScope::Board,
+    ];
+    let alt = |names: Vec<String>| names.join(" | ");
+    out.push_str(&format!(
+        "export type AppliesTo = {};\nexport type WorksIn = {};\nexport type Surface = {};\nexport type DeskScope = {};\n\n",
+        alt(applies.iter().map(ts_enum).collect()),
+        alt(works.iter().map(ts_enum).collect()),
+        alt(surfaces.iter().map(ts_enum).collect()),
+        alt(scopes.iter().map(ts_enum).collect()),
+    ));
+    out.push_str(TS_TYPES);
+    out.push_str("export const ACTIONS: readonly ActionRow[] = [\n");
+    for v in &verbs {
+        let desk: Vec<&str> = v.desktop.iter().map(|k| k.id).collect();
+        out.push_str("  {\n");
+        out.push_str(&format!("    id: {},\n", ts_str(v.id)));
+        out.push_str(&format!("    label: {},\n", ts_str(v.label)));
+        out.push_str(&format!("    hint: {},\n", ts_str(v.hint)));
+        out.push_str(&format!("    group: {},\n", ts_str(v.group)));
+        out.push_str(&format!("    word: {},\n", ts_str(v.word)));
+        out.push_str(&format!("    destructive: {},\n", v.destructive));
+        out.push_str(&format!("    appliesTo: {},\n", ts_list(v.applies_to)));
+        out.push_str(&format!("    worksIn: {},\n", ts_list(v.works_in)));
+        out.push_str(&format!("    surface: {},\n", ts_enum(&v.surface)));
+        out.push_str(&format!("    tui: {},\n", ts_strs(v.tui)));
+        out.push_str(&format!("    desktop: {},\n", ts_strs(&desk)));
+        out.push_str("  },\n");
+    }
+    out.push_str("];\n\n/** The window's key rows, in its help's order. */\n");
+    out.push_str("export const DESK_KEYS: readonly DeskKey[] = [\n");
+    for (action, k) in &keys {
+        out.push_str(&format!(
+            "  {{ id: {}, action: {}, label: {}, group: {}, scope: {}, editorOwns: {}, chords: {} }},\n",
+            ts_str(k.id),
+            ts_str(action),
+            ts_str(k.label),
+            ts_str(k.group),
+            ts_enum(&k.scope),
+            k.editor_owns,
+            ts_strs(k.chords),
+        ));
+    }
+    out.push_str("];\n");
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn ids_are_unique_across_both_tables() {
+        let mut seen = BTreeSet::new();
+        for v in verbs() {
+            assert!(seen.insert(v.id), "verb id {} twice", v.id);
+        }
+        let mut keys = BTreeSet::new();
+        for (_, k) in desktop_keys() {
+            assert!(keys.insert(k.id), "desktop key {} twice", k.id);
+        }
+    }
+
+    #[test]
+    fn every_desktop_key_is_in_the_order_once() {
+        let mut listed: Vec<&str> = ACTIONS
+            .iter()
+            .flat_map(|s| s.desktop.iter().map(|k| k.id))
+            .chain(
+                DESKTOP_ONLY
+                    .iter()
+                    .flat_map(|d| d.desktop.iter().map(|k| k.id)),
+            )
+            .collect();
+        let mut ordered: Vec<&str> = DESKTOP_ORDER.to_vec();
+        listed.sort_unstable();
+        ordered.sort_unstable();
+        assert_eq!(ordered, listed);
+        assert_eq!(desktop_keys().len(), DESKTOP_ORDER.len());
+    }
+
+    #[test]
+    fn every_row_says_what_it_is() {
+        for s in ACTIONS {
+            match s.surface {
+                Surface::Tui => assert!(s.desktop.is_empty(), "{} is TUI-only", s.id),
+                Surface::Both => {}
+                Surface::Desktop => panic!("{} is in the TUI's table", s.id),
+            }
+            assert!(!s.word.is_empty(), "{}", s.id);
+            assert!(
+                !s.applies_to.is_empty() && !s.works_in.is_empty(),
+                "{}",
+                s.id
+            );
+        }
+        for d in DESKTOP_ONLY {
+            assert!(!d.desktop.is_empty(), "{} has no key", d.id);
+            assert!(!d.word.is_empty(), "{}", d.id);
+            assert!(
+                !d.applies_to.is_empty() && !d.works_in.is_empty(),
+                "{}",
+                d.id
+            );
+        }
+    }
+
+    #[test]
+    fn the_tui_table_keeps_its_ids() {
+        // Users' overrides are keyed by these: a rename strands them. Some
+        // read as the desktop's other verbs (`palette` is the TUI's fuzzy
+        // jump, the window's Ctrl+K is `command_palette`; `move_up` walks
+        // the cursor where the window's reorders, `reorder_up`): the
+        // window's key ids are their own namespace.
+        assert_eq!(ACTIONS.len(), 73);
+        for id in [
+            "palette",
+            "move_up",
+            "move_down",
+            "delete",
+            "quit",
+            "reorder_up",
+        ] {
+            assert!(ACTIONS.iter().any(|s| s.id == id), "{id}");
+        }
+    }
+
+    #[test]
+    fn chord_lists_split_on_their_commas_only() {
+        assert_eq!(
+            split_chords("ctrl+k, ctrl+shift+p"),
+            vec!["ctrl+k", "ctrl+shift+p"]
+        );
+        assert_eq!(split_chords(","), vec![","]);
+        assert_eq!(split_chords(",, ."), vec![",", "."]);
+        assert_eq!(split_chords("ctrl+,, f2"), vec!["ctrl+,", "f2"]);
+        assert_eq!(split_chords("f2, ,"), vec!["f2", ","]);
+        assert!(split_chords("").is_empty());
+    }
+
+    #[test]
+    fn desktop_overrides_live_beside_the_tuis() {
+        let mut kb: BTreeMap<String, String> = BTreeMap::new();
+        kb.insert("quit".into(), "ctrl+q".into());
+        let palette = ["Ctrl+J".to_string(), "ctrl+k".to_string()];
+        set_desktop_override(&mut kb, "palette", Some(&palette)).unwrap();
+        set_desktop_override(&mut kb, "help_f1", Some(&[])).unwrap();
+        assert_eq!(kb["desktop.palette"], "ctrl+j, ctrl+k");
+        assert_eq!(kb["desktop.help_f1"], "");
+        let over = desktop_overrides(&kb);
+        assert_eq!(over["palette"], vec!["ctrl+j", "ctrl+k"]);
+        assert!(over["help_f1"].is_empty());
+        assert!(!over.contains_key("quit"));
+        // Back to the defaults drops the entry.
+        set_desktop_override(&mut kb, "palette", Some(&["ctrl+k".into()])).unwrap();
+        assert!(!kb.contains_key("desktop.palette"));
+        set_desktop_override(&mut kb, "help_f1", None).unwrap();
+        assert!(!kb.contains_key("desktop.help_f1"));
+        assert!(set_desktop_override(&mut kb, "nope", None).is_err());
+        assert!(set_desktop_override(&mut kb, "board_diff", Some(&["x".into()])).is_err());
+        // A key that counts while typing takes no bare or shifted letter.
+        assert!(set_desktop_override(&mut kb, "cycle_theme", Some(&["t".into()])).is_err());
+        assert!(set_desktop_override(&mut kb, "back", Some(&["shift+b".into()])).is_err());
+        assert!(set_desktop_override(&mut kb, "back", Some(&["f6".into()])).is_ok());
+        assert!(set_desktop_override(&mut kb, "help", Some(&["h".into()])).is_ok());
+        assert!(typing_safe(DeskScope::Anywhere, "ctrl+,"));
+        assert!(!typing_safe(DeskScope::Fields, "f"));
+        for (_, k) in desktop_keys() {
+            for c in k.chords {
+                assert!(typing_safe(k.scope, c), "{} default {c}", k.id);
+            }
+        }
+        set_desktop_override(&mut kb, "back", None).unwrap();
+        set_desktop_override(&mut kb, "help", None).unwrap();
+        // A TUI save replaces its own part only.
+        set_desktop_override(&mut kb, "rename", Some(&["f2".into(), ",".into()])).unwrap();
+        merge_tui_overrides(
+            &mut kb,
+            BTreeMap::from([("help".to_string(), "f1".to_string())]),
+        );
+        assert_eq!(kb["desktop.rename"], "f2, ,");
+        assert_eq!(desktop_overrides(&kb)["rename"], vec!["f2", ","]);
+        assert_eq!(kb["help"], "f1");
+        assert!(!kb.contains_key("quit"));
+    }
+
+    #[test]
+    fn the_generated_file_is_plain_ascii() {
+        assert!(render_ts().is_ascii());
+        assert_eq!(ts_str("\u{2318}P \u{1F600}"), "\"\\u2318P \\ud83d\\ude00\"");
+    }
+
+    #[test]
+    fn actions_gen_ts_is_current() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(TS_PATH);
+        let want = render_ts();
+        if std::env::var_os("KETE_BLESS").is_some() {
+            std::fs::write(&path, &want).unwrap();
+        }
+        let have = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("{}: {e} (run with KETE_BLESS=1)", path.display()))
+            .replace('\r', "");
+        assert!(
+            have == want,
+            "{} is stale: run KETE_BLESS=1 cargo test -p nebula-config actions_gen",
+            path.display()
+        );
+    }
 }

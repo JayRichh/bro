@@ -1,0 +1,1394 @@
+// Generated from crates/nebula-config/src/actions.rs: do not edit. The
+// nebula-config test actions_gen_ts_is_current fails when this file and
+// that table differ; KETE_BLESS=1 cargo test -p nebula-config actions_gen
+// rewrites it.
+
+export type ActionId =
+  | "focus_next"
+  | "focus_left"
+  | "focus_right"
+  | "move_down"
+  | "move_up"
+  | "half_page_down"
+  | "half_page_up"
+  | "activate"
+  | "palette"
+  | "command_palette"
+  | "nav_back"
+  | "nav_forward"
+  | "next_attention"
+  | "prev_attention"
+  | "next_project_tab"
+  | "prev_project_tab"
+  | "project_tab_1"
+  | "project_tab_2"
+  | "project_tab_3"
+  | "project_tab_4"
+  | "project_tab_5"
+  | "project_tab_6"
+  | "project_tab_7"
+  | "project_tab_8"
+  | "project_tab_9"
+  | "close_project_tab"
+  | "project_dropdown"
+  | "add_project"
+  | "new"
+  | "git_diff"
+  | "open_repo"
+  | "open_pull_request"
+  | "open_issue"
+  | "refresh_pull_requests"
+  | "comment_pull_request"
+  | "issues"
+  | "pull_requests"
+  | "switch_branch"
+  | "azure_devops"
+  | "open_worktree"
+  | "open_in_browser"
+  | "screenshot"
+  | "new_terminal"
+  | "open_ghostty_tab"
+  | "rename"
+  | "archive"
+  | "unarchive"
+  | "toggle_archived"
+  | "delete"
+  | "delete_all"
+  | "agent_presets"
+  | "quick_prompt"
+  | "follow_up"
+  | "duplicate_session"
+  | "move_session"
+  | "reorder_up"
+  | "reorder_down"
+  | "subagents"
+  | "find_file"
+  | "grep"
+  | "tree_browser"
+  | "unlock_terminal"
+  | "toggle_launcher_pane"
+  | "toggle_kanban"
+  | "toggle_orchestrator_view"
+  | "accounts"
+  | "toggle_full_screen"
+  | "pane_tabs"
+  | "hosts"
+  | "settings"
+  | "metrics"
+  | "help"
+  | "quit"
+  | "cycle_theme"
+  | "new_worktree"
+  | "home_board"
+  | "home_overview"
+  | "open_session"
+  | "go_home"
+  | "go_session"
+  | "go_diff"
+  | "close_split"
+  | "restart"
+  | "row_menu"
+  | "list_move"
+  | "list_open"
+  | "overview_fold"
+  | "board_lanes"
+  | "board_diff";
+
+export type DeskKeyId =
+  | "palette"
+  | "palette_alt"
+  | "help"
+  | "help_f1"
+  | "settings"
+  | "quick_prompt"
+  | "quick_prompt_alt"
+  | "cycle_theme"
+  | "new_worktree"
+  | "back"
+  | "forward"
+  | "home_board"
+  | "home_overview"
+  | "toggle_home"
+  | "open_session"
+  | "open_diff"
+  | "go_home"
+  | "go_session"
+  | "go_diff"
+  | "orchestrator"
+  | "orchestrator_f10"
+  | "close_split"
+  | "maximize"
+  | "toggle_archived"
+  | "next_attention"
+  | "prev_attention"
+  | "accounts"
+  | "rename"
+  | "archive"
+  | "unarchive"
+  | "delete"
+  | "restart"
+  | "move"
+  | "duplicate"
+  | "follow_up"
+  | "new_terminal"
+  | "open_editor"
+  | "open_remote"
+  | "switch_branch"
+  | "row_menu"
+  | "move_up"
+  | "move_down"
+  | "list_move"
+  | "list_open"
+  | "overview_fold"
+  | "board_lanes"
+  | "board_diff";
+
+export type DeskGroup =
+  | "General"
+  | "Views"
+  | "Sessions"
+  | "Overview and board";
+
+export type AppliesTo = "global" | "repo" | "worktree" | "session" | "terminal" | "account";
+export type WorksIn = "grid" | "board" | "pane" | "diff" | "overlay";
+export type Surface = "both" | "tui" | "desktop";
+export type DeskScope = "anywhere" | "fields" | "global" | "row" | "overview" | "board";
+
+/** One verb. `tui` is the terminal app's default chords in its own
+ *  spelling; `desktop` names the window's key rows for it. */
+export interface ActionRow {
+  id: ActionId;
+  label: string;
+  hint: string;
+  group: string;
+  word: string;
+  destructive: boolean;
+  appliesTo: readonly AppliesTo[];
+  worksIn: readonly WorksIn[];
+  surface: Surface;
+  tui: readonly string[];
+  desktop: readonly DeskKeyId[];
+}
+
+/** One of the window's key rows: its default chords, spelled as
+ *  `chordOf` spells a key event, and where they count. */
+export interface DeskKey {
+  id: DeskKeyId;
+  action: ActionId;
+  label: string;
+  group: DeskGroup;
+  scope: DeskScope;
+  editorOwns: boolean;
+  chords: readonly string[];
+}
+
+export const ACTIONS: readonly ActionRow[] = [
+  {
+    id: "focus_next",
+    label: "Open / fold checkout",
+    hint: "Open every card of the checkout under the cursor in place, or fold it back to one row: one checkout open at a time",
+    group: "NAVIGATE",
+    word: "fold",
+    destructive: false,
+    appliesTo: ["worktree"],
+    worksIn: ["grid"],
+    surface: "tui",
+    tui: ["tab"],
+    desktop: [],
+  },
+  {
+    id: "focus_left",
+    label: "Focus left",
+    hint: "Step to the card on the left, stopping at the row's first",
+    group: "NAVIGATE",
+    word: "left",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["h", "left"],
+    desktop: [],
+  },
+  {
+    id: "focus_right",
+    label: "Focus right",
+    hint: "Step to the card on the right, stopping at the row's last",
+    group: "NAVIGATE",
+    word: "right",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["l", "right"],
+    desktop: [],
+  },
+  {
+    id: "move_down",
+    label: "Move down",
+    hint: "Move the cursor down a row of cards; twice from the project tabs, into the one under their cursor",
+    group: "NAVIGATE",
+    word: "down",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["j", "down"],
+    desktop: [],
+  },
+  {
+    id: "move_up",
+    label: "Move up",
+    hint: "Move the cursor up a row of cards, stopping at the first; twice there, up to the project tabs",
+    group: "NAVIGATE",
+    word: "up",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["k", "up"],
+    desktop: [],
+  },
+  {
+    id: "half_page_down",
+    label: "Half page down",
+    hint: "Jump the cursor down two rows of cards, stopping at the last",
+    group: "NAVIGATE",
+    word: "page",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid"],
+    surface: "tui",
+    tui: ["ctrl+d"],
+    desktop: [],
+  },
+  {
+    id: "half_page_up",
+    label: "Half page up",
+    hint: "Jump the cursor up two rows of cards, stopping at the first",
+    group: "NAVIGATE",
+    word: "page",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid"],
+    surface: "tui",
+    tui: ["ctrl+u"],
+    desktop: [],
+  },
+  {
+    id: "activate",
+    label: "Open / attach",
+    hint: "Into the pane on the card under the cursor, or lock the pane's input",
+    group: "NAVIGATE",
+    word: "open",
+    destructive: false,
+    appliesTo: ["session", "terminal"],
+    worksIn: ["grid", "board", "pane"],
+    surface: "tui",
+    tui: ["enter"],
+    desktop: [],
+  },
+  {
+    id: "palette",
+    label: "Fuzzy jump",
+    hint: "Search every project, worktree and session at once",
+    group: "NAVIGATE",
+    word: "jump",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board", "pane"],
+    surface: "tui",
+    tui: ["/"],
+    desktop: [],
+  },
+  {
+    id: "command_palette",
+    label: "Command palette",
+    hint: "Search every project, worktree, session and pull request, and every action by its name: Enter jumps to the row or runs the action",
+    group: "NAVIGATE",
+    word: "commands",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board", "pane", "diff"],
+    surface: "both",
+    tui: ["ctrl+k"],
+    desktop: ["palette", "palette_alt"],
+  },
+  {
+    id: "nav_back",
+    label: "Back",
+    hint: "Go back to the place the grid was on before (its project tab, the card under the cursor, full-screen or not), as the header's \u2039 does. < is bound beside \u2325\u2190, which needs Option as Meta on a Mac",
+    group: "NAVIGATE",
+    word: "back",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board", "pane", "diff"],
+    surface: "both",
+    tui: ["alt+left", "<"],
+    desktop: ["back"],
+  },
+  {
+    id: "nav_forward",
+    label: "Forward",
+    hint: "Go forward again after a back, as the header's \u203a does. > is bound beside \u2325\u2192, which needs Option as Meta on a Mac",
+    group: "NAVIGATE",
+    word: "forward",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board", "pane", "diff"],
+    surface: "both",
+    tui: ["alt+right", ">"],
+    desktop: ["forward"],
+  },
+  {
+    id: "next_attention",
+    label: "Next session needing you",
+    hint: "Jump to the next session in the palette's attention order (needs feedback, running, unseen, then recency) in any project, wrapping",
+    group: "NAVIGATE",
+    word: "next",
+    destructive: false,
+    appliesTo: ["session"],
+    worksIn: ["grid", "board", "pane"],
+    surface: "both",
+    tui: ["."],
+    desktop: ["next_attention"],
+  },
+  {
+    id: "prev_attention",
+    label: "Prev session needing you",
+    hint: "The same walk backwards: the session before this one in the palette's attention order, wrapping at the top",
+    group: "NAVIGATE",
+    word: "prev",
+    destructive: false,
+    appliesTo: ["session"],
+    worksIn: ["grid", "board", "pane"],
+    surface: "both",
+    tui: [","],
+    desktop: ["prev_attention"],
+  },
+  {
+    id: "next_project_tab",
+    label: "Next project tab",
+    hint: "Open the project on the tab to the right of this one in the header, stopping at the last",
+    group: "NAVIGATE",
+    word: "tab",
+    destructive: false,
+    appliesTo: ["repo"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["]"],
+    desktop: [],
+  },
+  {
+    id: "prev_project_tab",
+    label: "Prev project tab",
+    hint: "Open the project on the tab to the left, stopping at the first",
+    group: "NAVIGATE",
+    word: "tab",
+    destructive: false,
+    appliesTo: ["repo"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["["],
+    desktop: [],
+  },
+  {
+    id: "project_tab_1",
+    label: "Project tab 1",
+    hint: "Open the project on that tab of the header, counting from the left (\u2318N only in emulators that send \u2318)",
+    group: "NAVIGATE",
+    word: "tab",
+    destructive: false,
+    appliesTo: ["repo"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["1", "cmd+1"],
+    desktop: [],
+  },
+  {
+    id: "project_tab_2",
+    label: "Project tab 2",
+    hint: "Open the project on that tab of the header, counting from the left (\u2318N only in emulators that send \u2318)",
+    group: "NAVIGATE",
+    word: "tab",
+    destructive: false,
+    appliesTo: ["repo"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["2", "cmd+2"],
+    desktop: [],
+  },
+  {
+    id: "project_tab_3",
+    label: "Project tab 3",
+    hint: "Open the project on that tab of the header, counting from the left (\u2318N only in emulators that send \u2318)",
+    group: "NAVIGATE",
+    word: "tab",
+    destructive: false,
+    appliesTo: ["repo"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["3", "cmd+3"],
+    desktop: [],
+  },
+  {
+    id: "project_tab_4",
+    label: "Project tab 4",
+    hint: "Open the project on that tab of the header, counting from the left (\u2318N only in emulators that send \u2318)",
+    group: "NAVIGATE",
+    word: "tab",
+    destructive: false,
+    appliesTo: ["repo"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["4", "cmd+4"],
+    desktop: [],
+  },
+  {
+    id: "project_tab_5",
+    label: "Project tab 5",
+    hint: "Open the project on that tab of the header, counting from the left (\u2318N only in emulators that send \u2318)",
+    group: "NAVIGATE",
+    word: "tab",
+    destructive: false,
+    appliesTo: ["repo"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["5", "cmd+5"],
+    desktop: [],
+  },
+  {
+    id: "project_tab_6",
+    label: "Project tab 6",
+    hint: "Open the project on that tab of the header, counting from the left (\u2318N only in emulators that send \u2318)",
+    group: "NAVIGATE",
+    word: "tab",
+    destructive: false,
+    appliesTo: ["repo"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["6", "cmd+6"],
+    desktop: [],
+  },
+  {
+    id: "project_tab_7",
+    label: "Project tab 7",
+    hint: "Open the project on that tab of the header, counting from the left (\u2318N only in emulators that send \u2318)",
+    group: "NAVIGATE",
+    word: "tab",
+    destructive: false,
+    appliesTo: ["repo"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["7", "cmd+7"],
+    desktop: [],
+  },
+  {
+    id: "project_tab_8",
+    label: "Project tab 8",
+    hint: "Open the project on that tab of the header, counting from the left (\u2318N only in emulators that send \u2318)",
+    group: "NAVIGATE",
+    word: "tab",
+    destructive: false,
+    appliesTo: ["repo"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["8", "cmd+8"],
+    desktop: [],
+  },
+  {
+    id: "project_tab_9",
+    label: "Project tab 9",
+    hint: "Open the project on that tab of the header, counting from the left (\u2318N only in emulators that send \u2318)",
+    group: "NAVIGATE",
+    word: "tab",
+    destructive: false,
+    appliesTo: ["repo"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["9", "cmd+9"],
+    desktop: [],
+  },
+  {
+    id: "close_project_tab",
+    label: "Close project tab",
+    hint: "Drop this project's tab from the header and open the tab beside it. Nothing is deleted: + opens it again",
+    group: "NAVIGATE",
+    word: "close",
+    destructive: false,
+    appliesTo: ["repo"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["x"],
+    desktop: [],
+  },
+  {
+    id: "project_dropdown",
+    label: "Switch project",
+    hint: "Drop the list of every project under the + in the header: type to narrow it, Enter or a click opens one. + is the header's own button and arrives in every terminal and in kete browser; \u2318P does the same from inside the pane, where the terminal sends \u2318 at all (Ghostty/kitty do, Terminal.app and the browser never do)",
+    group: "NAVIGATE",
+    word: "projects",
+    destructive: false,
+    appliesTo: ["repo"],
+    worksIn: ["grid", "board", "pane"],
+    surface: "tui",
+    tui: ["+", "cmd+p"],
+    desktop: [],
+  },
+  {
+    id: "add_project",
+    label: "Open a folder as a project",
+    hint: "Open a folder as a project in kete, from anywhere; \u21e7O opens a checkout outside it, in your editor",
+    group: "PROJECTS & WORKTREES",
+    word: "add",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["o"],
+    desktop: [],
+  },
+  {
+    id: "new",
+    label: "New session",
+    hint: "Pick the harness first (\u2192 drills into its model and effort), then the quick prompt opens set to it, in the checkout under the cursor; on the first-run splash, add a project",
+    group: "PROJECTS & WORKTREES",
+    word: "new",
+    destructive: false,
+    appliesTo: ["worktree"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["n"],
+    desktop: [],
+  },
+  {
+    id: "git_diff",
+    label: "Git diff",
+    hint: "Open the diff viewer for the checkout under the cursor, or, with the pane reading a pull request, that pull request's diff",
+    group: "PROJECTS & WORKTREES",
+    word: "diff",
+    destructive: false,
+    appliesTo: ["worktree", "session"],
+    worksIn: ["grid", "board", "pane", "diff"],
+    surface: "both",
+    tui: ["g"],
+    desktop: ["open_diff"],
+  },
+  {
+    id: "open_repo",
+    label: "Open repo in browser",
+    hint: "Send the selected repo's git remote (GitHub, GitLab, \u2026) to your browser",
+    group: "PROJECTS & WORKTREES",
+    word: "remote",
+    destructive: false,
+    appliesTo: ["repo"],
+    worksIn: ["grid", "board"],
+    surface: "both",
+    tui: ["shift+g"],
+    desktop: ["open_remote"],
+  },
+  {
+    id: "open_pull_request",
+    label: "Open pull request in browser",
+    hint: "Send the pull request of the session card under the cursor (its checkout's branch) to your browser, as a click on the card's #42 line does. v lists the pull requests in kete; \u21e7V goes to GitHub",
+    group: "PROJECTS & WORKTREES",
+    word: "PR",
+    destructive: false,
+    appliesTo: ["worktree", "session"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["shift+v"],
+    desktop: [],
+  },
+  {
+    id: "open_issue",
+    label: "Open issue in browser",
+    hint: "Send the GitHub issue the session card under the cursor was started from to your browser. i lists the issues in kete; \u21e7I goes to GitHub",
+    group: "PROJECTS & WORKTREES",
+    word: "issue",
+    destructive: false,
+    appliesTo: ["session"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["shift+i"],
+    desktop: [],
+  },
+  {
+    id: "refresh_pull_requests",
+    label: "Reload from GitHub",
+    hint: "Ask GitHub again now for the project's open pull requests and issues, the selected worktree's PR and the one the pane is reading",
+    group: "PROJECTS & WORKTREES",
+    word: "reload",
+    destructive: false,
+    appliesTo: ["repo"],
+    worksIn: ["grid", "board", "pane"],
+    surface: "tui",
+    tui: ["shift+r"],
+    desktop: [],
+  },
+  {
+    id: "comment_pull_request",
+    label: "Comment on pull request",
+    hint: "Open a box to type a comment and post it through gh on the card's pull request (the one \u21e7V opens) or, with the pane reading a pull request (a / jump lands on one), on that one",
+    group: "PROJECTS & WORKTREES",
+    word: "comment",
+    destructive: false,
+    appliesTo: ["worktree", "session"],
+    worksIn: ["grid", "board", "pane"],
+    surface: "tui",
+    tui: ["y"],
+    desktop: [],
+  },
+  {
+    id: "issues",
+    label: "GitHub issues",
+    hint: "List the project's open issues; Enter prompts an agent on one, \u21e7Tab launches a preset on it",
+    group: "PROJECTS & WORKTREES",
+    word: "issues",
+    destructive: false,
+    appliesTo: ["repo"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["i"],
+    desktop: [],
+  },
+  {
+    id: "pull_requests",
+    label: "GitHub pull requests",
+    hint: "List the project's open pull requests; Enter prompts a PR session on one, \u21e7Tab launches a preset on it, Tab picks a harness",
+    group: "PROJECTS & WORKTREES",
+    word: "PRs",
+    destructive: false,
+    appliesTo: ["repo"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["v"],
+    desktop: [],
+  },
+  {
+    id: "switch_branch",
+    label: "Switch root branch",
+    hint: "Fuzzy-pick a branch or remote for the project's root checkout; uncommitted changes get stash / bring / commit / discard",
+    group: "PROJECTS & WORKTREES",
+    word: "branch",
+    destructive: false,
+    appliesTo: ["repo"],
+    worksIn: ["grid", "board"],
+    surface: "both",
+    tui: ["c"],
+    desktop: ["switch_branch"],
+  },
+  {
+    id: "azure_devops",
+    label: "Azure DevOps",
+    hint: "On a project whose remote is on Azure DevOps (the header shows an ado button): your sprint's tasks, the active pull requests and the branches. Enter opens a task or pull request in the browser and checks a branch out in a worktree; s twice starts a task (branch, worktree, agent)",
+    group: "PROJECTS & WORKTREES",
+    word: "ADO",
+    destructive: false,
+    appliesTo: ["repo"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["shift+b"],
+    desktop: [],
+  },
+  {
+    id: "open_worktree",
+    label: "Open checkout in editor",
+    hint: "Open the selected checkout outside kete, usually in your editor: its project's Open command (Settings \u2192 Project), else .kete.json \"open\", e.g. open http://localhost:3000 (\u21e7Enter needs the kitty protocol; \u21e7O arrives everywhere; \u2325Enter is the ESC CR that VS Code's Shift+Enter setup sends and tmux passes through)",
+    group: "PROJECTS & WORKTREES",
+    word: "editor",
+    destructive: false,
+    appliesTo: ["worktree"],
+    worksIn: ["grid", "board"],
+    surface: "both",
+    tui: ["shift+enter", "shift+o", "alt+enter"],
+    desktop: ["open_editor"],
+  },
+  {
+    id: "open_in_browser",
+    label: "Open localhost in a browser",
+    hint: "Open the selected worktree's dev server (http://localhost:<port>, the port its sessions listen on) in a browser picked from Chrome, Edge, Firefox or the system default; the pick is remembered per project",
+    group: "PROJECTS & WORKTREES",
+    word: "browser",
+    destructive: false,
+    appliesTo: ["worktree"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["w"],
+    desktop: [],
+  },
+  {
+    id: "screenshot",
+    label: "Screenshot localhost",
+    hint: "Take a headless Edge or Chrome screenshot (1280\u00d7800) of the selected worktree's dev server and show it in the image view",
+    group: "PROJECTS & WORKTREES",
+    word: "shot",
+    destructive: false,
+    appliesTo: ["worktree"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["shift+w"],
+    desktop: [],
+  },
+  {
+    id: "new_terminal",
+    label: "New shell terminal",
+    hint: "Spawn a plain shell inside kete, in the selected worktree's directory; \u21e7T opens one outside it, in a Ghostty tab",
+    group: "SESSIONS",
+    word: "terminal",
+    destructive: false,
+    appliesTo: ["worktree"],
+    worksIn: ["grid", "board"],
+    surface: "both",
+    tui: ["t"],
+    desktop: ["new_terminal"],
+  },
+  {
+    id: "open_ghostty_tab",
+    label: "Terminal in a Ghostty tab",
+    hint: "Open a new Ghostty tab in the selected worktree's directory: t's terminal, outside kete; does nothing without Ghostty.app",
+    group: "SESSIONS",
+    word: "ghostty",
+    destructive: false,
+    appliesTo: ["worktree"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["shift+t"],
+    desktop: [],
+  },
+  {
+    id: "rename",
+    label: "Rename",
+    hint: "Rename the session under the cursor (the checkout's run command is the menu's Run / Stop)",
+    group: "SESSIONS",
+    word: "rename",
+    destructive: false,
+    appliesTo: ["session", "terminal"],
+    worksIn: ["grid", "board"],
+    surface: "both",
+    tui: ["r"],
+    desktop: ["rename"],
+  },
+  {
+    id: "archive",
+    label: "Archive session",
+    hint: "Archive the selected agent (its PTY is released)",
+    group: "SESSIONS",
+    word: "archive",
+    destructive: false,
+    appliesTo: ["session"],
+    worksIn: ["grid", "board", "pane"],
+    surface: "both",
+    tui: ["a"],
+    desktop: ["archive"],
+  },
+  {
+    id: "unarchive",
+    label: "Unarchive session",
+    hint: "Bring an archived agent back into the list",
+    group: "SESSIONS",
+    word: "unarchive",
+    destructive: false,
+    appliesTo: ["session"],
+    worksIn: ["grid", "board", "pane"],
+    surface: "both",
+    tui: ["u"],
+    desktop: ["unarchive"],
+  },
+  {
+    id: "toggle_archived",
+    label: "Show / hide archived",
+    hint: "Swap the grid between the live sessions and the archived ones",
+    group: "SESSIONS",
+    word: "archived",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board"],
+    surface: "both",
+    tui: ["shift+a"],
+    desktop: ["toggle_archived"],
+  },
+  {
+    id: "delete",
+    label: "Delete selected",
+    hint: "Remove the selected row, behind a confirmation. With the PROJECT TABS holding the keys, close the tab under their cursor, behind the same kind of confirmation: x closes it outright",
+    group: "SESSIONS",
+    word: "delete",
+    destructive: true,
+    appliesTo: ["session", "terminal"],
+    worksIn: ["grid", "board"],
+    surface: "both",
+    tui: ["d", "delete", "backspace"],
+    desktop: ["delete"],
+  },
+  {
+    id: "delete_all",
+    label: "Delete all sessions",
+    hint: "Remove every session listed for the checkout under the cursor, behind a confirmation",
+    group: "SESSIONS",
+    word: "delete all",
+    destructive: true,
+    appliesTo: ["worktree"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["shift+d"],
+    desktop: [],
+  },
+  {
+    id: "agent_presets",
+    label: "Agent presets",
+    hint: "Saved launch presets (CLI, model, effort, prefix/postfix) for the checkout under the cursor; Enter asks for an optional task, or skips it; from the pull requests list, a PR session in that branch's worktree",
+    group: "SESSIONS",
+    word: "presets",
+    destructive: false,
+    appliesTo: ["worktree"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["e"],
+    desktop: [],
+  },
+  {
+    id: "quick_prompt",
+    label: "Quick prompt",
+    hint: "Type a prompt; Enter starts an agent on it (Settings > Agents picks which)",
+    group: "SESSIONS",
+    word: "prompt",
+    destructive: false,
+    appliesTo: ["worktree"],
+    worksIn: ["grid", "board", "pane"],
+    surface: "both",
+    tui: ["p"],
+    desktop: ["quick_prompt", "quick_prompt_alt"],
+  },
+  {
+    id: "follow_up",
+    label: "Follow-up prompt",
+    hint: "Open a box over the grid for the selected session's next turn, sent to the running agent on Enter; the pane stays as it is",
+    group: "SESSIONS",
+    word: "reply",
+    destructive: false,
+    appliesTo: ["session"],
+    worksIn: ["grid", "board", "pane"],
+    surface: "both",
+    tui: ["space"],
+    desktop: ["follow_up"],
+  },
+  {
+    id: "duplicate_session",
+    label: "Duplicate session",
+    hint: "Open the quick prompt set to launch what the selected card runs (the same harness, model, effort and worktree) so only the task is left to type. p opens the box on the defaults; \u21e7P on the card",
+    group: "SESSIONS",
+    word: "duplicate",
+    destructive: false,
+    appliesTo: ["session"],
+    worksIn: ["grid", "board"],
+    surface: "both",
+    tui: ["shift+p"],
+    desktop: ["duplicate"],
+  },
+  {
+    id: "move_session",
+    label: "Move session",
+    hint: "Pick another worktree, of this project or another, for the selected session; it resumes there, after its current turn when it is mid-turn. Dragging the card onto another band or project tab does the same",
+    group: "SESSIONS",
+    word: "move",
+    destructive: false,
+    appliesTo: ["session"],
+    worksIn: ["grid", "board"],
+    surface: "both",
+    tui: ["m"],
+    desktop: ["move"],
+  },
+  {
+    id: "reorder_up",
+    label: "Move item up",
+    hint: "Move the card under the cursor one place earlier in its band (on the board, among its worktree's cards in its lane), or on a band with no card to be on (empty or folded) that band, or with the project tabs holding the keys the tab under their cursor one place left; the menus' Move up and dragging do the same. \u2325\u2191 needs Option as Meta on a Mac; \u21e7\u2191 is bound beside it",
+    group: "SESSIONS",
+    word: "up",
+    destructive: false,
+    appliesTo: ["session", "worktree", "repo"],
+    worksIn: ["grid", "board"],
+    surface: "both",
+    tui: ["alt+up", "shift+up"],
+    desktop: ["move_up"],
+  },
+  {
+    id: "reorder_down",
+    label: "Move item down",
+    hint: "Move the card under the cursor one place later in its band (on the board, in its lane), or the project tab under the header's cursor one place right; the menus' Move down and dragging do the same",
+    group: "SESSIONS",
+    word: "down",
+    destructive: false,
+    appliesTo: ["session", "worktree", "repo"],
+    worksIn: ["grid", "board"],
+    surface: "both",
+    tui: ["alt+down", "shift+down"],
+    desktop: ["move_down"],
+  },
+  {
+    id: "subagents",
+    label: "Subagents and session tree",
+    hint: "The project's sessions as a tree, each session under the one that started it and the subagents running inside it under that; Enter opens the session, \u2192 and \u2190 open and fold, Tab every project. A card's \u2442 chip opens it on that session",
+    group: "SESSIONS",
+    word: "tree",
+    destructive: false,
+    appliesTo: ["repo", "session"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["shift+s"],
+    desktop: [],
+  },
+  {
+    id: "find_file",
+    label: "Find file",
+    hint: "Fuzzy file finder for the selected worktree",
+    group: "FILES",
+    word: "find",
+    destructive: false,
+    appliesTo: ["worktree"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["f"],
+    desktop: [],
+  },
+  {
+    id: "grep",
+    label: "Find in files",
+    hint: "git grep across the selected worktree",
+    group: "FILES",
+    word: "grep",
+    destructive: false,
+    appliesTo: ["worktree"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["shift+f"],
+    desktop: [],
+  },
+  {
+    id: "tree_browser",
+    label: "File tree browser",
+    hint: "Browse the worktree's files with a preview pane",
+    group: "FILES",
+    word: "files",
+    destructive: false,
+    appliesTo: ["worktree"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["b"],
+    desktop: [],
+  },
+  {
+    id: "unlock_terminal",
+    label: "Unlock terminal input",
+    hint: "Leave the locked pane and go back to the card (^q always works; ^\u21e7H needs the kitty protocol)",
+    group: "TERMINAL",
+    word: "unlock",
+    destructive: false,
+    appliesTo: ["session", "terminal"],
+    worksIn: ["pane"],
+    surface: "tui",
+    tui: ["ctrl+q", "ctrl+]", "ctrl+shift+h"],
+    desktop: [],
+  },
+  {
+    id: "toggle_launcher_pane",
+    label: "Launcher session pane",
+    hint: "Fold the pane under the cards away (which also unselects the card it was reading) or bring it back. From inside the pane the ctrl chords take two presses: the first hands the keys back to the card, the second folds the pane. ^` and ^~ need the kitty protocol; ~ is bound alongside them, the shift of the ` that walks the pane's tabs",
+    group: "GENERAL",
+    word: "pane",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "pane"],
+    surface: "tui",
+    tui: ["ctrl+`", "ctrl+~", "~"],
+    desktop: [],
+  },
+  {
+    id: "toggle_kanban",
+    label: "Kanban board",
+    hint: "Lay the grid out as lanes by status (Needs you, Running, Unread, Done, PR open) or back to a band per worktree; the Overview | Board toggle at the right of the grid's header does the same by click. On the board h/l walk the lanes, j/k the cards, Tab flips between this project and every project",
+    group: "GENERAL",
+    word: "board",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board"],
+    surface: "both",
+    tui: ["shift+k"],
+    desktop: ["toggle_home"],
+  },
+  {
+    id: "toggle_orchestrator_view",
+    label: "Orchestrator view",
+    hint: "Toggle between the chat-first orchestrator view and the grid",
+    group: "GENERAL",
+    word: "orchestrator",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board", "pane", "diff"],
+    surface: "both",
+    tui: ["f10"],
+    desktop: ["orchestrator", "orchestrator_f10"],
+  },
+  {
+    id: "accounts",
+    label: "Accounts and usage",
+    hint: "Every account (profiles, and each CLI's own login) with its 5h and weekly plan usage, resets and login; Space switches a profile on or off, d makes it its harness's default",
+    group: "GENERAL",
+    word: "accounts",
+    destructive: false,
+    appliesTo: ["account"],
+    worksIn: ["grid", "board", "pane"],
+    surface: "both",
+    tui: ["shift+u"],
+    desktop: ["accounts"],
+  },
+  {
+    id: "toggle_full_screen",
+    label: "Full-screen session",
+    hint: "Give the session in the pane the whole screen, or bring it back down beside the cards, from inside the pane too, where it is never forwarded to the agent. From the cards it full-screens the one under the cursor. ^q and ^` also bring a full-screen session back down",
+    group: "GENERAL",
+    word: "full",
+    destructive: false,
+    appliesTo: ["session"],
+    worksIn: ["grid", "board", "pane", "diff"],
+    surface: "both",
+    tui: ["ctrl+f"],
+    desktop: ["maximize"],
+  },
+  {
+    id: "pane_tabs",
+    label: "Terminals in the pane",
+    hint: "Walk the cursor through the terminal cards of its checkout, one after another and back round to the first, the pane reads each",
+    group: "GENERAL",
+    word: "terminals",
+    destructive: false,
+    appliesTo: ["terminal"],
+    worksIn: ["grid", "pane"],
+    surface: "tui",
+    tui: ["`"],
+    desktop: [],
+  },
+  {
+    id: "hosts",
+    label: "SSH hosts",
+    hint: "Connect to a saved ssh host (restarts kete over ssh)",
+    group: "GENERAL",
+    word: "hosts",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["shift+h"],
+    desktop: [],
+  },
+  {
+    id: "settings",
+    label: "Settings",
+    hint: "Open this settings overlay",
+    group: "GENERAL",
+    word: "settings",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board", "pane", "diff"],
+    surface: "both",
+    tui: ["s"],
+    desktop: ["settings"],
+  },
+  {
+    id: "metrics",
+    label: "Memory usage",
+    hint: "RAM used by kete and every live agent's process tree",
+    group: "GENERAL",
+    word: "memory",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["shift+m"],
+    desktop: [],
+  },
+  {
+    id: "help",
+    label: "Help",
+    hint: "Toggle the keyboard help overlay",
+    group: "GENERAL",
+    word: "help",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board", "pane", "diff"],
+    surface: "both",
+    tui: ["?"],
+    desktop: ["help", "help_f1"],
+  },
+  {
+    id: "quit",
+    label: "Quit kete",
+    hint: "Leave the TUI (sessions keep running in the daemon)",
+    group: "GENERAL",
+    word: "quit",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
+    tui: ["q", "ctrl+c"],
+    desktop: [],
+  },
+  {
+    id: "cycle_theme",
+    label: "Cycle theme",
+    hint: "Step the window's theme through system, light and dark",
+    group: "GENERAL",
+    word: "theme",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board", "pane", "diff"],
+    surface: "desktop",
+    tui: [],
+    desktop: ["cycle_theme"],
+  },
+  {
+    id: "new_worktree",
+    label: "New worktree",
+    hint: "Cut a new worktree in the focused or shown repo",
+    group: "PROJECTS & WORKTREES",
+    word: "worktree",
+    destructive: false,
+    appliesTo: ["repo"],
+    worksIn: ["grid", "board", "pane", "diff"],
+    surface: "desktop",
+    tui: [],
+    desktop: ["new_worktree"],
+  },
+  {
+    id: "home_board",
+    label: "Board",
+    hint: "Show the board: the sessions as lanes by status",
+    group: "VIEWS",
+    word: "board",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board", "pane", "diff"],
+    surface: "desktop",
+    tui: [],
+    desktop: ["home_board"],
+  },
+  {
+    id: "home_overview",
+    label: "Overview",
+    hint: "Show the overview: the repos, their worktrees and sessions",
+    group: "VIEWS",
+    word: "overview",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board", "pane", "diff"],
+    surface: "desktop",
+    tui: [],
+    desktop: ["home_overview"],
+  },
+  {
+    id: "open_session",
+    label: "Show the session",
+    hint: "Bring back the session last shown, in the split",
+    group: "VIEWS",
+    word: "session",
+    destructive: false,
+    appliesTo: ["session"],
+    worksIn: ["grid", "board", "diff"],
+    surface: "desktop",
+    tui: [],
+    desktop: ["open_session"],
+  },
+  {
+    id: "go_home",
+    label: "Home",
+    hint: "The home view, overview or board, with nothing open beside it",
+    group: "VIEWS",
+    word: "home",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board", "pane", "diff"],
+    surface: "desktop",
+    tui: [],
+    desktop: ["go_home"],
+  },
+  {
+    id: "go_session",
+    label: "Session",
+    hint: "The session last shown",
+    group: "VIEWS",
+    word: "session",
+    destructive: false,
+    appliesTo: ["session"],
+    worksIn: ["grid", "board", "pane", "diff"],
+    surface: "desktop",
+    tui: [],
+    desktop: ["go_session"],
+  },
+  {
+    id: "go_diff",
+    label: "Diff",
+    hint: "The diff last shown, or the shown session's worktree's",
+    group: "VIEWS",
+    word: "diff",
+    destructive: false,
+    appliesTo: ["worktree"],
+    worksIn: ["grid", "board", "pane", "diff"],
+    surface: "desktop",
+    tui: [],
+    desktop: ["go_diff"],
+  },
+  {
+    id: "close_split",
+    label: "Close the split",
+    hint: "Close the session or diff beside the home view, or Settings; a full pane comes back down first",
+    group: "VIEWS",
+    word: "close",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["pane", "diff"],
+    surface: "desktop",
+    tui: [],
+    desktop: ["close_split"],
+  },
+  {
+    id: "restart",
+    label: "Restart the agent",
+    hint: "Restart the focused session's agent, resuming its conversation",
+    group: "SESSIONS",
+    word: "restart",
+    destructive: false,
+    appliesTo: ["session"],
+    worksIn: ["grid", "board", "pane"],
+    surface: "desktop",
+    tui: [],
+    desktop: ["restart"],
+  },
+  {
+    id: "row_menu",
+    label: "Actions menu",
+    hint: "The focused row's or card's actions, as a right-click shows them",
+    group: "SESSIONS",
+    word: "actions",
+    destructive: false,
+    appliesTo: ["repo", "worktree", "session", "terminal"],
+    worksIn: ["grid", "board"],
+    surface: "desktop",
+    tui: [],
+    desktop: ["row_menu"],
+  },
+  {
+    id: "list_move",
+    label: "Move through the rows",
+    hint: "Walk the overview's rows, or the board's cards in a lane",
+    group: "OVERVIEW AND BOARD",
+    word: "move",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board"],
+    surface: "desktop",
+    tui: [],
+    desktop: ["list_move"],
+  },
+  {
+    id: "list_open",
+    label: "Open the session",
+    hint: "Open the session on the focused row or card",
+    group: "OVERVIEW AND BOARD",
+    word: "open",
+    destructive: false,
+    appliesTo: ["session", "terminal"],
+    worksIn: ["grid", "board"],
+    surface: "desktop",
+    tui: [],
+    desktop: ["list_open"],
+  },
+  {
+    id: "overview_fold",
+    label: "Unfold, fold",
+    hint: "Unfold or fold the overview row's nested sessions",
+    group: "OVERVIEW AND BOARD",
+    word: "fold",
+    destructive: false,
+    appliesTo: ["worktree", "session"],
+    worksIn: ["grid"],
+    surface: "desktop",
+    tui: [],
+    desktop: ["overview_fold"],
+  },
+  {
+    id: "board_lanes",
+    label: "Across lanes",
+    hint: "Step to the board's lane on either side",
+    group: "OVERVIEW AND BOARD",
+    word: "lanes",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["board"],
+    surface: "desktop",
+    tui: [],
+    desktop: ["board_lanes"],
+  },
+  {
+    id: "board_diff",
+    label: "Diff the card",
+    hint: "Diff the selected card's worktree",
+    group: "OVERVIEW AND BOARD",
+    word: "diff",
+    destructive: false,
+    appliesTo: ["session"],
+    worksIn: ["board"],
+    surface: "desktop",
+    tui: [],
+    desktop: ["board_diff"],
+  },
+];
+
+/** The window's key rows, in its help's order. */
+export const DESK_KEYS: readonly DeskKey[] = [
+  { id: "palette", action: "command_palette", label: "Command palette", group: "General", scope: "fields", editorOwns: true, chords: ["ctrl+k"] },
+  { id: "palette_alt", action: "command_palette", label: "Command palette", group: "General", scope: "anywhere", editorOwns: false, chords: ["ctrl+shift+p"] },
+  { id: "help", action: "help", label: "Keyboard shortcuts", group: "General", scope: "global", editorOwns: false, chords: ["?"] },
+  { id: "help_f1", action: "help", label: "Keyboard shortcuts", group: "General", scope: "anywhere", editorOwns: false, chords: ["f1"] },
+  { id: "settings", action: "settings", label: "Settings", group: "General", scope: "anywhere", editorOwns: false, chords: ["ctrl+,"] },
+  { id: "quick_prompt", action: "quick_prompt", label: "Quick prompt", group: "General", scope: "global", editorOwns: false, chords: ["p", "n"] },
+  { id: "quick_prompt_alt", action: "quick_prompt", label: "Quick prompt", group: "General", scope: "anywhere", editorOwns: false, chords: ["ctrl+shift+n"] },
+  { id: "cycle_theme", action: "cycle_theme", label: "Cycle theme: system, light, dark", group: "General", scope: "anywhere", editorOwns: false, chords: ["ctrl+shift+l"] },
+  { id: "new_worktree", action: "new_worktree", label: "New worktree in this repo", group: "General", scope: "global", editorOwns: false, chords: ["shift+n"] },
+  { id: "back", action: "nav_back", label: "Back", group: "Views", scope: "fields", editorOwns: false, chords: ["alt+arrowleft"] },
+  { id: "forward", action: "nav_forward", label: "Forward", group: "Views", scope: "fields", editorOwns: false, chords: ["alt+arrowright"] },
+  { id: "home_board", action: "home_board", label: "Board", group: "Views", scope: "anywhere", editorOwns: false, chords: ["ctrl+shift+b"] },
+  { id: "home_overview", action: "home_overview", label: "Overview", group: "Views", scope: "anywhere", editorOwns: false, chords: ["ctrl+shift+o"] },
+  { id: "toggle_home", action: "toggle_kanban", label: "Switch overview and board", group: "Views", scope: "global", editorOwns: false, chords: ["shift+k"] },
+  { id: "open_session", action: "open_session", label: "Show the session", group: "Views", scope: "anywhere", editorOwns: false, chords: ["ctrl+shift+t"] },
+  { id: "open_diff", action: "git_diff", label: "Diff the checkout in context: the focused row, the session, the repo (again: back from the diff)", group: "Views", scope: "anywhere", editorOwns: false, chords: ["ctrl+shift+d"] },
+  { id: "go_home", action: "go_home", label: "Home", group: "Views", scope: "global", editorOwns: false, chords: ["1"] },
+  { id: "go_session", action: "go_session", label: "Session", group: "Views", scope: "global", editorOwns: false, chords: ["2"] },
+  { id: "go_diff", action: "go_diff", label: "Diff", group: "Views", scope: "global", editorOwns: false, chords: ["3"] },
+  { id: "orchestrator", action: "toggle_orchestrator_view", label: "Orchestrator (start one when there is none)", group: "Views", scope: "global", editorOwns: false, chords: ["0"] },
+  { id: "orchestrator_f10", action: "toggle_orchestrator_view", label: "Orchestrator (start one when there is none)", group: "Views", scope: "fields", editorOwns: false, chords: ["f10"] },
+  { id: "close_split", action: "close_split", label: "Close the split or Settings (a full pane comes back down first)", group: "Views", scope: "global", editorOwns: false, chords: ["escape"] },
+  { id: "maximize", action: "toggle_full_screen", label: "Full pane: the session or diff takes the window, or comes back down", group: "Views", scope: "anywhere", editorOwns: false, chords: ["ctrl+shift+m"] },
+  { id: "toggle_archived", action: "toggle_archived", label: "Show or hide archived sessions", group: "Views", scope: "global", editorOwns: false, chords: ["shift+a"] },
+  { id: "next_attention", action: "next_attention", label: "Next session needing you", group: "Views", scope: "global", editorOwns: false, chords: ["."] },
+  { id: "prev_attention", action: "prev_attention", label: "Previous session needing you", group: "Views", scope: "global", editorOwns: false, chords: [","] },
+  { id: "accounts", action: "accounts", label: "Accounts: every login, its use, and who runs on it", group: "Views", scope: "global", editorOwns: false, chords: ["shift+u"] },
+  { id: "rename", action: "rename", label: "Rename", group: "Sessions", scope: "row", editorOwns: false, chords: ["r"] },
+  { id: "archive", action: "archive", label: "Archive", group: "Sessions", scope: "row", editorOwns: false, chords: ["a"] },
+  { id: "unarchive", action: "unarchive", label: "Unarchive", group: "Sessions", scope: "row", editorOwns: false, chords: ["u"] },
+  { id: "delete", action: "delete", label: "Delete (asks first)", group: "Sessions", scope: "row", editorOwns: false, chords: ["delete"] },
+  { id: "restart", action: "restart", label: "Restart the agent", group: "Sessions", scope: "row", editorOwns: false, chords: ["shift+r"] },
+  { id: "move", action: "move_session", label: "Move to another worktree", group: "Sessions", scope: "row", editorOwns: false, chords: ["m"] },
+  { id: "duplicate", action: "duplicate_session", label: "Duplicate into the quick prompt", group: "Sessions", scope: "row", editorOwns: false, chords: ["shift+p"] },
+  { id: "follow_up", action: "follow_up", label: "Follow-up prompt", group: "Sessions", scope: "row", editorOwns: false, chords: ["f"] },
+  { id: "new_terminal", action: "new_terminal", label: "New terminal in its worktree", group: "Sessions", scope: "row", editorOwns: false, chords: ["t"] },
+  { id: "open_editor", action: "open_worktree", label: "Open its worktree in the editor", group: "Sessions", scope: "row", editorOwns: false, chords: ["shift+o"] },
+  { id: "open_remote", action: "open_repo", label: "Open the repo remote in the browser", group: "Sessions", scope: "row", editorOwns: false, chords: ["shift+g"] },
+  { id: "switch_branch", action: "switch_branch", label: "Switch the repo root checkout to another branch", group: "Sessions", scope: "row", editorOwns: false, chords: ["c"] },
+  { id: "row_menu", action: "row_menu", label: "Actions menu", group: "Sessions", scope: "row", editorOwns: false, chords: ["shift+f10", "contextmenu"] },
+  { id: "move_up", action: "reorder_up", label: "Move up: the session, worktree or repo (or drag it)", group: "Sessions", scope: "row", editorOwns: false, chords: ["alt+arrowup"] },
+  { id: "move_down", action: "reorder_down", label: "Move down: the session, worktree or repo (or drag it)", group: "Sessions", scope: "row", editorOwns: false, chords: ["alt+arrowdown"] },
+  { id: "list_move", action: "list_move", label: "Move through the rows (cards on the board)", group: "Overview and board", scope: "overview", editorOwns: false, chords: ["j", "k", "arrowdown", "arrowup"] },
+  { id: "list_open", action: "list_open", label: "Open the session", group: "Overview and board", scope: "overview", editorOwns: false, chords: ["enter", "space"] },
+  { id: "overview_fold", action: "overview_fold", label: "Overview: unfold, fold nested sessions", group: "Overview and board", scope: "overview", editorOwns: false, chords: ["arrowright", "arrowleft"] },
+  { id: "board_lanes", action: "board_lanes", label: "Board: across lanes (also the side arrows)", group: "Overview and board", scope: "board", editorOwns: false, chords: ["h", "l"] },
+  { id: "board_diff", action: "board_diff", label: "Board: diff the selected card", group: "Overview and board", scope: "board", editorOwns: false, chords: ["d"] },
+];
