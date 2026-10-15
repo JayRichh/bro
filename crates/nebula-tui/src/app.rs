@@ -228,6 +228,10 @@ pub enum HitTarget {
     /// The `⑂ 2` SUBAGENT CHIP on a session's card, or in the PANE's
     /// header, by the session: a click opens the SUBAGENTS OVERLAY on it.
     SubagentChip(AgentId),
+    /// The ACCOUNT CHIP in the PANE's header — what the session runs on,
+    /// `claude@max2 opus` — by the session: a click opens MOVE TO ACCOUNT
+    /// on it (`account_switch::open_picker`).
+    AccountChip(AgentId),
     /// A count on the header's ATTENTION STRIP: a click opens the next
     /// session in that state, round and round.
     Attention(crate::subagents::Tone),

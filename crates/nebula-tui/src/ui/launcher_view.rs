@@ -3344,6 +3344,79 @@ const PROMPT_MIN: usize = 12;
 /// nothing after it is tried, so a narrowing pane only takes words away
 /// — then the last prompt, cut to whatever is left.
 fn fact_spans(facts: &PaneFacts, room: usize, th: Theme) -> Vec<Span<'static>> {
+    fact_groups(facts, room, th)
+        .into_iter()
+        .flat_map(|(spans, _)| spans)
+        .collect()
+}
+
+/// [`fact_spans`] in its pieces, each with its leading gap, the one
+/// saying what the session runs on (`claude@max2 opus`) flagged: that
+/// piece is the ACCOUNT CHIP, a button onto MOVE TO ACCOUNT.
+fn fact_groups(facts: &PaneFacts, room: usize, th: Theme) -> Vec<(Vec<Span<'static>>, bool)> {
+    const GAP: &str = "  ";
+    // The pieces come back gap-first; regroup them at each gap.
+    let mut groups: Vec<Vec<Span<'static>>> = Vec::new();
+    for span in fact_pieces(facts, room, th) {
+        if span.content == GAP || groups.is_empty() {
+            groups.push(Vec::new());
+        }
+        if let Some(last) = groups.last_mut() {
+            last.push(span);
+        }
+    }
+    let mut chip_seen = false;
+    groups
+        .into_iter()
+        .map(|g| {
+            let chip = !chip_seen
+                && g.len() == 2
+                && g[0].content == GAP
+                && g[1].content == facts.runs_on.as_str();
+            chip_seen |= chip;
+            (g, chip)
+        })
+        .collect()
+}
+
+/// Register the ACCOUNT CHIP's hit for session `id` over the runs-on
+/// group, laid out from `x` on row `y`; the spans, flattened.
+fn account_chip_hits(
+    app: &mut App,
+    groups: Vec<(Vec<Span<'static>>, bool)>,
+    mut x: u16,
+    y: u16,
+    id: &nebula_core::AgentId,
+) -> Vec<Span<'static>> {
+    let mut out = Vec::new();
+    let lit = app.launcher.hover_crumb.as_ref() == Some(&HitTarget::AccountChip(id.clone()));
+    for (mut spans, chip) in groups {
+        let width: usize = spans.iter().map(Span::width).sum();
+        if chip {
+            // The gap stays out of the target.
+            let gap = spans.first().map_or(0, Span::width);
+            app.chrome.hits.push((
+                Rect {
+                    x: x.saturating_add(gap as u16),
+                    y,
+                    width: (width - gap) as u16,
+                    height: 1,
+                },
+                HitTarget::AccountChip(id.clone()),
+            ));
+            if lit {
+                for s in spans.iter_mut().skip(1) {
+                    s.style = s.style.add_modifier(Modifier::UNDERLINED);
+                }
+            }
+        }
+        x = x.saturating_add(width as u16);
+        out.extend(spans);
+    }
+    out
+}
+
+fn fact_pieces(facts: &PaneFacts, room: usize, th: Theme) -> Vec<Span<'static>> {
     const GAP: &str = "  ";
     let dim = Style::default().fg(th.dim);
     let mut pieces: Vec<Vec<Span<'static>>> = vec![
@@ -3437,9 +3510,30 @@ fn pane_title(app: &App, room: usize) -> Vec<PaneTab> {
                 .and_then(|at| bands.get(at.band))
                 .is_some_and(|b| b.is_main);
             let facts = pane_facts(app, row, is_main, crate::app::now_ms());
-            let spans = fact_spans(&facts, room.saturating_sub(used), th);
-            if !spans.is_empty() {
+            // What it runs on is the ACCOUNT CHIP: a click opens MOVE TO
+            // ACCOUNT on the session.
+            let chip = HitTarget::AccountChip(a.id.clone());
+            let lit = app.launcher.hover_crumb.as_ref() == Some(&chip);
+            for (mut spans, is_chip) in fact_groups(&facts, room.saturating_sub(used), th) {
+                if !is_chip {
+                    tabs.push(PaneTab::plain(spans));
+                    continue;
+                }
+                let piece = spans.split_off(1);
                 tabs.push(PaneTab::plain(spans));
+                tabs.push(PaneTab {
+                    spans: piece
+                        .into_iter()
+                        .map(|s| {
+                            if lit {
+                                s.patch_style(Style::default().add_modifier(Modifier::UNDERLINED))
+                            } else {
+                                s
+                            }
+                        })
+                        .collect(),
+                    hit: Some(chip.clone()),
+                });
             }
             return tabs;
         }
@@ -3598,10 +3692,14 @@ pub(super) fn crumb_frame(f: &mut Frame, app: &mut App, area: Rect) -> Rect {
                 .iter()
                 .any(|w| w.id == a.worktree_id && w.is_main);
             let facts = pane_facts(app, row, is_main, crate::app::now_ms());
-            spans.extend(fact_spans(
-                &facts,
-                usize::from(r.width).saturating_sub(used),
-                th,
+            let groups = fact_groups(&facts, usize::from(r.width).saturating_sub(used), th);
+            let id = a.id.clone();
+            spans.extend(account_chip_hits(
+                app,
+                groups,
+                r.x.saturating_add(used as u16),
+                r.y,
+                &id,
             ));
         }
         f.render_widget(Paragraph::new(Line::from(spans)), r);

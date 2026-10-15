@@ -944,6 +944,7 @@ fn handle_left_click_target(app: &mut App, mouse: MouseEvent, out: &mut Vec<Clie
         // STRIP count the next session in that state, ‹ › back and
         // forward.
         Some(HitTarget::SubagentChip(id)) => desk::open_subagents(app, Some(id)),
+        Some(HitTarget::AccountChip(id)) => crate::account_switch::open_picker(app, id),
         Some(HitTarget::Attention(tone)) => desk::jump_attention_kind(app, tone, out),
         Some(HitTarget::NavBack) => desk::go(app, -1, out),
         Some(HitTarget::NavForward) => desk::go(app, 1, out),

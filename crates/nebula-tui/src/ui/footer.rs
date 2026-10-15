@@ -259,6 +259,15 @@ fn button_tooltip(app: &App, th: Theme) -> Option<FooterHint> {
                 th,
             ));
         }
+        HitTarget::AccountChip(_) => {
+            return Some(dim_hint(
+                format!(
+                    "click: move this session to another account (restarts it fresh) · keys: {} then m on an account",
+                    key_hint(app, Action::Accounts)
+                ),
+                th,
+            ));
+        }
         _ => return None,
     };
     let spec = crate::keymap::spec_of(action)?;
