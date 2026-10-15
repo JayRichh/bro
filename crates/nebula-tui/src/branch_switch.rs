@@ -2028,10 +2028,9 @@ fn draw_list(f: &mut Frame, view: &BranchSwitchView, body: Rect, th: Theme) -> R
             }
             (Some(e), _) if view.list.items.is_empty() => format!("couldn't list branches: {e}"),
             (_, false) => "reading branches…".into(),
-            _ if !query.is_empty() => format!(
-                "{NO_MATCHES}: Enter creates \"{query}\" off {}",
-                view.current
-            ),
+            _ if !query.is_empty() => {
+                format!("no matches: Enter creates \"{query}\" off {}", view.current)
+            }
             _ => NO_MATCHES.into(),
         };
         empty_list_row(f, list, &fit(&text, list.width as usize), th);

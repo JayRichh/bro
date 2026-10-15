@@ -267,10 +267,15 @@ pub fn whats_new_lines(width: u16, th: crate::theme::Theme) -> Vec<ratatui::text
             ),
         ]));
         for item in r.items {
-            lines.push(Line::from(vec![
-                Span::styled(" · ", Style::default().fg(th.dim)),
-                Span::styled(*item, Style::default().fg(th.text)),
-            ]));
+            // Wrapped here, so a long item's next rows hang under its words.
+            let rows = wrap_words(item, usize::from(width).saturating_sub(4));
+            for (n, row) in rows.into_iter().enumerate() {
+                let lead = if n == 0 { " · " } else { "   " };
+                lines.push(Line::from(vec![
+                    Span::styled(lead, Style::default().fg(th.dim)),
+                    Span::styled(row, Style::default().fg(th.text)),
+                ]));
+            }
         }
     }
     lines.push(Line::from(""));
@@ -306,4 +311,40 @@ pub fn whats_new_lines(width: u16, th: crate::theme::Theme) -> Vec<ratatui::text
         ]));
     }
     lines
+}
+
+/// `text` in rows of at most `width` columns, broken between words (a
+/// word longer than a row gets one to itself).
+fn wrap_words(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(8);
+    let mut rows = Vec::new();
+    let mut row = String::new();
+    for word in text.split_whitespace() {
+        let fits = row.chars().count() + 1 + word.chars().count() <= width;
+        if !row.is_empty() && !fits {
+            rows.push(std::mem::take(&mut row));
+        }
+        if !row.is_empty() {
+            row.push(' ');
+        }
+        row.push_str(word);
+    }
+    if !row.is_empty() {
+        rows.push(row);
+    }
+    rows
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wrap_words;
+
+    #[test]
+    fn items_wrap_between_words() {
+        assert_eq!(
+            wrap_words("one two three four", 9),
+            vec!["one two", "three", "four"]
+        );
+        assert_eq!(wrap_words("", 9), Vec::<String>::new());
+    }
 }

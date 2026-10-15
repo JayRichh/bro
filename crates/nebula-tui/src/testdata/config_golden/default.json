@@ -69,6 +69,7 @@
   "session_pane": "right",
   "show_all_worktrees": true,
   "show_key_combos": false,
+  "show_tips": true,
   "show_workspaces": true,
   "skip_session_naming": false,
   "source_control_graph": false,

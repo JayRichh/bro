@@ -551,7 +551,7 @@ impl SettingKind {
             | SettingKind::KanbanScope
             | SettingKind::Icons => (2026, 10, 13),
             SettingKind::OrchestratorView => (2026, 10, 14),
-            SettingKind::ShowTips => (2026, 10, 16),
+            SettingKind::ShowTips => (2026, 10, 15),
         }
     }
 

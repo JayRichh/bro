@@ -26,13 +26,35 @@ use nebula_core::{AgentId, ClientRequest, ProjectId, SessionRef, WorktreeId};
 const HALF_PAGE: i64 = 2;
 
 /// What `⇧A` says each way: which of the two lists the grid is now of.
-const ARCHIVED_VIEW: &str = "archived sessions: u unarchives one, ⇧A back to the live ones";
-const LIVE_VIEW: &str = "live sessions: ⇧A reads the archived ones";
+fn archived_view(app: &App) -> String {
+    format!(
+        "archived sessions: {} unarchives one, {} back to the live ones",
+        crate::ui::key_hint(app, Action::Unarchive),
+        crate::ui::key_hint(app, Action::ToggleArchived)
+    )
+}
+fn live_view(app: &App) -> String {
+    format!(
+        "live sessions: {} reads the archived ones",
+        crate::ui::key_hint(app, Action::ToggleArchived)
+    )
+}
 
 /// What the grid says when there is nothing to step through yet — of
 /// whichever of the two lists it is showing ([`toggle_archived`]).
-const NO_SESSIONS: &str = "no sessions yet: p starts one";
-const NO_ARCHIVED_SESSIONS: &str = "nothing archived here: ⇧A back to the live sessions";
+/// Each names the user's own key for the way out.
+fn no_sessions(app: &App) -> String {
+    format!(
+        "no sessions yet: {} starts one",
+        crate::ui::key_hint(app, Action::QuickPrompt)
+    )
+}
+fn no_archived_sessions(app: &App) -> String {
+    format!(
+        "nothing archived here: {} back to the live sessions",
+        crate::ui::key_hint(app, Action::ToggleArchived)
+    )
+}
 
 /// Is the card under this id one of the ARCHIVED VIEW's? Its session was
 /// reaped when it was archived, so nothing on it can be stepped into.
@@ -41,11 +63,11 @@ fn is_archived(app: &App, id: &AgentId) -> bool {
 }
 
 /// The one of those two this grid means.
-fn nothing_here(app: &App) -> &'static str {
+fn nothing_here(app: &App) -> String {
     if app.launcher.show_archived {
-        NO_ARCHIVED_SESSIONS
+        no_archived_sessions(app)
     } else {
-        NO_SESSIONS
+        no_sessions(app)
     }
 }
 
@@ -185,14 +207,11 @@ pub(crate) fn toggle_archived(app: &mut App, out: &mut Vec<ClientRequest>) {
         Some(first) => select(app, first, out),
         None => clear_aim(app),
     }
-    app.chrome.flash = Some(
-        if app.launcher.show_archived {
-            ARCHIVED_VIEW
-        } else {
-            LIVE_VIEW
-        }
-        .into(),
-    );
+    app.chrome.flash = Some(if app.launcher.show_archived {
+        archived_view(app)
+    } else {
+        live_view(app)
+    });
     app.chrome.dirty = true;
 }
 
@@ -442,7 +461,7 @@ pub(super) fn reorder_focused(app: &mut App, dir: i64, out: &mut Vec<ClientReque
             crate::order::step(app, &target, dir, out);
         }
         None if app.chrome.flash.is_none() => {
-            app.chrome.flash = Some(nothing_here(app).into());
+            app.chrome.flash = Some(nothing_here(app));
         }
         None => {}
     }
@@ -621,7 +640,7 @@ pub(super) fn toggle_band_expand(app: &mut App, out: &mut Vec<ClientRequest>) {
     app.classify_nested_threads();
     let bands = view::bands(app);
     if bands.is_empty() {
-        app.chrome.flash = Some(nothing_here(app).into());
+        app.chrome.flash = Some(nothing_here(app));
         return;
     }
     let index = match wearing_band(app, &bands) {
@@ -633,7 +652,7 @@ pub(super) fn toggle_band_expand(app: &mut App, out: &mut Vec<ClientRequest>) {
     };
     if bands[index].cards.is_empty() {
         // An EMPTY BAND has no cards to open onto rows.
-        app.chrome.flash = Some(NO_SESSIONS.into());
+        app.chrome.flash = Some(no_sessions(app));
         take_aim(app);
         return;
     }
@@ -710,7 +729,7 @@ pub(super) fn new_terminal(app: &mut App, out: &mut Vec<ClientRequest>) {
 pub(super) fn walk_terminals(app: &mut App, out: &mut Vec<ClientRequest>) {
     let bands = view::bands(app);
     let Some(band) = view::band_cursor(app, &bands) else {
-        app.chrome.flash = Some(nothing_here(app).into());
+        app.chrome.flash = Some(nothing_here(app));
         return;
     };
     let cards = &bands[band].cards;
@@ -749,7 +768,7 @@ pub(super) fn walk_band(app: &mut App, dx: i64, out: &mut Vec<ClientRequest>) {
     let Some(band) = view::band_cursor(app, &bands) else {
         match bands.first() {
             Some(first) => select_band(app, first.worktree.clone(), out),
-            None => app.chrome.flash = Some(nothing_here(app).into()),
+            None => app.chrome.flash = Some(nothing_here(app)),
         }
         return;
     };
@@ -1138,7 +1157,7 @@ pub(super) fn click_kanban_menu(app: &mut App, id: &AgentId, out: &mut Vec<Clien
 /// [`super::activate::no_follow_up`] the panel's box asks.
 pub(super) fn follow_up(app: &mut App) {
     let Some(row) = app.selected_session_row() else {
-        app.chrome.flash = Some(nothing_here(app).into());
+        app.chrome.flash = Some(nothing_here(app));
         return;
     };
     if let Some(why) = super::activate::no_follow_up(app, &row) {
@@ -1428,7 +1447,7 @@ pub(super) fn step_grid(app: &mut App, dx: i64, dy: i64, out: &mut Vec<ClientReq
     app.classify_nested_threads();
     let bands = view::bands(app);
     if bands.is_empty() {
-        app.chrome.flash = Some(nothing_here(app).into());
+        app.chrome.flash = Some(nothing_here(app));
         return;
     }
     if app.launcher.launcher_nested && dx == 0 {
@@ -1577,7 +1596,7 @@ fn nested_at(app: &App, bands: &[view::Band]) -> Option<NestedStop> {
 fn step_nested(app: &mut App, bands: &[view::Band], dy: i64, out: &mut Vec<ClientRequest>) {
     let stops = nested_stops(app, bands);
     let Some(last) = stops.len().checked_sub(1) else {
-        app.chrome.flash = Some(nothing_here(app).into());
+        app.chrome.flash = Some(nothing_here(app));
         return;
     };
     let at = nested_at(app, bands).and_then(|s| stops.iter().position(|&x| x == s));
@@ -3048,7 +3067,7 @@ pub(super) fn enter_pane(app: &mut App, out: &mut Vec<ClientRequest>) {
         return;
     }
     let Some(sref) = cursor_or_first(app) else {
-        app.chrome.flash = Some(nothing_here(app).into());
+        app.chrome.flash = Some(nothing_here(app));
         return;
     };
     match sref {
@@ -3084,7 +3103,7 @@ pub(super) fn enter_pane(app: &mut App, out: &mut Vec<ClientRequest>) {
 /// comes up.
 pub(super) fn open_session(app: &mut App, out: &mut Vec<ClientRequest>) -> bool {
     let Some(sref) = cursor_or_first(app) else {
-        app.chrome.flash = Some(nothing_here(app).into());
+        app.chrome.flash = Some(nothing_here(app));
         return false;
     };
     match sref {
@@ -3157,7 +3176,7 @@ fn has_pane(app: &App) -> bool {
 /// pane reads — or the first card of the first band when it is on none:
 /// the pane shows no session until something is walked onto, so a way in
 /// from a fresh launch takes the newest card rather than saying there is
-/// nothing to enter. None with no card anywhere, which [`NO_SESSIONS`]
+/// nothing to enter. None with no card anywhere, which [`no_sessions`]
 /// answers.
 fn cursor_or_first(app: &App) -> Option<SessionRef> {
     let bands = view::bands(app);
@@ -4774,7 +4793,10 @@ mod tests {
             key(&mut app, KeyCode::Char('j'), KeyModifiers::NONE);
             key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
             assert_eq!(app.launcher.launcher_expanded, None);
-            assert_eq!(app.chrome.flash.as_deref(), Some(super::NO_SESSIONS));
+            assert_eq!(
+                app.chrome.flash.as_deref(),
+                Some(super::no_sessions(&app).as_str())
+            );
         });
     }
 
@@ -6360,7 +6382,10 @@ mod tests {
                 app.launcher.launcher_unaimed,
                 "no card to aim at, so the pane folds"
             );
-            assert_eq!(app.chrome.flash.as_deref(), Some(super::NO_SESSIONS));
+            assert_eq!(
+                app.chrome.flash.as_deref(),
+                Some(super::no_sessions(&app).as_str())
+            );
             let text = buffer_text(&draw(&mut app));
             assert_eq!(tabs_drawn(&app), ["docs", "demo"], "{text}");
             assert!(
@@ -6418,7 +6443,10 @@ mod tests {
                     !super::has_pane(&app),
                     "ack_first={ack_first}: the pane folded away: {text}"
                 );
-                assert_eq!(app.chrome.flash.as_deref(), Some(super::NO_SESSIONS));
+                assert_eq!(
+                    app.chrome.flash.as_deref(),
+                    Some(super::no_sessions(&app).as_str())
+                );
                 assert!(text.contains("Welcome to kete"), "{text}");
                 assert!(!text.contains("shell-1"), "no terminal of demo's: {text}");
             }
@@ -6450,7 +6478,10 @@ mod tests {
                 Some("docs".into())
             );
             assert!(!super::has_pane(&app), "the pane folded away");
-            assert_eq!(app.chrome.flash.as_deref(), Some(super::NO_SESSIONS));
+            assert_eq!(
+                app.chrome.flash.as_deref(),
+                Some(super::no_sessions(&app).as_str())
+            );
         });
     }
 
@@ -6515,7 +6546,7 @@ mod tests {
                 );
                 assert_eq!(
                     app.chrome.flash.as_deref(),
-                    Some(super::NO_SESSIONS),
+                    Some(super::no_sessions(&app).as_str()),
                     "{way}"
                 );
 
@@ -8751,7 +8782,10 @@ mod tests {
                     "{keys:?}: nothing left to aim at"
                 );
                 assert!(!super::has_pane(&app), "{keys:?}: and the pane folded");
-                assert_eq!(app.chrome.flash.as_deref(), Some(super::NO_SESSIONS));
+                assert_eq!(
+                    app.chrome.flash.as_deref(),
+                    Some(super::no_sessions(&app).as_str())
+                );
                 let text = buffer_text(&draw(&mut app));
                 assert!(
                     text.contains("press  p  to prompt"),
@@ -12644,7 +12678,10 @@ mod tests {
             key(&mut app, KeyCode::Char('l'), KeyModifiers::NONE);
             assert!(app.launcher.launcher_folded.is_empty());
             key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
-            assert_eq!(app.chrome.flash.as_deref(), Some(super::NO_SESSIONS));
+            assert_eq!(
+                app.chrome.flash.as_deref(),
+                Some(super::no_sessions(&app).as_str())
+            );
         });
     }
 

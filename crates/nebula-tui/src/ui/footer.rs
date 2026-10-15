@@ -35,6 +35,10 @@ fn keys(key: String, does: impl Into<String>) -> KeyHint {
     }
 }
 
+/// The most a KEY BAR shows: `? more` and six. A footer that lists every
+/// key is one nobody reads; the `?` menu and F1 hold the rest.
+pub(crate) const FOOTER_MAX: usize = 7;
+
 fn key_bar(hints: Vec<KeyHint>) -> FooterHint {
     FooterHint {
         hints: Span::raw(""),
@@ -449,16 +453,8 @@ fn launcher_grid_footer_hint(app: &App, _th: Theme) -> FooterHint {
         } else {
             "this project"
         };
-        let mut hints = vec![
-            keys(
-                format!("{}{}", k(Action::FocusLeft), k(Action::FocusRight)),
-                "lanes",
-            ),
-            keys(
-                format!("{}{}", k(Action::MoveDown), k(Action::MoveUp)),
-                "cards",
-            ),
-        ];
+        // One walk: `hl` across the lanes, `jk` down one.
+        let mut hints = vec![keys(move_keys, "move")];
         hints.extend(selected);
         hints.push(button(k(Action::FocusNext), scope, Action::FocusNext));
         hints.push(button(
@@ -479,13 +475,14 @@ fn launcher_grid_footer_hint(app: &App, _th: Theme) -> FooterHint {
     } else {
         let mut hints = vec![keys(move_keys, "move")];
         hints.extend(selected);
+        // The view's own, most used first: the cap keeps what fits.
         hints.extend([
+            button(k(Action::QuickPrompt), "new session", Action::QuickPrompt),
+            button(k(Action::ToggleKanban), "board", Action::ToggleKanban),
             keys(
                 format!("{}{}", k(Action::PrevProjectTab), k(Action::NextProjectTab)),
                 "project tabs",
             ),
-            button(k(Action::QuickPrompt), "new session", Action::QuickPrompt),
-            button(k(Action::ToggleKanban), "board", Action::ToggleKanban),
         ]);
         hints
     };
@@ -501,8 +498,10 @@ fn launcher_grid_footer_hint(app: &App, _th: Theme) -> FooterHint {
         None => true,
     });
     hints.insert(0, more);
-    hints.push(button(k(Action::Palette), "jump", Action::Palette));
-    hints.push(button(k(Action::Quit), "quit", Action::Quit));
+    // FEWER THINGS TO READ: `? more`, the walk, the selection's leading
+    // verbs and the view's first; the rest (jump, quit, help) are a `?`
+    // or F1 away.
+    hints.truncate(FOOTER_MAX);
     key_bar(hints)
 }
 
@@ -592,6 +591,7 @@ fn pane_footer_hint(app: &App, th: Theme) -> FooterHint {
         None => true,
     });
     hints.insert(0, verb(Action::Verbs));
+    hints.truncate(FOOTER_MAX);
     key_bar(hints)
 }
 

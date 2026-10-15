@@ -22591,6 +22591,7 @@ fn a_desktop_write_waits_for_the_reset_confirm_too() {
 mod board;
 mod buttons;
 mod dispatch;
+mod learn;
 mod orch_view;
 mod paste_speed;
 mod verbs;

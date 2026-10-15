@@ -214,8 +214,9 @@ fn pr_lines(
     let Some((number, title, url, state)) = tracked.or_else(listed) else {
         return vec![dim_line(
             &format!(
-                "No PR on {}: ⇧R on the grid reloads from GitHub.",
-                worktree.branch
+                "No PR on {}: {} on the grid reloads from GitHub.",
+                worktree.branch,
+                crate::ui::key_hint(app, crate::keymap::Action::RefreshPullRequests)
             ),
             th,
         )];

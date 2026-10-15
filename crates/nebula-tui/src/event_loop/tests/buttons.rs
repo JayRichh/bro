@@ -186,20 +186,24 @@ fn a_footer_hint_and_a_header_tool_run_their_action() {
         assert!(
             matches!(&app.modals.overlay, Some(Overlay::Prompt(p)) if matches!(p.kind, PromptKind::QuickPrompt(_)))
         );
-        // A bar wide enough for every hint: the jump, the verbs, the diff.
-        let mut app = grid(400);
+        // A bar wide enough for every hint: the verbs, the diff — and no
+        // more than `? more` and six, however wide (the jump and quit are
+        // a `?` or F1 away).
+        let app = grid(400);
         assert!(app
             .hit_rect(&HitTarget::FooterHint(Action::Verbs))
             .is_some());
         assert!(app
             .hit_rect(&HitTarget::FooterHint(Action::GitDiff))
             .is_some());
-        click_hit(
-            &mut app,
-            &HitTarget::FooterHint(Action::Palette),
-            &mut Vec::new(),
+        let shown = hits_where(&app, |h| matches!(h, HitTarget::FooterHint(_))).len();
+        assert!(
+            shown <= crate::ui::footer::FOOTER_MAX,
+            "{shown} footer buttons"
         );
-        assert!(matches!(app.modals.overlay, Some(Overlay::Palette(_))));
+        assert!(app
+            .hit_rect(&HitTarget::FooterHint(Action::Palette))
+            .is_none());
 
         let mut app = grid(160);
         click_hit(&mut app, &HitTarget::Button(Action::Help), &mut Vec::new());

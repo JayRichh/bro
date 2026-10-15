@@ -16,8 +16,8 @@ use ratatui::Frame;
 mod accounts_view;
 mod ado_view;
 mod attention_view;
-mod footer;
-mod launcher_view;
+pub(crate) mod footer;
+pub(crate) mod launcher_view;
 mod overlay;
 mod review_view;
 mod rows;
@@ -210,7 +210,8 @@ const HOSTS_W: u16 = 64;
 /// rather than the list.
 pub(crate) const SPLIT_PANE_LAYOUT_MIN: u16 = 20;
 /// What every filtered list says when nothing survives the filter.
-pub(crate) const NO_MATCHES: &str = "no matches";
+/// It says the one way back: a shorter filter.
+pub(crate) const NO_MATCHES: &str = "no matches: fewer letters widen it";
 
 /// Columns the tree-browser preview must keep for the file text itself
 /// before a line-number gutter is worth drawing.
