@@ -63,13 +63,13 @@ async function edgeDriver() {
   if (!res.ok) throw new Error(`${url}: ${res.status}`);
   const zip = path.join(dir, 'edgedriver_win64.zip');
   fs.writeFileSync(zip, Buffer.from(await res.arrayBuffer()));
-  execFileSync('powershell', ['-NoProfile', '-Command', `Expand-Archive -LiteralPath '${zip}' -DestinationPath '${dir}' -Force`], { stdio: 'inherit' });
+  execFileSync('powershell', ['-NoProfile', '-Command', `Expand-Archive -LiteralPath '${zip}' -DestinationPath '${dir}' -Force`], { stdio: 'inherit', env: winPs() });
   fs.rmSync(zip);
   // Microsoft signs it: refuse anything that isn't.
   const sig = execFileSync(
     'powershell',
     ['-NoProfile', '-Command', `$s = Get-AuthenticodeSignature -LiteralPath '${exe}'; "$($s.Status)|$($s.SignerCertificate.Subject)"`],
-    { encoding: 'utf8' },
+    { encoding: 'utf8', env: winPs() },
   ).trim();
   if (!sig.startsWith('Valid|CN=Microsoft Corporation,')) {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -121,3 +121,12 @@ const bins = skipBuild && fs.existsSync(PATHS_FILE) ? JSON.parse(fs.readFileSync
 const out = { kete: bins.kete, agent: bins.agent, desktop: desktop(), tauriDriver: driver, edgeDriver: edge };
 fs.writeFileSync(PATHS_FILE, JSON.stringify(out, null, 2));
 console.log(out);
+
+// Windows PowerShell started from PowerShell 7 (a CI runner's shell) inherits
+// a PSModulePath that points at 7's modules, so its own Security and Archive
+// modules don't autoload. Let it rebuild the path from its defaults.
+function winPs() {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) if (key.toLowerCase() === 'psmodulepath') delete env[key];
+  return env;
+}

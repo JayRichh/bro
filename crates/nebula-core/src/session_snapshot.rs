@@ -313,9 +313,23 @@ fn tree_of(root: &Path, has_head: bool, limits: &Limits) -> Option<String> {
     // Read and written rather than `fs::copy`: a plain read shares the file
     // for delete, so a session's `git add` renaming its lock over the index
     // meanwhile is never refused.
-    let copied = index
-        .and_then(|index| std::fs::read(index).ok())
-        .is_some_and(|bytes| std::fs::write(&temp.0, bytes).is_ok());
+    //
+    // The copy keeps the real index's modified time: git trusts a file whose
+    // stat matches its entry unless the file is as new as the index (racy
+    // git), so a copy stamped now would hide an edit made in the same second
+    // the real index was written.
+    let copied = index.and_then(|index| {
+        let bytes = std::fs::read(&index).ok()?;
+        std::fs::write(&temp.0, bytes).ok()?;
+        if let Ok(when) = std::fs::metadata(&index).and_then(|m| m.modified()) {
+            let _ = std::fs::OpenOptions::new()
+                .write(true)
+                .open(&temp.0)
+                .and_then(|f| f.set_modified(when));
+        }
+        Some(())
+    });
+    let copied = copied.is_some();
     if !copied && has_head {
         let mut cmd = command(root, &["read-tree", "HEAD"]);
         cmd.env("GIT_INDEX_FILE", &temp.0);
