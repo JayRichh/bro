@@ -248,6 +248,36 @@ mod tests {
         });
     }
 
+    /// A 0.48 `reviewed.json` (`crates/nebula/tests/fixtures/upgrade`):
+    /// its HEAD marks read back for that worktree and HEAD, and a base
+    /// mark stored beside them keeps them.
+    #[test]
+    fn a_048_store_still_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let wt = dir.path().join("alpha");
+        std::fs::create_dir(&wt).unwrap();
+        let key = serde_json::to_string(&wt.to_string_lossy()).unwrap();
+        let text = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../nebula/tests/fixtures/upgrade/v0.48/data/reviewed.json"
+        ))
+        .unwrap()
+        .replace(r#""@ROOTW@\\repos\\alpha""#, &key);
+        let path = dir.path().join("reviewed.json");
+        std::fs::write(&path, text).unwrap();
+        with_store_path(path, || {
+            let head = "3c63799e00e81d7af0e7f74716f3b0c9d4571e15";
+            let theirs = HashMap::from([("README.md".to_string(), 0x1234_5678_u64)]);
+            assert_eq!(load_marks(&wt, head), theirs);
+            store_scoped(
+                &wt,
+                Scope::Base("mb"),
+                &HashMap::from([("b".to_string(), 1)]),
+            );
+            assert_eq!(load_marks(&wt, head), theirs);
+        });
+    }
+
     #[test]
     fn malformed_store_is_ignored_and_recovered() {
         let dir = tempfile::tempdir().unwrap();
