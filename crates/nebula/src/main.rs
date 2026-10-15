@@ -50,7 +50,9 @@ fn main() -> Result<()> {
         Some(Command::Config { command }) => nebula_tui::run_config(match command {
             ConfigCommand::Path => nebula_tui::ConfigOp::Path,
             ConfigCommand::Export { path } => nebula_tui::ConfigOp::Export { path },
-            ConfigCommand::Import { source } => nebula_tui::ConfigOp::Import { source },
+            ConfigCommand::Import { source, dry_run } => {
+                nebula_tui::ConfigOp::Import { source, dry_run }
+            }
             ConfigCommand::Harnesses => nebula_tui::ConfigOp::Harnesses,
         }),
         Some(Command::Profile { command }) => profile::run_profile(match command {

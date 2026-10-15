@@ -47,6 +47,10 @@ fn mirror(app: &App, view: &mut AccountsView) {
         .map(|p| (p.name.clone(), p.repo_path.clone()))
         .collect();
     view.project_accounts = app.launcher.project_accounts.clone();
+    view.sessions_follow = app
+        .orch
+        .daemon_protocol
+        .is_some_and(|v| v >= nebula_core::RENAME_PROFILE_PROTOCOL);
 }
 
 /// `⇧U`: open the overlay.
@@ -94,7 +98,7 @@ fn list_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) -> Done 
     let said = |r: Result<String, String>| {
         Some(r.map(|m| Outcome {
             message: m,
-            sign_in: None,
+            ..Outcome::default()
         }))
     };
     match key.code {
@@ -287,6 +291,14 @@ pub(crate) fn handle_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientReque
             refresh(app);
             if let Some(account) = outcome.sign_in {
                 sign_in(app, &account, out);
+            }
+            // The renamed profile's sessions follow it, in the daemon.
+            if let Some((old, new)) = outcome.rename_sessions {
+                send(app, out, |req_id| ClientRequest::RenameProfileSessions {
+                    req_id,
+                    old,
+                    new,
+                });
             }
         }
         Some(Err(message)) => app.chrome.flash = Some(message),
@@ -1295,6 +1307,44 @@ mod tests {
                 assert!(!profiles_root().join("work").exists());
                 assert_eq!(view(&app).mode, Mode::List);
                 assert_eq!(view(&app).selected().map(|r| r.key.as_str()), Some("max2"));
+            },
+        );
+    }
+
+    /// On a daemon whose sessions follow a rename (protocol 60), a session
+    /// on the account no longer refuses it: the rename goes through and
+    /// the daemon is asked to move the sessions' stored name.
+    #[test]
+    fn rename_with_sessions_on_it_asks_a_new_daemon_to_follow() {
+        with_config_json(
+            r#"{"profiles":[{"name":"work","harness":"claude"}]}"#,
+            || {
+                let mut app = App::new();
+                seed_tree(&mut app);
+                app.tree.agents[0].profile = Some("work".into());
+                app.chrome.conn = crate::app::ConnState::Connected;
+                app.orch.daemon_protocol = Some(nebula_core::RENAME_PROFILE_PROTOCOL);
+                let mut out = Vec::new();
+                open_overlay(&mut app, &mut out);
+                key(&mut app, KeyCode::Char('r'), &mut out);
+                assert!(matches!(view(&app).mode, Mode::Form(_)), "not refused");
+                for _ in 0.."work".len() {
+                    key(&mut app, KeyCode::Backspace, &mut out);
+                }
+                typed(&mut app, "max2", &mut out);
+                out.clear();
+                key(&mut app, KeyCode::Enter, &mut out);
+                assert_eq!(saved()["profiles"][0]["name"], "max2");
+                assert!(
+                    out.iter().any(|r| matches!(
+                        r,
+                        ClientRequest::RenameProfileSessions { old, new, .. }
+                            if old == "work" && new == "max2"
+                    )),
+                    "{out:?}"
+                );
+                let flash = app.chrome.flash.clone().unwrap_or_default();
+                assert!(flash.contains("1 session follows"), "{flash}");
             },
         );
     }

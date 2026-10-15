@@ -441,6 +441,9 @@ pub enum MenuAction {
     OpenWorktree(WorktreeId),
     AddProject,
     RemoveProject(ProjectId),
+    /// The project menu's **Delete merged & clean worktrees…**: read its
+    /// free checkouts, then confirm the ones that go (`crate::sweep`).
+    SweepWorktrees(ProjectId),
     /// The PULL REQUEST COMPOSER on a checkout, from a card (`ship_view`).
     CreatePullRequest {
         worktree: WorktreeId,
@@ -944,6 +947,9 @@ pub enum PendingAction {
         terminals: Vec<TerminalId>,
     },
     RemoveProject(ProjectId),
+    /// The WORKTREE SWEEP, confirmed: each checkout deleted unforced and
+    /// bulk, so a refusal only flashes (`crate::sweep`).
+    SweepWorktrees(Vec<WorktreeId>),
     /// `d`, `Delete` or `Backspace` with the PROJECT TABS holding the
     /// keys: close the tab under the header's cursor once the dialog is
     /// answered (`event_loop::launcher::close_cursor_tab`, the `x`).
@@ -957,6 +963,10 @@ pub enum PendingAction {
         index: usize,
         worktree: WorktreeId,
         quick: Option<Box<crate::quick_prompt::QuickReturn>>,
+    },
+    /// SETTINGS IMPORT, previewed: merge the file at `source` in.
+    ImportSettings {
+        source: String,
     },
     /// `R` in the settings overlay: rewrite config.json from the defaults
     /// (every setting and every hotkey), then reopen the overlay on them.
@@ -1179,6 +1189,12 @@ pub enum PromptKind {
     EditLink {
         id: LinkId,
     },
+    /// SETTINGS EXPORT: the file (or folder) to write the settings to,
+    /// prefilled with the data dir's `nebula-settings.json`.
+    ExportSettings,
+    /// SETTINGS IMPORT: the file or folder to read; Enter shows what it
+    /// would change behind a confirm (`crate::settings_io`).
+    ImportSettings,
     /// `c` in the ISSUES MODAL: a comment to post on the issue under the
     /// cursor, as you, with `gh issue comment`. Multi-row like the tasks —
     /// a comment is rarely one line. Enter posts it off the loop and puts
@@ -2725,6 +2741,9 @@ pub struct SettingsView {
     pub first_row: usize,
     /// Set while the Hotkeys tab is waiting for a key press.
     pub capture: Option<HotkeyCapture>,
+    /// The bottom row's Export and Import buttons, written during draw;
+    /// `true` is Import.
+    pub io_hits: Vec<(Rect, bool)>,
     /// Transient line under the body: duplicate warnings, host-terminal
     /// warnings, "reset to default".
     pub notice: Option<(String, NoticeLevel)>,

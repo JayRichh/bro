@@ -1,8 +1,9 @@
 <script lang="ts">
   // Start orchestrator: harness, model, effort and profile, each starting on
   // the Agents tab's defaults (the quick prompt's harness, its configured
-  // model and effort). Drawn in the orchestrator view when there is none,
-  // and as a dialog from the palette, 0 or F10 elsewhere.
+  // model and effort), and the project it runs in and its name, as `kete
+  // orchestrator start` takes them. Drawn in the orchestrator view when
+  // there is none, and as a dialog from the palette, 0 or F10 elsewhere.
   import { tick } from 'svelte';
   import { app } from '../store.svelte';
   import { ui } from '../ui/ui.svelte';
@@ -18,6 +19,8 @@
   let model = $state('');
   let effort = $state('');
   let profile = $state('');
+  let project = $state('');
+  let name = $state('');
   let busy = $state(false);
   let box = $state<HTMLElement>();
 
@@ -71,6 +74,8 @@
       // The configured pick goes as none, so the Agents tab decides.
       model: model && model !== c?.model ? model : null,
       effort: efforts.length && effort && effort !== c?.effort ? effort : null,
+      project: project || null,
+      name: name.trim() || null,
     });
     busy = false;
   }
@@ -121,6 +126,17 @@
         {#each efforts as x (x)}<option value={x}>{x}{x === info?.choices?.effort ? ' (set)' : ''}</option>{/each}
       </select>
     </label>
+    <label class="flex flex-col gap-1">
+      <span class={label}>Project</span>
+      <select class={field} bind:value={project} aria-label="Project" title="Where it runs: a repo's root checkout, or a workspace of its own under kete's data dir">
+        <option value="">Its own workspace</option>
+        {#each app.model.projects as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
+      </select>
+    </label>
+    <label class="flex flex-col gap-1">
+      <span class={label}>Name</span>
+      <input class={field} bind:value={name} placeholder="The daemon names it" aria-label="Name" spellcheck="false" />
+    </label>
   </div>
   {#if !ok}
     <p class="m-0 border border-fail px-3 py-2 text-[13px] text-fail" role="status">
@@ -144,7 +160,9 @@
       </header>
       <div class="flex flex-col gap-4 px-5 py-4">{@render form()}</div>
       <footer class="flex items-center justify-between gap-3 border-t border-rule px-5 py-3">
-        <span class="font-mono text-[11px] text-muted">Runs in its own workspace &middot; one per machine</span>
+        <span class="font-mono text-[11px] text-muted"
+          >{project ? 'Runs in the repo\u2019s root checkout' : 'Runs in its own workspace'} &middot; one per machine</span
+        >
         <button
           class="h-8 border-0 bg-ink px-4 text-[13px] font-medium text-bg disabled:bg-transparent disabled:text-faint"
           disabled={!ok || busy}

@@ -804,7 +804,9 @@ pub struct Renamed {
 /// home moves first and is moved back when the settings cannot be
 /// written. Takes the settings locks itself: the caller holds none.
 ///
-/// What `kete profile rename` and both apps' Rename run.
+/// What `kete profile rename` and both apps' Rename run against a
+/// daemon older than [`crate::RENAME_PROFILE_PROTOCOL`]; a newer one
+/// takes [`rename_following`].
 pub fn rename(
     config: &Path,
     local: &Path,
@@ -813,11 +815,42 @@ pub fn rename(
     new: &str,
     agents: &[crate::entities::Agent],
 ) -> Result<Renamed, String> {
+    rename_in(config, local, root, old, new, Some(agents))
+}
+
+/// [`rename`] where the daemon rewrites the sessions' stored name
+/// (`ClientRequest::RenameProfileSessions`, protocol 60): no session
+/// refuses it, and none is left naming the old one, archived ones
+/// included. The caller sends that request once this returns Ok, so a
+/// refused rename never leaves sessions naming a profile that is not
+/// there. A live session keeps running under the home it started in
+/// until it restarts; where the system refuses to move a home in use
+/// (Windows), the rename fails with nothing changed.
+pub fn rename_following(
+    config: &Path,
+    local: &Path,
+    root: &Path,
+    old: &str,
+    new: &str,
+) -> Result<Renamed, String> {
+    rename_in(config, local, root, old, new, None)
+}
+
+/// `agents`: the sessions to refuse over and to report archived ones
+/// from; None when the daemon rewrites them all.
+fn rename_in(
+    config: &Path,
+    local: &Path,
+    root: &Path,
+    old: &str,
+    new: &str,
+    agents: Option<&[crate::entities::Agent]>,
+) -> Result<Renamed, String> {
     let (old, new) = (old.trim(), new.trim());
     if old == new {
         return Err(format!("`{old}` already has that name"));
     }
-    if let Some(why) = rename_blocker(agents, old) {
+    if let Some(why) = agents.and_then(|agents| rename_blocker(agents, old)) {
         return Err(why);
     }
     // config.json's lock covers both layers, as every settings writer
@@ -921,6 +954,7 @@ pub fn rename(
         let _ = std::fs::rename(usage_path_in(root, old), usage_path_in(root, new));
     }
     let archived = agents
+        .unwrap_or_default()
         .iter()
         .filter(|a| a.archived && a.profile.as_deref().map(str::trim) == Some(old))
         .map(|a| a.name.clone())
@@ -1275,6 +1309,23 @@ mod tests {
         std::fs::create_dir_all(root.join(".usage")).unwrap();
         std::fs::write(usage_path_in(&root, "work"), "{}").unwrap();
         (dir, config, local, root)
+    }
+
+    /// Against a daemon that rewrites the sessions' stored name, a session
+    /// on the profile no longer refuses the rename, and none is reported
+    /// left behind; the old path still refuses for any of them.
+    #[test]
+    fn a_rename_the_daemon_follows_is_not_refused_by_sessions() {
+        let (_d, config, local, root) = rename_fixture();
+        let live = agent("live", Some("work"), true, false);
+        assert!(rename(&config, &local, &root, "work", "max2", &[live]).is_err());
+        let done = rename_following(&config, &local, &root, "work", "max2").unwrap();
+        assert_eq!(done.profile.name, "max2");
+        assert!(
+            done.archived.is_empty(),
+            "the daemon takes archived ones too"
+        );
+        assert!(root.join("max2").join("claude").is_dir());
     }
 
     #[test]

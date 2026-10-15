@@ -134,6 +134,14 @@ describe('menus from the registry', () => {
     expect(repo[0]).toBe('New session\u2026');
     expect(repo).toContain('Remove from Kete\u2026');
     expect(repo.indexOf('Locate folder\u2026')).toBe(repo.indexOf('Remove from Kete\u2026') - 1);
+    // The sweep only with a linked worktree to look at, as the terminal app.
+    expect(repo).not.toContain('Delete merged & clean worktrees\u2026');
+    app.model = {
+      ...app.model,
+      worktrees: [...app.model.worktrees, { id: 'w2', project_id: 'p', path: '/p2', branch: 'feat', is_main: false, sort_order: 1 }],
+    } as unknown as Model;
+    const swept = words(actions.menuFor({ kind: 'project', id: 'p' }));
+    expect(swept.indexOf('Delete merged & clean worktrees\u2026')).toBeLessThan(swept.indexOf('Remove from Kete\u2026'));
   });
 
   it('offers the pull request verbs and Focus here under the shared ids, in the terminal app words', () => {
@@ -164,6 +172,34 @@ describe('menus from the registry', () => {
     // Focus here narrows the chip to the checkout.
     expect(actions.runVerb({ kind: 'worktree', id: 'w1' }, 'focus_scope')).toBe(true);
     expect(calls).toEqual(['scope p/w1']);
+  });
+
+  it('greys Create pull request on a checkout on its base branch, and says why', async () => {
+    const { rows } = await import('./worktrees/rows.svelte');
+    app.model = {
+      ...app.model,
+      agents: [],
+      terminals: [],
+      worktrees: [{ id: 'w1', project_id: 'p', path: '/p', branch: 'main', is_main: true, sort_order: 0 }],
+      projects: [{ id: 'p', name: 'demo', repo_path: '/p', sort_order: 0 }],
+      cards: {},
+      prs: {},
+    } as unknown as Model;
+    const create = () =>
+      actions
+        .menuFor({ kind: 'worktree', id: 'w1' })
+        .find((e) => typeof e === 'object' && 'label' in e && e.label.startsWith('Create pull request')) as
+        | { label: string; disabled?: boolean; title?: string }
+        | undefined;
+    expect(create()?.disabled).toBeFalsy();
+    rows.git = { ...rows.git, w1: { changed: 0, untracked: 0, upstream: null, ahead: null, behind: null, committed: 0, ahead_of_base: 0, on_default_branch: true } };
+    const row = create();
+    expect(row?.disabled).toBe(true);
+    expect(row?.label).toContain('(on the base branch)');
+    expect(row?.title).toMatch(/base branch/);
+    expect(actions.runVerb({ kind: 'worktree', id: 'w1' }, 'create_pull_request')).toBe(false);
+    expect(app.toast).toMatch(/base branch/);
+    rows.git = {};
   });
 
   it('runs a verb on its target as the menu row does, and refuses one that means nothing there', async () => {

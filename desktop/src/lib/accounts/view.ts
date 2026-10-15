@@ -11,6 +11,15 @@ import { accountKey, sessionHarness } from './usage';
  *  (`nebula_core::SWITCH_ACCOUNT_PROTOCOL`). */
 export const SWITCH_ACCOUNT_PROTOCOL = 57;
 
+/** The first daemon protocol whose sessions follow a profile rename
+ *  (`nebula_core::RENAME_PROFILE_PROTOCOL`). */
+export const RENAME_PROFILE_PROTOCOL = 60;
+
+/** Does the connected daemon move the sessions on a renamed profile? */
+export function sessionsFollow(m: Pick<Model, 'connected' | 'protocol_version'>): boolean {
+  return m.connected && m.protocol_version >= RENAME_PROFILE_PROTOCOL;
+}
+
 /** Does the connected daemon take a move to another account? */
 export function canSwitch(m: Pick<Model, 'connected' | 'protocol_version'>): boolean {
   return m.connected && m.protocol_version >= SWITCH_ACCOUNT_PROTOCOL;
@@ -169,8 +178,10 @@ export function sessionCounts(row: Pick<AccountRow, 'key'>, agents: Agent[]): { 
 /** Why the profile `name` cannot be renamed now, or null: every
  *  unarchived session naming it blocks (`profiles::rename_blocker`): a
  *  running one lives in its home, a stopped one would fail to resume, and
- *  only the daemon could change the name a session stores. */
-export function renameBlocker(name: string, agents: Pick<Agent, 'name' | 'profile' | 'archived' | 'alive'>[]): string | null {
+ *  only the daemon could change the name a session stores. A daemon whose
+ *  sessions follow a rename (`follow`) takes it whatever runs on it. */
+export function renameBlocker(name: string, agents: Pick<Agent, 'name' | 'profile' | 'archived' | 'alive'>[], follow = false): string | null {
+  if (follow) return null;
   const on = agents.filter((a) => !a.archived && a.profile?.trim() === name.trim());
   if (!on.length) return null;
   const live = on.filter((a) => a.alive).map((a) => a.name);

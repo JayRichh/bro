@@ -402,14 +402,61 @@ async fn fetch_tree() -> Result<(
     }
 }
 
-/// `kete profile rename`: the sessions are asked of the daemon (a session
-/// naming the profile refuses it), then `profiles::rename` moves the
-/// home and rewrites every name in the settings.
+/// The daemon's sessions and the protocol it said at Hello, over the
+/// connection a rename then sends `RenameProfileSessions` on.
+async fn sessions_and_protocol() -> Result<(nebula_tui::ipc::Connection, Vec<nebula_core::Agent>)> {
+    use nebula_core::codec::{read_frame, write_frame};
+    use nebula_core::{ClientRequest, ServerEvent};
+    let mut conn = nebula_tui::ipc::connect_or_spawn().await?;
+    write_frame(&mut conn.stream, &ClientRequest::Subscribe).await?;
+    loop {
+        match read_frame::<ServerEvent, _>(&mut conn.stream).await? {
+            Some(ServerEvent::Snapshot { agents, .. }) => return Ok((conn, agents)),
+            Some(_) => continue,
+            None => bail!("the daemon closed the connection before sending its sessions"),
+        }
+    }
+}
+
+/// Ask the daemon to point every session naming `old` at `new`.
+async fn rename_sessions(
+    conn: &mut nebula_tui::ipc::Connection,
+    old: &str,
+    new: &str,
+) -> Result<()> {
+    use nebula_core::codec::{read_frame, write_frame};
+    use nebula_core::{ClientRequest, ServerEvent};
+    const REQ_ID: u64 = 1;
+    let req = ClientRequest::RenameProfileSessions {
+        req_id: REQ_ID,
+        old: old.trim().to_string(),
+        new: new.trim().to_string(),
+    };
+    write_frame(&mut conn.stream, &req).await?;
+    loop {
+        match read_frame::<ServerEvent, _>(&mut conn.stream).await? {
+            Some(ServerEvent::Ack { req_id, .. }) if req_id == REQ_ID => return Ok(()),
+            Some(ServerEvent::Error {
+                req_id: Some(REQ_ID),
+                message,
+            }) => bail!(message),
+            Some(_) => continue,
+            None => bail!("the daemon closed the connection before answering"),
+        }
+    }
+}
+
+/// `kete profile rename`: the sessions are asked of the daemon, then
+/// `profiles::rename` moves the home and rewrites every name in the
+/// settings. A daemon that rewrites the sessions' stored name (protocol
+/// 59) is then asked to, and no session refuses the rename; an older one
+/// cannot, so a session naming the profile refuses it.
 fn rename(base: &Path, local: &Path, old: &str, new: &str) -> Result<()> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    let (_, _, agents) = rt.block_on(fetch_tree())?;
+    let (mut conn, agents) = rt.block_on(sessions_and_protocol())?;
+    let follows = conn.protocol_version >= nebula_core::RENAME_PROFILE_PROTOCOL;
     let signed_in = profiles::load()
         .iter()
         .find(|p| p.name.trim() == old.trim())
@@ -417,9 +464,31 @@ fn rename(base: &Path, local: &Path, old: &str, new: &str) -> Result<()> {
             nebula_core::accounts::login_state(Some(p), &p.harness)
                 == nebula_core::accounts::LoginState::LoggedIn
         });
-    let done = profiles::rename(base, local, &profiles::profiles_root(), old, new, &agents)
-        .map_err(anyhow::Error::msg)?;
+    let root = profiles::profiles_root();
+    let done = if follows {
+        profiles::rename_following(base, local, &root, old, new)
+    } else {
+        profiles::rename(base, local, &root, old, new, &agents)
+    }
+    .map_err(anyhow::Error::msg)?;
     println!("renamed `{}` to `{}`", old.trim(), done.profile.name);
+    let named = agents
+        .iter()
+        .filter(|a| a.profile.as_deref().map(str::trim) == Some(old.trim()))
+        .count();
+    if follows && named > 0 {
+        rt.block_on(rename_sessions(&mut conn, old, new))
+            .with_context(|| {
+                format!(
+                    "renamed, but the sessions still name `{}`: move them to an account",
+                    old.trim()
+                )
+            })?;
+        println!(
+            "{named} session(s) now name `{}`; a running one picks the new home up when it restarts",
+            done.profile.name
+        );
+    }
     if let Some((_, to)) = &done.home {
         println!("its home is now {}", to.display());
     }

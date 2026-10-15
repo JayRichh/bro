@@ -170,3 +170,30 @@ fn a_bad_bundle_in_the_environment_never_fails_the_command() {
     );
     assert!(!data.path().join("config.json").exists());
 }
+
+/// `config import --dry-run`, what both apps' Settings show before an
+/// import: what would change, line by line, and nothing written.
+#[test]
+fn a_dry_run_says_what_changes_and_writes_nothing() {
+    let (here, files) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    put(&here.path().join("config.json"), json!({"theme": "ocean"}));
+    let incoming = files.path().join("config.json");
+    put(&incoming, json!({"theme": "forest", "editor": "hx"}));
+    let source = incoming.display().to_string();
+
+    let out = nebula(here.path(), &["config", "import", "--dry-run", &source]);
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    let lines: Vec<String> = text(&out.stdout).lines().map(str::to_string).collect();
+    assert_eq!(lines[0], "config: 2 keys changed");
+    assert_eq!(lines[1], "config.json: editor, theme");
+    assert_eq!(
+        get(&here.path().join("config.json")),
+        json!({"theme": "ocean"})
+    );
+
+    let out = nebula(here.path(), &["config", "import", &source]);
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    assert_eq!(get(&here.path().join("config.json"))["theme"], "forest");
+    let out = nebula(here.path(), &["config", "import", "--dry-run", &source]);
+    assert_eq!(text(&out.stdout).trim(), "nothing changed");
+}

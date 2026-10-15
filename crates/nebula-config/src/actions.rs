@@ -230,6 +230,15 @@ pub enum Action {
     DeleteWorktree,
     /// Take the project off the list (nothing on disk is touched).
     RemoveProject,
+    /// Delete the project's linked worktrees with nothing in them whose
+    /// pull request merged or whose commits are all on a remote, after
+    /// one confirm listing them; never forced.
+    SweepWorktrees,
+    /// Write this machine's settings to one file (`kete config export`).
+    ExportSettings,
+    /// Merge a settings file in (`kete config import`), after a confirm
+    /// saying what it changes.
+    ImportSettings,
 }
 
 /// What a verb acts on.
@@ -1037,7 +1046,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::Ado,
         id: "azure_devops",
         label: "Azure DevOps",
-        hint: "On a project whose remote is on Azure DevOps (the header shows an ado button): your sprint's tasks, the active pull requests and the branches. Enter opens a task or pull request in the browser and checks a branch out in a worktree; s twice starts a task (branch, worktree, agent)",
+        hint: "On a project whose remote is on Azure DevOps (the header shows an ado button): your sprint's tasks, the active pull requests and the branches. Enter opens a task or pull request in the browser and checks a branch out in a worktree; s twice starts a task (branch, worktree, agent); on a pull request v votes and c reads its threads to reply",
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
         defaults: &["shift+b"],
@@ -1689,6 +1698,52 @@ pub const ACTIONS: &[ActionSpec] = &[
         surface: Surface::Tui,
         desktop: &[],
     },
+    // Appended: the keymap indexes this table by position.
+    ActionSpec {
+        action: Action::SweepWorktrees,
+        id: "sweep_worktrees",
+        label: "Delete merged & clean worktrees",
+        hint: "Delete the project's worktrees with no session, terminal or uncommitted work whose PR merged or whose commits are all on a remote, after one confirm listing them; never forced, so git keeps any that picked up work",
+        group: "PROJECTS & WORKTREES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "sweep",
+        destructive: true,
+        applies_to: &[AppliesTo::Repo],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::ExportSettings,
+        id: "export_settings",
+        label: "Export settings",
+        hint: "Write config.json, the agent presets and the ssh hosts to one file, as kete config export does (never config.local.json)",
+        group: "GENERAL",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "export",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::ImportSettings,
+        id: "import_settings",
+        label: "Import settings",
+        hint: "Merge a settings file in, as kete config import does: what it would change is shown first and nothing is written until you say so",
+        group: "GENERAL",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "import",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Both,
+        desktop: &[],
+    },
 ];
 
 pub fn spec_at(index: usize) -> Option<&'static ActionSpec> {
@@ -2001,6 +2056,13 @@ pub const MENU_LABELS: &[(&str, Option<AppliesTo>, &str)] = &[
     ("new_worktree", None, "New worktree\u{2026}"),
     ("refresh_pull_requests", None, "Refresh pull requests"),
     ("remove_project", None, "Remove from Kete\u{2026}"),
+    (
+        "sweep_worktrees",
+        None,
+        "Delete merged & clean worktrees\u{2026}",
+    ),
+    ("export_settings", None, "Export settings\u{2026}"),
+    ("import_settings", None, "Import settings\u{2026}"),
     ("toggle_full_screen", None, "Full screen"),
     ("accounts", None, "Accounts\u{2026}"),
     ("add_project", None, "Add project…"),
@@ -2093,6 +2155,7 @@ pub const MENUS: &[(AppliesTo, &[&str])] = &[
             "reorder_up",
             "reorder_down",
             "delete_worktree",
+            "sweep_worktrees",
             "remove_project",
         ],
     ),
@@ -2663,7 +2726,7 @@ mod tests {
         // jump, the window's Ctrl+K is `command_palette`; `move_up` walks
         // the cursor where the window's reorders, `reorder_up`): the
         // window's key ids are their own namespace.
-        assert_eq!(ACTIONS.len(), 87);
+        assert_eq!(ACTIONS.len(), 90);
         for id in [
             "palette",
             "move_up",

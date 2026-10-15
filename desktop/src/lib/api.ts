@@ -325,6 +325,8 @@ export interface ProfileRenamed {
   projects: string[];
   /** Archived sessions still naming the old name. */
   archived: string[];
+  /** Sessions the daemon moved onto the new name (protocol 60). */
+  followed: number;
 }
 export interface QuickLaunch {
   project: string;
@@ -401,6 +403,14 @@ export interface SettingsSchema {
   /** Why the settings files can't be written now (one can't be parsed). */
   problem: string | null;
 }
+/** What importing a settings file would change (src-tauri settings_io.rs). */
+export interface ImportPreview {
+  path: string;
+  /** `kete config import --dry-run`: the summary, then what changes. */
+  lines: string[];
+  changes: boolean;
+}
+
 export interface DesktopPrefs {
   theme: string;
   diff_mode: string;
@@ -592,6 +602,11 @@ export const api = {
   settingsSchema: () => invoke<SettingsSchema>('settings_schema'),
   settingsSet: (target: SettingTarget, value: boolean | string) => invoke<void>('settings_set', { target, value }),
   settingsReset: () => invoke<void>('settings_reset'),
+  /** Save dialog, then `kete config export`; null when cancelled. */
+  settingsExport: () => invoke<string | null>('settings_export'),
+  /** Open dialog, then `kete config import --dry-run`; null when cancelled. */
+  settingsImportPreview: () => invoke<ImportPreview | null>('settings_import_preview'),
+  settingsImport: (path: string) => invoke<string>('settings_import', { path }),
   desktopPrefs: () => invoke<DesktopPrefs>('desktop_prefs'),
   /** The verb registry and the window's own key bindings. */
   actionsList: () => invoke<ActionsList>('actions_list'),
@@ -619,6 +634,10 @@ export interface StartOrchestrator {
   profile?: string | null;
   model?: string | null;
   effort?: string | null;
+  /** A project id: its root worktree; none, a workspace of its own. */
+  project?: string | null;
+  /** The session's name; none, the daemon's. */
+  name?: string | null;
   replace?: boolean;
 }
 /** `kete orchestrator review`, as the daemon broadcasts it. */

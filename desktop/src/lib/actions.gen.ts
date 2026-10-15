@@ -91,6 +91,9 @@ export type ActionId =
   | "verbs"
   | "help"
   | "quit"
+  | "sweep_worktrees"
+  | "export_settings"
+  | "import_settings"
   | "cycle_theme"
   | "home_board"
   | "home_overview"
@@ -840,7 +843,7 @@ export const ACTIONS: readonly ActionRow[] = [
   {
     id: "azure_devops",
     label: "Azure DevOps",
-    hint: "On a project whose remote is on Azure DevOps (the header shows an ado button): your sprint's tasks, the active pull requests and the branches. Enter opens a task or pull request in the browser and checks a branch out in a worktree; s twice starts a task (branch, worktree, agent)",
+    hint: "On a project whose remote is on Azure DevOps (the header shows an ado button): your sprint's tasks, the active pull requests and the branches. Enter opens a task or pull request in the browser and checks a branch out in a worktree; s twice starts a task (branch, worktree, agent); on a pull request v votes and c reads its threads to reply",
     group: "PROJECTS & WORKTREES",
     word: "ADO",
     destructive: false,
@@ -1345,6 +1348,45 @@ export const ACTIONS: readonly ActionRow[] = [
     desktop: [],
   },
   {
+    id: "sweep_worktrees",
+    label: "Delete merged & clean worktrees",
+    hint: "Delete the project's worktrees with no session, terminal or uncommitted work whose PR merged or whose commits are all on a remote, after one confirm listing them; never forced, so git keeps any that picked up work",
+    group: "PROJECTS & WORKTREES",
+    word: "sweep",
+    destructive: true,
+    appliesTo: ["repo"],
+    worksIn: ["grid", "board"],
+    surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
+    id: "export_settings",
+    label: "Export settings",
+    hint: "Write config.json, the agent presets and the ssh hosts to one file, as kete config export does (never config.local.json)",
+    group: "GENERAL",
+    word: "export",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board", "pane"],
+    surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
+    id: "import_settings",
+    label: "Import settings",
+    hint: "Merge a settings file in, as kete config import does: what it would change is shown first and nothing is written until you say so",
+    group: "GENERAL",
+    word: "import",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board", "pane"],
+    surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
     id: "cycle_theme",
     label: "Cycle theme",
     hint: "Step the window's theme through system, light and dark",
@@ -1616,6 +1658,9 @@ export const MENU_LABELS: readonly { id: ActionId; on: AppliesTo | null; label: 
   { id: "new_worktree", on: null, label: "New worktree\u2026" },
   { id: "refresh_pull_requests", on: null, label: "Refresh pull requests" },
   { id: "remove_project", on: null, label: "Remove from Kete\u2026" },
+  { id: "sweep_worktrees", on: null, label: "Delete merged & clean worktrees\u2026" },
+  { id: "export_settings", on: null, label: "Export settings\u2026" },
+  { id: "import_settings", on: null, label: "Import settings\u2026" },
   { id: "toggle_full_screen", on: null, label: "Full screen" },
   { id: "accounts", on: null, label: "Accounts\u2026" },
   { id: "add_project", on: null, label: "Add project\u2026" },
@@ -1626,7 +1671,7 @@ export const MENUS: Readonly<Partial<Record<AppliesTo, readonly ActionId[]>>> = 
   session: ["activate", "follow_up", "restart", "duplicate_session", "move_session", "move_to_account", "rename", "pin_orchestrator", "open_pull_request", "create_pull_request", "merge_pull_request", "open_issue", "focus_scope", "reorder_up", "reorder_down", "unarchive", "archive", "delete"],
   terminal: ["activate", "rename", "delete"],
   worktree: ["new", "quick_prompt", "new_terminal", "toggle_run", "git_diff", "open_worktree", "open_repo", "switch_branch", "create_pull_request", "merge_pull_request", "focus_scope", "reorder_up", "reorder_down", "delete_all", "delete_worktree"],
-  repo: ["quick_prompt", "new_worktree", "switch_branch", "toggle_run", "open_worktree", "open_repo", "refresh_pull_requests", "focus_scope", "rename", "reorder_up", "reorder_down", "delete_worktree", "remove_project"],
+  repo: ["quick_prompt", "new_worktree", "switch_branch", "toggle_run", "open_worktree", "open_repo", "refresh_pull_requests", "focus_scope", "rename", "reorder_up", "reorder_down", "delete_worktree", "sweep_worktrees", "remove_project"],
 };
 
 /** The verbs a footer and the verb bar lead with, per kind, best first. */

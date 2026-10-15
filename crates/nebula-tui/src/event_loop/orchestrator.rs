@@ -94,31 +94,90 @@ fn open_start(app: &mut App) {
     if refuse_old_daemon(app) {
         return;
     }
-    let profiles = crate::config::Config::load().profiles;
-    app.modals.overlay = Some(Overlay::OrchestratorStart(StartView::new(profiles)));
+    let cfg = crate::config::Config::load();
+    // Each harness's configured model and effort, as a new session gets.
+    let configured = nebula_core::AgentKind::ALL
+        .into_iter()
+        .map(|k| (k, cfg.default_model(k), cfg.default_effort(k)))
+        .collect();
+    let projects = app
+        .tree
+        .projects
+        .iter()
+        .map(|p| (p.id.clone(), p.name.clone()))
+        .collect();
+    app.modals.overlay = Some(Overlay::OrchestratorStart(
+        StartView::new(cfg.profiles.clone()).with(configured, projects),
+    ));
 }
 
 /// The start prompt's keys: ↑/↓ (or Tab) pick the row, ←/→ its value,
-/// Enter starts, Esc cancels.
+/// Enter starts, Esc cancels. On the name row the letters type.
 pub(crate) fn handle_start_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) {
     let Some(Overlay::OrchestratorStart(start)) = &mut app.modals.overlay else {
         return;
     };
+    let typing = start.focused() == crate::orchestrator_view::StartRow::Name;
+    let plain = !key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
     match key.code {
         KeyCode::Esc => app.modals.overlay = None,
-        KeyCode::Up | KeyCode::Down | KeyCode::Tab | KeyCode::BackTab => {
-            start.row = 1 - start.row.min(1)
-        }
-        KeyCode::Char('k') | KeyCode::Char('j') => start.row = 1 - start.row.min(1),
-        KeyCode::Left | KeyCode::Char('h') => start.step(-1),
-        KeyCode::Right | KeyCode::Char('l') | KeyCode::Char(' ') => start.step(1),
+        KeyCode::Up | KeyCode::BackTab => start.move_row(-1),
+        KeyCode::Down | KeyCode::Tab => start.move_row(1),
         KeyCode::Enter => {
             let start = start.clone();
             start_orchestrator(app, &start, out);
         }
+        KeyCode::Backspace if typing => {
+            start.name.pop();
+        }
+        KeyCode::Char(c) if typing && plain => start.name.push(c),
+        KeyCode::Char('k') if !typing => start.move_row(-1),
+        KeyCode::Char('j') if !typing => start.move_row(1),
+        KeyCode::Left | KeyCode::Char('h') if !typing => start.step(-1),
+        KeyCode::Right | KeyCode::Char('l') | KeyCode::Char(' ') if !typing => start.step(1),
         _ => {}
     }
     app.chrome.dirty = true;
+}
+
+/// A click on the start prompt: a row takes the keys, its ‹ or › steps
+/// it, and the Start button is Enter.
+pub(crate) fn handle_start_mouse(
+    app: &mut App,
+    mouse: MouseEvent,
+    out: &mut Vec<ClientRequest>,
+) -> bool {
+    let Some(Overlay::OrchestratorStart(start)) = &mut app.modals.overlay else {
+        return false;
+    };
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        return true;
+    }
+    let pos = ratatui::layout::Position::new(mouse.column, mouse.row);
+    app.chrome.dirty = true;
+    if start.start_hit.contains(pos) {
+        let start = start.clone();
+        start_orchestrator(app, &start, out);
+        return true;
+    }
+    if let Some((rect, row)) = start
+        .row_hits
+        .iter()
+        .find(|(r, _)| r.contains(pos))
+        .copied()
+    {
+        start.row = row;
+        // The value sits after the label: its left end steps back, its
+        // right end on.
+        let value_x = rect.x + 11;
+        if mouse.column >= value_x {
+            let mid = value_x + (rect.right().saturating_sub(value_x)) / 2;
+            start.step(if mouse.column < mid { -1 } else { 1 });
+        }
+    }
+    true
 }
 
 fn start_orchestrator(app: &mut App, start: &StartView, out: &mut Vec<ClientRequest>) {
@@ -128,9 +187,8 @@ fn start_orchestrator(app: &mut App, start: &StartView, out: &mut Vec<ClientRequ
     if refuse_old_daemon(app) {
         return;
     }
-    // The harness's configured model and effort, as a new session gets.
-    let cfg = crate::config::Config::load();
-    let (model, effort) = (cfg.default_model(kind), cfg.default_effort(kind));
+    // The rows start on the harness's configured model and effort.
+    let (model, effort) = (start.model_name(), start.effort_name());
     app.chrome.flash = Some(format!("starting the orchestrator on {}…", kind.as_str()));
     send_with(app, out, PendingIntent::OpenOrchestrator, |req_id| {
         ClientRequest::StartOrchestrator {
@@ -140,8 +198,8 @@ fn start_orchestrator(app: &mut App, start: &StartView, out: &mut Vec<ClientRequ
             model,
             effort,
             profile,
-            project: None,
-            name: None,
+            project: start.project_id(),
+            name: start.name_value(),
             replace: false,
         }
     });

@@ -141,15 +141,20 @@ export interface ReviewVerbs {
   deleteWorktree: boolean;
 }
 
+/** Why a checkout on its base branch opens no pull request. */
+export const ON_BASE_BRANCH = 'The checkout is on the base branch: a pull request needs a branch of its own.';
+
 /** The verbs a session's review row and menu offer, from its pull request
- *  (`model.prs`), core's verdict for a drop on Ship, and whether its
- *  checkout is the repo's root. */
-export function reviewVerbs(pr: PrInfo | null | undefined, toShip: DropVerb | undefined, isMain: boolean): ReviewVerbs {
+ *  (`model.prs`), core's verdict for a drop on Ship, whether its
+ *  checkout is the repo's root, and whether it is on the base branch (its
+ *  git state's `on_default_branch`; unknown counts as not, and the
+ *  composer still refuses). The terminal app leaves Create out there. */
+export function reviewVerbs(pr: PrInfo | null | undefined, toShip: DropVerb | undefined, isMain: boolean, onBase = false): ReviewVerbs {
   const open = isOpen(pr);
   // Only the base branch rules a pull request out for sure; the other
   // refusals (the agent's lane, nothing pushed yet) leave the composer to
   // say what the forge says.
-  const why = toShip?.act === 'refuse' && /base branch/.test(toShip.reason) ? toShip.reason : null;
+  const why = toShip?.act === 'refuse' && /base branch/.test(toShip.reason) ? toShip.reason : onBase ? ON_BASE_BRANCH : null;
   return {
     pr: open ? { kind: 'view', why: null } : { kind: 'open', why },
     merge: open ? { why: pr?.draft ? 'Its pull request is a draft: mark it ready for review before it can merge.' : null } : null,

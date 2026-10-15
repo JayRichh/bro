@@ -1051,6 +1051,9 @@ mod tests {
                             | Action::ToggleRun
                             | Action::DeleteWorktree
                             | Action::RemoveProject
+                            | Action::SweepWorktrees
+                            | Action::ExportSettings
+                            | Action::ImportSettings
                             | Action::CreatePullRequest
                             | Action::MergePullRequest
                             | Action::FocusScope

@@ -28,7 +28,7 @@
     windowLabel,
   } from './usage';
   import { removeWarning } from './pick';
-  import { nameProblem, projectAccount, projectsDefaultingTo, renameBlocker, SPREADS, suggestName, THRESHOLDS, viewRows } from './view';
+  import { nameProblem, projectAccount, projectsDefaultingTo, renameBlocker, sessionsFollow, SPREADS, suggestName, THRESHOLDS, viewRows } from './view';
   import { runLogin, setProjectAccount } from './actions';
   import { openAddAccount } from './add.svelte';
   import { allKeysItem } from '../commands';
@@ -170,7 +170,7 @@
   /** Rename: refused while a session names it; the home, the repos it is
    *  the default of and its reading move with the name. */
   async function rename(r: AccountRow) {
-    const blocked = app.model.connected ? renameBlocker(r.name, app.model.agents) : RENAME_OFFLINE;
+    const blocked = app.model.connected ? renameBlocker(r.name, app.model.agents, sessionsFollow(app.model)) : RENAME_OFFLINE;
     if (blocked) return toast(blocked);
     const taken = app.accounts.filter((x) => x.profile && x.key !== r.key).map((x) => x.name);
     const v = await ask.prompt({
@@ -188,7 +188,10 @@
       const out = await api.profileRename(r.name, v.name.trim());
       const repos = out.projects.length ? `, the default of ${out.projects.length} ${out.projects.length === 1 ? 'repo' : 'repos'}` : '';
       const archived = out.archived.length ? ` ${out.archived.length} archived ${out.archived.length === 1 ? 'session still names' : 'sessions still name'} ${r.name}.` : '';
-      toast(`Renamed ${r.name} to ${out.name}${repos}.${archived}`);
+      const followed = out.followed
+        ? ` ${out.followed} ${out.followed === 1 ? 'session follows' : 'sessions follow'} (a running one on its next restart).`
+        : '';
+      toast(`Renamed ${r.name} to ${out.name}${repos}.${archived}${followed}`);
       if (editing?.key === r.key) editing = null;
       refreshLaunchables();
       refreshAccounts();
@@ -462,7 +465,7 @@
                   >
                 {/if}
                 {#if r.name !== '(no name)'}
-                  {@const blocked = app.model.connected ? renameBlocker(r.name, app.model.agents) : RENAME_OFFLINE}
+                  {@const blocked = app.model.connected ? renameBlocker(r.name, app.model.agents, sessionsFollow(app.model)) : RENAME_OFFLINE}
                   <button
                     class="{btn} {blocked ? 'text-faint' : ''}"
                     onclick={() => rename(r)}

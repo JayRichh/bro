@@ -47,6 +47,9 @@ pub(crate) fn handle_settings_key(app: &mut App, key: KeyEvent) {
         // Shift+R: back to the defaults, behind a confirmation. It isn't
         // about a row, so it works from the strip and the list alike.
         KeyCode::Char('R') => SettingsCmd::ResetAll,
+        // Shift+E / Shift+I: the settings to a file, or a file's in.
+        KeyCode::Char('E') => SettingsCmd::Export,
+        KeyCode::Char('I') => SettingsCmd::Import,
         // ---- the tab strip has focus ----
         KeyCode::Left | KeyCode::Char('h') if on_tabs => SettingsCmd::Tab((tab + tabs - 1) % tabs),
         KeyCode::Right | KeyCode::Char('l') if on_tabs => SettingsCmd::Tab((tab + 1) % tabs),
@@ -145,6 +148,8 @@ pub(crate) fn run_settings_cmd(app: &mut App, cmd: SettingsCmd) {
                 view.info("Enter: rebind   a: add another key   ⌫: default   x: unbind");
             }
         }
+        SettingsCmd::Export => open_prompt(app, PromptKind::ExportSettings),
+        SettingsCmd::Import => open_prompt(app, PromptKind::ImportSettings),
         SettingsCmd::ResetAll => {
             // The confirm replaces the overlay; both of its exits put the
             // settings back on screen (see `reset_settings` and the Esc
@@ -191,6 +196,8 @@ pub(crate) enum SettingsCmd {
     ClearHotkey,
     Nudge,
     ResetAll,
+    Export,
+    Import,
 }
 
 /// The keystroke that lands while the Hotkeys tab is waiting for one.

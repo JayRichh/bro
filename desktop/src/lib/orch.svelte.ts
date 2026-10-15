@@ -46,6 +46,8 @@ export async function startOrchestrator(spec: {
   profile: string | null;
   model: string | null;
   effort: string | null;
+  project?: string | null;
+  name?: string | null;
 }): Promise<boolean> {
   if (!guard()) return false;
   try {

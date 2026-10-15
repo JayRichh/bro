@@ -36,6 +36,7 @@ import { openAddAccount } from './accounts/add.svelte';
 import { moveStep, rootOf, stepInFor } from './reorder.svelte';
 import { railOrder, repoRows } from './overview/repos';
 import { scopedRepo, scopedWorktree } from './scope';
+import { exportSettings, importSettings } from './settings/io';
 
 /** F10: the orchestrator, or the Start form when there is none. */
 function orchestratorKey() {
@@ -370,6 +371,8 @@ export function paletteCommands(): Command[] {
     cmd('theme', `Cycle theme (now ${app.themePref})`, 'Window', cycleTheme, 'cycle_theme', 'dark light system'),
     cmd('settings', 'Settings', 'Window', () => openSettings(), 'settings', 'preferences config'),
     cmd('presets', 'Agent presets', 'Window', () => openSettings('presets'), undefined, 'prefix postfix'),
+    cmd('export-settings', menuLabel('export_settings', 'global'), 'Window', exportSettings, undefined, 'backup config save file'),
+    cmd('import-settings', menuLabel('import_settings', 'global'), 'Window', importSettings, undefined, 'restore config load file'),
     cmd('accounts', 'Accounts', 'Window', openAccounts, 'accounts', 'profiles login usage spread subscription'),
     cmd('add-account', 'Add an account\u2026', 'Window', () => openAddAccount(), undefined, 'profile login new subscription'),
     cmd('profiles', 'Profiles', 'Window', openAccounts, undefined, 'accounts login'),

@@ -10,7 +10,7 @@ use std::path::PathBuf;
 ///
 /// Bump on every protocol change. Additive changes keep
 /// [`MIN_COMPATIBLE_PROTOCOL`] where it is; breaking changes bump both.
-pub const PROTOCOL_VERSION: u32 = 59;
+pub const PROTOCOL_VERSION: u32 = 60;
 
 /// Oldest IPC protocol this build can safely talk to.
 ///
@@ -89,6 +89,14 @@ pub const RECORDED_BASE_PROTOCOL: u32 = 59;
 /// client checks the version the daemon said at Hello before it sends one:
 /// an older daemon drops the connection on the unknown variant.
 pub const SESSION_CHANGES_PROTOCOL: u32 = 59;
+
+/// The first protocol whose daemon takes
+/// [`ClientRequest::RenameProfileSessions`]. A client renames a profile
+/// that sessions use only against a daemon that said this or later at
+/// Hello (`profiles::rename_following`); an older one cannot decode the
+/// request and would drop the connection, so the rename keeps refusing
+/// while a session names the profile (`profiles::rename`).
+pub const RENAME_PROFILE_PROTOCOL: u32 = 60;
 
 /// Max IPC frame size (length prefix sanity bound).
 pub const MAX_FRAME_LEN: u32 = 4 * 1024 * 1024;
@@ -722,6 +730,19 @@ pub enum ClientRequest {
         req_id: u64,
         agent: AgentId,
     },
+
+    // -- protocol 60, appended after 59's. --
+    /// A PROFILE was renamed from `old` to `new` (`profiles::
+    /// rename_following`, which moved its home and rewrote the settings):
+    /// every session row naming `old`, archived ones included, names
+    /// `new` from now on, so a stopped one resumes under it. A live
+    /// session keeps the home it started in until it restarts. Answered
+    /// with `Ack`. Sent only to a 60+ daemon (`RENAME_PROFILE_PROTOCOL`).
+    RenameProfileSessions {
+        req_id: u64,
+        old: String,
+        new: String,
+    },
 }
 
 /// What a [`ClientRequest::Reorder`] reorders, and the order rule every
@@ -1293,6 +1314,24 @@ mod tests {
             };
             assert_eq!((req_id, id.0.as_str(), got), (9, "a1", profile));
         }
+    }
+
+    /// 60 appends `RenameProfileSessions`, sent only to a 60 daemon: older
+    /// peers stay in range and the request round-trips.
+    #[test]
+    fn protocol_60_rename_profile_sessions_round_trips() {
+        assert!(protocol_compatible_with(59));
+        const { assert!(RENAME_PROFILE_PROTOCOL <= PROTOCOL_VERSION) };
+        let req = ClientRequest::RenameProfileSessions {
+            req_id: 4,
+            old: "work".into(),
+            new: "max2".into(),
+        };
+        let back: ClientRequest = rmp_serde::from_slice(&encode(&req)).unwrap();
+        let ClientRequest::RenameProfileSessions { req_id, old, new } = back else {
+            panic!("not a RenameProfileSessions");
+        };
+        assert_eq!((req_id, old.as_str(), new.as_str()), (4, "work", "max2"));
     }
 
     /// 58 adds `profile` to the end of `SpawnSiblingAgent`. Without one the

@@ -2,7 +2,7 @@
 //! model, `ui::ado_view` the drawing).
 
 use super::*;
-use crate::ado::{AdoAnswer, AdoTab, AdoView, Load};
+use crate::ado::{AdoAnswer, AdoButton, AdoTab, AdoView, Load, PrThreads, VOTES};
 
 /// Ask, off the loop, whether each project's remote is on Azure DevOps —
 /// the projects not asked about yet. The answer lights the header's `ado`
@@ -131,6 +131,47 @@ pub(crate) fn land(app: &mut App, answer: AdoAnswer) {
                 v.branches = load(result);
             }
         }
+        AdoAnswer::Threads {
+            project,
+            pr,
+            result,
+        } if ours(app, &project) => {
+            if let Some(Overlay::Ado(v)) = &mut app.modals.overlay {
+                if let Some(t) = v.threads.as_mut().filter(|t| t.pr == pr) {
+                    t.threads = load(result);
+                }
+            }
+        }
+        AdoAnswer::Voted(result) => {
+            app.chrome.flash = Some(match result {
+                Ok(said) => said.trim().to_string(),
+                Err(e) => format!("vote failed: {e}"),
+            });
+        }
+        AdoAnswer::Replied {
+            project,
+            pr,
+            result,
+        } => {
+            let ok = result.is_ok();
+            app.chrome.flash = Some(match result {
+                Ok(said) => said.trim().to_string(),
+                Err(e) => format!("reply failed: {e}"),
+            });
+            if let Some(Overlay::Ado(v)) = &mut app.modals.overlay {
+                if let Some(t) = v.threads.as_mut().filter(|t| t.pr == pr) {
+                    t.sending = false;
+                    // Sent: the box goes and the threads are read again;
+                    // failed, the text stays to send again.
+                    if ok {
+                        t.reply = None;
+                    }
+                }
+            }
+            if ok && ours(app, &project) {
+                fetch_threads(app, &project, pr);
+            }
+        }
         AdoAnswer::Started(result) => {
             app.chrome.flash = Some(match result {
                 Ok(said) => said
@@ -238,14 +279,204 @@ fn start_task(app: &mut App) {
     });
 }
 
-/// j/k walk, Tab / 1–3 switch lists, Enter opens, `s` starts a task, `r`
+/// The pull request under the cursor, on the PR tab.
+fn pr_here(app: &App) -> Option<(ProjectId, crate::ado::AdoPr)> {
+    let Some(Overlay::Ado(view)) = &app.modals.overlay else {
+        return None;
+    };
+    Some((view.project.clone()?, view.pr()?.clone()))
+}
+
+/// `v` on a pull request: its vote choices, as the desktop's Review
+/// buttons. A draft takes no votes until it is published.
+fn start_vote(app: &mut App) {
+    let pr = match &app.modals.overlay {
+        Some(Overlay::Ado(view)) => view
+            .threads
+            .as_ref()
+            .map(|t| (t.pr, t.is_draft))
+            .or_else(|| view.pr().map(|p| (p.id, p.is_draft))),
+        _ => None,
+    };
+    let Some((id, draft)) = pr else {
+        return;
+    };
+    if draft {
+        app.chrome.flash = Some(format!(
+            "!{id} is a draft: nobody can vote until it is published"
+        ));
+        return;
+    }
+    if let Some(Overlay::Ado(view)) = &mut app.modals.overlay {
+        view.voting = Some(id);
+    }
+}
+
+/// A vote's key: `kete ado vote <id> <word>`, off the loop.
+fn cast(app: &mut App, key: char) {
+    let Some(Overlay::Ado(view)) = &mut app.modals.overlay else {
+        return;
+    };
+    let (Some(id), Some(project)) = (view.voting.take(), view.project.clone()) else {
+        return;
+    };
+    let Some((_, word, label)) = VOTES.iter().find(|v| v.0 == key).copied() else {
+        return;
+    };
+    app.chrome.flash = Some(format!("voting {label} on !{id}…"));
+    let Some(jobs) = app.jobs.view_jobs.clone() else {
+        return;
+    };
+    jobs.run(move || {
+        let id = id.to_string();
+        Some(crate::view_jobs::Answer::Ado(AdoAnswer::Voted(
+            crate::ado::run_cli(&project, &["vote", &id, word]),
+        )))
+    });
+}
+
+/// `c` on a pull request: its threads in place of the list, read now.
+fn open_threads(app: &mut App) {
+    let Some((project, pr)) = pr_here(app) else {
+        return;
+    };
+    if let Some(Overlay::Ado(view)) = &mut app.modals.overlay {
+        view.voting = None;
+        view.threads = Some(PrThreads {
+            pr: pr.id,
+            title: pr.title.clone(),
+            is_draft: pr.is_draft,
+            threads: Load::Loading,
+            cursor: 0,
+            reply: None,
+            sending: false,
+        });
+    }
+    fetch_threads(app, &project, pr.id);
+}
+
+/// `kete ado pr <id> --json`'s threads, off the loop.
+fn fetch_threads(app: &mut App, project: &ProjectId, pr: u32) {
+    let Some(jobs) = app.jobs.view_jobs.clone() else {
+        return;
+    };
+    let project = project.clone();
+    jobs.run(move || {
+        let id = pr.to_string();
+        Some(crate::view_jobs::Answer::Ado(AdoAnswer::Threads {
+            result: crate::ado::run_cli(&project, &["pr", &id, "--json"])
+                .and_then(|json| crate::ado::parse_threads(&json)),
+            project,
+            pr,
+        }))
+    });
+}
+
+/// Enter on a typed reply: `kete ado reply <id> <thread> -- <text>`,
+/// off the loop; the `--` keeps a reply that starts with `-` text.
+fn send_reply(app: &mut App) {
+    let Some(Overlay::Ado(view)) = &mut app.modals.overlay else {
+        return;
+    };
+    let project = view.project.clone();
+    let Some(t) = view.threads.as_mut() else {
+        return;
+    };
+    let text = t.reply.as_deref().unwrap_or("").trim().to_string();
+    let (Some(project), Some(thread)) = (project, t.thread().map(|x| x.id)) else {
+        return;
+    };
+    if text.is_empty() || t.sending {
+        return;
+    }
+    t.sending = true;
+    let pr = t.pr;
+    app.chrome.flash = Some(format!("replying on !{pr}…"));
+    let Some(jobs) = app.jobs.view_jobs.clone() else {
+        return;
+    };
+    jobs.run(move || {
+        let (id, thread) = (pr.to_string(), thread.to_string());
+        Some(crate::view_jobs::Answer::Ado(AdoAnswer::Replied {
+            result: crate::ado::run_cli(&project, &["reply", &id, &thread, "--", &text]),
+            project,
+            pr,
+        }))
+    });
+}
+
+/// The keys while a vote is being picked, a reply typed, or a PR's
+/// threads are up; false when none of them is.
+fn handle_pr_key(app: &mut App, key: KeyEvent) -> bool {
+    let Some(Overlay::Ado(view)) = &mut app.modals.overlay else {
+        return false;
+    };
+    let plain = !key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+    if let Some(t) = view.threads.as_mut().filter(|t| t.reply.is_some()) {
+        match key.code {
+            KeyCode::Esc => t.reply = None,
+            KeyCode::Enter => send_reply(app),
+            KeyCode::Backspace => {
+                if let Some(r) = t.reply.as_mut() {
+                    r.pop();
+                }
+            }
+            KeyCode::Char(c) if plain && !t.sending => {
+                if let Some(r) = t.reply.as_mut() {
+                    r.push(c);
+                }
+            }
+            _ => {}
+        }
+        return true;
+    }
+    if view.voting.is_some() {
+        match key.code {
+            KeyCode::Char(c) if VOTES.iter().any(|v| v.0 == c) => cast(app, c),
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('v') => view.voting = None,
+            _ => {}
+        }
+        return true;
+    }
+    let Some(t) = view.threads.as_mut() else {
+        return false;
+    };
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => view.threads = None,
+        KeyCode::Down | KeyCode::Char('j') => t.step(1),
+        KeyCode::Up | KeyCode::Char('k') => t.step(-1),
+        KeyCode::Enter | KeyCode::Char('c') if t.thread().is_some() => {
+            t.reply = Some(String::new())
+        }
+        KeyCode::Char('v') => start_vote(app),
+        KeyCode::Char('r') => {
+            t.threads = Load::Loading;
+            let (pr, project) = (t.pr, view.project.clone());
+            if let Some(project) = project {
+                fetch_threads(app, &project, pr);
+            }
+        }
+        _ => {}
+    }
+    true
+}
+
+/// j/k walk, Tab / 1–3 switch lists, Enter opens, `s` starts a task, `v`
+/// votes on a pull request and `c` reads its threads to reply, `r`
 /// reads the list again, Esc / q close.
 pub(crate) fn handle_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) {
     app.chrome.dirty = true;
+    if handle_pr_key(app, key) {
+        return;
+    }
     match key.code {
         KeyCode::Enter => return activate(app, out),
         KeyCode::Char('s') => return start_task(app),
         KeyCode::Char('r') => return reload(app),
+        KeyCode::Char('v') => return start_vote(app),
+        KeyCode::Char('c') => return open_threads(app),
         _ => {}
     }
     let Some(Overlay::Ado(view)) = &mut app.modals.overlay else {
@@ -289,6 +520,49 @@ pub(crate) fn handle_mouse(app: &mut App, mouse: MouseEvent, out: &mut Vec<Clien
     };
     app.chrome.dirty = true;
     let pos = ratatui::layout::Position::new(mouse.column, mouse.row);
+    // A bottom-row button is its key, pressed.
+    if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        if let Some(b) = view
+            .buttons
+            .iter()
+            .find(|(r, _)| r.contains(pos))
+            .map(|(_, b)| *b)
+        {
+            let code = match b {
+                AdoButton::Vote => KeyCode::Char('v'),
+                AdoButton::Comments => KeyCode::Char('c'),
+                AdoButton::Cast(c) => KeyCode::Char(c),
+                AdoButton::Send => KeyCode::Enter,
+                AdoButton::Back => KeyCode::Esc,
+            };
+            handle_key(app, KeyEvent::new(code, KeyModifiers::NONE), out);
+            return true;
+        }
+        // A thread: the cursor there; on the cursor's, a reply.
+        if let Some(i) = view
+            .thread_hits
+            .iter()
+            .find(|(r, _)| r.contains(pos))
+            .map(|(_, i)| *i)
+        {
+            if let Some(t) = view.threads.as_mut().filter(|t| t.reply.is_none()) {
+                if t.cursor == i {
+                    t.reply = Some(String::new());
+                } else {
+                    t.cursor = i;
+                }
+            }
+            return true;
+        }
+    }
+    if let Some(t) = view.threads.as_mut() {
+        match mouse.kind {
+            MouseEventKind::ScrollDown => t.step(1),
+            MouseEventKind::ScrollUp => t.step(-1),
+            _ => {}
+        }
+        return true;
+    }
     match mouse.kind {
         MouseEventKind::ScrollDown => view.step(1),
         MouseEventKind::ScrollUp => view.step(-1),
@@ -319,7 +593,7 @@ pub(crate) fn handle_mouse(app: &mut App, mouse: MouseEvent, out: &mut Vec<Clien
 mod tests {
     use super::super::tests::{buffer_text, press, seed_tree, with_default_config};
     use super::*;
-    use crate::ado::{AdoBranch, AdoPr, AdoTask, TaskRead};
+    use crate::ado::{AdoBranch, AdoPr, AdoTask, AdoThread, TaskRead};
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
@@ -485,6 +759,138 @@ mod tests {
             assert_eq!(view(&app).armed, None, "a tab change disarms");
             let text = draw(&mut app);
             assert!(text.contains("Sign in to Azure DevOps"), "{text}");
+        });
+    }
+    fn pr(id: u32, draft: bool) -> AdoPr {
+        AdoPr {
+            id,
+            title: format!("PR {id}"),
+            source: "jr/x".into(),
+            target: "main".into(),
+            is_draft: draft,
+            created_by: "Sam".into(),
+            url: "u".into(),
+            mine: false,
+        }
+    }
+
+    /// On a pull request `v` puts up the vote choices (buttons naming
+    /// their keys) and a draft takes none; `c` reads its threads, a
+    /// thread takes a typed reply, and a sent reply closes the box.
+    #[test]
+    fn a_pull_request_takes_a_vote_and_a_reply() {
+        with_default_config(|| {
+            let mut app = ado_app();
+            let mut out = Vec::new();
+            let p1 = ProjectId("p1".into());
+            press(&mut app, KeyCode::Char('B'), KeyModifiers::SHIFT, &mut out);
+            land(
+                &mut app,
+                AdoAnswer::Prs {
+                    project: p1.clone(),
+                    result: Ok(vec![pr(7, false), pr(8, true)]),
+                },
+            );
+            press(&mut app, KeyCode::Char('2'), KeyModifiers::NONE, &mut out);
+            let text = draw(&mut app);
+            assert!(
+                text.contains("[v vote]") && text.contains("[c comments]"),
+                "{text}"
+            );
+
+            press(&mut app, KeyCode::Char('v'), KeyModifiers::NONE, &mut out);
+            assert_eq!(view(&app).voting, Some(7));
+            let text = draw(&mut app);
+            assert!(
+                text.contains("[a approve]") && text.contains("[x reject]"),
+                "{text}"
+            );
+            press(&mut app, KeyCode::Esc, KeyModifiers::NONE, &mut out);
+            assert_eq!(view(&app).voting, None);
+            assert!(
+                app.modals.overlay.is_some(),
+                "Esc leaves the votes, not the overlay"
+            );
+            draw(&mut app);
+            // A click on the button is its key.
+            let (rect, _) = view(&app)
+                .buttons
+                .iter()
+                .find(|(_, b)| *b == AdoButton::Vote)
+                .copied()
+                .unwrap();
+            handle_mouse(
+                &mut app,
+                MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: rect.x + 1,
+                    row: rect.y,
+                    modifiers: KeyModifiers::NONE,
+                },
+                &mut out,
+            );
+            assert_eq!(view(&app).voting, Some(7));
+            press(&mut app, KeyCode::Char('a'), KeyModifiers::NONE, &mut out);
+            assert_eq!(view(&app).voting, None);
+            assert!(app
+                .chrome
+                .flash
+                .as_deref()
+                .unwrap_or("")
+                .contains("approve on !7"));
+
+            press(&mut app, KeyCode::Char('j'), KeyModifiers::NONE, &mut out);
+            press(&mut app, KeyCode::Char('v'), KeyModifiers::NONE, &mut out);
+            assert_eq!(view(&app).voting, None, "a draft takes no votes");
+            assert!(app.chrome.flash.as_deref().unwrap_or("").contains("draft"));
+            press(&mut app, KeyCode::Char('k'), KeyModifiers::NONE, &mut out);
+
+            press(&mut app, KeyCode::Char('c'), KeyModifiers::NONE, &mut out);
+            assert!(draw(&mut app).contains("loading the threads"));
+            land(
+                &mut app,
+                AdoAnswer::Threads {
+                    project: p1.clone(),
+                    pr: 7,
+                    result: Ok(vec![AdoThread {
+                        id: 3,
+                        status: "active".into(),
+                        file: Some("/src/a.rs".into()),
+                        line: Some(12),
+                        comments: vec![("Sam".into(), "why this?".into())],
+                    }]),
+                },
+            );
+            let text = draw(&mut app);
+            assert!(
+                text.contains("src/a.rs:12") && text.contains("Sam: why this?"),
+                "{text}"
+            );
+            press(&mut app, KeyCode::Char('c'), KeyModifiers::NONE, &mut out);
+            for c in "-q jk".chars() {
+                press(&mut app, KeyCode::Char(c), KeyModifiers::NONE, &mut out);
+            }
+            let t = view(&app).threads.clone().unwrap();
+            assert_eq!(t.reply.as_deref(), Some("-q jk"), "the letters type");
+            assert!(draw(&mut app).contains("reply › -q jk"));
+            press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
+            assert!(view(&app).threads.as_ref().unwrap().sending);
+            land(
+                &mut app,
+                AdoAnswer::Replied {
+                    project: p1,
+                    pr: 7,
+                    result: Ok("Replied on !7, thread 3.".into()),
+                },
+            );
+            let t = view(&app).threads.clone().unwrap();
+            assert_eq!((t.reply, t.sending), (None, false));
+            assert_eq!(
+                app.chrome.flash.as_deref(),
+                Some("Replied on !7, thread 3.")
+            );
+            press(&mut app, KeyCode::Esc, KeyModifiers::NONE, &mut out);
+            assert!(view(&app).threads.is_none(), "Esc: back to the list");
         });
     }
 }

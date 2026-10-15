@@ -20,11 +20,12 @@ import { canSwitchBranch, openBranchSwitch } from './worktrees/switcher.svelte';
 import { checkoutSessions, deleteAllSessions } from './checkout';
 import { moveToAccount, pickProjectAccount, SWITCH_UNAVAILABLE } from './accounts/actions';
 import { canSwitch } from './accounts/view';
-import { whileCutting } from './worktrees/rows.svelte';
+import { rows as gitRows, whileCutting } from './worktrees/rows.svelte';
 import { moveStep, stepInFor, type StepIn } from './reorder.svelte';
 import { openComposer, openMerge } from './ship/sheet.svelte';
 import { reviewVerbs } from './ship/ship';
 import { repoScope, worktreeScope } from './scope';
+import { groupOf } from './worktrees/groups';
 
 export type Target =
   /** `viaSub`: picked from one of its subagents' rows, so it acts on
@@ -441,6 +442,8 @@ interface VerbImpl {
   /** Words where the verb turns (Run or Stop run, Unpin orchestrator). */
   label?: string;
   disabled?: boolean;
+  /** Why it is disabled: the row's tooltip, and what its key says. */
+  why?: string;
 }
 export type VerbTable = Partial<Record<ActionId, VerbImpl>>;
 
@@ -450,6 +453,7 @@ const entry = (id: ActionId, on: AppliesTo, v: VerbImpl): MenuItem => ({
   keys: verbKeys(id),
   danger: destructive(id),
   ...(v.disabled ? { disabled: true } : {}),
+  ...(v.disabled && v.why ? { title: v.why } : {}),
 });
 
 /** The registry's rows of `on`'s menu that `table` has, in its order. */
@@ -467,10 +471,18 @@ function rows(on: AppliesTo, table: VerbTable): MenuItem[] {
  *  whether the branch is the base. */
 function prVerbs(worktree: string, session?: string): VerbTable {
   const pr = m().prs[worktree];
-  const rv = reviewVerbs(pr, session ? m().cards[session]?.drops?.pr : undefined, !!worktreeOf(worktree)?.is_main);
+  const onBase = !!gitRows.git[worktree]?.on_default_branch;
+  const rv = reviewVerbs(pr, session ? m().cards[session]?.drops?.pr : undefined, !!worktreeOf(worktree)?.is_main, onBase);
   const t: VerbTable = {};
   if (pr) t.open_pull_request = { run: () => api.openUrl(pr.url).catch((e) => toast(String(e))) };
-  if (rv.pr.kind === 'open') t.create_pull_request = { run: () => openComposer(worktree, session ?? null), disabled: !!rv.pr.why };
+  if (rv.pr.kind === 'open')
+    t.create_pull_request = {
+      run: () => openComposer(worktree, session ?? null),
+      disabled: !!rv.pr.why,
+      why: rv.pr.why ?? undefined,
+      // On the base branch, as the terminal app says by leaving it out.
+      label: onBase ? `${menuLabel('create_pull_request', session ? 'session' : 'worktree')} (on the base branch)` : undefined,
+    };
   if (rv.merge) t.merge_pull_request = { run: () => openMerge(worktree, session ?? null), disabled: !!rv.merge.why };
   return t;
 }
@@ -580,6 +592,19 @@ function projectVerbs(project: string): VerbTable {
     remove_project: { run: () => removeProject(project) },
   };
   if (canSwitchBranch(project)) t.switch_branch = { run: () => openBranchSwitch(project) };
+  // The Worktrees view's sweep, with a linked checkout to look at. Its
+  // module imports this one, so it loads when asked.
+  const linked = m().worktrees.filter((w) => w.project_id === project && !w.is_main);
+  if (linked.length)
+    t.sweep_worktrees = {
+      run: () =>
+        import('./worktrees/verbs').then((v) =>
+          v.sweepWorktrees(
+            project,
+            linked.map((w) => groupOf(m(), w)),
+          ),
+        ),
+    };
   return t;
 }
 
@@ -607,6 +632,7 @@ export function verbTable(t: Target): VerbTable {
  *  nothing there. */
 export function runVerb(t: Target, id: ActionId): boolean {
   const v = verbTable(t)[id];
+  if (v?.disabled && v.why) toast(v.why);
   if (!v || v.disabled) return false;
   void v.run();
   return true;

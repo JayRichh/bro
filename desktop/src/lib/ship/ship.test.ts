@@ -117,6 +117,9 @@ describe('review verbs', () => {
     expect(base.pr.why).toMatch(/base branch/);
     expect(base.deleteWorktree).toBe(false);
     expect(reviewVerbs(null, { act: 'refuse', reason: 'Running is the agent\u2019s' }, false).pr.why).toBeNull();
+    // A checkout read as on its base branch, as the terminal app hides it.
+    expect(reviewVerbs(null, undefined, true, true).pr.why).toMatch(/base branch/);
+    expect(reviewVerbs(null, undefined, true).pr.why).toBeNull();
   });
 
   it('words chips and commit counts', () => {

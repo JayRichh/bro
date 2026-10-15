@@ -50,6 +50,12 @@ pub struct StartSpec {
     pub model: Option<String>,
     #[serde(default)]
     pub effort: Option<String>,
+    /// Run in this project's root worktree; None: a workspace of its own.
+    #[serde(default)]
+    pub project: Option<String>,
+    /// The session's name; None (or blank): the daemon's.
+    #[serde(default)]
+    pub name: Option<String>,
     /// Replace a running orchestrator (it stays, as a worker).
     #[serde(default)]
     pub replace: bool,
@@ -71,8 +77,8 @@ pub async fn start_orchestrator_in(client: &Client, cfg: &Config, spec: StartSpe
         model: launch.model,
         effort: launch.effort,
         profile,
-        project: None,
-        name: None,
+        project: some(spec.project).map(nebula_core::ProjectId),
+        name: some(spec.name),
         replace: spec.replace,
     })
     .await?;
@@ -184,6 +190,8 @@ mod tests {
                 StartSpec {
                     kind: "claude".into(),
                     profile: Some(" work ".into()),
+                    project: Some("p1".into()),
+                    name: Some("  ".into()),
                     replace: true,
                     ..Default::default()
                 },
@@ -197,6 +205,7 @@ mod tests {
             model,
             profile,
             project,
+            name,
             replace,
             ..
         }] = seen.as_slice()
@@ -206,7 +215,8 @@ mod tests {
         assert_eq!(*kind, AgentKind::Claude);
         assert_eq!(model.as_deref(), Some("opus"));
         assert_eq!(profile.as_deref(), Some("work"));
-        assert_eq!(*project, None);
+        assert_eq!(project.as_ref().map(|p| p.0.as_str()), Some("p1"));
+        assert_eq!(*name, None, "a blank name is the daemon's");
         assert!(*replace);
     }
 

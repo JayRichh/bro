@@ -201,6 +201,16 @@ pub(crate) fn open_prompt(app: &mut App, kind: PromptKind) {
                 String::new(),
             )
         }
+        PromptKind::ExportSettings => (
+            "Export settings".into(),
+            "file or folder to write config.json, the presets and the ssh hosts to".into(),
+            crate::settings_io::default_file(),
+        ),
+        PromptKind::ImportSettings => (
+            "Import settings".into(),
+            "an export, a config.json, or a folder holding one: Enter shows what changes".into(),
+            crate::settings_io::default_file(),
+        ),
         PromptKind::EditLink { id } => {
             let current = app
                 .tree

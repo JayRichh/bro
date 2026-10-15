@@ -1064,8 +1064,10 @@ pub(crate) enum ProfileCommand {
     /// Rename a profile: its home moves to the new name, and every
     /// project default naming it follows.
     ///
-    /// Refused while a session (running, or stopped and able to resume)
-    /// runs on it: move those to another account or archive them first.
+    /// The sessions on it follow the new name too, archived ones included;
+    /// a running one picks up the moved home when it restarts. Against a
+    /// daemon too old to move them (before protocol 60) it is refused while
+    /// a session (running, or stopped and able to resume) runs on it.
     Rename {
         /// The profile's name now.
         old: String,
@@ -1244,12 +1246,16 @@ pub(crate) enum ConfigCommand {
     /// never written, and still wins.
     #[command(
         after_help = "Examples:\n  kete config import nebula-settings.json\n  \
-                            kete config import ~/dotfiles/nebula   a folder holding config.json"
+                            kete config import ~/dotfiles/nebula   a folder holding config.json\n  \
+                            kete config import --dry-run backup.json   what it would change"
     )]
     Import {
         /// The file, the folder, or `-` for stdin.
         #[arg(value_name = "SOURCE")]
         source: String,
+        /// Say what the import would change, and write nothing.
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Print the effective harness registry: every harness kete knows (
     /// the built-ins, `custom_harnesses` entries and `harnesses` map ids)

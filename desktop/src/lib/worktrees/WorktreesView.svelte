@@ -95,7 +95,7 @@
     >
     <button
       class="h-7 border border-fail bg-transparent px-2.5 text-[13px] text-fail hover:bg-fail hover:text-bg disabled:border-rule disabled:text-faint disabled:hover:bg-transparent"
-      title="Delete the worktrees with nothing in them whose PR merged or whose commits are all on a remote. Asks first, listing them; git refuses any with uncommitted work."
+      title="Delete the worktrees with nothing in them whose PR merged or whose commits are all on a remote. Asks first, listing them; git refuses any with uncommitted work. Also on the repo's menu."
       disabled={!app.model.connected}
       onclick={() => sweepWorktrees(repo, groups)}>Delete merged &amp; clean&hellip;</button
     >
