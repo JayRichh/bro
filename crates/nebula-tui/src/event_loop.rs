@@ -45,6 +45,7 @@ mod optimistic;
 mod orchestrator;
 mod overlays;
 mod pacing;
+mod paste_burst;
 mod placeholder;
 mod prompts;
 mod quick_launch;

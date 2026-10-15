@@ -65,6 +65,28 @@ impl ServerEvent {
 /// Max IPC frame size (length prefix sanity bound).
 pub const MAX_FRAME_LEN: u32 = 4 * 1024 * 1024;
 
+/// The most bytes one `Input` carries: a paste longer than a frame goes as
+/// several, which the daemon writes to the child back to back, in order.
+pub const INPUT_CHUNK: usize = 1024 * 1024;
+
+/// `data` for `session` as `Input` requests of at most [`INPUT_CHUNK`]
+/// bytes each. A single frame over [`MAX_FRAME_LEN`] is refused by the
+/// codec, and the connection goes with it.
+pub fn input_requests(session: &SessionRef, data: Vec<u8>) -> Vec<ClientRequest> {
+    if data.len() <= INPUT_CHUNK {
+        return vec![ClientRequest::Input {
+            session: session.clone(),
+            data,
+        }];
+    }
+    data.chunks(INPUT_CHUNK)
+        .map(|chunk| ClientRequest::Input {
+            session: session.clone(),
+            data: chunk.to_vec(),
+        })
+        .collect()
+}
+
 /// Cloud tasks ultimately cross an OS argv boundary (twice: the login
 /// shell's `-c` string and Claude's own argv). Leave ample room for shell
 /// quoting expansion and the rest of the environment on every platform.
@@ -1030,6 +1052,39 @@ pub enum SubagentStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A paste bigger than a frame goes as frames that fit, and back to
+    /// back they are the paste, markers and all.
+    #[test]
+    fn a_paste_bigger_than_a_frame_is_split_into_frames_that_fit() {
+        let session = SessionRef::Agent(crate::AgentId("a1".into()));
+        let paste = [
+            &b"\x1b[200~"[..],
+            &vec![b'x'; 5 * 1024 * 1024],
+            b"\x1b[201~",
+        ]
+        .concat();
+        let reqs = input_requests(&session, paste.clone());
+        assert_eq!(reqs.len(), 6);
+        let mut joined = Vec::new();
+        for req in &reqs {
+            let frame = rmp_serde::to_vec(req).unwrap();
+            assert!(
+                frame.len() <= MAX_FRAME_LEN as usize,
+                "{} bytes",
+                frame.len()
+            );
+            match req {
+                ClientRequest::Input { session: s, data } => {
+                    assert_eq!(s, &session);
+                    joined.extend_from_slice(data);
+                }
+                other => panic!("not an Input: {other:?}"),
+            }
+        }
+        assert_eq!(joined, paste);
+        assert_eq!(input_requests(&session, b"a".to_vec()).len(), 1);
+    }
 
     #[test]
     fn protocol_ranges_overlap_when_either_side_is_additive() {

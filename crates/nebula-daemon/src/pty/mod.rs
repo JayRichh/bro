@@ -1,5 +1,6 @@
 pub mod cloud;
 pub mod cursor;
+mod input;
 pub mod kitty;
 mod osc;
 pub mod progress;
@@ -255,12 +256,14 @@ enum ReaderMsg {
 
 pub struct PtySession {
     pub sref: SessionRef,
-    // PTY lock order: writer/master are independent operation locks; scanner
-    // locks are fed one at a time before appending to `ring`. The only
+    // PTY lock order: master is an independent operation lock (input is a
+    // queue, not a lock); scanner locks are fed one at a time before
+    // appending to `ring`. The only
     // intentional nested scanner path is cursor/question setup before a ring
     // snapshot so no bytes are missed; code must not take `ring` and then a
     // scanner lock.
-    writer: Mutex<Box<dyn Write + Send>>,
+    /// Every write to the child, queued on a thread of its own (`input`).
+    input: input::InputQueue,
     master: Mutex<Box<dyn MasterPty + Send>>,
     /// Child pid: drives the SIGHUP → SIGKILL escalation (the child is its
     /// PTY session's leader — portable-pty does setsid — so pgid == pid,
@@ -400,7 +403,7 @@ impl PtySession {
         Ok(Self::start(
             Self {
                 sref,
-                writer: Mutex::new(writer),
+                input: input::InputQueue::spawn(writer),
                 master: Mutex::new(master),
                 child_pid,
                 ring: Mutex::new(ScrollbackRing::new(RING_CAPACITY)),
@@ -448,7 +451,7 @@ impl PtySession {
         let session = Self::start(
             Self {
                 sref: carried.sref,
-                writer: Mutex::new(writer),
+                input: input::InputQueue::spawn(writer),
                 master: Mutex::new(Box::new(master)),
                 child_pid: Some(pid),
                 ring: Mutex::new(ScrollbackRing::restored(
@@ -538,11 +541,11 @@ impl PtySession {
     #[cfg(windows)]
     pub fn uncarry(&self) {}
 
+    /// Queue `data` for the child. Returns at once, however slow the child
+    /// is to read it; a failed write is logged by the queue and refused to
+    /// the callers after it.
     pub fn write_input(&self, data: &[u8]) -> Result<()> {
-        let mut w = self.writer.lock();
-        w.write_all(data)?;
-        w.flush()?;
-        Ok(())
+        self.input.write(data)
     }
 
     pub fn resize(&self, cols: u16, rows: u16) -> Result<()> {
