@@ -112,6 +112,11 @@ macro_rules! main_loop_body {
     // The INPUT LATENCY PROBE (`NEBULA_PERF_LOG`); None outside a
     // measurement run.
     let mut perf = crate::perf::Perf::from_env();
+    // A paste the host typed out key by key, being put back together
+    // (PASTE BURSTS, paste_burst.rs).
+    let mut burst = paste_burst::PasteBurst::default();
+    // The host's events this turn, handled once the select is through.
+    let mut terminal_events: Vec<Event> = Vec::new();
 
     loop {
         if app.chrome.dirty && tokio::time::Instant::now() >= next_draw {
@@ -144,6 +149,10 @@ macro_rules! main_loop_body {
         // When the EDGE AUTO-SCROLL next steps (its arm below).
         let drag_autoscroll_deadline = app
             .pane.next_drag_autoscroll
+            .map_or_else(tokio::time::Instant::now, tokio::time::Instant::from_std);
+        // When the PASTE BURST settles (its arm below).
+        let burst_deadline = burst
+            .deadline()
             .map_or_else(tokio::time::Instant::now, tokio::time::Instant::from_std);
         tokio::select! {
             // Pending redraw: wake at the frame boundary even if no new
@@ -309,27 +318,29 @@ macro_rules! main_loop_body {
             {
                 fire_keepwarm(&mut app, &mut out);
             }
+            // A PASTE BURST that has stopped arriving: whatever came in
+            // while the loop was busy joins it first, else it is settled.
+            _ = tokio::time::sleep_until(burst_deadline), if burst.is_holding() => {
+                let batch = queued_input(&mut input, Vec::new(), &mut app).await;
+                let now = std::time::Instant::now();
+                terminal_events = burst.feed(batch, now);
+                if burst.deadline().is_some_and(|deadline| deadline <= now) {
+                    terminal_events.extend(burst.settle());
+                }
+            }
             ev = input.next() => match ev {
                 Some(Ok(event)) => {
-                    tracing::debug!(?event, "$terminal event");
-                    if matches!(event, Event::Resize(..)) {
-                        on_host_resize($terminal)?;
-                    }
-                    let probe = perf
-                        .as_ref()
-                        .and_then(|_| crate::perf::label(&event))
-                        .map(|label| (label, std::time::Instant::now()));
-                    let watching = app.chrome.release_watch.is_some();
-                    handle_terminal_event(&mut app, event, &mut out);
-                    // A RELEASE WATCH armed by this key flips the host's
-                    // keyboard flags now, ahead of the key's first repeat;
-                    // one ended by it flips them back (release_watch.rs).
-                    if watching != app.chrome.release_watch.is_some() {
-                        let _ = watch_held_key($terminal.backend_mut(), !watching);
-                    }
-                    if let (Some(perf), Some((label, arrived))) = (&mut perf, probe) {
-                        perf.input(label, arrived, &app);
-                    }
+                    // A text key with more queued behind it may be a paste
+                    // the host typed out (PASTE BURSTS): read the rest of
+                    // what is queued before any of it is handled.
+                    terminal_events = if paste_burst::ENABLED
+                        && (burst.is_holding() || paste_burst::is_text_press(&event))
+                    {
+                        let batch = queued_input(&mut input, vec![event], &mut app).await;
+                        burst.feed(batch, std::time::Instant::now())
+                    } else {
+                        vec![event]
+                    };
                 }
                 Some(Err(_)) | None => app.chrome.should_quit = true,
             },
@@ -447,6 +458,27 @@ macro_rules! main_loop_body {
                 }
             }
         }
+        for event in terminal_events.drain(..) {
+            tracing::debug!(?event, "$terminal event");
+            if matches!(event, Event::Resize(..)) {
+                on_host_resize($terminal)?;
+            }
+            let probe = perf
+                .as_ref()
+                .and_then(|_| crate::perf::label(&event))
+                .map(|label| (label, std::time::Instant::now()));
+            let watching = app.chrome.release_watch.is_some();
+            handle_terminal_event(&mut app, event, &mut out);
+            // A RELEASE WATCH armed by this key flips the host's
+            // keyboard flags now, ahead of the key's first repeat;
+            // one ended by it flips them back (release_watch.rs).
+            if watching != app.chrome.release_watch.is_some() {
+                let _ = watch_held_key($terminal.backend_mut(), !watching);
+            }
+            if let (Some(perf), Some((label, arrived))) = (&mut perf, probe) {
+                perf.input(label, arrived, &app);
+            }
+        }
         if app.nav.focus != focus_before {
             tracing::debug!(from = ?focus_before, to = ?app.nav.focus, "focus changed");
             note_focus_change(&mut app);
@@ -550,6 +582,37 @@ macro_rules! main_loop_body {
     }
 
     }};
+}
+
+/// `batch` and every host event already queued behind it, up to
+/// `paste_burst::MAX_BATCH`, read without waiting for more. A host that
+/// went away ends the loop, as it does from the select.
+///
+/// Polled with the loop's own waker, never `now_or_never`'s: crossterm's
+/// `EventStream` keeps the waker it was first left pending with until an
+/// event arrives, and a no-op one there left the next key unheard until
+/// some other timer woke the loop — seconds, under a ConPTY repro.
+async fn queued_input<S>(input: &mut S, mut batch: Vec<Event>, app: &mut App) -> Vec<Event>
+where
+    S: futures::Stream<Item = std::io::Result<Event>> + Unpin,
+{
+    use std::task::Poll;
+    while batch.len() < paste_burst::MAX_BATCH {
+        let next = std::future::poll_fn(|cx| match input.poll_next_unpin(cx) {
+            Poll::Ready(next) => Poll::Ready(Some(next)),
+            Poll::Pending => Poll::Ready(None),
+        })
+        .await;
+        match next {
+            Some(Some(Ok(event))) => batch.push(event),
+            Some(Some(Err(_)) | None) => {
+                app.chrome.should_quit = true;
+                break;
+            }
+            None => break,
+        }
+    }
+    batch
 }
 
 pub(crate) async fn main_loop(

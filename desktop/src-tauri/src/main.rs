@@ -85,9 +85,11 @@ fn input(
     } else {
         data.into_bytes()
     };
-    client
-        .send(ClientRequest::Input { session, data })
-        .map_err(err)
+    // A paste bigger than a frame goes as several (`input_requests`).
+    for req in nebula_core::input_requests(&session, data) {
+        client.send(req).map_err(err)?;
+    }
+    Ok(())
 }
 
 #[tauri::command]

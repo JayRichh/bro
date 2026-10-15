@@ -253,7 +253,7 @@ pub(crate) fn dispatch_input(app: &mut App, event: Event, out: &mut Vec<ClientRe
                     let session = term.sref.clone();
                     let data = pasted(term.parser.screen(), &text);
                     typed_into(app, &session);
-                    out.push(ClientRequest::Input { session, data });
+                    out.extend(nebula_core::input_requests(&session, data));
                 }
             }
         }

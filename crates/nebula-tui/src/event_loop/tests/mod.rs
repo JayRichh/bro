@@ -7601,6 +7601,78 @@ fn paste_into_a_locked_pane_is_bracketed() {
     assert!(out.is_empty(), "an unlocked pane takes no paste: {out:?}");
 }
 
+/// A paste the Windows console typed out — a press and a release per
+/// character, a line break an Enter — reaches claude as ONE bracketed
+/// Input once the PASTE BURST puts it back together. Forwarded key by
+/// key, as it was, it made an Input per character and an Enter, which
+/// submits the prompt, per line.
+#[test]
+fn a_paste_typed_out_by_the_console_is_one_bracketed_input() {
+    use super::paste_burst::PasteBurst;
+    let mut app = App::new();
+    seed_tree(&mut app);
+    let sref = SessionRef::Agent(AgentId("a1".into()));
+    let mut term = AttachedTerm::new(sref.clone(), 80, 24);
+    term.apply_output(0, b"\x1b[?2004h");
+    app.pane.term = Some(term);
+    app.nav.focus = Focus::Terminal;
+    app.pane.term_locked = true;
+
+    // Windows Terminal pastes its line breaks as carriage returns.
+    let text: String = (0..40)
+        .map(|i| format!("line {i} of a pasted block\r"))
+        .collect();
+    let keys: Vec<Event> = text
+        .chars()
+        .flat_map(|c| {
+            let code = if c == '\r' {
+                KeyCode::Enter
+            } else {
+                KeyCode::Char(c)
+            };
+            [KeyEventKind::Press, KeyEventKind::Release]
+                .map(|kind| Event::Key(KeyEvent::new_with_kind(code, KeyModifiers::NONE, kind)))
+        })
+        .collect();
+
+    // Without the burst: what the pane used to send.
+    let mut out = Vec::new();
+    for event in keys.clone() {
+        handle_terminal_event(&mut app, event, &mut out);
+    }
+    let enters = out
+        .iter()
+        .filter(|r| matches!(r, ClientRequest::Input { data, .. } if data.as_slice() == b"\r"))
+        .count();
+    assert_eq!(out.len(), text.chars().count(), "an Input per character");
+    assert_eq!(enters, 40, "every line submitted");
+
+    // With it: the console's batches, held and settled as one paste.
+    out.clear();
+    let mut burst = PasteBurst::default();
+    let now = std::time::Instant::now();
+    for chunk in keys.chunks(52) {
+        for event in burst.feed(chunk.to_vec(), now) {
+            handle_terminal_event(&mut app, event, &mut out);
+        }
+    }
+    assert!(
+        out.is_empty(),
+        "nothing goes while the burst holds: {out:?}"
+    );
+    for event in burst.settle() {
+        handle_terminal_event(&mut app, event, &mut out);
+    }
+    let want = [&b"\x1b[200~"[..], text.as_bytes(), b"\x1b[201~"].concat();
+    match out.as_slice() {
+        [ClientRequest::Input { session, data }] => {
+            assert_eq!(session, &sref);
+            assert_eq!(data, &want);
+        }
+        other => panic!("expected one Input request, got {} of them", other.len()),
+    }
+}
+
 /// A program that never turned bracketed paste on gets a paste as a
 /// terminal sends it, as though typed: a token pasted at a password
 /// prompt the shell ran (`hf auth login`) arrives as the token alone,
