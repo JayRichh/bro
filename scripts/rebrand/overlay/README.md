@@ -104,7 +104,8 @@ One sprint, start to finish, in `kete`. <sub>Synthetic demo data: the repos, tas
 
 <img src="assets/showcase/04-review.png" alt="The review modal on the Invoice CSV export session, on its Diff tab, showing the CSV writer added to src/invoices/export.ts" width="100%">
 
-**5. The kanban.** `Shift+K` lays every session out in five lanes, across every project with `Tab`.
+**5. The board.** `Shift+K` lays every session out in five lanes: Running, Needs you, Review, Ship
+and Done. The scope chip in the header says what it shows (all, a repo, a worktree, an account).
 
 <img src="assets/showcase/05-kanban.png" alt="The kanban over both projects: one session needing input, three running including the orchestrator, one unseen, one done and one with a pull request open" width="100%">
 
@@ -131,8 +132,18 @@ The strip across the top counts across all repos: how many sessions need you, ar
 unread. Under it, one row per repo, the repos with something waiting on you first. Each row holds its
 session tree: an orchestrator, the agents it started, and their subagents, indented under it, with
 status as a square and a word. A session that needs you carries an ember bar down its left edge.
-`Shift+K` swaps to the board, the same sessions in five lanes (Needs input, Running, Unseen, Done
-and PR open). Pick a session to open its live terminal in a split beside the overview.
+`Shift+K` swaps to the board, the same sessions in five lanes (Running, Needs you, Review, Ship and
+Done). The scope chip in the header narrows the board, the overview and the counts to a repo, a
+worktree or an account, and its x shows everything again. Pick a session to open its live terminal
+in a split beside the overview.
+
+**Review and ship.** Opening a Review card docks its worktree's diff against the base beside the
+board, with a verb row: Reply (`Space`), Open PR or View PR (`Alt+P`), Merge (`Alt+M`), Archive
+(`Alt+A`) and Delete worktree (`Alt+W`), the same keys in both apps. Dropping a Review card on Ship
+opens the pull request composer (GitHub through `gh`, Azure DevOps through its API), and dropping a
+Ship card on Done opens the merge confirm. A lane the agent owns (Running, Needs you) refuses a drop
+and says why. The same verbs are on every card's menu: Create pull request, Merge pull request, Open
+pull request and Focus here, which narrows the scope chip to the card's worktree.
 
 ### 2. Tasks: the sprint, and Start task
 
@@ -236,6 +247,19 @@ The quick prompt along the bottom takes a task, `Enter` starts it, and `Shift+En
 While it has the focus, a row above it picks the model, effort, profile and agent preset, and
 whether the session gets a new worktree.
 
+## Shipping from the command line
+
+`kete ship` does what the board's Ship lane does, on the checkout you are in or any worktree Kete
+knows with `--project <name>` and `--worktree <branch>`. GitHub goes through `gh`, Azure DevOps
+through its API. Git never asks for a sign-in (no prompt, no credential window, ssh in batch mode):
+a missing one is an error that says how to sign in.
+
+```powershell
+kete ship status                          # the forge, branch, base, unpushed commits and the PR
+kete ship pr --draft                      # push and open a draft, title suggested
+kete ship merge --method squash --delete-branch
+```
+
 ## Azure DevOps
 
 The Tasks, Branches and Pull requests views work on any repo whose git remote is on
@@ -281,7 +305,7 @@ project tabs, and each tab counts its sessions' dots. A red `●1` on a tab tell
 | **Status at a glance** | Yellow mid-turn, blue finished and unseen, green finished and read, red waiting on you. On every card, and counted on every project tab. |
 | **A task box** | `p` opens the quick prompt: type the task, `Enter`, and an agent is on it. Project, worktree, harness, model and profile are each a picker that keeps your text. |
 | **Real git worktrees** | `Ctrl+N` in the box sends the launch to a fresh `git worktree`, so two agents never edit the same checkout. |
-| **A kanban** | `Shift+K` lays the sessions out in five lanes: Needs input, Running, Unseen, Done and PR open. |
+| **A board** | `Shift+K` lays the sessions out in five lanes: Running, Needs you, Review, Ship and Done. `Enter` on a Review card docks its diff against the base with a verb row, and dropping a card on Ship or Done opens the pull request or merges it. |
 | **A diff viewer** | `g` shows the worktree's changes side by side, inline or as replacements, with word-level highlights. Stage a change with `Ctrl+y` or discard it with `Ctrl+x`. |
 | **GitHub pull requests and issues** | Kete asks `gh` what's open. `v` lists pull requests, `i` lists issues, and either can start an agent on one. |
 | **Find, grep, browse** | `f` finds a file, `F` runs `git grep`, `b` opens the tree browser, all scoped to the worktree. |
@@ -298,7 +322,9 @@ project tabs, and each tab counts its sessions' dots. A red `●1` on a tab tell
 | `j` / `k`, `h` / `l` | walk the worktree bands, then the cards in one |
 | `Enter`, `` Ctrl+` `` | step into the session's terminal, and hand the keys back |
 | `/` | jump to any project, worktree, session or pull request, what needs you first |
-| `Shift+K` | the kanban |
+| `Shift+K` | the board: Running, Needs you, Review, Ship, Done |
+| `Shift+←` / `Shift+→` | on the board: the card onto the lane beside it (Review to Ship opens the pull request) |
+| `Alt+P` / `Alt+M` / `Alt+A` / `Alt+W` | in a review: the pull request, merge, archive, delete the worktree |
 | `g` | diff viewer |
 | `f` / `F` / `b` | find file, `git grep`, tree browser |
 | `v` / `i` | pull requests, issues |

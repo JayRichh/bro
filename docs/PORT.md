@@ -38,7 +38,7 @@ Kete is a cross-platform fork of [nebula](https://github.com/AgentSystemLabs/neb
 
 - **Profiles:** several accounts per harness. Each profile maps to env: `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GH_CONFIG_DIR`, `COPILOT_*`. A picker in the quick prompt chooses one, quota is shown per profile, and switch-and-resume is supported.
 - **Copilot:** as a harness.
-- **Kanban:** sessions in lanes by status (Needs input, Running, Unseen, Done, PR open), on `Shift+K`.
+- **Board:** sessions in five lanes (Running, Needs you, Review, Ship, Done), on `Shift+K`, in both apps: a scope chip narrows it to a repo, a worktree or an account; a Review card opens a review unit (its diff against the base and a verb row: reply, pull request, merge, archive, delete worktree); dropping Review on Ship opens the pull request composer and Ship on Done the merge. `kete ship` (status, pr, merge) does the same from the command line, GitHub through `gh` and Azure DevOps through its API.
 - **Diff:** side by side, inline and replacement layouts, word highlights, and per-change stage and discard.
 - **Themes:** One Dark and One Light, `auto` to follow the OS, or `vscode` to derive the palette from the VS Code theme.
 - **File icons:** Material Icon Theme mapping. Nerd Font glyphs in the TUI with an ASCII fallback; SVGs in the GUI.
