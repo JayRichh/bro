@@ -56,10 +56,22 @@ pub(super) fn draw_footer_bar(f: &mut Frame, app: &mut App, area: Rect) {
         key_bar,
         sep,
     } = footer_hint(app);
-    let mut spans: FooterSpans = footer_left_context(app, th)
-        .into_iter()
-        .map(|s| (s, None))
-        .collect();
+    // On the grid, a KEY BAR that would run past the bar loses the
+    // breadcrumb first: the header's lit tab and the pane's header already
+    // say the project, the checkout and the card, and the buttons are
+    // what the footer is for there.
+    let room = usize::from(area.width).saturating_sub(footer_usage_width(app));
+    let bar_w: usize = key_bar.as_ref().map_or(0, |bar| {
+        bar.iter()
+            .map(|h| h.key.chars().count() + sep.chars().count() + h.does.chars().count() + 2)
+            .sum()
+    });
+    let mut context = footer_left_context(app, th, true);
+    let context_w: usize = context.iter().map(|s| s.width()).sum();
+    if key_bar.is_some() && app.launcher_grid() && context_w + PLATE_ROOM + bar_w > room {
+        context = footer_left_context(app, th, false);
+    }
+    let mut spans: FooterSpans = context.into_iter().map(|s| (s, None)).collect();
     let actions = append_footer_hint(app, &mut spans, hints, key_bar, sep, th);
     render_footer_left(f, app, area, spans, &actions, th);
     render_footer_usage(f, app, area, th);
@@ -282,6 +294,7 @@ fn launcher_tabs_footer_hint(app: &App, _th: Theme) -> FooterHint {
     let k = |a| key_hint(app, a);
     let down = k(Action::MoveDown);
     key_bar(vec![
+        button(k(Action::Help), "help", Action::Help),
         keys(
             format!("{}{}", k(Action::FocusLeft), k(Action::FocusRight)),
             "switch project",
@@ -297,7 +310,6 @@ fn launcher_tabs_footer_hint(app: &App, _th: Theme) -> FooterHint {
             Action::CloseProjectTab,
         ),
         keys("esc".into(), "back to the cards"),
-        button(k(Action::Help), "help", Action::Help),
         button(k(Action::Quit), "quit", Action::Quit),
     ])
 }
@@ -324,11 +336,10 @@ fn launcher_grid_footer_hint(app: &App, _th: Theme) -> FooterHint {
     }
     // Every entry that is one action's key is a button: a click on it runs
     // that action, as the key does. The walks (`hjkl`, `[]`) stay words.
-    let jump_help_quit = [
-        button(k(Action::Palette), "jump", Action::Palette),
-        button(k(Action::Help), "help", Action::Help),
-        button(k(Action::Quit), "quit", Action::Quit),
-    ];
+    // Help leads the bar, so the one button every other action is a click
+    // away from (each of its rows is a button) is never the one a narrow
+    // bar cuts.
+    let help = button(k(Action::Help), "help", Action::Help);
     // The KANBAN's own keys first: its lanes, its scope, the way back to
     // the bands — the board is the grid's other home, and its footer
     // says how to leave it as plainly as the bands' says how to reach it.
@@ -383,13 +394,12 @@ fn launcher_grid_footer_hint(app: &App, _th: Theme) -> FooterHint {
             button(k(Action::GitDiff), "diff", Action::GitDiff),
         ]
     };
-    let [jump, help, quit] = jump_help_quit;
-    hints.push(jump);
+    hints.insert(0, help);
+    hints.push(button(k(Action::Palette), "jump", Action::Palette));
     if !app.launcher.launcher_kanban && !app.launcher.show_archived {
         hints.push(button(k(Action::Settings), "settings", Action::Settings));
     }
-    hints.push(help);
-    hints.push(quit);
+    hints.push(button(k(Action::Quit), "quit", Action::Quit));
     key_bar(hints)
 }
 
@@ -533,7 +543,9 @@ fn worktree_footer_hint(app: &App, k: &impl Fn(Action) -> String) -> String {
     )
 }
 
-fn footer_left_context(app: &App, th: Theme) -> Vec<Span<'static>> {
+/// The footer's left: the host, the connection, and — with `crumbs` —
+/// the breadcrumb.
+fn footer_left_context(app: &App, th: Theme, crumbs: bool) -> Vec<Span<'static>> {
     let mut spans = vec![Span::raw(" ")];
     if app.chrome.is_remote {
         spans.push(Span::styled(
@@ -546,7 +558,7 @@ fn footer_left_context(app: &App, th: Theme) -> Vec<Span<'static>> {
         spans.push(Span::styled("✗ disconnected", Style::default().fg(th.err)));
         spans.push(Span::styled("  ·  ", Style::default().fg(th.dim)));
     }
-    let crumbs = breadcrumb(app);
+    let crumbs = if crumbs { breadcrumb(app) } else { Vec::new() };
     if !crumbs.is_empty() {
         spans.extend(crumbs);
         // No changed-file count here: it rides each card's branch, where
@@ -554,6 +566,15 @@ fn footer_left_context(app: &App, th: Theme) -> Vec<Span<'static>> {
         spans.push(Span::styled("    ", Style::default()));
     }
     spans
+}
+
+/// What the version plate takes (`kete v0.48.0  ·  `), give or take an
+/// update notice: the room [`draw_footer_bar`] keeps for it.
+const PLATE_ROOM: usize = 20;
+
+/// The columns the usage readout at the bar's right end takes.
+fn footer_usage_width(app: &App) -> usize {
+    footer_usage(app).map_or(0, |s| s.chars().count() + 2)
 }
 
 /// The footer's spans, each tagged with the KEY BAR entry it belongs to,

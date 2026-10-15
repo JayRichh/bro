@@ -291,27 +291,28 @@ fn handle_global_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>)
 /// press takes after the keymap lookup ([`dispatch_action`]), so a click
 /// and its key can never come to mean two things. No double tap is armed
 /// (a click is one press), and the chord handed on is the action's first
-/// binding — what the KEY COMBO DISPLAY and a held-key watch read — or,
-/// for an action left unbound, a chord no key sends.
+/// binding — what the KEY COMBO DISPLAY shows — or, for an action left
+/// unbound, a chord no key sends, which the display leaves out.
 pub(super) fn run_action(
     app: &mut App,
     action: crate::keymap::Action,
     out: &mut Vec<ClientRequest>,
 ) {
-    let chord = app
-        .chrome
-        .keymap
-        .first(action)
-        .unwrap_or(crate::keymap::KeyChord {
-            code: KeyCode::Null,
-            mods: crossterm::event::KeyModifiers::NONE,
-        });
-    crate::key_combo::note(
-        app,
-        &[chord],
-        crate::keymap::spec_of(action).map(|s| s.label),
-    );
+    let bound = app.chrome.keymap.first(action);
+    if let Some(chord) = bound {
+        crate::key_combo::note(
+            app,
+            &[chord],
+            crate::keymap::spec_of(action).map(|s| s.label),
+        );
+    }
+    let chord = bound.unwrap_or(crate::keymap::KeyChord {
+        code: KeyCode::Null,
+        mods: crossterm::event::KeyModifiers::NONE,
+    });
     dispatch_action(app, action, None, chord, out);
+    // A click holds no key down: nothing for the RELEASE WATCH to wait on.
+    app.chrome.release_watch = None;
     app.chrome.dirty = true;
 }
 

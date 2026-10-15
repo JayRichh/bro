@@ -103,6 +103,13 @@ fn every_button_is_drawn_whole_inside_the_frame_at_every_width() {
             // on its last row; 60 columns of context leave it none.
             assert!(w < 100 || !footer.is_empty(), "{w}: no footer buttons");
             assert!(footer.iter().all(|(r, _)| r.y == 39), "{w}: {footer:?}");
+            // Help is always a click away — the header's `?` or the footer's
+            // — and every other action is a click on one of its rows.
+            assert!(
+                app.hit_rect(&HitTarget::Button(Action::Help)).is_some()
+                    || app.hit_rect(&HitTarget::FooterHint(Action::Help)).is_some(),
+                "{w}: no way to the help"
+            );
             // The card under the cursor carries its buttons, the `⋯` always.
             assert!(
                 !hits_where(&app, |h| matches!(h, HitTarget::CardMenu(_))).is_empty(),
@@ -436,6 +443,31 @@ fn a_double_click_never_answers_the_dialog_it_put_up() {
             matches!(app.modals.overlay, Some(Overlay::Confirm(_))),
             "the dialog waits for a deliberate answer"
         );
+    });
+}
+
+/// A plain one-line prompt — a rename — has its two buttons too, in the
+/// narrower box it is drawn in.
+#[test]
+fn a_rename_prompt_has_its_buttons() {
+    with_default_config(|| {
+        let mut app = App::new();
+        seed_tree(&mut app);
+        open_prompt(
+            &mut app,
+            PromptKind::RenameAgent {
+                id: AgentId("a1".into()),
+            },
+        );
+        drawn_modal_area(&mut app);
+        let rects = match &app.modals.overlay {
+            Some(Overlay::Prompt(p)) => p.answer_rects(),
+            _ => panic!("the rename prompt is up"),
+        };
+        assert_eq!(rects.len(), 2, "[Enter] ok and [Esc] cancel");
+        let esc = rects.iter().find(|(_, k)| *k == KeyCode::Esc).unwrap().0;
+        click(&mut app, esc.x + 1, esc.y, &mut Vec::new());
+        assert!(app.modals.overlay.is_none(), "cancel closes it");
     });
 }
 
