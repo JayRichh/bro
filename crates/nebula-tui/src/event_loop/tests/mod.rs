@@ -22592,6 +22592,7 @@ mod board;
 mod buttons;
 mod dispatch;
 mod orch_view;
+mod paste_speed;
 mod verbs;
 mod visual;
 

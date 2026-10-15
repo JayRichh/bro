@@ -39,6 +39,7 @@ mod board;
 mod commands;
 mod desk;
 mod focus_walk;
+mod host_input;
 mod host_terminal;
 mod key_modes;
 mod launcher;

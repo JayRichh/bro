@@ -4645,6 +4645,9 @@ pub struct ChromeState {
     /// process with a fresh connection.
     pub pending_ssh: Option<crate::hosts::HostEntry>,
     pub flash: Option<String>,
+    /// A PASTE BURST being read, in bytes so far: the status bar says
+    /// `pasting… 64 KB` until it lands (paste_burst.rs).
+    pub pasting: Option<usize>,
     /// The session whose attach refusal `flash` is showing, with the text
     /// it put there: that session starting after all (its first replay)
     /// clears the line, however the pane got back to it — a switch away
@@ -4732,6 +4735,7 @@ impl Default for ChromeState {
             should_quit: false,
             pending_ssh: None,
             flash: None,
+            pasting: None,
             refusal_flash: None,
             update_available: None,
             edge_tap: None,

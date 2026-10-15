@@ -22,6 +22,13 @@
 //! into an overlay's field, nowhere near the grid's hotkeys). Anything
 //! shorter is replayed key for key, exactly as it arrived. A lone key —
 //! everything typed — is never held at all.
+//!
+//! A burst is read as fast as the host hands it over: the Windows console's
+//! text keys in bulk (HOST INPUT, host_input.rs), tens of thousands of
+//! events a turn, and no frame painted between turns while it holds but
+//! the one in [`PASTE_FRAME`] that says how much has come — a 110 KB
+//! paste is two hundred thousand events, and the status bar says
+//! `pasting… 64 KB` rather than looking hung.
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use std::time::{Duration, Instant};
@@ -38,8 +45,38 @@ pub(super) const ENABLED: bool = cfg!(windows);
 pub(super) const QUIET: Duration = Duration::from_millis(20);
 
 /// The most events read in one go before the loop gets a turn again, so
-/// a long paste still lets output and the clock through.
-pub(super) const MAX_BATCH: usize = 1024;
+/// a long paste still lets output and the clock through: 32 KB of text,
+/// read in a few milliseconds in bulk.
+pub(super) const MAX_BATCH: usize = 64 * 1024;
+
+/// The most text keys read in bulk between two looks at the time.
+pub(super) const READ_CHUNK: usize = 4096;
+
+/// …or the longest one read may take, where the host hands its events
+/// over one at a time (crossterm's stream: tens of microseconds each).
+pub(super) const BATCH_TIME: Duration = Duration::from_millis(50);
+
+/// How often a frame is painted while a burst holds: often enough for the
+/// status bar's count to move, rarely enough that the paste isn't waiting
+/// on frames. Any other time the FRAME PACING decides.
+pub(super) const PASTE_FRAME: Duration = Duration::from_millis(100);
+
+/// A burst this big says `pasting…` in the status bar while it is read.
+const SHOW_BYTES: usize = 1024;
+
+/// When the loop may paint next: as the pacer says, held back to
+/// [`PASTE_FRAME`] after the last frame while a burst is being read.
+pub(super) fn draw_at(
+    next_draw: tokio::time::Instant,
+    last_frame: tokio::time::Instant,
+    holding: bool,
+) -> tokio::time::Instant {
+    if holding {
+        next_draw.max(last_frame + PASTE_FRAME)
+    } else {
+        next_draw
+    }
+}
 
 /// More characters than this in one burst is a paste even on one line:
 /// a slow frame can queue a few typed keys, never this many.
@@ -51,11 +88,18 @@ pub(crate) struct PasteBurst {
     held: Vec<Event>,
     /// When the last key joined: the burst settles [`QUIET`] after it.
     last: Option<Instant>,
+    /// The text the held presses type, in bytes: the status bar's count.
+    bytes: usize,
 }
 
 impl PasteBurst {
     pub(super) fn is_holding(&self) -> bool {
         !self.held.is_empty()
+    }
+
+    /// How much a burst big enough to mention has gathered, in bytes.
+    pub(super) fn pasting(&self) -> Option<usize> {
+        (self.bytes >= SHOW_BYTES).then_some(self.bytes)
     }
 
     /// When the burst is settled if nothing more joins it.
@@ -74,6 +118,7 @@ impl PasteBurst {
         let mut out = Vec::new();
         for event in batch {
             if is_text_key(&event) {
+                self.bytes += text_len(&event);
                 self.held.push(event);
                 self.last = Some(now);
             } else {
@@ -88,6 +133,7 @@ impl PasteBurst {
     /// Settle the burst: one paste, or its keys as they came.
     pub(super) fn settle(&mut self) -> Vec<Event> {
         self.last = None;
+        self.bytes = 0;
         let held = std::mem::take(&mut self.held);
         match pasted_text(&held) {
             Some(text) => vec![Event::Paste(text)],
@@ -130,6 +176,18 @@ fn pasted_text(held: &[Event]) -> Option<String> {
     (paired && chars >= 2 && (line_break || chars > MIN_PASTE_CHARS)).then_some(text)
 }
 
+/// The bytes a held key adds to the text: a press's character, nothing
+/// for a release.
+fn text_len(event: &Event) -> usize {
+    match event {
+        Event::Key(key) if key.kind != KeyEventKind::Release => match key.code {
+            KeyCode::Char(c) => c.len_utf8(),
+            _ => 1,
+        },
+        _ => 0,
+    }
+}
+
 /// A key press that types text: what a paste is made of.
 pub(super) fn is_text_press(event: &Event) -> bool {
     matches!(event, Event::Key(key) if key.kind != KeyEventKind::Release && types_text(key))
@@ -145,7 +203,7 @@ fn is_text_key(event: &Event) -> bool {
 /// Tab, and Enter plain or with Ctrl (the console's line feed). Ctrl or
 /// Alt alone on a character is a chord, never text; a lone Ctrl+Enter
 /// typed is never in a burst, and passes through as the chord it is.
-fn types_text(key: &KeyEvent) -> bool {
+pub(super) fn types_text(key: &KeyEvent) -> bool {
     let mods = key.modifiers - KeyModifiers::SHIFT;
     match key.code {
         KeyCode::Char(_) => mods.is_empty() || mods == KeyModifiers::CONTROL | KeyModifiers::ALT,

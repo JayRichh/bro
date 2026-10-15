@@ -32,7 +32,9 @@ macro_rules! main_loop_body {
     // when its settings carry one, so an org-restricted machine offers the
     // ids the CLI will accept instead of aliases it refuses.
     crate::claude_catalogue::bootstrap(cfg.claude_enabled);
-    let mut input = crossterm::event::EventStream::new();
+    // The host's events: on Windows the console, its pasted text read in
+    // bulk (HOST INPUT, host_input.rs).
+    let mut input = host_input::open();
     let mut out: Vec<ClientRequest> = Vec::new();
     // Pointer shape last sent to the $terminal (OSC 22), so hover over a
     // splitter swaps the cursor once instead of on every motion event.
@@ -42,6 +44,9 @@ macro_rules! main_loop_body {
     // When the loop may paint again (FRAME PACING): back to back for a key
     // and its answer, 60 fps under sustained output.
     let mut pacer = pacing::FramePacer::new(next_draw);
+    // When the last frame was painted: a PASTE BURST being read holds the
+    // next one back (paste_burst::draw_at).
+    let mut last_frame = next_draw;
     let mut next_git_poll = tokio::time::Instant::now();
     // The changed-file badge's `git status`, run off the loop; the count
     // lands here and in `app.jobs.git_changes`.
@@ -124,7 +129,8 @@ macro_rules! main_loop_body {
     let mut terminal_events: Vec<Event> = Vec::new();
 
     loop {
-        if app.chrome.dirty && tokio::time::Instant::now() >= next_draw {
+        let draw_at = paste_burst::draw_at(next_draw, last_frame, burst.is_holding());
+        if app.chrome.dirty && tokio::time::Instant::now() >= draw_at {
             // A selection change must never paint another checkout's badge:
             // the badge stays off until this checkout's count lands, and
             // between selections the slow poll keeps it fresh.
@@ -137,7 +143,8 @@ macro_rules! main_loop_body {
                 perf.frame(began, &app);
             }
             app.chrome.dirty = false;
-            next_draw = pacer.drew(tokio::time::Instant::now(), began.elapsed());
+            last_frame = tokio::time::Instant::now();
+            next_draw = pacer.drew(last_frame, began.elapsed());
             sync_pty_size(&mut app, &mut out);
             sync_vim_size(&mut app);
         }
@@ -162,7 +169,7 @@ macro_rules! main_loop_body {
         tokio::select! {
             // Pending redraw: wake at the frame boundary even if no new
             // events arrive.
-            _ = tokio::time::sleep_until(next_draw), if app.chrome.dirty => {}
+            _ = tokio::time::sleep_until(draw_at), if app.chrome.dirty => {}
             // Fixed deadline (not a fresh sleep per iteration) so heavy PTY
             // traffic can't starve the badge refresh.
             _ = tokio::time::sleep_until(next_git_poll) => {
@@ -326,7 +333,7 @@ macro_rules! main_loop_body {
             // A PASTE BURST that has stopped arriving: whatever came in
             // while the loop was busy joins it first, else it is settled.
             _ = tokio::time::sleep_until(burst_deadline), if burst.is_holding() => {
-                let batch = queued_input(&mut input, Vec::new(), &mut app).await;
+                let batch = queued_input(&mut input, Vec::new(), &mut app.chrome.should_quit).await;
                 let now = std::time::Instant::now();
                 terminal_events = burst.feed(batch, now);
                 if burst.deadline().is_some_and(|deadline| deadline <= now) {
@@ -341,7 +348,8 @@ macro_rules! main_loop_body {
                     terminal_events = if paste_burst::ENABLED
                         && (burst.is_holding() || paste_burst::is_text_press(&event))
                     {
-                        let batch = queued_input(&mut input, vec![event], &mut app).await;
+                        let batch =
+                            queued_input(&mut input, vec![event], &mut app.chrome.should_quit).await;
                         burst.feed(batch, std::time::Instant::now())
                     } else {
                         vec![event]
@@ -491,6 +499,12 @@ macro_rules! main_loop_body {
                 perf.input(label, arrived, &app);
             }
         }
+        // The PASTE BURST's size, for the status bar while it is read.
+        let pasting = burst.pasting();
+        if app.chrome.pasting != pasting {
+            app.chrome.pasting = pasting;
+            app.chrome.dirty = true;
+        }
         if app.nav.focus != focus_before {
             tracing::debug!(from = ?focus_before, to = ?app.nav.focus, "focus changed");
             note_focus_change(&mut app);
@@ -596,20 +610,39 @@ macro_rules! main_loop_body {
     }};
 }
 
-/// `batch` and every host event already queued behind it, up to
-/// `paste_burst::MAX_BATCH`, read without waiting for more. A host that
-/// went away ends the loop, as it does from the select.
+/// `batch` and every host event already queued behind it, read without
+/// waiting for more: the text keys at the head of the queue in bulk where
+/// the host can (HOST INPUT), the rest one at a time. Stops at
+/// `paste_burst::MAX_BATCH` events or `paste_burst::BATCH_TIME`, so a
+/// long paste still lets output and the clock through. A host that went
+/// away sets `closed`, ending the loop as it does from the select.
 ///
 /// Polled with the loop's own waker, never `now_or_never`'s: crossterm's
 /// `EventStream` keeps the waker it was first left pending with until an
 /// event arrives, and a no-op one there left the next key unheard until
 /// some other timer woke the loop — seconds, under a ConPTY repro.
-async fn queued_input<S>(input: &mut S, mut batch: Vec<Event>, app: &mut App) -> Vec<Event>
+pub(super) async fn queued_input<S>(
+    input: &mut S,
+    mut batch: Vec<Event>,
+    closed: &mut bool,
+) -> Vec<Event>
 where
-    S: futures::Stream<Item = std::io::Result<Event>> + Unpin,
+    S: host_input::HostInput,
 {
     use std::task::Poll;
-    while batch.len() < paste_burst::MAX_BATCH {
+    let began = std::time::Instant::now();
+    while batch.len() < paste_burst::MAX_BATCH && began.elapsed() < paste_burst::BATCH_TIME {
+        // A stretch at a time, so a paste the host is still handing over
+        // can't hold the turn past the time.
+        let room = (paste_burst::MAX_BATCH - batch.len()).min(paste_burst::READ_CHUNK);
+        match input.read_text(&mut batch, room) {
+            Err(_) => {
+                *closed = true;
+                break;
+            }
+            Ok(0) => {}
+            Ok(_) => continue,
+        }
         let next = std::future::poll_fn(|cx| match input.poll_next_unpin(cx) {
             Poll::Ready(next) => Poll::Ready(Some(next)),
             Poll::Pending => Poll::Ready(None),
@@ -618,7 +651,7 @@ where
         match next {
             Some(Some(Ok(event))) => batch.push(event),
             Some(Some(Err(_)) | None) => {
-                app.chrome.should_quit = true;
+                *closed = true;
                 break;
             }
             None => break,

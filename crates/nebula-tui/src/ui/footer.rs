@@ -79,6 +79,14 @@ pub(super) fn draw_footer_bar(f: &mut Frame, app: &mut App, area: Rect) {
 
 fn footer_hint(app: &App) -> FooterHint {
     let th = app.chrome.theme;
+    // A long paste the host typed out takes a moment to read: say so, or
+    // the screen looks hung (PASTE BURSTS).
+    if let Some(bytes) = app.chrome.pasting {
+        return span_hint(Span::styled(
+            pasting_label(bytes),
+            Style::default().fg(th.warn),
+        ));
+    }
     if let Some(flash) = &app.chrome.flash {
         return span_hint(Span::styled(flash.clone(), Style::default().fg(th.warn)));
     }
@@ -104,6 +112,11 @@ fn footer_hint(app: &App) -> FooterHint {
         return launcher_grid_footer_hint(app, th);
     }
     pane_footer_hint(app, th)
+}
+
+/// `pasting… 64 KB`, counted in whole KB.
+pub(crate) fn pasting_label(bytes: usize) -> String {
+    format!("pasting… {} KB", bytes.div_ceil(1024))
 }
 
 fn span_hint(hints: Span<'static>) -> FooterHint {
