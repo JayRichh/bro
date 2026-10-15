@@ -41,6 +41,10 @@ pub const TESTS: &[(&str, Test)] = &[
         "the_pane_keeps_every_line_across_board_and_grid",
         the_pane_keeps_every_line_across_board_and_grid,
     ),
+    (
+        "a_048_data_dir_upgrades_in_place",
+        super::upgrade::a_048_data_dir_upgrades_in_place,
+    ),
 ];
 
 /// The feature the fake agent builds: a question, a file, a commit.

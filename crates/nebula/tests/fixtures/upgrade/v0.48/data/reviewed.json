@@ -1,0 +1,10 @@
+{
+  "worktrees": {
+    "@ROOTW@\\repos\\alpha": {
+      "head": "3c63799e00e81d7af0e7f74716f3b0c9d4571e15",
+      "files": {
+        "README.md": 305419896
+      }
+    }
+  }
+}

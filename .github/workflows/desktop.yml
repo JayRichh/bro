@@ -7,13 +7,13 @@ on:
   pull_request:
     paths:
       - "desktop/**"
-      - "crates/nebula-core/**"
+      - "crates/**"
       - ".github/workflows/desktop.yml"
   push:
     branches: [main, windows]
     paths:
       - "desktop/**"
-      - "crates/nebula-core/**"
+      - "crates/**"
       - ".github/workflows/desktop.yml"
 
 permissions:
@@ -92,3 +92,49 @@ jobs:
           name: kete-desktop-windows-x64
           path: desktop/target/release/kete-desktop.exe
           if-no-files-found: error
+
+  # The built window driven end to end: tauri-driver over msedgedriver
+  # (matched to the runner's WebView2), a real daemon in temp dirs and the
+  # TUI suite's scripted fake agent as Claude (desktop/e2e).
+  e2e:
+    name: kete-desktop end-to-end (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    env:
+      CARGO_TERM_COLOR: always
+
+    defaults:
+      run:
+        working-directory: desktop
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Install Rust stable
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Cache cargo and target directories
+        uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
+        with:
+          workspaces: |
+            . -> target
+            desktop -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Fetch the drivers and build kete, the fake agent and kete-desktop
+        run: npm run e2e:prepare
+
+      - name: Desktop end-to-end
+        timeout-minutes: 20
+        run: npm run e2e:run

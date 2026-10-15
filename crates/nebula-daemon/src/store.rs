@@ -3703,4 +3703,73 @@ mod tests {
         assert!(store.snapshot_agents().unwrap().is_empty());
         assert!(store.worktree_bases().unwrap().is_empty());
     }
+    /// A database a 0.48 daemon left (migration 33), captured with its
+    /// rows (`crates/nebula/tests/fixtures/upgrade`): the store brings it
+    /// to the last migration with every project, worktree and session, the
+    /// user's order, the accounts sessions run under and the UI state
+    /// intact, and gives it a daemon id for its snapshot refs.
+    #[test]
+    fn a_048_database_upgrades_with_its_rows_and_order_intact() {
+        let sql = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../nebula/tests/fixtures/upgrade/v0.48/nebula.sql"
+        ))
+        .unwrap()
+        .replace("@ROOT@", "/fixture");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nebula.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(&sql).unwrap();
+            let version: i64 = conn
+                .query_row("PRAGMA user_version", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(version, 33, "the fixture is a 0.48 database");
+        }
+
+        let store = Store::open(&path).unwrap();
+        let version: i64 = store
+            .conn
+            .lock()
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, MIGRATIONS.len() as i64);
+        assert_eq!(version, 35);
+
+        let (projects, worktrees, agents, _) = store.load_tree().unwrap();
+        // beta was dragged ahead of alpha.
+        let names: Vec<&str> = projects.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["beta", "alpha"]);
+        let alpha = &projects[1];
+        assert_eq!(alpha.repo_path, PathBuf::from("/fixture/repos/alpha"));
+        // alpha's worktrees: main first, then fix-typo dragged above feat/login.
+        let branches: Vec<&str> = worktrees
+            .iter()
+            .filter(|w| w.project_id == alpha.id)
+            .map(|w| w.branch.as_str())
+            .collect();
+        assert_eq!(branches, ["main", "fix-typo", "feat/login"]);
+        assert_eq!(worktrees.len(), 5);
+        // feat/login's sessions: tests dragged above the renamed form.
+        let login = worktrees.iter().find(|w| w.branch == "feat/login").unwrap();
+        let in_login: Vec<&str> = agents
+            .iter()
+            .filter(|a| a.worktree_id == login.id)
+            .map(|a| a.name.as_str())
+            .collect();
+        assert_eq!(in_login, ["login tests", "login form (renamed)"]);
+        assert_eq!(agents.len(), 6);
+        let by_name = |n: &str| agents.iter().find(|a| a.name == n).unwrap();
+        assert!(by_name("typo").archived);
+        assert_eq!(by_name("login tests").profile.as_deref(), Some("work"));
+        assert_eq!(by_name("spike it").profile.as_deref(), Some("spare"));
+        let ui = store.load_ui_state().unwrap().unwrap();
+        assert!(ui.contains("\"show_archived\":true"), "{ui}");
+        // 34 and 35: no recorded bases or snapshots to invent, and an id
+        // for this data dir's snapshot refs.
+        assert!(store.worktree_bases().unwrap().is_empty());
+        assert!(store.snapshot_agents().unwrap().is_empty());
+        let id = store.daemon_id().unwrap();
+        assert_eq!(id.len(), 16, "{id}");
+    }
 }

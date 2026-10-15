@@ -107,6 +107,9 @@ fn handle_snapshot_event(app: &mut App, event: ServerEvent, out: &mut Vec<Client
             // `orchestrator_view`: auto (a narrow terminal), always, never.
             if first_snapshot {
                 super::orchestrator::startup_view(app, out);
+                if !super::background::note_older_daemon(app) {
+                    super::background::check_tracked_settings(app);
+                }
             }
             app.chrome.dirty = true;
         }

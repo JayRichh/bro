@@ -256,6 +256,82 @@ fn the_footer_holds_at_most_seven_entries() {
     });
 }
 
+/// A TUI attached to a daemon an older install left running says so on
+/// its first snapshot, with how to move onto this build; on a daemon of
+/// its own protocol it says nothing.
+#[test]
+fn an_older_daemon_is_named_on_the_first_snapshot() {
+    for (theirs, said) in [
+        (nebula_core::PROTOCOL_VERSION - 3, true),
+        (nebula_core::PROTOCOL_VERSION, false),
+    ] {
+        let mut seeded = App::new();
+        seed_tree(&mut seeded);
+        let tree = seeded.tree.clone();
+        let mut app = App::new();
+        app.orch.daemon_protocol = Some(theirs);
+        hse(
+            &mut app,
+            ServerEvent::Snapshot {
+                projects: tree.projects,
+                worktrees: tree.worktrees,
+                agents: tree.agents,
+                terminals: tree.terminals,
+                links: tree.links,
+                pr_seen: Vec::new(),
+                ui_state: None,
+                subagents: Vec::new(),
+            },
+        );
+        let flash = app.chrome.flash.clone().unwrap_or_default();
+        assert_eq!(flash.contains("older build"), said, "{theirs}: {flash:?}");
+        if said {
+            assert!(flash.contains(if cfg!(windows) {
+                "kete kill"
+            } else {
+                "kete reload"
+            }));
+        }
+    }
+}
+
+/// The one-time notices lead with what to run, so a 120-column footer
+/// (beside the connection and the breadcrumb) shows the tracked-settings
+/// command whole, and what to run on an older daemon.
+#[test]
+fn the_upgrade_notices_show_their_command_at_120_columns() {
+    let found = [(
+        "alpha feat/login".to_string(),
+        ".claude/settings.local.json",
+    )];
+    for (flash, needle) in [
+        (
+            nebula_core::tracked_settings::notice(&found).unwrap(),
+            "git rm --cached .claude/settings.local.json",
+        ),
+        (
+            crate::event_loop::background::OLDER_DAEMON.to_string(),
+            if cfg!(windows) {
+                "kete kill"
+            } else {
+                "kete reload"
+            },
+        ),
+    ] {
+        let mut app = App::new();
+        seed_tree(&mut app);
+        app.chrome.flash = Some(flash);
+        let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
+        let screen = buffer_text(&terminal);
+        assert!(
+            screen.contains(needle),
+            "{needle}:
+{screen}"
+        );
+    }
+}
+
 /// The page opens before the daemon's first snapshot lands, and is
 /// already recorded as shown: the snapshot (its remembered selection and
 /// pane) must not close it, or the user never sees it.

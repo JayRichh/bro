@@ -35,6 +35,8 @@ pub struct Tui {
     /// Held, not dropped: dropping it closes the pseudoconsole under the
     /// TUI. Kept so the host's size can be changed under it.
     master: Box<dyn portable_pty::MasterPty + Send>,
+    /// What [`Tui::restart`] launches the next TUI with.
+    launch: Launch,
     pub runtime_dir: PathBuf,
     pub data_dir: PathBuf,
     pub repos: PathBuf,
@@ -51,6 +53,17 @@ pub struct Options {
     pub scripts: Vec<(&'static str, String)>,
     /// Directories dropped from PATH, for a TUI that must not find a tool.
     pub strip_path: Vec<String>,
+    /// Start from a data dir an older release left, with its repos
+    /// (`upgrade::seed`), instead of an empty one: `v0.48`.
+    pub fixture: Option<&'static str>,
+}
+
+/// How a TUI is started in a harness's dirs.
+#[derive(Clone)]
+struct Launch {
+    base: PathBuf,
+    options_env: Vec<(String, String)>,
+    strip_path: Vec<String>,
 }
 
 impl Default for Options {
@@ -59,6 +72,7 @@ impl Default for Options {
             script: "stop;echo".into(),
             scripts: Vec::new(),
             strip_path: Vec::new(),
+            fixture: None,
         }
     }
 }
@@ -88,122 +102,60 @@ impl Tui {
         // the quick prompt launches Claude, and the daemon installs
         // Claude's hooks for it and passes it Claude's argv.
         let me = std::env::current_exe().unwrap();
-        std::fs::write(
-            data_dir.join(nebula_core::paths::CONFIG_FILE_NAME),
-            serde_json::json!({
-                "theme": "default",
-                "icons": "off",
-                "quick_prompt_new_worktree": true,
-                // No tips or What's new page over the screens the tests read.
-                "show_tips": false,
-                "whats_new_seen": "999.0",
-                "harnesses": { "claude": { "program": me.display().to_string() } },
-            })
-            .to_string(),
-        )
-        .unwrap();
-
-        let pty = native_pty_system()
-            .openpty(PtySize {
-                rows: ROWS,
-                cols: COLS,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
+        if let Some(name) = options.fixture {
+            super::upgrade::seed(&base, name, &me);
+        } else {
+            std::fs::write(
+                data_dir.join(nebula_core::paths::CONFIG_FILE_NAME),
+                serde_json::json!({
+                    "theme": "default",
+                    "icons": "off",
+                    "quick_prompt_new_worktree": true,
+                    // No tips or What's new page over the screens the tests read.
+                    "show_tips": false,
+                    "whats_new_seen": "999.0",
+                    "harnesses": { "claude": { "program": me.display().to_string() } },
+                })
+                .to_string(),
+            )
             .unwrap();
-        let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_kete"));
-        cmd.env(nebula_core::env::RUNTIME_DIR, &runtime_dir);
-        cmd.env(nebula_core::env::DATA_DIR, &data_dir);
-        cmd.env(nebula_core::env::WORKTREE_SYNC_MS, "100");
-        cmd.env(nebula_core::env::UPDATE_CHECK_SECS, "0");
-        cmd.env(nebula_core::env::LOG, "debug");
-        cmd.env("HOME", &home);
-        cmd.env("GIT_TERMINAL_PROMPT", "0");
-        cmd.env("GCM_INTERACTIVE", "never");
-        cmd.env_remove("NO_COLOR");
-        cmd.env_remove("FORCE_COLOR");
-        for var in nebula_core::env::AGENT_SESSION_VARS {
-            cmd.env_remove(var);
         }
+
         let agent_log = base.join("agent.log");
         let echo_log = base.join("echo.log");
-        cmd.env(agent::ROLE, "1");
-        cmd.env(agent::SCRIPT, &options.script);
-        cmd.env(agent::LOG, &agent_log);
-        cmd.env(agent::ECHO_LOG, &echo_log);
         let gates = base.join("gates");
         std::fs::create_dir_all(&gates).unwrap();
-        cmd.env(agent::GATES, &gates);
+        let mut options_env = vec![
+            (agent::SCRIPT.to_string(), options.script.clone()),
+            (agent::LOG.to_string(), agent_log.display().to_string()),
+            (agent::ECHO_LOG.to_string(), echo_log.display().to_string()),
+            (agent::GATES.to_string(), gates.display().to_string()),
+        ];
         for (word, script) in &options.scripts {
-            cmd.env(
+            options_env.push((
                 format!("{}_{}", agent::SCRIPT, word.to_ascii_uppercase()),
-                script,
-            );
+                script.clone(),
+            ));
         }
-        if !options.strip_path.is_empty() {
-            let path = std::env::var("PATH").unwrap_or_default();
-            let kept: Vec<&str> = path
-                .split(';')
-                .filter(|dir| {
-                    !options
-                        .strip_path
-                        .iter()
-                        .any(|gone| dir.trim_end_matches('\\').eq_ignore_ascii_case(gone))
-                })
-                .collect();
-            cmd.env("PATH", kept.join(";"));
-        }
-        cmd.cwd(&repos);
-        let child = pty.slave.spawn_command(cmd).unwrap();
-        drop(pty.slave);
-
-        let mut reader = pty.master.try_clone_reader().unwrap();
-        let writer: Writer = Arc::new(Mutex::new(pty.master.take_writer().unwrap()));
-        let master = pty.master;
-
-        let parser = Arc::new(Mutex::new(vt100::Parser::new(ROWS, COLS, 0)));
-        let raw = Arc::new(Mutex::new(Vec::new()));
-        {
-            let parser = parser.clone();
-            let raw = raw.clone();
-            let writer = writer.clone();
-            std::thread::spawn(move || {
-                let mut buf = [0u8; 16384];
-                let mut tail: Vec<u8> = Vec::new();
-                while let Ok(n) = reader.read(&mut buf) {
-                    if n == 0 {
-                        break;
-                    }
-                    raw.lock().unwrap().extend_from_slice(&buf[..n]);
-                    let mut parser = parser.lock().unwrap();
-                    parser.process(&buf[..n]);
-                    // ConPTY asks where the cursor is before it draws a
-                    // thing (and the TUI may ask again): answer as a
-                    // terminal would, or it waits.
-                    tail.extend_from_slice(&buf[..n]);
-                    let asks = tail.windows(4).filter(|w| w == b"\x1b[6n").count();
-                    if asks > 0 {
-                        let (row, col) = parser.screen().cursor_position();
-                        let reply = format!("\x1b[{};{}R", row + 1, col + 1);
-                        let mut w = writer.lock().unwrap();
-                        for _ in 0..asks {
-                            let _ = w.write_all(reply.as_bytes());
-                        }
-                        let _ = w.flush();
-                        tail.clear();
-                    } else if tail.len() > 3 {
-                        tail.drain(..tail.len() - 3);
-                    }
-                }
-            });
-        }
-
+        let launch = Launch {
+            base: base.clone(),
+            options_env,
+            strip_path: options.strip_path.clone(),
+        };
+        let Started {
+            writer,
+            parser,
+            raw,
+            child,
+            master,
+        } = launch.start();
         Self {
             writer,
             parser,
             raw,
             child,
             master,
+            launch,
             runtime_dir,
             data_dir,
             repos,
@@ -212,6 +164,20 @@ impl Tui {
             gates,
             _root: root,
         }
+    }
+
+    /// Quit this TUI (its daemon stays up, as it does when a user quits)
+    /// and start a fresh one in the same dirs: the next launch after an
+    /// upgrade.
+    pub fn restart(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        let started = self.launch.start();
+        self.writer = started.writer;
+        self.parser = started.parser;
+        self.raw = started.raw;
+        self.child = started.child;
+        self.master = started.master;
     }
 
     /// A committed repo named `name` with a bare repo beside it as its
@@ -427,6 +393,113 @@ impl Tui {
         self.wait_for_gone("Open project");
         self.wait_for_text(name);
     }
+}
+
+impl Launch {
+    /// `kete` in a fresh ConPTY over these dirs, and the thread reading it
+    /// into a screen.
+    fn start(&self) -> Started {
+        let pty = native_pty_system()
+            .openpty(PtySize {
+                rows: ROWS,
+                cols: COLS,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        let base = &self.base;
+        let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_kete"));
+        cmd.env(nebula_core::env::RUNTIME_DIR, base.join("rt"));
+        cmd.env(nebula_core::env::DATA_DIR, base.join("data"));
+        cmd.env(nebula_core::env::WORKTREE_SYNC_MS, "100");
+        cmd.env(nebula_core::env::UPDATE_CHECK_SECS, "0");
+        cmd.env(nebula_core::env::LOG, "debug");
+        cmd.env("HOME", base.join("home"));
+        cmd.env("GIT_TERMINAL_PROMPT", "0");
+        cmd.env("GCM_INTERACTIVE", "never");
+        cmd.env_remove("NO_COLOR");
+        cmd.env_remove("FORCE_COLOR");
+        for var in nebula_core::env::AGENT_SESSION_VARS {
+            cmd.env_remove(var);
+        }
+        cmd.env(agent::ROLE, "1");
+        for (key, value) in &self.options_env {
+            cmd.env(key, value);
+        }
+        if !self.strip_path.is_empty() {
+            let path = std::env::var("PATH").unwrap_or_default();
+            let kept: Vec<&str> = path
+                .split(';')
+                .filter(|dir| {
+                    !self
+                        .strip_path
+                        .iter()
+                        .any(|gone| dir.trim_end_matches('\\').eq_ignore_ascii_case(gone))
+                })
+                .collect();
+            cmd.env("PATH", kept.join(";"));
+        }
+        cmd.cwd(base.join("repos"));
+        let child = pty.slave.spawn_command(cmd).unwrap();
+        drop(pty.slave);
+
+        let mut reader = pty.master.try_clone_reader().unwrap();
+        let writer: Writer = Arc::new(Mutex::new(pty.master.take_writer().unwrap()));
+        let master = pty.master;
+
+        let parser = Arc::new(Mutex::new(vt100::Parser::new(ROWS, COLS, 0)));
+        let raw = Arc::new(Mutex::new(Vec::new()));
+        {
+            let parser = parser.clone();
+            let raw = raw.clone();
+            let writer = writer.clone();
+            std::thread::spawn(move || {
+                let mut buf = [0u8; 16384];
+                let mut tail: Vec<u8> = Vec::new();
+                while let Ok(n) = reader.read(&mut buf) {
+                    if n == 0 {
+                        break;
+                    }
+                    raw.lock().unwrap().extend_from_slice(&buf[..n]);
+                    let mut parser = parser.lock().unwrap();
+                    parser.process(&buf[..n]);
+                    // ConPTY asks where the cursor is before it draws a
+                    // thing (and the TUI may ask again): answer as a
+                    // terminal would, or it waits.
+                    tail.extend_from_slice(&buf[..n]);
+                    let asks = tail.windows(4).filter(|w| w == b"\x1b[6n").count();
+                    if asks > 0 {
+                        let (row, col) = parser.screen().cursor_position();
+                        let reply = format!("\x1b[{};{}R", row + 1, col + 1);
+                        let mut w = writer.lock().unwrap();
+                        for _ in 0..asks {
+                            let _ = w.write_all(reply.as_bytes());
+                        }
+                        let _ = w.flush();
+                        tail.clear();
+                    } else if tail.len() > 3 {
+                        tail.drain(..tail.len() - 3);
+                    }
+                }
+            });
+        }
+        Started {
+            writer,
+            parser,
+            raw,
+            child,
+            master,
+        }
+    }
+}
+
+/// One launched TUI: what [`Tui::restart`] replaces together.
+struct Started {
+    writer: Writer,
+    parser: Arc<Mutex<vt100::Parser>>,
+    raw: Arc<Mutex<Vec<u8>>>,
+    child: Box<dyn portable_pty::Child + Send + Sync>,
+    master: Box<dyn portable_pty::MasterPty + Send>,
 }
 
 impl Drop for Tui {
