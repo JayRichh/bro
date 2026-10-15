@@ -829,7 +829,9 @@ fn handle_left_click_target(app: &mut App, mouse: MouseEvent, out: &mut Vec<Clie
         // the click on their button themselves, before this is reached.
         Some(HitTarget::ModalBrowser) => {}
         // A BUTTON is its action's key: the one dispatch the press takes.
-        Some(HitTarget::Button(action)) => run_action(app, action, out),
+        Some(HitTarget::Button(action) | HitTarget::FooterHint(action)) => {
+            run_action(app, action, out)
+        }
         // The buttons on the card under the cursor, its `⋯`, a band's
         // `+` and the pane header's `⋯`.
         Some(HitTarget::CardButton(at, action)) => {

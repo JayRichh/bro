@@ -199,12 +199,16 @@ pub enum HitTarget {
     /// map: it is what `hover_crumb` holds while the pointer rests on the
     /// button (`ui::browser_button_under`), so the draw can underline it.
     ModalBrowser,
-    /// A BUTTON that is its action's key: the footer's key hints, the
-    /// header's settings and help, the pane header's diff. A click runs
-    /// the action through the dispatch the key takes
-    /// (`event_loop::run_action`), and the footer names the key while the
-    /// pointer rests on it.
+    /// A BUTTON that is its action's key: the header's settings and help,
+    /// the pane header's diff. A click runs the action through the
+    /// dispatch the key takes (`event_loop::run_action`), and the footer
+    /// names the key while the pointer rests on it.
     Button(crate::keymap::Action),
+    /// A KEY HINT in the footer bar (`g diff`): the same click as a
+    /// [`HitTarget::Button`], its own target only because the hint already
+    /// names its key, so the footer is not swapped for a tooltip under
+    /// the pointer.
+    FooterHint(crate::keymap::Action),
     /// A CARD BUTTON on the bottom edge of the card under the cursor —
     /// follow-up, diff, archive, delete — by the card and the action: a
     /// click lands the cursor on that card, takes the keys back from the
