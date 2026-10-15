@@ -920,6 +920,9 @@ Examples:
   kete profile add main --harness claude --use-default --default
   kete profile add max2 --harness claude
   kete profile login max2        sign the new account in
+  kete profile edit max2 --env HTTPS_PROXY=http://proxy:8080
+  kete profile set-project . max2       max2 for Claude sessions in this repo
+  kete profile set-project app --clear claude
   kete profile list              accounts, homes and last seen usage";
 
 #[derive(Subcommand)]
@@ -959,8 +962,49 @@ pub(crate) enum ProfileCommand {
         #[arg(long)]
         purge: bool,
     },
+    /// Change a profile. The name stays: it names the profile's home. Only
+    /// what is given changes; --env replaces the variables, --clear-env
+    /// drops them.
+    Edit {
+        name: String,
+        /// The harness it is an account for.
+        #[arg(long, value_name = "HARNESS")]
+        harness: Option<String>,
+        /// Adopt the CLI's existing default login.
+        #[arg(long, conflicts_with = "own_home")]
+        use_default: bool,
+        /// Back to a home of its own under the data dir.
+        #[arg(long)]
+        own_home: bool,
+        /// Make it the harness's default.
+        #[arg(long)]
+        default: bool,
+        /// Replace its variables, `KEY=VALUE`; repeatable.
+        #[arg(long, value_name = "KEY=VALUE", conflicts_with = "clear_env")]
+        env: Vec<String>,
+        /// Drop every variable it sets.
+        #[arg(long)]
+        clear_env: bool,
+    },
     /// Make a profile its harness's default.
     Default { name: String },
+    /// Make a profile the default account of its harness for one project:
+    /// sessions started there naming no profile run under it, ahead of the
+    /// account spread and the harness's default.
+    ///
+    /// The project is its name, its id, or a path inside one of its
+    /// checkouts (`.` works). --clear <harness> takes the project's default
+    /// for that harness away.
+    SetProject {
+        /// The project: name, id, or a checkout path.
+        project: String,
+        /// The profile; its harness is the one it becomes the default of.
+        #[arg(required_unless_present = "clear", conflicts_with = "clear")]
+        profile: Option<String>,
+        /// Clear the project's default account for this harness.
+        #[arg(long, value_name = "HARNESS")]
+        clear: Option<String>,
+    },
     /// Switch a profile on: launches that pick no profile may take it again.
     Enable { name: String },
     /// Switch a profile off: launches that pick no profile skip it (no

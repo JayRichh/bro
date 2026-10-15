@@ -27,6 +27,23 @@ pub enum ProfileOp {
         name: String,
         purge: bool,
     },
+    /// Change what is given; the name stays (it names the home).
+    Edit {
+        name: String,
+        harness: Option<String>,
+        /// Some(true): adopt the CLI's login; Some(false): a home of its own.
+        use_default: Option<bool>,
+        default: bool,
+        /// Some: replace the variables (empty drops them all).
+        env: Option<Vec<String>>,
+    },
+    /// A project's default account for the profile's harness, or with
+    /// `clear` (a harness) none.
+    SetProject {
+        project: String,
+        profile: Option<String>,
+        clear: Option<String>,
+    },
     Default {
         name: String,
     },
@@ -48,7 +65,8 @@ pub fn run_profile(op: ProfileOp) -> Result<()> {
     // settings writers (`Config::save`, the window's profile edits) take
     // that one for both layers. The base layer's edit locks it itself.
     let _lock = match &op {
-        ProfileOp::List | ProfileOp::Login { .. } => None,
+        // A project default edits the `projects` key: its own layer.
+        ProfileOp::List | ProfileOp::Login { .. } | ProfileOp::SetProject { .. } => None,
         _ if config == local => Some(
             nebula_core::settings::lock(&base)
                 .with_context(|| format!("lock {}", base.display()))?,
@@ -64,24 +82,8 @@ pub fn run_profile(op: ProfileOp) -> Result<()> {
             default,
             env,
         } => {
-            let registry = nebula_tui::config::Config::load().harness_registry();
-            if !registry.iter().any(|h| h.id == harness.trim()) {
-                bail!(
-                    "unknown harness `{harness}`: expected one of {}",
-                    registry
-                        .iter()
-                        .map(|h| h.id.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
-            }
-            let mut vars = BTreeMap::new();
-            for pair in env {
-                let Some((key, value)) = pair.split_once('=') else {
-                    bail!("--env takes KEY=VALUE, not `{pair}`");
-                };
-                vars.insert(key.trim().to_string(), value.to_string());
-            }
+            check_harness(&harness)?;
+            let vars = env_vars(&env)?;
             let profile = Profile {
                 name: name.trim().to_string(),
                 harness: harness.trim().to_string(),
@@ -137,6 +139,53 @@ pub fn run_profile(op: ProfileOp) -> Result<()> {
             }
             Ok(())
         }
+        ProfileOp::Edit {
+            name,
+            harness,
+            use_default,
+            default,
+            env,
+        } => {
+            let held = nebula_core::settings::read_object(&config)
+                .map_err(anyhow::Error::msg)?
+                .unwrap_or_default();
+            let Some(old) = profiles::from_settings(&held)
+                .into_iter()
+                .find(|p| p.name.trim() == name.trim())
+            else {
+                bail!("no profile named `{name}`: kete profile list shows them");
+            };
+            if let Some(harness) = &harness {
+                check_harness(harness)?;
+            }
+            let profile = edited(old, harness, use_default, default, env.as_deref())?;
+            profiles::update_in_file(&config, &profile).map_err(anyhow::Error::msg)?;
+            if let Some(home) = profile.home() {
+                profile
+                    .prepare(None)
+                    .with_context(|| format!("create {}", home.display()))?;
+            }
+            println!("saved profile `{}` ({})", profile.name, profile.harness);
+            if let Some(hint) = profiles::login_hint(&profile) {
+                if nebula_core::accounts::login_state(Some(&profile), &profile.harness)
+                    == nebula_core::accounts::LoginState::NeedsLogin
+                {
+                    println!("sign it in with: {hint}");
+                }
+            }
+            Ok(())
+        }
+        ProfileOp::SetProject {
+            project,
+            profile,
+            clear,
+        } => set_project(
+            &base,
+            &local,
+            &project,
+            profile.as_deref(),
+            clear.as_deref(),
+        ),
         ProfileOp::Default { name } => {
             profiles::set_default_in_file(&config, &name).map_err(anyhow::Error::msg)?;
             println!("`{}` is now its harness's default profile", name.trim());
@@ -156,6 +205,192 @@ pub fn run_profile(op: ProfileOp) -> Result<()> {
             Ok(())
         }
         ProfileOp::Login { name, args } => login(&name, &args),
+    }
+}
+
+/// Refuse a harness id the registry does not know.
+fn check_harness(harness: &str) -> Result<()> {
+    let registry = nebula_tui::config::Config::load().harness_registry();
+    if !registry.iter().any(|h| h.id == harness.trim()) {
+        bail!(
+            "unknown harness `{harness}`: expected one of {}",
+            registry
+                .iter()
+                .map(|h| h.id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    Ok(())
+}
+
+/// `--env` pairs as a map.
+fn env_vars(pairs: &[String]) -> Result<BTreeMap<String, String>> {
+    let mut vars = BTreeMap::new();
+    for pair in pairs {
+        let Some((key, value)) = pair.split_once('=') else {
+            bail!("--env takes KEY=VALUE, not `{pair}`");
+        };
+        if key.trim().is_empty() {
+            bail!("--env `{pair}` names no variable");
+        }
+        vars.insert(key.trim().to_string(), value.to_string());
+    }
+    Ok(vars)
+}
+
+/// `old` with what `kete profile edit` was given: the name and the
+/// switched-off flag always stay, the rest only where given.
+fn edited(
+    mut old: Profile,
+    harness: Option<String>,
+    use_default: Option<bool>,
+    default: bool,
+    env: Option<&[String]>,
+) -> Result<Profile> {
+    if let Some(harness) = harness {
+        old.harness = harness.trim().to_string();
+    }
+    if let Some(adopt) = use_default {
+        old.use_default = adopt;
+    }
+    if default {
+        old.default = true;
+    }
+    if let Some(env) = env {
+        old.env = env_vars(env)?;
+    }
+    if let Some(problem) = old.problem() {
+        bail!("{problem}");
+    }
+    Ok(old)
+}
+
+/// `kete profile set-project`: the project found in the daemon's tree (by
+/// name, id or checkout path), its default account for a harness set or
+/// cleared under its repo path exactly as the daemon stores it, in the
+/// layer whose `projects` key is in force.
+fn set_project(
+    base: &Path,
+    local: &Path,
+    query: &str,
+    profile: Option<&str>,
+    clear: Option<&str>,
+) -> Result<()> {
+    let (harness, name) = match (profile, clear) {
+        (Some(name), _) => {
+            let harness = profiles::project_default_harness(&profiles::load(), name)
+                .map_err(anyhow::Error::msg)?;
+            (harness, Some(name.trim().to_string()))
+        }
+        (None, Some(harness)) => (harness.trim().to_string(), None),
+        (None, None) => bail!("name a profile, or --clear <harness>"),
+    };
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let (projects, worktrees) = rt.block_on(fetch_projects())?;
+    let project = find_project(&projects, &worktrees, query)?;
+    let repo = project.repo_path.to_string_lossy().into_owned();
+    let layer =
+        profiles::layer_for(base, local, profiles::PROJECTS_KEY).map_err(anyhow::Error::msg)?;
+    // The local layer's edit also holds config.json's lock, as every
+    // settings writer takes that one for both layers.
+    let _lock = if layer == local {
+        Some(
+            nebula_core::settings::lock(base)
+                .with_context(|| format!("lock {}", base.display()))?,
+        )
+    } else {
+        None
+    };
+    profiles::set_project_default_in_file(&layer, &repo, &harness, name.as_deref())
+        .map_err(anyhow::Error::msg)?;
+    match name {
+        Some(name) => println!(
+            "{harness} sessions in {} that name no profile now run on `{name}`",
+            project.name
+        ),
+        None => println!(
+            "{} has no default {harness} account now: the account spread picks",
+            project.name
+        ),
+    }
+    Ok(())
+}
+
+/// The daemon's projects and worktrees, over one connection (the daemon
+/// is started when none runs, as `kete ado` does).
+async fn fetch_projects() -> Result<(Vec<nebula_core::Project>, Vec<nebula_core::Worktree>)> {
+    use nebula_core::codec::{read_frame, write_frame};
+    use nebula_core::{ClientRequest, ServerEvent};
+    let mut conn = nebula_tui::ipc::connect_or_spawn().await?;
+    write_frame(&mut conn.stream, &ClientRequest::Subscribe).await?;
+    loop {
+        match read_frame::<ServerEvent, _>(&mut conn.stream).await? {
+            Some(ServerEvent::Snapshot {
+                projects,
+                worktrees,
+                ..
+            }) => return Ok((projects, worktrees)),
+            Some(_) => continue,
+            None => bail!("the daemon closed the connection before sending its projects"),
+        }
+    }
+}
+
+/// The project `query` names: its id, its name (any case; refused when two
+/// share it), or a path that is one of its checkouts or inside one.
+fn find_project<'a>(
+    projects: &'a [nebula_core::Project],
+    worktrees: &[nebula_core::Worktree],
+    query: &str,
+) -> Result<&'a nebula_core::Project> {
+    let q = query.trim();
+    if let Some(p) = projects.iter().find(|p| p.id.0 == q) {
+        return Ok(p);
+    }
+    let named: Vec<&nebula_core::Project> = projects
+        .iter()
+        .filter(|p| p.name.eq_ignore_ascii_case(q))
+        .collect();
+    match named.len() {
+        1 => return Ok(named[0]),
+        0 => {}
+        n => bail!("{n} projects are named `{q}`: give its path instead"),
+    }
+    let want = normal_path(Path::new(q));
+    let inside = |root: &Path| {
+        let root = normal_path(root);
+        want == root || want.starts_with(&format!("{root}/"))
+    };
+    projects
+        .iter()
+        .find(|p| {
+            inside(&p.repo_path)
+                || worktrees
+                    .iter()
+                    .any(|w| w.project_id == p.id && inside(&w.path))
+        })
+        .ok_or_else(|| {
+            anyhow::anyhow!("no kete project named `{q}` or holding that path: `kete add` adds one")
+        })
+}
+
+/// A path for comparing: canonical when it exists, `/` separators, no
+/// trailing one, and on Windows case folded.
+fn normal_path(p: &Path) -> String {
+    let p = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let text = p.to_string_lossy();
+    let text = text
+        .strip_prefix(r"\\?\")
+        .unwrap_or(&text)
+        .replace('\\', "/");
+    let text = text.trim_end_matches('/').to_string();
+    if cfg!(windows) {
+        text.to_lowercase()
+    } else {
+        text
     }
 }
 
@@ -185,7 +420,25 @@ fn list() -> Result<()> {
         };
         println!("\naccount spread: {spread}  (Settings \u{2192} Sessions \u{2192} Accounts)");
     }
+    let projects = profiles::load_project_defaults();
+    if !projects.is_empty() {
+        println!("\nproject defaults (kete profile set-project):");
+        for line in project_default_lines(&projects) {
+            println!("{line}");
+        }
+    }
     Ok(())
+}
+
+/// `  C:\Code\app  claude: work, codex: gpt` per project with defaults.
+fn project_default_lines(projects: &BTreeMap<String, BTreeMap<String, String>>) -> Vec<String> {
+    projects
+        .iter()
+        .map(|(repo, defaults)| {
+            let pairs: Vec<String> = defaults.iter().map(|(h, n)| format!("{h}: {n}")).collect();
+            format!("  {repo}  {}", pairs.join(", "))
+        })
+        .collect()
 }
 
 /// Width of a usage bar in `kete profile list`.
@@ -418,6 +671,107 @@ mod layer_tests {
                 .collect();
         assert_eq!(merged, ["work", "home"]);
         assert!(!std::fs::read_to_string(&config).unwrap().contains("home"));
+    }
+}
+
+#[cfg(test)]
+mod edit_tests {
+    use super::*;
+    use nebula_core::{Project, ProjectId, Worktree, WorktreeId};
+
+    fn work() -> Profile {
+        let mut env = BTreeMap::new();
+        env.insert("K".to_string(), "v".to_string());
+        Profile {
+            name: "work".into(),
+            harness: "claude".into(),
+            env,
+            default: false,
+            use_default: false,
+            disabled: true,
+        }
+    }
+
+    #[test]
+    fn an_edit_changes_only_what_is_given() {
+        let same = edited(work(), None, None, false, None).unwrap();
+        assert_eq!(same, work());
+        let p = edited(work(), None, Some(true), true, Some(&[])).unwrap();
+        assert!(p.use_default && p.default && p.env.is_empty());
+        assert!(p.disabled, "the switch stays");
+        assert_eq!(p.name, "work");
+        let p = edited(
+            work(),
+            Some(" codex ".into()),
+            Some(false),
+            false,
+            Some(&["A=1".into()]),
+        )
+        .unwrap();
+        assert_eq!(p.harness, "codex");
+        assert_eq!(p.env.get("A").map(String::as_str), Some("1"));
+        assert!(edited(work(), None, None, false, Some(&["NOEQ".into()])).is_err());
+        assert!(edited(work(), None, None, false, Some(&["=v".into()])).is_err());
+        assert!(edited(work(), Some(" ".into()), None, false, None).is_err());
+    }
+
+    #[test]
+    fn a_project_is_found_by_id_name_or_a_path_in_a_checkout() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("app");
+        let wt = dir.path().join("app-feature");
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        std::fs::create_dir_all(&wt).unwrap();
+        let project = |id: &str, name: &str, path: &Path| Project {
+            id: ProjectId(id.into()),
+            name: name.into(),
+            repo_path: path.to_path_buf(),
+            sort_order: 0,
+        };
+        let projects = vec![
+            project("p1", "App", &repo),
+            project("p2", "twin", Path::new("/x")),
+            project("p3", "twin", Path::new("/y")),
+        ];
+        let worktrees = vec![Worktree {
+            id: WorktreeId("w1".into()),
+            project_id: ProjectId("p1".into()),
+            path: wt.clone(),
+            branch: "feature".into(),
+            is_main: false,
+            sort_order: 0,
+        }];
+        let find = |q: &str| find_project(&projects, &worktrees, q).map(|p| p.id.0.clone());
+        assert_eq!(find("p2").unwrap(), "p2");
+        assert_eq!(find("app").unwrap(), "p1", "names match in any case");
+        assert_eq!(find(repo.join("src").to_str().unwrap()).unwrap(), "p1");
+        assert_eq!(
+            find(wt.to_str().unwrap()).unwrap(),
+            "p1",
+            "a linked checkout"
+        );
+        assert!(find("twin").unwrap_err().to_string().contains("2 projects"));
+        assert!(
+            find(dir.path().to_str().unwrap()).is_err(),
+            "above every checkout"
+        );
+        assert!(find("nope").is_err());
+    }
+
+    #[test]
+    fn project_defaults_list_one_line_per_project() {
+        let mut map = BTreeMap::new();
+        map.insert(
+            "/repo".to_string(),
+            BTreeMap::from([
+                ("claude".to_string(), "work".to_string()),
+                ("codex".to_string(), "gpt".to_string()),
+            ]),
+        );
+        assert_eq!(
+            project_default_lines(&map),
+            ["  /repo  claude: work, codex: gpt"]
+        );
     }
 }
 
