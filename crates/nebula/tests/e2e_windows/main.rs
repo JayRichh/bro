@@ -60,10 +60,7 @@ fn run_suite() {
     // A test that hangs somewhere no screen wait covers (a child that
     // never exits, a pipe that never closes) fails the run instead of
     // holding a CI job to its timeout.
-    let current = std::sync::Arc::new(std::sync::Mutex::new((
-        "",
-        std::time::Instant::now(),
-    )));
+    let current = std::sync::Arc::new(std::sync::Mutex::new(("", std::time::Instant::now())));
     {
         let current = current.clone();
         std::thread::spawn(move || loop {

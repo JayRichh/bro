@@ -55,24 +55,29 @@ fn quick_prompt_session_runs_needs_you_and_lands_in_review() {
     let repo = tui.make_repo("life-proj");
     tui.wait_for_text("create your first project");
     tui.add_project(&repo, "life-proj");
-    tui.send(b"K");
-    tui.wait_for_text("Needs you");
 
+    // On the grid, the header's ATTENTION STRIP counts it running, then
+    // waiting on you.
     launch(&tui, "build the feature");
-    tui.wait_for_text("● 1 Running");
+    tui.wait_for_text("1 running");
     tui.wait_for_agent("step gate:asked");
     tui.open_gate("asked");
-    tui.wait_for_text("● 1 Needs you");
-    // The project tab's attention count (the header's `N need you` strip
-    // gives way to the scope chip and the docked pane at this width).
-    tui.wait_for_text("life-proj ●1");
+    tui.wait_for_text("1 needs you");
+    tui.wait_for_text("agent-1  needs you");
 
+    // On the board, its lane.
+    tui.send(b"K");
+    tui.wait_for_text("● 1 Needs you");
     reply(&tui, "yes ship it");
     tui.wait_for_agent("reply \"yes ship it\"");
     tui.wait_for_text("● 1 Review");
     tui.wait_for_text("1 commit");
-    tui.wait_for_text("done");
-    tui.wait_for_gone("life-proj ●1");
+    tui.wait_for_text("agent-1  done");
+
+    // What it printed reached the daemon whole.
+    let (_, _, ring) = daemon_tail(&tui.runtime_dir, &tui.agent_id("build the feature"));
+    let ring = String::from_utf8_lossy(&ring);
+    assert!(ring.contains("committed: add the feature"), "{ring:?}");
 
     // The work is on the session's own worktree, committed whole: Kete's
     // hooks file is not in it, nor left over as a change.
@@ -226,7 +231,8 @@ fn dragging_a_done_card_onto_archived_offers_the_delete() {
     launch(&tui, "tidy the docs");
     tui.wait_for_text("● 1 Done");
 
-    let (row, col) = tui.find("› tidy the").expect("the Done card");
+    // The card's own line (the pane header names the prompt too).
+    let (row, col) = tui.find("┃ › tidy the").expect("the Done card");
     tui.send(&sgr_mouse(0, col, row, false));
     tui.send(&sgr_mouse(32, col, row + 1, false));
     tui.wait_for_text("let go here to archive");

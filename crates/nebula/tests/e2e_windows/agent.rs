@@ -64,7 +64,10 @@ pub fn run() {
         cwd: std::env::current_dir().unwrap_or_default(),
         input: std::io::stdin(),
     };
-    agent.log(&format!("args {args:?}"));
+    agent.log(&format!(
+        "agent {} args {args:?}",
+        std::env::var(nebula_core::env::AGENT_ID).unwrap_or_default()
+    ));
     print_line("fake agent up");
     agent.hook("SessionStart", serde_json::json!({ "source": "startup" }));
     let prompt = match prompt_of(&args) {
@@ -86,7 +89,7 @@ pub fn run() {
         .or_else(|_| std::env::var(SCRIPT))
         .unwrap_or_else(|_| "stop".into());
     for step in script.split(';').map(str::trim).filter(|s| !s.is_empty()) {
-        agent.log(&format!("step {step}"));
+        agent.log(&format!("step {step} (console {:?})", console_size()));
         let (verb, rest) = step.split_once(':').unwrap_or((step, ""));
         match verb {
             "gate" => {
@@ -340,5 +343,21 @@ fn raw_console() {
                 | ENABLE_VIRTUAL_TERMINAL_PROCESSING
                 | DISABLE_NEWLINE_AUTO_RETURN,
         );
+    }
+}
+
+/// The console's window size, columns by rows: what the agent draws to.
+fn console_size() -> Option<(i16, i16)> {
+    use windows_sys::Win32::System::Console::{
+        GetConsoleScreenBufferInfo, GetStdHandle, CONSOLE_SCREEN_BUFFER_INFO, STD_OUTPUT_HANDLE,
+    };
+    // SAFETY: a zeroed out-struct the call fills, on this process's handle.
+    unsafe {
+        let mut info: CONSOLE_SCREEN_BUFFER_INFO = std::mem::zeroed();
+        if GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &mut info) == 0 {
+            return None;
+        }
+        let w = info.srWindow;
+        Some((w.Right - w.Left + 1, w.Bottom - w.Top + 1))
     }
 }

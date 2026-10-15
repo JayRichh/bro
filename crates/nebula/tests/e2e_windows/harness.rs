@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-pub const COLS: u16 = 200;
+pub const COLS: u16 = 220;
 pub const ROWS: u16 = 50;
 /// How long one screen state may take to come up: generous, as a cold
 /// CI runner starts a daemon, git worktrees and agents.
@@ -328,6 +328,23 @@ impl Tui {
         });
     }
 
+    /// The session id of the fake agent that took `prompt`, off its log:
+    /// the process that logged the prompt, and the id it logged at boot.
+    pub fn agent_id(&self, prompt: &str) -> String {
+        let log = std::fs::read_to_string(&self.agent_log).unwrap();
+        let pid_of = |line: &str| line.split(']').next().unwrap_or_default().to_string();
+        let pid = log
+            .lines()
+            .find(|l| l.contains(&format!("prompt {prompt:?}")))
+            .map(pid_of)
+            .unwrap_or_else(|| panic!("no agent took {prompt:?}:\n{log}"));
+        log.lines()
+            .filter(|l| pid_of(l) == pid)
+            .find_map(|l| l.split("] agent ").nth(1)?.split(' ').next())
+            .expect("the agent logs its id at boot")
+            .to_string()
+    }
+
     /// Where `needle` first appears: (row, col) in cells.
     pub fn find(&self, needle: &str) -> Option<(u16, u16)> {
         screen_to_text(self.parser.lock().unwrap().screen())
@@ -416,4 +433,42 @@ fn tail(path: &Path, lines: usize) -> String {
     let text = std::fs::read_to_string(path).unwrap_or_default();
     let all: Vec<&str> = text.lines().collect();
     all[all.len().saturating_sub(lines)..].join("\n")
+}
+
+/// The daemon's ring of what session `agent` printed, read over its pipe
+/// as a client would (`TailOutput`): (cols, rows, bytes).
+pub fn daemon_tail(runtime_dir: &Path, agent: &str) -> (u16, u16, Vec<u8>) {
+    use nebula_core::codec::{read_frame, write_frame};
+    use nebula_core::{AgentId, ClientRequest, ServerEvent, SessionRef, PROTOCOL_VERSION};
+    let pipe = nebula_core::paths::pipe_name_for_socket(&runtime_dir.join("daemon.sock"));
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let mut stream = tokio::net::windows::named_pipe::ClientOptions::new()
+            .open(&pipe)
+            .unwrap();
+        let hello = ClientRequest::Hello {
+            protocol_version: PROTOCOL_VERSION,
+        };
+        write_frame(&mut stream, &hello).await.unwrap();
+        let ask = ClientRequest::TailOutput {
+            req_id: 7,
+            session: SessionRef::Agent(AgentId(agent.into())),
+            max_bytes: 1 << 20,
+            after_seq: None,
+        };
+        write_frame(&mut stream, &ask).await.unwrap();
+        loop {
+            match read_frame::<ServerEvent, _>(&mut stream).await.unwrap() {
+                Some(ServerEvent::OutputTail { tail, .. }) => {
+                    let tail = tail.expect("the session's ring");
+                    return (tail.cols, tail.rows, tail.data);
+                }
+                Some(_) => continue,
+                None => panic!("the daemon hung up"),
+            }
+        }
+    })
 }
