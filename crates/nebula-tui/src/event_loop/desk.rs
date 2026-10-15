@@ -445,6 +445,15 @@ mod tests {
             );
             let text = buffer_text(&draw(&mut app));
             assert!(text.contains("⑂ 1/1"), "{text}");
+            // The selected card's buttons share the border with it, from
+            // the other end.
+            assert!(
+                app.chrome
+                    .hits
+                    .iter()
+                    .any(|(_, h)| matches!(h, HitTarget::CardButton(..))),
+                "{text}"
+            );
             let at = cell(&app, &HitTarget::SubagentChip(AgentId("a1".into())));
             click(&mut app, at);
             assert_eq!(tree_keys(&app), vec!["a:a1", "s:a1:x"]);

@@ -2529,13 +2529,15 @@ fn card_buttons(
     card: &crate::launcher::Card,
     at: crate::launcher::CardRef,
     placed: crate::launcher::Placed,
+    reserve: usize,
 ) -> Vec<(Rect, HitTarget, &'static str)> {
     let r = placed.rect;
     if placed.cut_bottom > 0 || r.height < 3 || r.width < 8 {
         return Vec::new();
     }
-    // A corner and a cell of rule at either end stay the card's.
-    let room = usize::from(r.width) - 4;
+    // A corner and a cell of rule at either end stay the card's, and the
+    // left end's SUBAGENT CHIP keeps its `reserve`: buttons give way first.
+    let room = (usize::from(r.width) - 4).saturating_sub(reserve);
     let mut kept: Vec<(&'static str, HitTarget)> = Vec::new();
     let mut used = 0;
     for (label, hit) in card_button_list(card, at) {
@@ -2595,7 +2597,8 @@ fn selected_card_buttons(
     if !selected || app.launcher.launcher_unaimed {
         return;
     }
-    let buttons = card_buttons(card, at, placed);
+    let reserve = super::subagents_view::card_chip_width(app, card);
+    let buttons = card_buttons(card, at, placed, reserve);
     draw_card_buttons(f.buffer_mut(), app, &buttons);
     app.chrome
         .hits

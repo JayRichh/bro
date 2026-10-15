@@ -39,18 +39,31 @@ fn chip(app: &App, id: &AgentId, th: Theme) -> Option<(String, Color)> {
 }
 
 /// Where a card drawn at `area` puts its chip `width` cells wide: the
-/// right end of its bottom edge, a cell of the frame either side. None
+/// left end of its bottom edge, past the corner and a cell of rule — the
+/// right end is the selected card's CARD BUTTONS'
+/// (`launcher_view::card_buttons`), which leave the chip its room. None
 /// on a card too narrow to keep its frame's corners clear.
 fn chip_rect(area: Rect, width: u16) -> Option<Rect> {
     if area.height < 3 || area.width < width + 4 {
         return None;
     }
     Some(Rect {
-        x: area.right() - 2 - width,
+        x: area.x + 2,
         y: area.bottom() - 1,
         width,
         height: 1,
     })
+}
+
+/// The cells the chip on `card` takes on its bottom edge, and the cell of
+/// rule after it; 0 on a card with no subagents. What the CARD BUTTONS
+/// keep clear of.
+pub(crate) fn card_chip_width(app: &App, card: &crate::launcher::Card) -> usize {
+    let crate::launcher::Card::Session(row) = card else {
+        return 0;
+    };
+    chip(app, &row.agent.id, app.chrome.theme)
+        .map_or(0, |(label, _)| Span::raw(label.as_str()).width() + 1)
 }
 
 /// The chip on the card of session `a` drawn at `area`: laid over its
