@@ -632,6 +632,10 @@ export interface StartOrchestrator {
   profile?: string | null;
   model?: string | null;
   effort?: string | null;
+  /** A project id: its root worktree; none, a workspace of its own. */
+  project?: string | null;
+  /** The session's name; none, the daemon's. */
+  name?: string | null;
   replace?: boolean;
 }
 /** `kete orchestrator review`, as the daemon broadcasts it. */

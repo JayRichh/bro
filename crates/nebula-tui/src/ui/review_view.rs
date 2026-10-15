@@ -283,28 +283,76 @@ pub(super) fn draw_start(
     app: &mut App,
     mut view: crate::orchestrator_view::StartView,
 ) {
+    use crate::orchestrator_view::StartRow;
     let th = app.chrome.theme;
-    let area = centered_rect(f.area(), 58, 9);
+    let area = centered_rect(f.area(), 62, 12);
     let inner = render_modal_frame(f, area, " Start the orchestrator ", th);
-    let row = |label: &str, value: String, focused: bool| {
+    let width = (inner.width as usize).saturating_sub(14);
+    let mut lines = vec![
+        dim_line(" One session that coordinates every other one.", th),
+        Line::from(""),
+    ];
+    view.row_hits.clear();
+    for (i, row) in StartRow::ALL.into_iter().enumerate() {
+        let focused = view.row == i;
         let style = if focused {
             Style::default().fg(th.on_accent).bg(th.accent)
         } else {
             Style::default().fg(th.text)
         };
-        Line::from(vec![
-            Span::styled(format!(" {label:<9}"), Style::default().fg(th.muted)),
-            Span::styled(format!(" ‹ {value} › "), style),
-        ])
+        // The name is typed, the rest stepped: a field, or ‹ value ›.
+        let value = match row {
+            StartRow::Name if view.name.is_empty() && !focused => {
+                Span::styled(" the daemon names it ", Style::default().fg(th.dim))
+            }
+            StartRow::Name => Span::styled(
+                format!(
+                    " {}{} ",
+                    truncate(&view.name, width),
+                    if focused { "▏" } else { "" }
+                ),
+                style,
+            ),
+            _ => Span::styled(
+                format!(" ‹ {} › ", truncate(&view.value(row), width)),
+                style,
+            ),
+        };
+        let y = inner.y + lines.len() as u16;
+        view.row_hits.push((
+            Rect {
+                x: inner.x,
+                y,
+                width: inner.width,
+                height: 1,
+            },
+            i,
+        ));
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!(" {:<9}", row.label()),
+                Style::default().fg(th.muted),
+            ),
+            value,
+        ]));
+    }
+    lines.push(Line::from(""));
+    let start = " Start ⏎ ";
+    let y = inner.y + lines.len() as u16;
+    view.start_hit = Rect {
+        x: inner.x + 1,
+        y,
+        width: start.chars().count() as u16,
+        height: 1,
     };
-    let lines = vec![
-        dim_line(" One session that coordinates every other one.", th),
-        Line::from(""),
-        row("Harness", view.kind().as_str().to_string(), view.row == 0),
-        row("Profile", view.profile_label(), view.row == 1),
-        Line::from(""),
-        dim_line(" ↑/↓ row · ←/→ change · Enter start · Esc cancel", th),
-    ];
+    lines.push(Line::from(vec![
+        Span::raw(" "),
+        Span::styled(start, Style::default().fg(th.on_accent).bg(th.accent)),
+        Span::styled(
+            "  ↑/↓ row · ←/→ change · Esc cancel",
+            Style::default().fg(th.dim),
+        ),
+    ]));
     f.render_widget(Paragraph::new(lines), inner);
     view.area = area;
     if let Some(Overlay::OrchestratorStart(v)) = &mut app.modals.overlay {

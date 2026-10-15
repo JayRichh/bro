@@ -786,3 +786,82 @@ fn orchestrator_view_setting_picks_the_startup_screen() {
         assert!(!crate::orchestrator_view::active(&app));
     });
 }
+
+/// The start prompt takes what `kete orchestrator start` takes: the
+/// model and effort start on the configured ones, the project row picks
+/// one of the tree's (or its own workspace), and the name row types —
+/// `j` and `k` included — and a click on Start is Enter.
+#[test]
+fn the_start_prompt_sends_model_effort_project_and_name() {
+    with_config_json(
+        r#"{"claude_model": "opus", "claude_effort": "high"}"#,
+        || {
+            let mut app = App::new();
+            seed_tree(&mut app);
+            let mut out = Vec::new();
+            key(&mut app, KeyCode::F(10), &mut out);
+            let text = screen(&mut app, 100, 30);
+            assert!(
+                text.contains("Model") && text.contains("‹ opus ›"),
+                "{text}"
+            );
+            assert!(text.contains("‹ high ›"), "{text}");
+            assert!(text.contains("‹ its own workspace ›"), "{text}");
+            assert!(text.contains("Start ⏎"), "{text}");
+            // Project: four rows down, one step on.
+            for _ in 0..4 {
+                key(&mut app, KeyCode::Down, &mut out);
+            }
+            key(&mut app, KeyCode::Right, &mut out);
+            assert!(screen(&mut app, 100, 30).contains("‹ demo ›"));
+            // Name: the letters type.
+            key(&mut app, KeyCode::Down, &mut out);
+            for c in "jk lead".chars() {
+                key(&mut app, KeyCode::Char(c), &mut out);
+            }
+            key(&mut app, KeyCode::Backspace, &mut out);
+            screen(&mut app, 100, 30);
+            let Some(Overlay::OrchestratorStart(v)) = &app.modals.overlay else {
+                panic!("the prompt closed");
+            };
+            let hit = v.start_hit;
+            handle_mouse(
+                &mut app,
+                crossterm::event::MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: hit.x + 1,
+                    row: hit.y,
+                    modifiers: KeyModifiers::NONE,
+                },
+                &mut out,
+            );
+            let sent = out.iter().find_map(|r| match r {
+                ClientRequest::StartOrchestrator {
+                    kind,
+                    model,
+                    effort,
+                    project,
+                    name,
+                    ..
+                } => Some((
+                    *kind,
+                    model.clone(),
+                    effort.clone(),
+                    project.clone(),
+                    name.clone(),
+                )),
+                _ => None,
+            });
+            assert_eq!(
+                sent,
+                Some((
+                    nebula_core::AgentKind::Claude,
+                    Some("opus".into()),
+                    Some("high".into()),
+                    Some(ProjectId("p1".into())),
+                    Some("jk lea".into()),
+                ))
+            );
+        },
+    );
+}
