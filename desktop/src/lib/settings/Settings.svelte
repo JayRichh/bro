@@ -16,6 +16,7 @@
   import { isDiffMode } from '../diff-api';
   import { nav } from '../shell/history.svelte';
   import { chordLabel, hotkeyGroups, matches, segmented, sequence, targetKey } from './settings';
+  import DesktopKeys from './DesktopKeys.svelte';
   import Presets from './Presets.svelte';
   import Profiles from './Profiles.svelte';
 
@@ -360,13 +361,27 @@
               </ul>
             </section>
           {:else}
-            {#if !tab?.hotkeys.length}
+            {#if !tab?.hotkeys.length && tabId !== 'hotkeys'}
               <p class="m-0 px-6 pt-6 text-[13px] text-muted">{filter ? 'Nothing on this tab matches.' : 'Nothing to set here.'}</p>
             {/if}
           {/each}
 
+          {#if tabId === 'hotkeys'}
+            <h2 class="m-0 mt-6 flex items-baseline gap-3 border-b border-rule-strong px-6 pb-1.5">
+              <span class="text-[15px] font-semibold text-ink">This window</span>
+              <span class="font-mono text-[12px] text-muted">rebind here</span>
+            </h2>
+            <DesktopKeys {filter} />
+            {#if tab?.hotkeys.length}
+              <h2 class="m-0 mt-8 flex items-baseline gap-3 border-b border-rule-strong px-6 pb-1.5">
+                <span class="text-[15px] font-semibold text-ink">Terminal app</span>
+                <span class="border border-rule px-1.5 font-mono text-[11px] leading-4 text-muted">terminal</span>
+                <span class="min-w-0 truncate font-mono text-[12px] text-muted">read-only here: rebind them in its Settings, Hotkeys tab</span>
+              </h2>
+            {/if}
+          {/if}
           {#each hotkeys as hg (hg.group)}
-            <section class="pt-5" aria-label={hg.group}>
+            <section class="pt-5" aria-label="Terminal app: {hg.group}">
               <h2 class="m-0 border-b border-rule-strong px-6 pb-1.5 font-mono text-[12px] font-semibold tracking-wide text-ink">{hg.group}</h2>
               <ul class="m-0 list-none p-0">
                 {#each hg.rows as h (h.id)}

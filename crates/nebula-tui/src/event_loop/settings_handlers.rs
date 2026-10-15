@@ -289,7 +289,8 @@ pub(crate) fn bind_hotkey(app: &mut App, action: usize, chord: crate::keymap::Ke
 /// changed, so callers skip their success message.
 pub(crate) fn save_keymap(app: &mut App, keymap: crate::keymap::Keymap) -> bool {
     let mut cfg = crate::config::Config::load();
-    cfg.keybindings = keymap.overrides();
+    // The desktop window's own overrides share the map: keep them.
+    nebula_config::actions::merge_tui_overrides(&mut cfg.keybindings, keymap.overrides());
     if !save_config(app, &cfg) {
         return false;
     }

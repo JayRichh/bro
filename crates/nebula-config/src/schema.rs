@@ -743,7 +743,7 @@ pub fn export(cfg: &Config, prefs: &DesktopPrefs, projects: &[ProjectRef]) -> Sc
             ),
             TabBody::Hotkeys => (
                 Vec::new(),
-                Some("The terminal app's keys, read-only here: rebind them in its Settings, Hotkeys tab. A running terminal app picks up changes when it next starts.".into()),
+                Some("This window's keys first: press a chord to bind one, or put it back. Then the terminal app's, read-only here: rebind those in its Settings, Hotkeys tab. A running terminal app picks up changes when it next starts.".into()),
                 hotkeys(cfg),
             ),
         };

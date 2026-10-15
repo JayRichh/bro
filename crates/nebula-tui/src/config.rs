@@ -2774,6 +2774,30 @@ mod tests {
     }
 
     #[test]
+    fn a_hotkey_save_keeps_the_desktop_windows_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(
+            &path,
+            r#"{"keybindings": {"quit": "ctrl+q", "desktop.palette": "ctrl+j", "desktop.help": "f2, ,"}}"#,
+        )
+        .unwrap();
+        let mut cfg = load_from(&path);
+        // The desktop entries mean nothing to the TUI's keymap.
+        let mut keymap = cfg.keymap();
+        assert_eq!(keymap.overrides().len(), 1);
+        let help = crate::keymap::index_of(crate::keymap::Action::Help).unwrap();
+        keymap.bind(help, crate::keymap::KeyChord::parse("f9").unwrap(), false);
+        nebula_config::actions::merge_tui_overrides(&mut cfg.keybindings, keymap.overrides());
+        cfg.save_to(&path).unwrap();
+        let reloaded = load_from(&path);
+        assert_eq!(reloaded.keybindings["quit"], "ctrl+q");
+        assert_eq!(reloaded.keybindings["desktop.palette"], "ctrl+j");
+        assert_eq!(reloaded.keybindings["desktop.help"], "f2, ,");
+        assert!(reloaded.keybindings["help"].contains("f9"));
+    }
+
+    #[test]
     fn save_creates_file_when_missing() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nested").join("config.json");

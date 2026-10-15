@@ -6,6 +6,7 @@ import { untrack } from 'svelte';
 import { api, type AccountRow, type Launchables, type Model, type SessionRef } from './api';
 import { ado, type AdoContextInfo } from './ado/api';
 import { nav, type Place } from './shell/history.svelte';
+import { applyOverrides } from './shortcuts';
 import { diffItem, isDiffMode, parseDiffItem, type DiffMode, type DiffRange } from './diff-api';
 
 export type ThemePref = 'system' | 'light' | 'dark';
@@ -116,6 +117,15 @@ export async function loadDesktopPrefs() {
     if (nav.current.view === 'overview' || nav.current.view === 'board') nav.replace({ ...nav.current, view: p.home });
   }
   return p;
+}
+
+/** Lay the window's own key bindings (Settings, Hotkeys) over the
+ *  defaults. Without them the defaults stand. */
+export function loadDesktopKeys() {
+  api
+    .actionsList()
+    .then((l) => applyOverrides(l.overrides))
+    .catch(() => {});
 }
 
 /** Ask which worktrees have a run command (after a settings change too). */

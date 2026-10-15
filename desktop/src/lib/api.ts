@@ -332,6 +332,14 @@ export interface HotkeyRow {
   bound: string[];
   overridden: boolean;
 }
+/** `actions_list`: the registry, and the window's key overrides by key
+ *  id (an empty list: deliberately unbound). */
+export interface ActionsList {
+  /** actions.gen.ts's ACTIONS as the Rust side has them (its field
+   *  names): the window reads the generated copy. */
+  verbs: unknown[];
+  overrides: Record<string, string[]>;
+}
 export interface SettingsTab {
   id: string;
   title: string;
@@ -443,6 +451,11 @@ export const api = {
   settingsSet: (target: SettingTarget, value: boolean | string) => invoke<void>('settings_set', { target, value }),
   settingsReset: () => invoke<void>('settings_reset'),
   desktopPrefs: () => invoke<DesktopPrefs>('desktop_prefs'),
+  /** The verb registry and the window's own key bindings. */
+  actionsList: () => invoke<ActionsList>('actions_list'),
+  /** Bind one of the window's keys (an empty list unbinds it), or with
+   *  null put it back to its default. Answers every binding now. */
+  desktopKeySet: (id: string, chords: string[] | null) => invoke<Record<string, string[]>>('desktop_key_set', { id, chords }),
   desktopSetCollapsed: (keys: string[]) => invoke<void>('desktop_set_collapsed', { keys }),
   /** Why config.json can't be written (it can't be parsed); null: fine. */
   configProblem: () => invoke<string | null>('config_problem'),

@@ -4,6 +4,7 @@
   import { placeOf } from '../status';
   import { parseItem } from '../ado/prs-api';
   import { parseDiffItem } from '../diff-api';
+  import { withKey } from '../shortcuts';
 
   type Crumb = { label: string; mono?: boolean; go?: () => void };
 
@@ -62,12 +63,12 @@
 </script>
 
 <nav class="flex min-w-0 items-center gap-1" aria-label="Where you are">
-  <button class={btn} onclick={() => nav.back()} disabled={!nav.canBack} title="Back (Alt+Left)" aria-label="Back">
+  <button class={btn} onclick={() => nav.back()} disabled={!nav.canBack} title={withKey('Back', 'back')} aria-label="Back">
     <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"
       ><path d="M13 8H3.5M7.5 3.5L3 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" /></svg
     >
   </button>
-  <button class={btn} onclick={() => nav.forward()} disabled={!nav.canForward} title="Forward (Alt+Right)" aria-label="Forward">
+  <button class={btn} onclick={() => nav.forward()} disabled={!nav.canForward} title={withKey('Forward', 'forward')} aria-label="Forward">
     <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"
       ><path d="M3 8h9.5M8.5 3.5L13 8l-4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" /></svg
     >

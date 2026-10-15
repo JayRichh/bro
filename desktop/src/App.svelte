@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick, untrack } from 'svelte';
-  import { app, boot, checkAdoStore, focusQuickPrompt, follow, loadDesktopPrefs, openDiff, openSession, sessionWorktree, setHome } from './lib/store.svelte';
+  import { app, boot, checkAdoStore, focusQuickPrompt, follow, loadDesktopKeys, loadDesktopPrefs, openDiff, openSession, sessionWorktree, setHome } from './lib/store.svelte';
   import { shortcutFor, withKey } from './lib/shortcuts';
   import { currentRepo, focusedTarget, runShortcut, toggleArchived, toggleDiff } from './lib/commands';
   import { layerOpen, ui } from './lib/ui/ui.svelte';
@@ -167,6 +167,7 @@
   async function applyStartup() {
     // Saved preferences first; the command line overrides them for this
     // run only and is never written back.
+    loadDesktopKeys();
     const prefs = await loadDesktopPrefs();
     loadCollapsed(prefs?.collapsed);
     const s = await api.startup().catch(() => null);
@@ -231,7 +232,7 @@
         <button
           class="h-6 flex-none border px-2 text-[12px] {app.showArchived ? 'border-ink bg-ink text-bg' : 'border-rule bg-transparent text-muted hover:text-ink'}"
           aria-pressed={app.showArchived}
-          title="Show archived sessions in the overview (Shift+A)"
+          title={withKey('Show archived sessions in the overview', 'toggle_archived')}
           onclick={toggleArchived}>Archived</button
         >
       {/if}

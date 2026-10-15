@@ -398,6 +398,10 @@ impl Keymap {
     pub fn from_overrides(overrides: &BTreeMap<String, String>) -> Self {
         let mut map = Self::default();
         for (id, spec) in overrides {
+            // The desktop window's keys, beside these in the same map.
+            if id.starts_with(nebula_config::actions::DESKTOP_PREFIX) {
+                continue;
+            }
             let Some(index) = ACTIONS.iter().position(|s| s.id == id) else {
                 tracing::warn!("ignoring keybinding for unknown action {id:?}");
                 continue;

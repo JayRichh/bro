@@ -151,7 +151,7 @@
     </span>
     <button
       class={verb}
-      title="Repo actions: open remote, refresh pull requests, rename, locate, remove, worktrees (Shift+F10, or right-click)"
+      title="{withKey('Repo actions: open remote, refresh pull requests, rename, locate, remove, worktrees', 'row_menu')}; or right-click"
       aria-label="{row.name} actions"
       aria-haspopup="menu"
       onclick={(e) => openMenu(projectMenu(row.project.id), e.currentTarget as HTMLElement, row.name)}

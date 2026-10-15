@@ -181,7 +181,7 @@
     </span>
     <button
       class="grid size-6 flex-none place-items-center border border-transparent bg-transparent p-0 text-muted hover:border-rule hover:text-ink"
-      title="Worktree actions: new session, terminal, diff, editor, folder, copy path, run, delete (or right-click; Shift+F10 on the row)"
+      title="Worktree actions: new session, terminal, diff, editor, folder, copy path, run, delete (or right-click; {withKey('on the row', 'row_menu')})"
       aria-label="{w.branch} actions"
       aria-haspopup="menu"
       onclick={(e) => openMenu(worktreeMenu(w), e.currentTarget as HTMLElement, w.branch)}

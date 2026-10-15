@@ -169,7 +169,7 @@
       <button
         class="{tile} text-[11px] {nav.current.view === 'accounts' ? 'bg-surface text-ink' : 'bg-transparent text-muted hover:text-ink'}"
         onclick={openAccounts}
-        title="Accounts: every login, its use and its sessions (Shift+U)"
+        title={withKey('Accounts: every login, its use and its sessions', 'accounts')}
         aria-label="Accounts"
         aria-current={nav.current.view === 'accounts' ? 'page' : undefined}
       >
@@ -178,7 +178,7 @@
       <button
         class="{tile} {inSettings ? 'bg-surface text-ink' : 'bg-transparent text-muted hover:text-ink'}"
         onclick={() => openSettings()}
-        title="Settings (Ctrl+,)"
+        title={withKey('Settings', 'settings')}
         aria-label="Settings"
         aria-current={inSettings ? 'page' : undefined}
       >
@@ -195,7 +195,7 @@
       <button
         class="{tile} bg-transparent text-muted hover:text-ink"
         onclick={cycleTheme}
-        title="Theme: {THEME_WORD[app.themePref]}. Press to cycle system, light, dark (Ctrl+Shift+L)"
+        title={withKey(`Theme: ${THEME_WORD[app.themePref]}. Press to cycle system, light, dark`, 'cycle_theme')}
         aria-label="Theme: {THEME_WORD[app.themePref]}"
       >
         <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
@@ -335,7 +335,7 @@
         ? 'bg-surface text-ink'
         : 'bg-transparent text-muted'}"
       onclick={() => openSettings()}
-      title="Settings (Ctrl+,)"
+      title={withKey('Settings', 'settings')}
       aria-current={inSettings ? 'page' : undefined}
     >
       <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
@@ -354,7 +354,7 @@
     <button
       class="inline-flex h-7 items-center gap-2 border-0 bg-transparent px-2 text-[13px] text-muted hover:bg-surface hover:text-ink"
       onclick={cycleTheme}
-      title="Theme: {THEME_WORD[app.themePref]}. Press to cycle system, light, dark (Ctrl+Shift+L)"
+      title={withKey(`Theme: ${THEME_WORD[app.themePref]}. Press to cycle system, light, dark`, 'cycle_theme')}
     >
       <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
         <rect x="2.5" y="2.5" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.3" />
