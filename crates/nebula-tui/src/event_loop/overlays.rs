@@ -20,6 +20,14 @@ pub(crate) fn handle_overlay_key(app: &mut App, key: KeyEvent, out: &mut Vec<Cli
         app.chrome.dirty = true;
         return;
     }
+    // `?` over the diff's file list or the accounts' rows: that
+    // overlay's verbs, each with its key, the overlay kept beneath.
+    if key.code == KeyCode::Char('?')
+        && !key.modifiers.contains(KeyModifiers::CONTROL)
+        && super::verbs::open_over_overlay(app)
+    {
+        return;
+    }
     let Some(overlay) = &app.modals.overlay else {
         return;
     };
@@ -61,7 +69,7 @@ fn handle_help_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) {
         Overlay::Help(_) => {
             if matches!(
                 key.code,
-                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?')
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') | KeyCode::F(1)
             ) {
                 app.modals.overlay = None;
             }
@@ -208,7 +216,9 @@ fn handle_menu_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) {
                         app.modals.overlay = None;
                         crate::quick_prompt::reopen(app, back.launch, &back.text);
                     }
-                    _ => app.modals.overlay = None,
+                    // A verbs menu `?` opened over an overlay goes back
+                    // to it.
+                    _ => app.modals.overlay = app.modals.verbs_under.take().map(|o| *o),
                 },
             },
             KeyCode::Char('j') | KeyCode::Down => {

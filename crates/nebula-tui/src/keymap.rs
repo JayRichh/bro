@@ -907,7 +907,7 @@ mod tests {
         assert!(!map.is_ambiguous(index_of(Action::Delete).unwrap()));
         assert_eq!(
             map.lookup(Scope::Global, &KeyChord::parse("?").unwrap()),
-            Some(Action::Help)
+            Some(Action::Verbs)
         );
     }
 
@@ -980,7 +980,7 @@ mod tests {
         assert!(map.chords(Action::Quit).is_empty(), "the row is cleared");
         assert_eq!(
             map.lookup(Scope::Global, &KeyChord::parse("?").unwrap()),
-            Some(Action::Help),
+            Some(Action::Verbs),
             "the rest of the map is untouched"
         );
     }
@@ -1038,6 +1038,25 @@ mod tests {
         // the host terminal is likely to eat.
         let map = Keymap::default();
         for (i, spec) in ACTIONS.iter().enumerate() {
+            // The menus' own verbs ship unbound: a menu row, the verbs
+            // menu and the palette reach them, and a user may bind one.
+            if spec.defaults.is_empty() {
+                assert!(
+                    matches!(
+                        spec.action,
+                        Action::Restart
+                            | Action::NewWorktree
+                            | Action::PinOrchestrator
+                            | Action::MoveToAccount
+                            | Action::ToggleRun
+                            | Action::DeleteWorktree
+                            | Action::RemoveProject
+                    ),
+                    "{} ships with no chord",
+                    spec.id
+                );
+                continue;
+            }
             assert!(
                 map.chords_at(i).iter().any(|c| host_warning(c).0.is_fine()),
                 "{} has no chord a stock terminal delivers",

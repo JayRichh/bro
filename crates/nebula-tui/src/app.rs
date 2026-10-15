@@ -457,6 +457,26 @@ pub enum MenuAction {
         target: crate::quick_prompt::QuickTarget,
         back: Box<crate::quick_prompt::QuickReturn>,
     },
+    /// A verb with no row-addressed form of its own, run as its key runs
+    /// on the selection (`key_modes::run_action`): the verbs menu and a
+    /// menu's checkout rows are built on the selection, so the key's
+    /// target is the row's.
+    Run(crate::keymap::Action),
+    /// The VERBS MENU's last row, **All keys…**: the full help.
+    AllKeys,
+    /// A row of the verbs menu an overlay's `?` opened (the diff's, the
+    /// accounts'): the overlay put back as it was, then this key pressed
+    /// in it.
+    OverlayKey(crossterm::event::KeyCode, crossterm::event::KeyModifiers),
+}
+
+/// The first row a menu of `len` rows draws in `visible` of them, so
+/// the hovered row is on screen: the draw and the click's hit test agree.
+pub fn menu_scroll(hover: usize, len: usize, visible: usize) -> usize {
+    if visible == 0 || len <= visible {
+        return 0;
+    }
+    (hover + 1).saturating_sub(visible).min(len - visible)
 }
 
 /// Which submenu → (right arrow) opens from a menu row.
@@ -507,6 +527,13 @@ pub struct MenuItem {
     pub label: String,
     pub action: MenuAction,
     pub destructive: bool,
+    /// The registry verb the row is, whose key the row shows at its right
+    /// (`keymap.label`, so a rebound key shows as bound). None on a row
+    /// that is no verb: a picker's harness, a link's URL.
+    pub verb: Option<crate::keymap::Action>,
+    /// The key to show when the row is no registry verb but has one of
+    /// its own (an overlay's, in the verbs menu its `?` opens).
+    pub key: Option<String>,
 }
 
 impl MenuItem {
@@ -516,16 +543,23 @@ impl MenuItem {
             label: label.into(),
             action,
             destructive: false,
+            verb: None,
+            key: None,
         }
     }
 
     /// A row drawn in the warning color: it deletes, closes, or removes.
     pub fn destructive(label: impl Into<String>, action: MenuAction) -> Self {
         Self {
-            label: label.into(),
-            action,
             destructive: true,
+            ..Self::new(label, action)
         }
+    }
+
+    /// The row as registry verb `verb`: its key shown at the right.
+    pub fn keyed(mut self, verb: crate::keymap::Action) -> Self {
+        self.verb = Some(verb);
+        self
     }
 }
 
@@ -626,12 +660,21 @@ impl ContextMenu {
         let Some(filter) = &self.filter else {
             return false;
         };
-        let labels: Vec<&str> = filter.all.iter().map(|i| i.label.as_str()).collect();
+        // The VERBS MENU's **All keys…** stays its last row whatever is
+        // typed: the way on when the verb wanted is not in the list.
+        let pinned = |i: &MenuItem| matches!(i.action, MenuAction::AllKeys);
+        let (rows, tail): (Vec<&MenuItem>, Vec<&MenuItem>) =
+            filter.all.iter().partition(|i| !pinned(i));
+        let labels: Vec<&str> = rows.iter().map(|i| i.label.as_str()).collect();
         let ranked = crate::fuzzy::rank(query, labels.iter().copied());
         if ranked.is_empty() {
             return false;
         }
-        let items: Vec<MenuItem> = ranked.iter().map(|(i, _)| filter.all[*i].clone()).collect();
+        let items: Vec<MenuItem> = ranked
+            .iter()
+            .map(|(i, _)| rows[*i].clone())
+            .chain(tail.into_iter().cloned())
+            .collect();
         self.hover = if query.trim().is_empty() {
             items
                 .iter()
@@ -4508,6 +4551,10 @@ impl Default for ChromeState {
 
 pub struct ModalState {
     pub overlay: Option<Overlay>,
+    /// The overlay a VERBS MENU (`?`) was opened over — the diff's, the
+    /// accounts' — put back when the menu goes, and before its row's key
+    /// is pressed in it (`MenuAction::OverlayKey`).
+    pub verbs_under: Option<Box<Overlay>>,
     /// When a modal's BUTTON was last clicked (a confirm's `[Enter/y]`, a
     /// prompt's `[Esc]`). A button click inside the double-click window
     /// after it is dropped: the answer can put another dialog up in the
@@ -4574,6 +4621,7 @@ impl Default for ModalState {
     fn default() -> Self {
         Self {
             overlay: None,
+            verbs_under: None,
             button_clicked_at: None,
             button_hover: None,
             follow_up: None,

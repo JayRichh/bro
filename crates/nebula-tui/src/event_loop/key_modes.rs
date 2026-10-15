@@ -416,6 +416,17 @@ fn handle_global_action(
         Action::CommandPalette | Action::NavBack | Action::NavForward | Action::Subagents => {
             desk::handle_action(app, action, out)
         }
+        // `?`: what can be done to the selection, each with its key.
+        Action::Verbs => super::verbs::open(app),
+        // The menus' own verbs, on a key the user gave one: the verb on
+        // the selection, as its menu row runs it.
+        Action::Restart
+        | Action::NewWorktree
+        | Action::PinOrchestrator
+        | Action::MoveToAccount
+        | Action::ToggleRun
+        | Action::DeleteWorktree
+        | Action::RemoveProject => super::verbs::run_on_selection(app, action, out),
         // Listed rather than `_`: a new action is a compile error here
         // until it is routed, never an `unreachable!` at the user's press.
         Action::GitDiff

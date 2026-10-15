@@ -60,6 +60,7 @@ mod state_io;
 mod terminal_events;
 mod terminal_mouse;
 mod text_entry;
+pub(crate) mod verbs;
 mod worktree_views;
 pub(crate) use actions::*;
 pub(crate) use background::*;

@@ -1,0 +1,578 @@
+//! The menus built from the verb registry (`event_loop::verbs`): every
+//! verb the hand-built menus had is still a row, running the same
+//! [`MenuAction`]; each row shows its key; `?` opens the selection's
+//! verbs; the footer leads with them.
+
+use super::*;
+use crate::event_loop::verbs::{self, Target};
+use crate::keymap::Action;
+use nebula_core::{AgentId, Entity, ProjectId, TerminalId, TerminalTab, Worktree, WorktreeId};
+
+/// [`seed_tree`] (`demo`, its root `main` and agent-1), and a linked
+/// worktree `feat` with a session of its own, a terminal in the root, an
+/// archived session there and a Cloud one.
+fn bench() -> App {
+    let mut app = App::new();
+    seed_tree(&mut app);
+    hse(
+        &mut app,
+        ServerEvent::EntityUpserted {
+            entity: Entity::Worktree(Worktree {
+                id: WorktreeId("w2".into()),
+                project_id: ProjectId("p1".into()),
+                path: "/tmp/demo-feat".into(),
+                branch: "feat".into(),
+                is_main: false,
+                sort_order: 1,
+            }),
+        },
+    );
+    seed_agent_in(&mut app, "a3", &WorktreeId("w2".into()));
+    seed_agent_in(&mut app, "arch", &WorktreeId("w1".into()));
+    seed_agent_in(&mut app, "cloud", &WorktreeId("w1".into()));
+    for a in app.tree.agents.iter_mut() {
+        match a.id.0.as_str() {
+            "arch" => a.archived = true,
+            "cloud" => a.cloud_session_id = Some("session_01SQugK2HDyk33coSrfqFJk4".into()),
+            "a1" => a.issue_url = Some("https://github.com/o/r/issues/7".into()),
+            _ => {}
+        }
+    }
+    hse(
+        &mut app,
+        ServerEvent::EntityUpserted {
+            entity: Entity::Terminal(TerminalTab {
+                id: TerminalId("t1".into()),
+                worktree_id: WorktreeId("w1".into()),
+                name: "shell".into(),
+                sort_order: 0,
+                alive: true,
+                run_command: None,
+            }),
+        },
+    );
+    app
+}
+
+fn agent(app: &App, id: &str) -> nebula_core::Agent {
+    app.tree
+        .agents
+        .iter()
+        .find(|a| a.id.0 == id)
+        .cloned()
+        .unwrap()
+}
+
+fn worktree(app: &App, id: &str) -> Worktree {
+    app.tree
+        .worktrees
+        .iter()
+        .find(|w| w.id.0 == id)
+        .cloned()
+        .unwrap()
+}
+
+// ---- the menus as they were built by hand, before the registry ----
+
+fn legacy_session(a: &nebula_core::Agent) -> Vec<MenuAction> {
+    let id = || a.id.clone();
+    if a.cloud_session_url().filter(|_| !a.archived).is_some() {
+        return vec![
+            MenuAction::OpenLink(a.cloud_session_url().unwrap()),
+            MenuAction::SendCloudMessage(id()),
+            MenuAction::DuplicateAgent(id()),
+            MenuAction::RenameAgent(id()),
+            MenuAction::ArchiveAgent(id()),
+            MenuAction::DeleteAgent(id()),
+        ];
+    }
+    if a.archived {
+        return vec![
+            MenuAction::UnarchiveAgent(id()),
+            MenuAction::DuplicateAgent(id()),
+            MenuAction::DeleteAgent(id()),
+        ];
+    }
+    vec![
+        MenuAction::Attach(SessionRef::Agent(id())),
+        MenuAction::FollowUp,
+        MenuAction::RestartAgent(id()),
+        MenuAction::DuplicateAgent(id()),
+        MenuAction::MoveAgentPicker(id()),
+        MenuAction::SwitchAccountPicker(id()),
+        MenuAction::RenameAgent(id()),
+        if a.role.is_orchestrator() {
+            MenuAction::ClearOrchestrator
+        } else {
+            MenuAction::MakeOrchestrator(id())
+        },
+        MenuAction::ArchiveAgent(id()),
+        MenuAction::DeleteAgent(id()),
+    ]
+}
+
+fn legacy_session_in(app: &App, a: &nebula_core::Agent) -> Vec<MenuAction> {
+    let mut items = legacy_session(a);
+    if let Some(url) = a.issue_url.clone() {
+        items.push(MenuAction::OpenLink(url));
+    }
+    if a.archived {
+        return items;
+    }
+    let w = worktree(app, &a.worktree_id.0);
+    items.push(MenuAction::ToggleRun(w.id.clone()));
+    items.push(MenuAction::OpenWorktree(w.id.clone()));
+    items.push(MenuAction::Reorder(
+        crate::order::OrderTarget::Agent(a.id.clone()),
+        -1,
+    ));
+    items.push(MenuAction::Reorder(
+        crate::order::OrderTarget::Agent(a.id.clone()),
+        1,
+    ));
+    if w.is_main {
+        items.push(MenuAction::SwitchBranch(w.id.clone()));
+    } else {
+        items.push(MenuAction::Reorder(
+            crate::order::OrderTarget::Worktree(w.id.clone()),
+            -1,
+        ));
+        items.push(MenuAction::Reorder(
+            crate::order::OrderTarget::Worktree(w.id.clone()),
+            1,
+        ));
+        items.push(MenuAction::DeleteWorktree(w.id.clone()));
+    }
+    items
+}
+
+fn legacy_worktree(w: &Worktree) -> Vec<MenuAction> {
+    let mut items = vec![
+        MenuAction::NewAgent(w.id.clone()),
+        MenuAction::NewTerminal(w.id.clone()),
+        MenuAction::ToggleRun(w.id.clone()),
+        MenuAction::OpenWorktree(w.id.clone()),
+    ];
+    if w.is_main {
+        items.push(MenuAction::SwitchBranch(w.id.clone()));
+    } else {
+        items.push(MenuAction::Reorder(
+            crate::order::OrderTarget::Worktree(w.id.clone()),
+            -1,
+        ));
+        items.push(MenuAction::Reorder(
+            crate::order::OrderTarget::Worktree(w.id.clone()),
+            1,
+        ));
+        items.push(MenuAction::DeleteWorktree(w.id.clone()));
+    }
+    items
+}
+
+fn legacy_repo(app: &App, p: &ProjectId) -> Vec<MenuAction> {
+    let mut items = vec![MenuAction::NewWorktree(p.clone())];
+    if let Some(w) = crate::launcher::checkout_for(app, p) {
+        items.push(MenuAction::ToggleRun(w.clone()));
+        items.push(MenuAction::OpenWorktree(w.clone()));
+        if !worktree(app, &w.0).is_main {
+            items.push(MenuAction::DeleteWorktree(w));
+        }
+    }
+    items.push(MenuAction::RenameProject(p.clone()));
+    items.push(MenuAction::Reorder(
+        crate::order::OrderTarget::Project(p.clone()),
+        -1,
+    ));
+    items.push(MenuAction::Reorder(
+        crate::order::OrderTarget::Project(p.clone()),
+        1,
+    ));
+    items.push(MenuAction::RemoveProject(p.clone()));
+    items
+}
+
+fn assert_kept(app: &App, t: &Target, legacy: Vec<MenuAction>) {
+    let menu = verbs::menu_for(app, t);
+    for want in legacy {
+        assert!(
+            menu.iter().any(|i| i.action == want),
+            "{t:?}: {want:?} is gone from {:?}",
+            menu.iter().map(|i| &i.label).collect::<Vec<_>>()
+        );
+    }
+}
+
+/// Every verb the hand-built menus offered on a live, an archived and a
+/// Cloud session, a terminal, a root and a linked checkout and a project
+/// is a row of its registry-built menu, running the same thing.
+#[test]
+fn every_menu_verb_is_still_there() {
+    let app = bench();
+    for id in ["a1", "a3", "arch", "cloud"] {
+        let a = agent(&app, id);
+        assert_kept(
+            &app,
+            &Target::Session(a.id.clone()),
+            legacy_session_in(&app, &a),
+        );
+    }
+    assert_kept(
+        &app,
+        &Target::Terminal(TerminalId("t1".into())),
+        vec![
+            MenuAction::Attach(SessionRef::Terminal(TerminalId("t1".into()))),
+            MenuAction::RenameTerminal(TerminalId("t1".into())),
+            MenuAction::CloseTerminal(TerminalId("t1".into())),
+        ],
+    );
+    for w in ["w1", "w2"] {
+        let w = worktree(&app, w);
+        assert_kept(&app, &Target::Worktree(w.id.clone()), legacy_worktree(&w));
+    }
+    let p = ProjectId("p1".into());
+    assert_kept(&app, &Target::Repo(p.clone()), legacy_repo(&app, &p));
+}
+
+/// A menu means what its target is now: no Unarchive on a live session,
+/// no Restart on an archived or Cloud one, no Delete worktree on the
+/// root, no Switch branch on a linked worktree.
+#[test]
+fn menus_leave_out_what_means_nothing_there() {
+    let app = bench();
+    let verbs_of = |t: Target| -> Vec<Option<Action>> {
+        verbs::menu_for(&app, &t).iter().map(|i| i.verb).collect()
+    };
+    let live = verbs_of(Target::Session(AgentId("a1".into())));
+    assert!(!live.contains(&Some(Action::Unarchive)));
+    assert!(live.contains(&Some(Action::Archive)));
+    let archived = verbs_of(Target::Session(AgentId("arch".into())));
+    assert!(archived.contains(&Some(Action::Unarchive)));
+    assert!(!archived.contains(&Some(Action::Restart)));
+    assert!(
+        !archived.contains(&Some(Action::ToggleRun)),
+        "no checkout verbs"
+    );
+    let cloud = verbs_of(Target::Session(AgentId("cloud".into())));
+    assert!(!cloud.contains(&Some(Action::Restart)));
+    assert!(!cloud.contains(&Some(Action::PinOrchestrator)));
+    let root = verbs_of(Target::Worktree(WorktreeId("w1".into())));
+    assert!(root.contains(&Some(Action::SwitchBranch)));
+    assert!(!root.contains(&Some(Action::DeleteWorktree)));
+    let linked = verbs_of(Target::Worktree(WorktreeId("w2".into())));
+    assert!(!linked.contains(&Some(Action::SwitchBranch)));
+    assert!(linked.contains(&Some(Action::DeleteWorktree)));
+}
+
+/// The same verb says the same words in both apps: the registry's menu
+/// labels, the card's checkout rows named as the checkout's where the
+/// card has its own.
+#[test]
+fn menu_rows_take_the_registrys_words_and_show_their_keys() {
+    let app = bench();
+    let menu = verbs::menu_for(&app, &Target::Session(AgentId("a3".into())));
+    let label = |a: MenuAction| {
+        menu.iter()
+            .find(|i| i.action == a)
+            .map(|i| i.label.clone())
+            .unwrap()
+    };
+    assert_eq!(
+        label(MenuAction::Attach(SessionRef::Agent(AgentId("a3".into())))),
+        "Open"
+    );
+    assert_eq!(
+        label(MenuAction::OpenWorktree(WorktreeId("w2".into()))),
+        "Open in editor"
+    );
+    assert_eq!(
+        label(MenuAction::Reorder(
+            crate::order::OrderTarget::Worktree(WorktreeId("w2".into())),
+            -1
+        )),
+        "Move worktree up"
+    );
+    assert_eq!(
+        label(MenuAction::DeleteAgent(AgentId("a3".into()))),
+        "Delete\u{2026}"
+    );
+    let term = verbs::menu_for(&app, &Target::Terminal(TerminalId("t1".into())));
+    assert_eq!(term[2].label, "Close terminal\u{2026}");
+    assert!(term[2].destructive);
+    let repo = verbs::menu_for(&app, &Target::Repo(ProjectId("p1".into())));
+    assert!(repo.iter().any(|i| i.label == "Remove from Kete\u{2026}"));
+    // Every registry row carries its verb, so the draw shows its key.
+    assert!(menu.iter().all(|i| i.verb.is_some()));
+    let rename = menu
+        .iter()
+        .find(|i| i.verb == Some(Action::Rename))
+        .unwrap();
+    assert_eq!(
+        app.chrome.keymap.first(Action::Rename).unwrap().display(),
+        "r"
+    );
+    let mut terminal = Terminal::new(TestBackend::new(100, 40)).unwrap();
+    let mut app = app;
+    app.modals.overlay = Some(Overlay::Menu(ContextMenu {
+        title: None,
+        items: vec![rename.clone()],
+        at: Some((2, 2)),
+        hover: 0,
+        area: ratatui::layout::Rect::default(),
+        parent: None,
+        filter: None,
+    }));
+    terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
+    let text = buffer_text(&terminal);
+    let line = text.lines().find(|l| l.contains("Rename")).unwrap();
+    assert!(
+        line.split("Rename…")
+            .nth(1)
+            .and_then(|rest| rest.split('│').next())
+            .map(str::trim)
+            == Some("r"),
+        "the key at the row's right: {line:?}"
+    );
+}
+
+/// `?` opens the verbs of whatever the cursor is on — a card, a band, a
+/// project tab — searchable, keys shown, **All keys…** last; the full
+/// help is F1 and that row.
+#[test]
+fn question_mark_opens_the_selections_verbs() {
+    let mut app = bench();
+    let mut out = Vec::new();
+    // The cursor on a card.
+    let rows = app.visible_session_rows();
+    let at = rows
+        .iter()
+        .position(|r| r.sref() == Some(SessionRef::Agent(AgentId("a1".into()))))
+        .unwrap();
+    app.nav.sel_session = at;
+    assert_eq!(
+        verbs::selection(&app),
+        Some(Target::Session(AgentId("a1".into())))
+    );
+    run_action(&mut app, Action::Verbs, &mut out);
+    let Some(Overlay::Menu(menu)) = &app.modals.overlay else {
+        panic!("no verbs menu");
+    };
+    assert!(menu.title.as_deref().unwrap().contains("agent-1"));
+    assert!(menu.filter.is_some(), "type to narrow");
+    assert!(menu.items.iter().any(|i| i.verb == Some(Action::Archive)));
+    // The rest of what applies, past the card's menu: a comment on its
+    // pull request, its subagents.
+    assert!(menu
+        .items
+        .iter()
+        .any(|i| i.action == MenuAction::Run(Action::Subagents)));
+    assert_eq!(menu.items.last().unwrap().action, MenuAction::AllKeys);
+    // Typing narrows; All keys stays last.
+    let Some(Overlay::Menu(menu)) = &mut app.modals.overlay else {
+        unreachable!()
+    };
+    assert!(menu.type_filter('a'));
+    assert!(menu.type_filter('r'));
+    assert_eq!(menu.items[0].verb, Some(Action::Archive));
+    assert_eq!(menu.items.last().unwrap().action, MenuAction::AllKeys);
+    // Enter on All keys: the full help.
+    let last = menu.items.len() - 1;
+    activate::menu_row(&mut app, last, &mut out);
+    assert!(matches!(app.modals.overlay, Some(Overlay::Help(_))));
+    app.modals.overlay = None;
+    // F1 is the help's own key now.
+    assert_eq!(app.chrome.keymap.label(Action::Help), "F1");
+    assert_eq!(app.chrome.keymap.label(Action::Verbs), "?");
+
+    // A project tab under the header's cursor: the project's verbs.
+    app.launcher.launcher_tab_cursor = Some(ProjectId("p1".into()));
+    assert_eq!(
+        verbs::selection(&app),
+        Some(Target::Repo(ProjectId("p1".into())))
+    );
+    let menu = verbs::selection_menu(&app);
+    assert!(menu
+        .items
+        .iter()
+        .any(|i| i.action == MenuAction::RenameProject(ProjectId("p1".into()))));
+    app.launcher.launcher_tab_cursor = None;
+
+    // A terminal card.
+    let rows = app.visible_session_rows();
+    if let Some(at) = rows
+        .iter()
+        .position(|r| r.sref() == Some(SessionRef::Terminal(TerminalId("t1".into()))))
+    {
+        app.nav.sel_session = at;
+        let menu = verbs::selection_menu(&app);
+        assert!(menu.title.as_deref().unwrap().starts_with("terminal"));
+        assert!(menu
+            .items
+            .iter()
+            .any(|i| i.action == MenuAction::CloseTerminal(TerminalId("t1".into()))));
+    }
+}
+
+/// `?` over the accounts' list: that overlay's own verbs, with their
+/// keys; Esc goes back to it, and a row puts it back and presses its key.
+#[test]
+fn question_mark_over_the_accounts_lists_their_verbs() {
+    let mut app = bench();
+    let mut out = Vec::new();
+    accounts::open(&mut app);
+    assert!(matches!(app.modals.overlay, Some(Overlay::Accounts(_))));
+    handle_overlay_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::SHIFT),
+        &mut out,
+    );
+    let Some(Overlay::Menu(menu)) = &app.modals.overlay else {
+        panic!("no verbs menu over the accounts");
+    };
+    let close = menu.items.iter().position(|i| i.label == "Close").unwrap();
+    assert_eq!(menu.items[close].key.as_deref(), Some("Esc"));
+    assert_eq!(menu.items.last().unwrap().action, MenuAction::AllKeys);
+    // Esc: back to the accounts.
+    handle_overlay_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        &mut out,
+    );
+    assert!(matches!(app.modals.overlay, Some(Overlay::Accounts(_))));
+    // A row: the accounts back, and its key pressed there (Close).
+    handle_overlay_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+        &mut out,
+    );
+    activate::menu_row(&mut app, close, &mut out);
+    assert!(app.modals.overlay.is_none(), "Esc closed the accounts");
+    assert!(app.modals.verbs_under.is_none());
+}
+
+/// A key the user gives one of the menus' own verbs runs it on the
+/// selection, as its row would: Run on a card runs its checkout's.
+#[test]
+fn a_menu_verbs_key_acts_on_the_selection() {
+    let mut app = bench();
+    let rows = app.visible_session_rows();
+    app.nav.sel_session = rows
+        .iter()
+        .position(|r| r.sref() == Some(SessionRef::Agent(AgentId("a1".into()))))
+        .unwrap();
+    let mut out = Vec::new();
+    run_action(&mut app, Action::RemoveProject, &mut out);
+    match &app.modals.overlay {
+        Some(Overlay::Confirm(c)) => assert!(matches!(c.action, PendingAction::RemoveProject(_))),
+        other => panic!("no remove confirm: {other:?}"),
+    }
+}
+
+/// The footer leads with the selection's verbs, in the registry's words,
+/// and `?` for the rest.
+#[test]
+fn the_footer_leads_with_the_selections_verbs() {
+    let mut app = bench();
+    let rows = app.visible_session_rows();
+    app.nav.sel_session = rows
+        .iter()
+        .position(|r| r.sref() == Some(SessionRef::Agent(AgentId("a1".into()))))
+        .unwrap();
+    let top = verbs::primary(&app, 4, true);
+    assert_eq!(
+        top,
+        vec![
+            (Action::Activate, "open"),
+            (Action::FollowUp, "reply"),
+            (Action::GitDiff, "diff"),
+            (Action::Archive, "archive"),
+        ]
+    );
+    app.nav.sel_session = rows
+        .iter()
+        .position(|r| r.sref() == Some(SessionRef::Agent(AgentId("arch".into()))))
+        .unwrap_or(app.nav.sel_session);
+    if verbs::selection(&app) == Some(Target::Session(AgentId("arch".into()))) {
+        let top = verbs::primary(&app, 4, true);
+        assert_eq!(top[0], (Action::Unarchive, "unarchive"));
+    }
+}
+
+/// `^K` leads with the selection's verbs, by their menu words and its
+/// name, ahead of every session and command; Enter runs one as its key.
+#[test]
+fn the_command_palette_leads_with_the_selections_verbs() {
+    let mut app = bench();
+    let rows = app.visible_session_rows();
+    app.nav.sel_session = rows
+        .iter()
+        .position(|r| r.sref() == Some(SessionRef::Agent(AgentId("a1".into()))))
+        .unwrap();
+    let mut out = Vec::new();
+    run_action(&mut app, Action::CommandPalette, &mut out);
+    let Some(Overlay::Palette(p)) = &app.modals.overlay else {
+        panic!("no palette");
+    };
+    let first = &p.list.items[p.list.matches[0].item];
+    assert!(first.pinned);
+    assert_eq!(first.text, "Open \u{b7} agent-1");
+    assert!(p
+        .list
+        .matches
+        .iter()
+        .take_while(|m| p.list.items[m.item].pinned)
+        .any(|m| p.list.items[m.item].text == "Archive \u{b7} agent-1"));
+}
+
+/// `?` over the diff's file list: the diff's own verbs, the diff kept
+/// beneath; a row puts it back and presses the row's key there.
+#[test]
+fn question_mark_over_the_diff_lists_its_verbs() {
+    let mut app = bench();
+    let mut out = Vec::new();
+    app.modals.overlay = Some(Overlay::Diff(fake_diff_view(3)));
+    handle_overlay_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+        &mut out,
+    );
+    let Some(Overlay::Menu(menu)) = &app.modals.overlay else {
+        panic!("no verbs menu over the diff");
+    };
+    assert!(menu.title.as_deref().unwrap().starts_with("diff"));
+    let next = menu
+        .items
+        .iter()
+        .position(|i| i.label == "Next change")
+        .unwrap();
+    assert_eq!(menu.items[next].key.as_deref(), Some("^n"));
+    activate::menu_row(&mut app, next, &mut out);
+    assert!(matches!(app.modals.overlay, Some(Overlay::Diff(_))));
+}
+
+/// The grid's footer: `? more` first, then the walk and the card's
+/// leading verbs as buttons.
+#[test]
+fn the_grid_footer_shows_more_and_the_cards_verbs() {
+    let mut app = App::new();
+    seed_tree(&mut app);
+    seed_second_agent(&mut app, nebula_core::AgentStatus::Finished);
+    let mut terminal = Terminal::new(TestBackend::new(200, 40)).unwrap();
+    terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
+    app.chrome.flash = None;
+    terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
+    let hint = |a: Action| app.hit_rect(&HitTarget::FooterHint(a));
+    let more = hint(Action::Verbs).expect("? more");
+    for a in [
+        Action::Activate,
+        Action::FollowUp,
+        Action::GitDiff,
+        Action::Archive,
+    ] {
+        let at = hint(a).unwrap_or_else(|| panic!("{a:?} on the footer"));
+        assert!(more.x < at.x, "? more leads");
+    }
+    let text = buffer_text(&terminal);
+    let footer = text.lines().last().unwrap();
+    assert!(footer.contains("?: more"), "{footer}");
+    assert!(footer.contains("reply"), "{footer}");
+}

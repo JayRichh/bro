@@ -241,7 +241,8 @@ pub(crate) fn jump_attention_kind(app: &mut App, tone: Tone, out: &mut Vec<Clien
 
 // ---- command palette ----
 
-/// `^K`: the `/` palette with every action in it.
+/// `^K`: the `/` palette with every action in it, the selection's verbs
+/// on top.
 pub(crate) fn open_command_palette(app: &mut App) {
     app.modals.overlay = Some(Overlay::Palette(
         Palette::new(
@@ -250,7 +251,9 @@ pub(crate) fn open_command_palette(app: &mut App) {
             &app.github.open_prs,
             app.launcher.hide_draft_prs,
         )
-        .with_commands(),
+        .with_commands()
+        // What can be done to the thing under the cursor, first.
+        .with_verbs(super::verbs::palette_verbs(app)),
     ));
     app.chrome.dirty = true;
 }

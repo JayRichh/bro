@@ -1386,37 +1386,7 @@ fn project_menu(app: &mut App, at: (u16, u16)) {
     let Some(project) = app.selected_project().map(|p| p.id.clone()) else {
         return;
     };
-    let mut items = vec![MenuItem::new(
-        "New worktree",
-        MenuAction::NewWorktree(project.clone()),
-    )];
-    if let Some(w) = crate::launcher::checkout_for(app, &project) {
-        let running = app.worktree_running(&w);
-        items.push(MenuItem::new(
-            if running { "Stop run" } else { "Run" },
-            MenuAction::ToggleRun(w.clone()),
-        ));
-        items.push(MenuItem::new("Open", MenuAction::OpenWorktree(w.clone())));
-        if !app.tree.worktrees.iter().any(|x| x.id == w && x.is_main) {
-            items.push(MenuItem::destructive(
-                "Delete worktree",
-                MenuAction::DeleteWorktree(w),
-            ));
-        }
-    }
-    items.push(MenuItem::new(
-        "Rename",
-        MenuAction::RenameProject(project.clone()),
-    ));
-    // The tab's place in the header, as dragging it does.
-    items.extend(super::move_items(
-        crate::order::OrderTarget::Project(project.clone()),
-        "",
-    ));
-    items.push(MenuItem::destructive(
-        "Remove from list",
-        MenuAction::RemoveProject(project),
-    ));
+    let items = super::project_menu_items(app, &project);
     super::open_menu(app, items, at);
 }
 
@@ -1837,6 +1807,12 @@ fn tabs_action(
         // than the card it left: the same close, behind the confirm every
         // delete key in kete puts up first.
         Action::Delete => confirm_close_cursor_tab(app, &on),
+        // `?` and the project's own verbs keep the tab: the project
+        // under the header's cursor is what they act on.
+        Action::Verbs => super::verbs::open(app),
+        Action::NewWorktree | Action::RemoveProject | Action::ToggleRun => {
+            super::verbs::run_on_selection(app, action, out)
+        }
         _ => {
             leave_tabs(app);
             return false;
@@ -4786,7 +4762,7 @@ mod tests {
                 Some(Overlay::Menu(menu)) => menu
                     .items
                     .iter()
-                    .position(|i| i.label == "Delete worktree")
+                    .position(|i| i.label == "Delete worktree…")
                     .unwrap_or_else(|| panic!("no Delete worktree in {menu:?}")),
                 other => panic!("expected the worktree's menu, got {other:?}"),
             };
@@ -4877,7 +4853,7 @@ mod tests {
                     Some(Overlay::Menu(menu)) => menu
                         .items
                         .iter()
-                        .position(|i| i.label == "Delete worktree")
+                        .position(|i| i.label == "Delete worktree…")
                         .unwrap_or_else(|| panic!("no Delete worktree in {menu:?}")),
                     other => panic!("expected the worktree's menu, got {other:?}"),
                 };
@@ -5137,7 +5113,7 @@ mod tests {
                 Some(Overlay::Menu(menu)) => menu
                     .items
                     .iter()
-                    .position(|i| i.label == "Follow-up prompt")
+                    .position(|i| i.label == "Follow-up prompt…")
                     .expect("the row is on the card's menu"),
                 other => panic!("expected the menu, got {other:?}"),
             };
@@ -6906,7 +6882,7 @@ mod tests {
                 panic!("the tab's menu: {:?}", app.modals.overlay);
             };
             let labels: Vec<&str> = menu.items.iter().map(|i| i.label.as_str()).collect();
-            for want in ["New worktree", "Rename", "Remove from list"] {
+            for want in ["New worktree…", "Rename…", "Remove from Kete…"] {
                 assert!(labels.contains(&want), "{want} in {labels:?}");
             }
             assert_eq!(menu.at.map(|(_, row)| row), Some(y + 1), "under the tab");
@@ -13024,7 +13000,7 @@ mod tests {
             };
             let labels: Vec<&str> = menu.items.iter().map(|i| i.label.as_str()).collect();
             assert!(labels.contains(&"Archive"), "{labels:?}");
-            assert!(labels.contains(&"Attach"), "the session's menu: {labels:?}");
+            assert!(labels.contains(&"Open"), "the session's menu: {labels:?}");
         });
     }
 
@@ -14287,7 +14263,7 @@ mod tests {
                 key(&mut app, KeyCode::Char('K'), KeyModifiers::SHIFT);
                 assert!(app.modals.overlay.is_none());
                 assert!(app.launcher.launcher_kanban, "still the board");
-                key(&mut app, KeyCode::Char('?'), KeyModifiers::NONE);
+                key(&mut app, KeyCode::F(1), KeyModifiers::NONE);
                 key(&mut app, KeyCode::Char('K'), KeyModifiers::SHIFT);
                 assert!(app.modals.overlay.is_none() && app.launcher.launcher_kanban);
                 key(&mut app, KeyCode::Char('S'), KeyModifiers::SHIFT);

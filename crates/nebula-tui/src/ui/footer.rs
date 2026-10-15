@@ -328,7 +328,7 @@ fn launcher_tabs_footer_hint(app: &App, _th: Theme) -> FooterHint {
     let k = |a| key_hint(app, a);
     let down = k(Action::MoveDown);
     key_bar(vec![
-        button(k(Action::Help), "help", Action::Help),
+        button(k(Action::Verbs), "more", Action::Verbs),
         keys(
             format!("{}{}", k(Action::FocusLeft), k(Action::FocusRight)),
             "switch project",
@@ -370,20 +370,24 @@ fn launcher_grid_footer_hint(app: &App, _th: Theme) -> FooterHint {
     }
     // Every entry that is one action's key is a button: a click on it runs
     // that action, as the key does. The walks (`hjkl`, `[]`) stay words.
-    // Help leads the bar, so the one button every other action is a click
-    // away from (each of its rows is a button) is never the one a narrow
-    // bar cuts.
-    let help = button(k(Action::Help), "help", Action::Help);
-    // The KANBAN's own keys first: its lanes, its scope, the way back to
-    // the bands — the board is the grid's other home, and its footer
-    // says how to leave it as plainly as the bands' says how to reach it.
+    // `?` leads the bar, so the one button every other verb is a click
+    // away from — the selection's verbs, the last of them every key — is
+    // never the one a narrow bar cuts.
+    let more = button(k(Action::Verbs), "more", Action::Verbs);
+    // Then how to walk, the selection's own verbs (the registry's leading
+    // four for what is under the cursor, in its words), and the view's.
+    let selected: Vec<KeyHint> =
+        crate::event_loop::verbs::primary(app, nebula_config::actions::PRIMARY_SHOWN, true)
+            .into_iter()
+            .map(|(action, word)| button(k(action), word, action))
+            .collect();
     let mut hints = if app.launcher.launcher_kanban {
         let scope = if app.launcher.kanban_all {
             "this project"
         } else {
             "all projects"
         };
-        vec![
+        let mut hints = vec![
             keys(
                 format!("{}{}", k(Action::FocusLeft), k(Action::FocusRight)),
                 "lanes",
@@ -392,47 +396,50 @@ fn launcher_grid_footer_hint(app: &App, _th: Theme) -> FooterHint {
                 format!("{}{}", k(Action::MoveDown), k(Action::MoveUp)),
                 "cards",
             ),
-            button(k(Action::FocusNext), scope, Action::FocusNext),
-            button(k(Action::Activate), "open", Action::Activate),
-            button(k(Action::QuickPrompt), "new session", Action::QuickPrompt),
-            button(k(Action::ToggleKanban), "overview", Action::ToggleKanban),
-        ]
+        ];
+        hints.extend(selected);
+        hints.push(button(k(Action::FocusNext), scope, Action::FocusNext));
+        hints.push(button(
+            k(Action::ToggleKanban),
+            "overview",
+            Action::ToggleKanban,
+        ));
+        hints
     } else if app.launcher.show_archived {
-        vec![
-            keys(move_keys, "move"),
-            button(k(Action::Unarchive), "unarchive", Action::Unarchive),
-            button(k(Action::Delete), "delete", Action::Delete),
-            button(
-                k(Action::ToggleArchived),
-                "back to live sessions",
-                Action::ToggleArchived,
-            ),
-        ]
+        let mut hints = vec![keys(move_keys, "move")];
+        hints.extend(selected);
+        hints.push(button(
+            k(Action::ToggleArchived),
+            "back to live sessions",
+            Action::ToggleArchived,
+        ));
+        hints
     } else {
-        vec![
-            keys(move_keys, "move"),
-            button(k(Action::Activate), "open", Action::Activate),
-            button(k(Action::QuickPrompt), "new session", Action::QuickPrompt),
+        let mut hints = vec![keys(move_keys, "move")];
+        hints.extend(selected);
+        hints.extend([
             keys(
                 format!("{}{}", k(Action::PrevProjectTab), k(Action::NextProjectTab)),
                 "project tabs",
             ),
-            button(k(Action::PaneTabs), "terminals", Action::PaneTabs),
-            button(k(Action::Archive), "archive", Action::Archive),
-            button(
-                k(Action::ToggleArchived),
-                "archived",
-                Action::ToggleArchived,
-            ),
+            button(k(Action::QuickPrompt), "new session", Action::QuickPrompt),
             button(k(Action::ToggleKanban), "board", Action::ToggleKanban),
-            button(k(Action::GitDiff), "diff", Action::GitDiff),
-        ]
+        ]);
+        hints
     };
-    hints.insert(0, help);
+    // A verb already on the bar (`new session` where the selection's own
+    // is the box) is said once.
+    let mut seen = Vec::new();
+    hints.retain(|h| match h.action {
+        Some(a) if seen.contains(&a) => false,
+        Some(a) => {
+            seen.push(a);
+            true
+        }
+        None => true,
+    });
+    hints.insert(0, more);
     hints.push(button(k(Action::Palette), "jump", Action::Palette));
-    if !app.launcher.launcher_kanban && !app.launcher.show_archived {
-        hints.push(button(k(Action::Settings), "settings", Action::Settings));
-    }
     hints.push(button(k(Action::Quit), "quit", Action::Quit));
     key_bar(hints)
 }

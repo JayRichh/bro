@@ -514,157 +514,15 @@ pub(crate) fn menu_items_for_link(row: &LinkRow) -> Vec<MenuItem> {
     items
 }
 
-pub(crate) fn menu_items_for_session(a: &nebula_core::Agent) -> Vec<MenuItem> {
-    // A Cloud row has no terminal to attach or restart: the agent runs in
-    // the cloud sandbox, so its verbs are the browser and the message
-    // queue, ahead of the row-keeping ones every session has.
-    if let Some(url) = a.cloud_session_url().filter(|_| !a.archived) {
-        return vec![
-            MenuItem::new("Open in browser", MenuAction::OpenLink(url)),
-            MenuItem::new(
-                "Send to cloud session",
-                MenuAction::SendCloudMessage(a.id.clone()),
-            ),
-            MenuItem::new("Duplicate", MenuAction::DuplicateAgent(a.id.clone())),
-            MenuItem::new("Rename", MenuAction::RenameAgent(a.id.clone())),
-            MenuItem::new("Archive", MenuAction::ArchiveAgent(a.id.clone())),
-            MenuItem::destructive("Delete", MenuAction::DeleteAgent(a.id.clone())),
-        ];
-    }
-    if a.archived {
-        vec![
-            MenuItem::new("Unarchive", MenuAction::UnarchiveAgent(a.id.clone())),
-            MenuItem::new("Duplicate", MenuAction::DuplicateAgent(a.id.clone())),
-            MenuItem::destructive("Delete", MenuAction::DeleteAgent(a.id.clone())),
-        ]
-    } else {
-        vec![
-            MenuItem::new(
-                "Attach",
-                MenuAction::Attach(SessionRef::Agent(a.id.clone())),
-            ),
-            MenuItem::new("Follow-up prompt", MenuAction::FollowUp),
-            MenuItem::new("Restart", MenuAction::RestartAgent(a.id.clone())),
-            MenuItem::new("Duplicate", MenuAction::DuplicateAgent(a.id.clone())),
-            MenuItem::new("Move to…", MenuAction::MoveAgentPicker(a.id.clone())),
-            MenuItem::new(
-                "Move to account…",
-                MenuAction::SwitchAccountPicker(a.id.clone()),
-            ),
-            MenuItem::new("Rename", MenuAction::RenameAgent(a.id.clone())),
-            if a.role.is_orchestrator() {
-                MenuItem::new("Unpin orchestrator", MenuAction::ClearOrchestrator)
-            } else {
-                MenuItem::new(
-                    "Make orchestrator",
-                    MenuAction::MakeOrchestrator(a.id.clone()),
-                )
-            },
-            MenuItem::new("Archive", MenuAction::ArchiveAgent(a.id.clone())),
-            MenuItem::destructive("Delete", MenuAction::DeleteAgent(a.id.clone())),
-        ]
-    }
-}
-
-/// The card's menu, plus the verbs of the CHECKOUT it runs in — the RUN
-/// COMMAND started or stopped, the checkout opened, and a linked one
-/// deleted. Those were the WORKTREES PANEL's rows' own, and the grid has
-/// no row for a checkout: every card names one instead, so the card's
-/// menu is where they go.
+/// A session card's menu: its verbs, then its checkout's
+/// (`verbs::menu_for`, from the registry's menus).
 pub(crate) fn menu_items_for_session_in(app: &App, a: &nebula_core::Agent) -> Vec<MenuItem> {
-    let mut items = menu_items_for_session(a);
-    // The card's pull request and the issue it was started from, what `⇧V`
-    // and `⇧I` open (`launcher::open_pull_request`, `launcher::open_issue`):
-    // ahead of the trailing Delete on an archived card, which keeps no
-    // checkout verbs, and after the checkout's Open on a live one.
-    let links: Vec<MenuItem> = crate::launcher::row(app, &a.id)
-        .and_then(|row| row.pr)
-        .map(|pr| MenuItem::new("Open pull request", MenuAction::OpenLink(pr.url)))
-        .into_iter()
-        .chain(
-            a.issue_url
-                .clone()
-                .map(|url| MenuItem::new("Open issue", MenuAction::OpenLink(url))),
-        )
-        .collect();
-    if a.archived {
-        let at = items.len().saturating_sub(1);
-        items.splice(at..at, links);
-        return items;
-    }
-    let Some(w) = app
-        .tree
-        .worktrees
-        .iter()
-        .find(|w| w.id == a.worktree_id)
-        .filter(|w| !app.is_placeholder_worktree(&w.id))
-    else {
-        return items;
-    };
-    items.push(MenuItem::new(
-        if app.worktree_running(&w.id) {
-            "Stop run"
-        } else {
-            "Run"
-        },
-        MenuAction::ToggleRun(w.id.clone()),
-    ));
-    items.push(MenuItem::new(
-        "Open",
-        MenuAction::OpenWorktree(w.id.clone()),
-    ));
-    items.extend(links);
-    // The card's place in its band (or its lane), and its band's among the
-    // project's: what `⌥↑` / `⌥↓` and a drag do.
-    items.extend(move_items(
-        crate::order::OrderTarget::Agent(a.id.clone()),
-        "",
-    ));
-    if !w.is_main {
-        items.extend(move_items(
-            crate::order::OrderTarget::Worktree(w.id.clone()),
-            "worktree",
-        ));
-    }
-    if w.is_main {
-        items.push(MenuItem::new(
-            "Switch branch…",
-            MenuAction::SwitchBranch(w.id.clone()),
-        ));
-    } else {
-        items.push(MenuItem::destructive(
-            "Delete worktree",
-            MenuAction::DeleteWorktree(w.id.clone()),
-        ));
-    }
-    items
+    super::verbs::menu_for(app, &super::verbs::Target::Session(a.id.clone()))
 }
 
-/// **Move up** / **Move down** for `target`, `what` naming it when the menu
-/// holds more than one kind of row ("Move worktree up").
-pub(crate) fn move_items(target: crate::order::OrderTarget, what: &str) -> [MenuItem; 2] {
-    let label = |dir: &str| {
-        if what.is_empty() {
-            format!("Move {dir}")
-        } else {
-            format!("Move {what} {dir}")
-        }
-    };
-    [
-        MenuItem::new(label("up"), MenuAction::Reorder(target.clone(), -1)),
-        MenuItem::new(label("down"), MenuAction::Reorder(target, 1)),
-    ]
-}
-
-pub(crate) fn menu_items_for_terminal(t: &nebula_core::TerminalTab) -> Vec<MenuItem> {
-    vec![
-        MenuItem::new(
-            "Attach",
-            MenuAction::Attach(SessionRef::Terminal(t.id.clone())),
-        ),
-        MenuItem::new("Rename", MenuAction::RenameTerminal(t.id.clone())),
-        MenuItem::destructive("Close", MenuAction::CloseTerminal(t.id.clone())),
-    ]
+/// A terminal card's menu: open, rename, close, then its checkout's.
+pub(crate) fn menu_items_for_terminal(app: &App, t: &nebula_core::TerminalTab) -> Vec<MenuItem> {
+    super::verbs::menu_for(app, &super::verbs::Target::Terminal(t.id.clone()))
 }
 
 pub(crate) fn open_menu(app: &mut App, items: Vec<MenuItem>, at: (u16, u16)) {
@@ -856,36 +714,12 @@ pub(crate) fn menu_quick_return(menu: &ContextMenu) -> Option<crate::quick_promp
 
 /// A checkout's context menu: what a right-click on an EMPTY BAND opens.
 pub(crate) fn worktree_menu_items(app: &App, w: &nebula_core::Worktree) -> Vec<MenuItem> {
-    let run = if app.worktree_running(&w.id) {
-        "Stop run"
-    } else {
-        "Run"
-    };
-    let mut items = vec![
-        MenuItem::new("New agent", MenuAction::NewAgent(w.id.clone())),
-        MenuItem::new("New terminal", MenuAction::NewTerminal(w.id.clone())),
-        MenuItem::new(run, MenuAction::ToggleRun(w.id.clone())),
-        MenuItem::new("Open", MenuAction::OpenWorktree(w.id.clone())),
-    ];
-    // The ROOT WORKTREE moves between branches; a linked worktree, named
-    // for its branch, is deleted instead.
-    if w.is_main {
-        items.push(MenuItem::new(
-            "Switch branch…",
-            MenuAction::SwitchBranch(w.id.clone()),
-        ));
-    } else {
-        // The band's place among the project's; the root's stays first.
-        items.extend(move_items(
-            crate::order::OrderTarget::Worktree(w.id.clone()),
-            "",
-        ));
-        items.push(MenuItem::destructive(
-            "Delete worktree",
-            MenuAction::DeleteWorktree(w.id.clone()),
-        ));
-    }
-    items
+    super::verbs::menu_for(app, &super::verbs::Target::Worktree(w.id.clone()))
+}
+
+/// A project's menu: its PROJECT TAB's, and its row's in the panels.
+pub(crate) fn project_menu_items(app: &App, p: &ProjectId) -> Vec<MenuItem> {
+    super::verbs::menu_for(app, &super::verbs::Target::Repo(p.clone()))
 }
 
 /// The CONTEXT MENU of the row under `focus`'s cursor — what a
@@ -895,21 +729,20 @@ pub(crate) fn worktree_menu_items(app: &App, w: &nebula_core::Worktree) -> Vec<M
 pub(crate) fn context_menu_items(app: &App, focus: Focus) -> Option<Vec<MenuItem>> {
     match focus {
         Focus::Projects => {
-            let mut items = vec![MenuItem::new("Add project", MenuAction::AddProject)];
-            if let Some(p) = app.selected_project() {
-                items.insert(
-                    0,
-                    MenuItem::new("New worktree", MenuAction::NewWorktree(p.id.clone())),
-                );
-                items.push(MenuItem::new(
-                    "Rename",
-                    MenuAction::RenameProject(p.id.clone()),
-                ));
-                items.push(MenuItem::destructive(
-                    "Remove from list",
-                    MenuAction::RemoveProject(p.id.clone()),
-                ));
-            }
+            let mut items = app
+                .selected_project()
+                .map(|p| project_menu_items(app, &p.id))
+                .unwrap_or_default();
+            items.push(
+                MenuItem::new(
+                    nebula_config::actions::menu_label(
+                        "add_project",
+                        nebula_config::actions::AppliesTo::Global,
+                    ),
+                    MenuAction::AddProject,
+                )
+                .keyed(crate::keymap::Action::AddProject),
+            );
             Some(items)
         }
         Focus::Worktrees => match app.selected_worktree_pr() {
@@ -930,7 +763,7 @@ pub(crate) fn context_menu_items(app: &App, focus: Focus) -> Option<Vec<MenuItem
             }
             None => match app.selected_session_row()? {
                 SessionRow::Agent(a) => Some(menu_items_for_session_in(app, &a)),
-                SessionRow::Terminal(t) => Some(menu_items_for_terminal(&t)),
+                SessionRow::Terminal(t) => Some(menu_items_for_terminal(app, &t)),
                 SessionRow::Link(l) => Some(menu_items_for_link(&l)),
             },
         },

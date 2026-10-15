@@ -184,8 +184,29 @@ pub enum Action {
     Hosts,
     Settings,
     Metrics,
+    /// `?`: the VERBS MENU — what can be done to the selection (the card,
+    /// band, tab or row under the cursor), each with its key, Enter
+    /// running it; its last row is the full help ([`Action::Help`]).
+    Verbs,
     Help,
     Quit,
+    // The menus' verbs, rebindable but unbound by default: each acts on
+    // the selection, as its menu row does on the row it was opened on.
+    /// Restart the session's agent, resuming its conversation.
+    Restart,
+    /// Cut a new worktree in the project.
+    NewWorktree,
+    /// Pin the session as the machine's ORCHESTRATOR, or unpin the one
+    /// that is.
+    PinOrchestrator,
+    /// Restart the session fresh on another account, picked from a list.
+    MoveToAccount,
+    /// Start the checkout's RUN COMMAND, or stop it while it runs.
+    ToggleRun,
+    /// Delete a linked worktree (its folder; the branch stays).
+    DeleteWorktree,
+    /// Take the project off the list (nothing on disk is touched).
+    RemoveProject,
 }
 
 /// What a verb acts on.
@@ -683,6 +704,68 @@ pub const ACTIONS: &[ActionSpec] = &[
         desktop: &[],
     },
     ActionSpec {
+        action: Action::NewWorktree,
+        id: "new_worktree",
+        label: "New worktree",
+        hint: "Cut a new worktree in the selected or shown project",
+        group: "PROJECTS & WORKTREES",
+        scope: Scope::Global,
+        // No key in the terminal app: its letters belong to the card
+        // under the cursor. The project's menu and the palette reach it.
+        defaults: &[],
+        word: "worktree",
+        destructive: false,
+        applies_to: &[AppliesTo::Repo],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff],
+        surface: Surface::Both,
+        desktop: &[dk("new_worktree", "New worktree in this repo", "General", DeskScope::Global, &["shift+n"])],
+    },
+    ActionSpec {
+        action: Action::ToggleRun,
+        id: "toggle_run",
+        label: "Run / stop the run command",
+        hint: "Start the checkout's run command (the project's Run setting, else its .kete.json run), or stop it while it runs",
+        group: "PROJECTS & WORKTREES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "run",
+        destructive: false,
+        applies_to: &[AppliesTo::Worktree, AppliesTo::Repo],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::DeleteWorktree,
+        id: "delete_worktree",
+        label: "Delete worktree",
+        hint: "Delete the selected linked worktree's folder, behind a confirmation; its branch stays",
+        group: "PROJECTS & WORKTREES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "delete",
+        destructive: true,
+        applies_to: &[AppliesTo::Worktree, AppliesTo::Repo],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::RemoveProject,
+        id: "remove_project",
+        label: "Remove project",
+        hint: "Take the project off the list, behind a confirmation: nothing on disk is touched",
+        group: "PROJECTS & WORKTREES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "remove",
+        destructive: true,
+        applies_to: &[AppliesTo::Repo],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
         action: Action::GitDiff,
         id: "git_diff",
         label: "Git diff",
@@ -711,7 +794,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         defaults: &["shift+g"],
         word: "remote",
         destructive: false,
-        applies_to: &[AppliesTo::Repo],
+        applies_to: &[AppliesTo::Repo, AppliesTo::Worktree],
         works_in: &[WorksIn::Grid, WorksIn::Board],
         surface: Surface::Both,
         desktop: &[
@@ -820,7 +903,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         defaults: &["c"],
         word: "branch",
         destructive: false,
-        applies_to: &[AppliesTo::Repo],
+        applies_to: &[AppliesTo::Repo, AppliesTo::Worktree],
         works_in: &[WorksIn::Grid, WorksIn::Board],
         surface: Surface::Both,
         desktop: &[
@@ -852,7 +935,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         defaults: &["shift+enter", "shift+o", "alt+enter"],
         word: "editor",
         destructive: false,
-        applies_to: &[AppliesTo::Worktree],
+        applies_to: &[AppliesTo::Worktree, AppliesTo::Repo],
         works_in: &[WorksIn::Grid, WorksIn::Board],
         surface: Surface::Both,
         desktop: &[
@@ -933,7 +1016,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         defaults: &["r"],
         word: "rename",
         destructive: false,
-        applies_to: &[AppliesTo::Session, AppliesTo::Terminal],
+        applies_to: &[AppliesTo::Session, AppliesTo::Terminal, AppliesTo::Repo],
         works_in: &[WorksIn::Grid, WorksIn::Board],
         surface: Surface::Both,
         desktop: &[
@@ -1022,7 +1105,54 @@ pub const ACTIONS: &[ActionSpec] = &[
         destructive: true,
         applies_to: &[AppliesTo::Worktree],
         works_in: &[WorksIn::Grid, WorksIn::Board],
-        surface: Surface::Tui,
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::Restart,
+        id: "restart",
+        label: "Restart the agent",
+        hint: "Restart the selected session's agent, resuming its conversation",
+        group: "SESSIONS",
+        scope: Scope::Global,
+        // ⇧R is refresh in both apps: restart is the menus' and the
+        // palette's, with no default key.
+        defaults: &[],
+        word: "restart",
+        destructive: false,
+        applies_to: &[AppliesTo::Session],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Both,
+        desktop: &[dk("restart", "Restart the agent", "Sessions", DeskScope::Row, &[])],
+    },
+    ActionSpec {
+        action: Action::PinOrchestrator,
+        id: "pin_orchestrator",
+        label: "Make or unpin the orchestrator",
+        hint: "Pin the selected session as the machine's orchestrator, or unpin it when it is one",
+        group: "SESSIONS",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "orchestrator",
+        destructive: false,
+        applies_to: &[AppliesTo::Session],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::MoveToAccount,
+        id: "move_to_account",
+        label: "Move to another account",
+        hint: "Restart the selected session fresh on another account, picked from a list (its conversation stays behind)",
+        group: "SESSIONS",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "account",
+        destructive: false,
+        applies_to: &[AppliesTo::Session],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Both,
         desktop: &[],
     },
     ActionSpec {
@@ -1050,7 +1180,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         defaults: &["p"],
         word: "prompt",
         destructive: false,
-        applies_to: &[AppliesTo::Worktree],
+        applies_to: &[AppliesTo::Worktree, AppliesTo::Repo, AppliesTo::Global],
         works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
         surface: Surface::Both,
         desktop: &[
@@ -1386,20 +1516,37 @@ pub const ACTIONS: &[ActionSpec] = &[
         desktop: &[],
     },
     ActionSpec {
-        action: Action::Help,
-        id: "help",
-        label: "Help",
-        hint: "Toggle the keyboard help overlay",
+        action: Action::Verbs,
+        id: "verbs",
+        label: "Verbs for the selection",
+        hint: "What can be done to the card, band, tab or row under the cursor, each with its key: type to narrow, Enter runs one; the last row is every key",
         group: "GENERAL",
         scope: Scope::Global,
         defaults: &["?"],
+        word: "more",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff, WorksIn::Overlay],
+        surface: Surface::Both,
+        desktop: &[dk("verbs", "Verbs for the selection", "General", DeskScope::Global, &["?"])],
+    },
+    ActionSpec {
+        action: Action::Help,
+        id: "help",
+        label: "Help",
+        hint: "Toggle the keyboard help overlay: every key (? lists the selection's verbs, with this one row down)",
+        group: "GENERAL",
+        scope: Scope::Global,
+        // `?` is the selection's verbs now, whose last row is this.
+        defaults: &["f1"],
         word: "help",
         destructive: false,
         applies_to: &[AppliesTo::Global],
         works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff],
         surface: Surface::Both,
         desktop: &[
-            dk("help", "Keyboard shortcuts", "General", DeskScope::Global, &["?"]),
+            // Kept, unbound, for a user's own key: F1 is `help_f1`.
+            dk("help", "Keyboard shortcuts", "General", DeskScope::Global, &[]),
             dk("help_f1", "Keyboard shortcuts", "General", DeskScope::Anywhere, &["f1"]),
         ],
     },
@@ -1448,17 +1595,6 @@ pub const DESKTOP_ONLY: &[DesktopVerb] = &[
         applies_to: &[AppliesTo::Global],
         works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff],
         desktop: &[dk("cycle_theme", "Cycle theme: system, light, dark", "General", DeskScope::Anywhere, &["ctrl+shift+l"])],
-    },
-    DesktopVerb {
-        id: "new_worktree",
-        label: "New worktree",
-        hint: "Cut a new worktree in the focused or shown repo",
-        group: "PROJECTS & WORKTREES",
-        word: "worktree",
-        destructive: false,
-        applies_to: &[AppliesTo::Repo],
-        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff],
-        desktop: &[dk("new_worktree", "New worktree in this repo", "General", DeskScope::Global, &["shift+n"])],
     },
     DesktopVerb {
         id: "home_board",
@@ -1550,19 +1686,6 @@ pub const DESKTOP_ONLY: &[DesktopVerb] = &[
         )],
     },
     DesktopVerb {
-        id: "restart",
-        label: "Restart the agent",
-        hint: "Restart the focused session's agent, resuming its conversation",
-        group: "SESSIONS",
-        word: "restart",
-        destructive: false,
-        applies_to: &[AppliesTo::Session],
-        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
-        // ⇧R is refresh in both apps: restart is the menus' and the
-        // palette's, with no default key.
-        desktop: &[dk("restart", "Restart the agent", "Sessions", DeskScope::Row, &[])],
-    },
-    DesktopVerb {
         id: "row_menu",
         label: "Actions menu",
         hint: "The focused row's or card's actions, as a right-click shows them",
@@ -1643,6 +1766,7 @@ pub const DESKTOP_ONLY: &[DesktopVerb] = &[
 pub const DESKTOP_ORDER: &[&str] = &[
     "palette",
     "palette_alt",
+    "verbs",
     "help",
     "help_f1",
     "settings",
@@ -1701,6 +1825,218 @@ pub const DESKTOP_ORDER: &[&str] = &[
     "overview_fold",
     "board_lanes",
 ];
+
+// ---- menus, the verbs menu and the verb bar ----
+
+/// What a verb's row says in a menu, the verbs menu (`?`) and the verb
+/// bar, where the Hotkeys tab's label is too long or names the wrong
+/// thing: one set of words for both apps. A row with a kind says it on
+/// that kind only, ahead of the row without one. A verb not here goes by
+/// its label ([`menu_label`]).
+pub const MENU_LABELS: &[(&str, Option<AppliesTo>, &str)] = &[
+    ("activate", None, "Open"),
+    ("follow_up", None, "Follow-up prompt\u{2026}"),
+    ("restart", None, "Restart agent"),
+    ("duplicate_session", None, "Duplicate"),
+    ("move_session", None, "Move to\u{2026}"),
+    ("move_to_account", None, "Move to account\u{2026}"),
+    ("rename", None, "Rename\u{2026}"),
+    ("pin_orchestrator", None, "Make orchestrator"),
+    ("archive", None, "Archive"),
+    ("unarchive", None, "Unarchive"),
+    (
+        "delete",
+        Some(AppliesTo::Terminal),
+        "Close terminal\u{2026}",
+    ),
+    ("delete", None, "Delete\u{2026}"),
+    ("open_pull_request", None, "Open pull request"),
+    ("open_issue", None, "Open issue"),
+    (
+        "comment_pull_request",
+        None,
+        "Comment on pull request\u{2026}",
+    ),
+    ("reorder_up", None, "Move up"),
+    ("reorder_down", None, "Move down"),
+    ("toggle_run", None, "Run"),
+    ("new", None, "New agent\u{2026}"),
+    ("quick_prompt", None, "New session\u{2026}"),
+    ("new_terminal", None, "New terminal"),
+    ("git_diff", None, "Diff"),
+    ("open_worktree", None, "Open in editor"),
+    ("open_repo", None, "Open remote in browser"),
+    ("switch_branch", None, "Switch branch\u{2026}"),
+    ("delete_all", None, "Delete all sessions\u{2026}"),
+    ("delete_worktree", None, "Delete worktree\u{2026}"),
+    ("new_worktree", None, "New worktree\u{2026}"),
+    ("refresh_pull_requests", None, "Refresh pull requests"),
+    ("remove_project", None, "Remove from Kete\u{2026}"),
+    ("toggle_full_screen", None, "Full screen"),
+    ("accounts", None, "Accounts\u{2026}"),
+    ("add_project", None, "Add project…"),
+];
+
+/// The words a menu row for verb `id` on a thing of kind `on` says.
+pub fn menu_label(id: &str, on: AppliesTo) -> &'static str {
+    let mine = |kind: Option<AppliesTo>| {
+        MENU_LABELS
+            .iter()
+            .find(|(i, k, _)| *i == id && *k == kind)
+            .map(|(_, _, l)| *l)
+    };
+    mine(Some(on))
+        .or_else(|| mine(None))
+        .or_else(|| verbs_label(id))
+        .unwrap_or("")
+}
+
+fn verbs_label(id: &str) -> Option<&'static str> {
+    ACTIONS
+        .iter()
+        .find(|s| s.id == id)
+        .map(|s| s.label)
+        .or_else(|| DESKTOP_ONLY.iter().find(|d| d.id == id).map(|d| d.label))
+}
+
+/// Each kind's menu, in order: what a right-click (or the row's `⋯`) on
+/// one lists, in both apps. Each app leaves out a row it has no verb
+/// for, or one that means nothing on this thing now (Unarchive on a live
+/// session, Delete worktree on a root checkout). A session's or a
+/// terminal's menu goes on with its checkout's.
+pub const MENUS: &[(AppliesTo, &[&str])] = &[
+    (
+        AppliesTo::Session,
+        &[
+            "activate",
+            "follow_up",
+            "restart",
+            "duplicate_session",
+            "move_session",
+            "move_to_account",
+            "rename",
+            "pin_orchestrator",
+            "unarchive",
+            "archive",
+            "delete",
+            "open_pull_request",
+            "open_issue",
+            "reorder_up",
+            "reorder_down",
+        ],
+    ),
+    (AppliesTo::Terminal, &["activate", "rename", "delete"]),
+    (
+        AppliesTo::Worktree,
+        &[
+            "new",
+            "new_terminal",
+            "toggle_run",
+            "git_diff",
+            "open_worktree",
+            "open_repo",
+            "switch_branch",
+            "reorder_up",
+            "reorder_down",
+            "delete_all",
+            "delete_worktree",
+        ],
+    ),
+    (
+        AppliesTo::Repo,
+        &[
+            "quick_prompt",
+            "new_worktree",
+            "switch_branch",
+            "toggle_run",
+            "open_worktree",
+            "open_repo",
+            "refresh_pull_requests",
+            "rename",
+            "reorder_up",
+            "reorder_down",
+            "delete_worktree",
+            "remove_project",
+        ],
+    ),
+];
+
+/// The verbs a footer and the verb bar lead with, per kind, best first:
+/// each app shows the first four it can run on the selection, then `?`
+/// for the rest.
+pub const PRIMARY: &[(AppliesTo, &[&str])] = &[
+    (
+        AppliesTo::Session,
+        &[
+            "activate",
+            "follow_up",
+            "git_diff",
+            "archive",
+            "unarchive",
+            "rename",
+            "restart",
+            "delete",
+        ],
+    ),
+    (AppliesTo::Terminal, &["activate", "rename", "delete"]),
+    (
+        AppliesTo::Worktree,
+        &[
+            "new",
+            "quick_prompt",
+            "new_terminal",
+            "git_diff",
+            "open_worktree",
+            "toggle_run",
+        ],
+    ),
+    (
+        AppliesTo::Repo,
+        &[
+            "quick_prompt",
+            "new_worktree",
+            "switch_branch",
+            "refresh_pull_requests",
+            "rename",
+        ],
+    ),
+    (AppliesTo::Account, &["accounts"]),
+    (
+        AppliesTo::Global,
+        &[
+            "quick_prompt",
+            "command_palette",
+            "toggle_kanban",
+            "settings",
+        ],
+    ),
+];
+
+/// How many verbs a footer or the verb bar shows before `? more`.
+pub const PRIMARY_SHOWN: usize = 4;
+
+/// A kind's menu ([`MENUS`]), empty for a kind with none.
+pub fn menu_of(kind: AppliesTo) -> &'static [&'static str] {
+    MENUS
+        .iter()
+        .find(|(k, _)| *k == kind)
+        .map(|(_, ids)| *ids)
+        .unwrap_or(&[])
+}
+
+/// A kind's leading verbs ([`PRIMARY`]).
+pub fn primary_of(kind: AppliesTo) -> &'static [&'static str] {
+    PRIMARY
+        .iter()
+        .find(|(k, _)| *k == kind)
+        .map(|(_, ids)| *ids)
+        .unwrap_or(&[])
+}
+
+/// The TUI's row for a verb id, if it has one.
+pub fn spec_by_id(id: &str) -> Option<&'static ActionSpec> {
+    ACTIONS.iter().find(|s| s.id == id)
+}
 
 /// One registry row, either table's, as the window reads it.
 #[derive(Debug, Serialize)]
@@ -2074,7 +2410,47 @@ pub fn render_ts() -> String {
             ts_strs(k.chords),
         ));
     }
+    out.push_str("];\n\n/** A verb's words in a menu, the verbs menu and the verb bar; `on`: that kind only. */\n");
+    out.push_str(
+        "export const MENU_LABELS: readonly { id: ActionId; on: AppliesTo | null; label: string }[] = [\n",
+    );
+    for (id, on, label) in MENU_LABELS {
+        let on = on.map(|k| ts_enum(&k)).unwrap_or_else(|| "null".into());
+        out.push_str(&format!(
+            "  {{ id: {}, on: {on}, label: {} }},\n",
+            ts_str(id),
+            ts_str(label)
+        ));
+    }
     out.push_str("];\n");
+    let table = |name: &str, doc: &str, rows: &[(AppliesTo, &[&str])]| {
+        let mut s = format!(
+            "\n/** {doc} */\nexport const {name}: Readonly<Partial<Record<AppliesTo, readonly ActionId[]>>> = {{\n"
+        );
+        for (kind, ids) in rows {
+            let key = serde_json::to_value(kind).expect("a variant serializes");
+            s.push_str(&format!(
+                "  {}: {},\n",
+                key.as_str().unwrap_or_default(),
+                ts_strs(ids)
+            ));
+        }
+        s.push_str("};\n");
+        s
+    };
+    out.push_str(&table(
+        "MENUS",
+        "Each kind's menu, in order: a right-click's rows in both apps.",
+        MENUS,
+    ));
+    out.push_str(&table(
+        "PRIMARY",
+        "The verbs a footer and the verb bar lead with, per kind, best first.",
+        PRIMARY,
+    ));
+    out.push_str(&format!(
+        "\n/** How many verbs the verb bar shows before `? more`. */\nexport const PRIMARY_SHOWN = {PRIMARY_SHOWN};\n"
+    ));
     out
 }
 
@@ -2146,7 +2522,7 @@ mod tests {
         // jump, the window's Ctrl+K is `command_palette`; `move_up` walks
         // the cursor where the window's reorders, `reorder_up`): the
         // window's key ids are their own namespace.
-        assert_eq!(ACTIONS.len(), 73);
+        assert_eq!(ACTIONS.len(), 81);
         for id in [
             "palette",
             "move_up",
@@ -2209,6 +2585,80 @@ mod tests {
             for k in v.desktop {
                 assert!(!k.chords.iter().any(bare), "{}: {:?}", k.id, k.chords);
             }
+        }
+    }
+
+    /// Every menu, footer and label row names a verb that is there, on a
+    /// kind it applies to: a stale id would show an empty row.
+    #[test]
+    fn menus_name_real_verbs_on_their_kinds() {
+        let all = verbs();
+        let row = |id: &str| all.iter().find(|v| v.id == id);
+        for (kind, ids) in MENUS.iter().chain(PRIMARY) {
+            let mut seen = BTreeSet::new();
+            for id in *ids {
+                assert!(seen.insert(*id), "{id} twice on {kind:?}");
+                let v = row(id).unwrap_or_else(|| panic!("{id} is no verb"));
+                assert!(
+                    v.applies_to.contains(kind),
+                    "{id} does not apply to {kind:?}"
+                );
+            }
+        }
+        for (id, on, label) in MENU_LABELS {
+            let v = row(id).unwrap_or_else(|| panic!("{id} is no verb"));
+            assert!(!label.is_empty());
+            if let Some(on) = on {
+                assert!(v.applies_to.contains(on), "{id} on {on:?}");
+            }
+        }
+        // One word per verb across the apps, the kind's own first.
+        assert_eq!(
+            menu_label("delete", AppliesTo::Terminal),
+            "Close terminal\u{2026}"
+        );
+        assert_eq!(menu_label("delete", AppliesTo::Session), "Delete\u{2026}");
+        assert_eq!(menu_label("activate", AppliesTo::Session), "Open");
+        assert_eq!(
+            menu_label("open_worktree", AppliesTo::Worktree),
+            "Open in editor"
+        );
+        assert_eq!(
+            menu_label("remove_project", AppliesTo::Repo),
+            "Remove from Kete\u{2026}"
+        );
+        assert_eq!(
+            menu_label("subagents", AppliesTo::Session),
+            "Subagents and session tree"
+        );
+        assert!(menu_of(AppliesTo::Account).is_empty());
+        assert_eq!(
+            primary_of(AppliesTo::Session)[..2],
+            ["activate", "follow_up"]
+        );
+    }
+
+    /// `?` is the selection's verbs in both apps; the full help moved to
+    /// F1 (and the verbs menu's last row), its ids kept.
+    #[test]
+    fn question_mark_is_the_verbs_menu() {
+        let row = |id: &str| verbs().into_iter().find(|v| v.id == id).unwrap();
+        assert_eq!(row("verbs").tui, ["?"]);
+        assert_eq!(row("help").tui, ["f1"]);
+        let desk = |id: &str| {
+            desktop_keys()
+                .into_iter()
+                .find(|(_, k)| k.id == id)
+                .unwrap()
+                .1
+        };
+        assert_eq!(desk("verbs").chords, ["?"]);
+        assert!(desk("help").chords.is_empty());
+        assert_eq!(desk("help_f1").chords, ["f1"]);
+        // The menus' verbs the TUI took over from the window keep its ids.
+        for id in ["restart", "new_worktree"] {
+            assert!(ACTIONS.iter().any(|s| s.id == id), "{id}");
+            assert!(!DESKTOP_ONLY.iter().any(|d| d.id == id), "{id}");
         }
     }
 

@@ -792,5 +792,16 @@ pub(crate) fn run_menu_action(app: &mut App, action: MenuAction, out: &mut Vec<C
         MenuAction::PickLaunchWorktree { target, back } => {
             launcher::pick_launch_worktree(app, target, *back)
         }
+        MenuAction::Run(verb) => run_action(app, verb, out),
+        MenuAction::AllKeys => {
+            app.modals.verbs_under = None;
+            app.modals.overlay = Some(Overlay::Help(HelpView::default()));
+        }
+        MenuAction::OverlayKey(code, mods) => {
+            if let Some(under) = app.modals.verbs_under.take() {
+                app.modals.overlay = Some(*under);
+                handle_overlay_key(app, KeyEvent::new(code, mods), out);
+            }
+        }
     }
 }
