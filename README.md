@@ -438,6 +438,12 @@ npm run tauri build       # desktop/target/release/kete-desktop (.exe on Windows
                           # (elsewhere: npm run tauri build -- --no-bundle)
 ```
 
+On Windows, `npm run e2e` in `desktop/` drives the built window end to end: `tauri-driver` over
+`msedgedriver` (matched to the installed WebView2 and fetched from Microsoft into `desktop/e2e/.tools`),
+a real daemon in temp dirs, temp repos, and the Windows suite's scripted fake agent as Claude. It
+builds `kete`, the fake agent and a debug `kete-desktop` first; `npm run e2e:run` runs the flows
+again without building. Nothing touches your own Kete data.
+
 `kete desktop` looks for `kete-desktop` beside `kete`, then (on Windows) in
 `%LOCALAPPDATA%\Programs\Kete`, then on `PATH`. The app starts its daemon through `kete` on your
 `PATH`, so install `kete` first.
