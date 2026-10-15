@@ -470,87 +470,93 @@ fn launcher_grid_footer_hint(app: &App, _th: Theme) -> FooterHint {
     key_bar(hints)
 }
 
+/// The columns layout's footer. The terminal's states are words, no verb;
+/// a row of the panels is the registry's, as the grid's footer has it:
+/// `?` first, the selection's leading verbs in their one word each (a pull
+/// request, issue or link row, which no verb is about, its own few), then
+/// the focus's way to add, search and help.
 fn pane_footer_hint(app: &App, th: Theme) -> FooterHint {
     let k = |a| key_hint(app, a);
-    let text = match app.nav.focus {
-        Focus::Terminal if app.previewed_cloud().is_some() => format!(
-            "{}: open in browser  {}: sessions",
-            k(Action::Activate),
-            k(Action::FocusLeft)
-        ),
-        Focus::Terminal if app.pane.term.as_ref().is_some_and(|t| t.exited) => {
-            "session exited: Esc: back to sessions".to_string()
+    let word = |a: Action| crate::keymap::spec_of(a).map_or("", |s| s.word);
+    let verb = |a: Action| button(k(a), word(a), a);
+    match app.nav.focus {
+        Focus::Terminal if app.previewed_cloud().is_some() => {
+            return dim_hint(
+                format!(
+                    "{}: open in browser  {}: sessions",
+                    k(Action::Activate),
+                    k(Action::FocusLeft)
+                ),
+                th,
+            )
         }
-        Focus::Terminal if app.pane.term_locked => locked_terminal_footer_hint(app),
-        Focus::Terminal if app.pane.term.is_some() => format!(
-            "{}: type into terminal  {}: sessions",
-            k(Action::Activate),
-            k(Action::FocusLeft)
-        ),
-        Focus::Terminal => "select a session and press Enter to attach".to_string(),
-        Focus::Projects => format!(
-            "{}/{}: add  {}: rename  {}: remove  {}: search  {}: help",
-            k(Action::New),
-            k(Action::AddProject),
-            k(Action::Rename),
-            k(Action::Delete),
-            k(Action::Palette),
-            k(Action::Help)
-        ),
-        Focus::Worktrees if app.selected_worktree_pr().is_some() => format!(
-            "{}: new session  {}: preset  {}: open in browser  {}: diff  PgUp/PgDn: scroll  {}: refresh  {}: search  {}: help",
-            k(Action::New),
-            k(Action::AgentPresets),
-            k(Action::Activate),
-            k(Action::GitDiff),
-            k(Action::RefreshPullRequests),
-            k(Action::Palette),
-            k(Action::Help)
-        ),
-        Focus::Worktrees if app.selected_worktree_issue().is_some() => format!(
-            "{}: open in browser  {}: prompt  {}: preset  PgUp/PgDn: scroll  {}: search  {}: help",
-            k(Action::Activate),
-            k(Action::QuickPrompt),
-            k(Action::AgentPresets),
-            k(Action::Palette),
-            k(Action::Help)
-        ),
-        Focus::Worktrees => worktree_footer_hint(app, &k),
-        Focus::Sessions if app.selected_link().is_some_and(|row| row.id().is_none()) => format!(
-            "{}: open in browser  {}: diff  PgUp/PgDn: scroll  {}: refresh  {}: help",
-            k(Action::Activate),
-            k(Action::GitDiff),
-            k(Action::RefreshPullRequests),
-            k(Action::Help)
-        ),
-        Focus::Sessions if app.selected_link().is_some() => format!(
-            "{}: open in browser  {}: edit URL  {}: delete  {}: help",
-            k(Action::Activate),
-            k(Action::Rename),
-            k(Action::Delete),
-            k(Action::Help)
-        ),
-        Focus::Sessions if app.previewed_cloud().is_some() => format!(
-            "{}: open in browser  {}: rename  {}: archive  {}: del  {}: help",
-            k(Action::Activate),
-            k(Action::Rename),
-            k(Action::Archive),
-            k(Action::Delete),
-            k(Action::Help)
-        ),
-        Focus::Sessions => format!(
-            "{}: focus  {}: agent  {}: presets  {}: terminal  {}: rename  {}: archive  {}: del  {}: help",
-            k(Action::Activate),
-            k(Action::New),
-            k(Action::AgentPresets),
-            k(Action::NewTerminal),
-            k(Action::Rename),
-            k(Action::Archive),
-            k(Action::Delete),
-            k(Action::Help)
-        ),
+        Focus::Terminal if app.pane.term.as_ref().is_some_and(|t| t.exited) => {
+            return dim_hint("session exited: Esc: back to sessions", th)
+        }
+        Focus::Terminal if app.pane.term_locked => {
+            return dim_hint(locked_terminal_footer_hint(app), th)
+        }
+        Focus::Terminal if app.pane.term.is_some() => {
+            return dim_hint(
+                format!(
+                    "{}: type into terminal  {}: sessions",
+                    k(Action::Activate),
+                    k(Action::FocusLeft)
+                ),
+                th,
+            )
+        }
+        Focus::Terminal => return dim_hint("select a session and press Enter to attach", th),
+        _ => {}
+    }
+    // The rows no registry verb is about: what their keys do there.
+    let browse = |a: Action| button(k(a), "open in browser", a);
+    let row_own: Option<Vec<KeyHint>> = match app.nav.focus {
+        Focus::Worktrees if app.selected_worktree_pr().is_some() => Some(vec![
+            browse(Action::Activate),
+            verb(Action::GitDiff),
+            verb(Action::RefreshPullRequests),
+        ]),
+        Focus::Worktrees if app.selected_worktree_issue().is_some() => {
+            Some(vec![browse(Action::Activate), verb(Action::QuickPrompt)])
+        }
+        Focus::Sessions if app.selected_link().is_some_and(|row| row.id().is_none()) => Some(vec![
+            browse(Action::Activate),
+            verb(Action::GitDiff),
+            verb(Action::RefreshPullRequests),
+        ]),
+        Focus::Sessions if app.selected_link().is_some() => Some(vec![
+            browse(Action::Activate),
+            button(k(Action::Rename), "edit URL", Action::Rename),
+            verb(Action::Delete),
+        ]),
+        _ => None,
     };
-    dim_hint(text, th)
+    let mut hints = row_own.unwrap_or_else(|| {
+        crate::event_loop::verbs::primary(app, nebula_config::actions::PRIMARY_SHOWN, true)
+            .into_iter()
+            .map(|(action, word)| button(k(action), word, action))
+            .collect()
+    });
+    // The focus's own way to add something, then search and help.
+    match app.nav.focus {
+        Focus::Projects => hints.push(verb(Action::AddProject)),
+        Focus::Worktrees => hints.push(verb(Action::AgentPresets)),
+        _ => hints.push(verb(Action::NewTerminal)),
+    }
+    hints.push(verb(Action::Palette));
+    hints.push(verb(Action::Help));
+    let mut seen = Vec::new();
+    hints.retain(|h| match h.action {
+        Some(a) if seen.contains(&a) => false,
+        Some(a) => {
+            seen.push(a);
+            true
+        }
+        None => true,
+    });
+    hints.insert(0, verb(Action::Verbs));
+    key_bar(hints)
 }
 
 fn locked_terminal_footer_hint(app: &App) -> String {
@@ -584,29 +590,6 @@ fn locked_terminal_footer_hint(app: &App) -> String {
         } else {
             "drag: select+copy"
         },
-    )
-}
-
-fn worktree_footer_hint(app: &App, k: &impl Fn(Action) -> String) -> String {
-    format!(
-        "{}: new worktree  {}: presets  {}: {}  {}: open  {}: terminal  {}: delete  {}: refresh PRs  {}: search  {}: help",
-        k(Action::New),
-        k(Action::AgentPresets),
-        k(Action::Rename),
-        if app
-            .selected_worktree()
-            .is_some_and(|w| app.worktree_running(&w.id))
-        {
-            "stop"
-        } else {
-            "run"
-        },
-        k(Action::OpenWorktree),
-        k(Action::NewTerminal),
-        k(Action::Delete),
-        k(Action::RefreshPullRequests),
-        k(Action::Palette),
-        k(Action::Help)
     )
 }
 

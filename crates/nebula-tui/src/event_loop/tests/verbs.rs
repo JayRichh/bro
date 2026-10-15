@@ -707,3 +707,41 @@ fn the_sweep_lists_the_clean_worktrees_and_deletes_them_unforced() {
         .collect();
     assert_eq!(deletes, vec![("w-clean".to_string(), false)]);
 }
+
+/// The panels' footer is the registry's too: `?` first, then the
+/// selection's leading verbs in their one word, as the grid's; a link
+/// row, which no verb is about, says what its own keys do.
+#[test]
+fn the_panels_footer_leads_with_the_registrys_verbs() {
+    with_default_config(|| {
+        let mut app = bench();
+        app.pane.collapsed = true;
+        app.nav.focus = Focus::Sessions;
+        let rows = app.visible_session_rows();
+        app.nav.sel_session = rows
+            .iter()
+            .position(|r| r.sref() == Some(SessionRef::Agent(AgentId("a1".into()))))
+            .unwrap();
+        let footer = |app: &mut App| {
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(200, 30)).unwrap();
+            terminal.draw(|f| crate::ui::draw(f, app)).unwrap();
+            let buf = terminal.backend().buffer().clone();
+            (0..buf.area.width)
+                .map(|x| buf[(x, buf.area.height - 1)].symbol().to_string())
+                .collect::<String>()
+        };
+        app.chrome.flash = None;
+        let text = footer(&mut app);
+        let at = |w: &str| {
+            text.find(w)
+                .unwrap_or_else(|| panic!("{w} missing: {text}"))
+        };
+        assert!(at("more") < at("open"), "{text}");
+        assert!(
+            at("open") < at("reply") && at("reply") < at("diff"),
+            "{text}"
+        );
+        assert!(!text.contains("del  "), "no hand-written list: {text}");
+    });
+}
