@@ -1686,3 +1686,46 @@ export const PRIMARY: Readonly<Partial<Record<AppliesTo, readonly ActionId[]>>> 
 
 /** How many verbs the verb bar shows before `? more`. */
 export const PRIMARY_SHOWN = 4;
+
+/** First-use tips (nebula-config learn.rs): `{verb}` / `{verb|words}` name a key. */
+export const TIPS: readonly { id: string; text: string }[] = [
+  { id: "verbs", text: "{verbs|The verbs menu} lists everything you can do with the selection, each with its key." },
+  { id: "scope", text: "The scope chip narrows the board, attention and quick prompt to one repo or worktree; clear it to see everything." },
+  { id: "lanes", text: "Review holds finished work no PR carries yet; open a card to see its diff, drag it to Ship to open the PR." },
+  { id: "drag", text: "Drag a card between lanes: to Ship opens a PR, to Done merges it. {verbs|The verbs menu} on a card has the same moves." },
+  { id: "review", text: "The row above the diff replies, opens or merges the PR, archives, or deletes the worktree; each names its key." },
+];
+
+/** The What's new page, newest release first. */
+export const WHATS_NEW: readonly { version: string; title: string; items: readonly string[] }[] = [
+  { version: "0.52", title: "Learn in place", items: ["A one-line tip the first time you meet the ? menu, the scope chip, the Review and Ship lanes, drag, or the review. Settings, General, Show tips turns them off.", "Every empty lane and list says what goes there and the one thing to do.", "The footer and verb bar show the selection's top verbs and ? more; Help (F1) is grouped by task.", "A session's changes are counted per turn, so two sessions in one worktree no longer mix."] },
+  { version: "0.51", title: "Which session made a change", items: ["The review switches between This session and All in this worktree.", "A worktree remembers the branch it was cut from; the review and the lanes use it.", "Large pastes on Windows arrive in seconds, with pasting... N KB meanwhile.", "Export and import settings, delete merged worktrees, and vote on ADO PRs from the apps."] },
+  { version: "0.50", title: "The board follows the work", items: ["Lanes: Running, Needs you, Review, Ship, Done. Review is finished work no PR carries; Ship has an open PR.", "Drops do what the lane means: Review to Ship opens the PR form, Ship to Done merges after a confirm.", "The scope chip (all, repo, worktree) narrows the board, attention and quick prompt.", "Open a Review or Ship card to dock its diff beside the board, with Reply, PR, Merge, Archive."] },
+  { version: "0.49", title: "One list of verbs", items: ["? on anything shows its verbs with their keys; type to filter, Enter to run. F1 is every key.", "The footer and the desktop's verb bar follow the selection.", "Rebind the desktop's keys in Settings, Hotkeys.", "The diff keeps an agent's committed work: it compares against the base branch."] },
+];
+
+/** The What's new page's keys-changed table. */
+export const KEYS_CHANGED: readonly { verb: string; tui: string; desktop: string }[] = [
+  { verb: "Verbs menu", tui: "? (help moved to F1)", desktop: "? (help moved to F1)" },
+  { verb: "Diff", tui: "d (g still works)", desktop: "d (Ctrl+Shift+D still works)" },
+  { verb: "Delete", tui: "Del only", desktop: "Del" },
+  { verb: "Reply to the agent", tui: "Space", desktop: "Space (was f)" },
+  { verb: "Open a session", tui: "Enter", desktop: "Enter (Space no longer opens)" },
+  { verb: "Filter", tui: "f", desktop: "f or /" },
+  { verb: "Digits", tui: "repos 1-9", desktop: "repos 1-9 in rail order" },
+  { verb: "Full screen", tui: "z", desktop: "z" },
+];
+
+/** What an empty lane, list or view says, and the verb that fills it. */
+export const EMPTY: readonly { id: string; text: string; verb: ActionId | null }[] = [
+  { id: "lane_running", text: "Agents at work show here.", verb: "quick_prompt" },
+  { id: "lane_needs", text: "Nothing needs you.", verb: null },
+  { id: "lane_review", text: "Finished work to read lands here.", verb: null },
+  { id: "lane_ship", text: "Cards with an open PR. Drag one in from Review.", verb: null },
+  { id: "lane_done", text: "Merged and read work rests here.", verb: null },
+  { id: "board", text: "No sessions yet: start one and it shows on the board.", verb: "quick_prompt" },
+  { id: "no_repos", text: "Add a repo to start: its worktrees and sessions show here.", verb: "add_project" },
+  { id: "no_sessions", text: "No sessions here yet.", verb: "quick_prompt" },
+  { id: "accounts", text: "No accounts yet: add one to run sessions on another login.", verb: "accounts" },
+  { id: "search", text: "Nothing matches. Try fewer letters.", verb: null },
+];

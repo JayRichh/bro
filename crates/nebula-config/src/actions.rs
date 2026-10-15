@@ -2655,6 +2655,64 @@ pub fn render_ts() -> String {
     out.push_str(&format!(
         "\n/** How many verbs the verb bar shows before `? more`. */\nexport const PRIMARY_SHOWN = {PRIMARY_SHOWN};\n"
     ));
+    out.push_str(&render_learn_ts());
+    out
+}
+
+/// The LEARN IN PLACE copy ([`crate::learn`]) as the window imports it:
+/// the tips, the What's new page and the empty states.
+fn render_learn_ts() -> String {
+    use crate::learn::{EMPTY, KEYS_CHANGED, TIPS, WHATS_NEW};
+    let mut out = String::from(
+        "\n/** First-use tips (nebula-config learn.rs): `{verb}` / `{verb|words}` name a key. */\n",
+    );
+    out.push_str("export const TIPS: readonly { id: string; text: string }[] = [\n");
+    for t in TIPS {
+        out.push_str(&format!(
+            "  {{ id: {}, text: {} }},\n",
+            ts_str(t.id),
+            ts_str(t.text)
+        ));
+    }
+    out.push_str("];\n\n/** The What's new page, newest release first. */\n");
+    out.push_str(
+        "export const WHATS_NEW: readonly { version: string; title: string; items: readonly string[] }[] = [\n",
+    );
+    for r in WHATS_NEW {
+        out.push_str(&format!(
+            "  {{ version: {}, title: {}, items: {} }},\n",
+            ts_str(r.version),
+            ts_str(r.title),
+            ts_strs(r.items)
+        ));
+    }
+    out.push_str("];\n\n/** The What's new page's keys-changed table. */\n");
+    out.push_str(
+        "export const KEYS_CHANGED: readonly { verb: string; tui: string; desktop: string }[] = [\n",
+    );
+    for k in KEYS_CHANGED {
+        out.push_str(&format!(
+            "  {{ verb: {}, tui: {}, desktop: {} }},\n",
+            ts_str(k.verb),
+            ts_str(k.tui),
+            ts_str(k.desktop)
+        ));
+    }
+    out.push_str(
+        "];\n\n/** What an empty lane, list or view says, and the verb that fills it. */\n",
+    );
+    out.push_str(
+        "export const EMPTY: readonly { id: string; text: string; verb: ActionId | null }[] = [\n",
+    );
+    for e in EMPTY {
+        let verb = e.verb.map(ts_str).unwrap_or_else(|| "null".into());
+        out.push_str(&format!(
+            "  {{ id: {}, text: {}, verb: {verb} }},\n",
+            ts_str(e.id),
+            ts_str(e.text)
+        ));
+    }
+    out.push_str("];\n");
     out
 }
 
