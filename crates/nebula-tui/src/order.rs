@@ -242,6 +242,8 @@ pub const ROOT_STAYS_FIRST: &str = "the root checkout stays first";
 
 /// What an Unread card let go on Done says.
 pub const MARKED_SEEN: &str = "marked read: the card is done";
+/// The same, onto Ship: read, its open pull request holds it there.
+pub const MARKED_SEEN_SHIP: &str = "marked read: its pull request is open, so the card is in Ship";
 
 /// The open PROJECT TABS, in the order the header draws them.
 fn tab_ids(app: &App) -> Vec<ProjectId> {

@@ -260,11 +260,15 @@ fn kanban_scoped(app: &App, all: bool) -> nebula_core::board::Scoped<LauncherRow
             .find(|w| w.id == row.agent.worktree_id)
             .map(|w| w.project_id.clone())
     };
-    let rows = rows_in(app, None).into_iter().map(|row| {
+    // Another project's card with `all` off is not on this board at all,
+    // so it is not counted as outside the scope either.
+    let rows = rows_in(app, None).into_iter().filter_map(|row| {
         let project = project_of(&row);
-        let admitted = (all || on_screen.is_none() || project == on_screen)
-            && scope.admits(&row.agent, project.as_ref());
-        (lane_of(app, &row), admitted, row)
+        if !(all || on_screen.is_none() || project == on_screen) {
+            return None;
+        }
+        let admitted = scope.admits(&row.agent, project.as_ref());
+        Some((lane_of(app, &row), admitted, row))
     });
     let split = nebula_core::board::split_by_scope(rows, |r| r.0, |r| r.1);
     nebula_core::board::Scoped {
@@ -2384,7 +2388,7 @@ mod tests {
         assert_eq!(names(&one, Lane::NeedsInput), ["fix-login"]);
         assert_eq!(names(&one, Lane::Running), ["add-search"]);
         assert!(one[Lane::Review.index()].is_empty(), "tidy-css is web's");
-        assert_eq!(kanban_hidden(&app, false), [1, 0, 1, 0, 0]);
+        assert_eq!(kanban_hidden(&app, false), [0; 5]);
         let all = kanban(&app, true);
         assert_eq!(names(&all, Lane::Review), ["tidy-css"]);
         assert_eq!(all.iter().map(Vec::len).sum::<usize>(), 4);
@@ -2413,6 +2417,17 @@ mod tests {
             ["tidy-css"]
         );
         assert_eq!(kanban_hidden(&app, true), [3, 0, 0, 0, 0]);
+        // On one project's board, only that project's cards count as
+        // outside the scope.
+        app.launcher.scope = nebula_core::scope::Scope {
+            session: Some(AgentId("a2".into())),
+            ..Default::default()
+        };
+        assert_eq!(
+            names(&kanban(&app, false)[Lane::Running.index()]),
+            ["add-search"]
+        );
+        assert_eq!(kanban_hidden(&app, false), [1, 0, 0, 0, 0]);
         app.launcher.scope = nebula_core::scope::Scope::default();
         assert_eq!(count(&kanban(&app, true)), 4);
     }

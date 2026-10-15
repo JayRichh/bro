@@ -125,16 +125,27 @@ pub struct CardFacts {
 /// daemon clears `unseen` when a session leaves finished, so in practice
 /// the two agree.
 pub fn lane_of(agent: &Agent, facts: &CardFacts) -> Lane {
-    match agent.status {
+    lane_for(agent.status, agent.unseen, facts)
+}
+
+/// [`lane_of`] over a session's status and unseen flag alone.
+fn lane_for(status: AgentStatus, unseen: bool, facts: &CardFacts) -> Lane {
+    match status {
         AgentStatus::NeedsFeedback => Lane::NeedsInput,
         AgentStatus::Running => Lane::Running,
-        _ if agent.unseen => Lane::Review,
+        _ if unseen => Lane::Review,
         _ if facts.pr.is_some_and(PrState::is_open) => Lane::Ship,
         _ if facts.pr.is_some() => Lane::Done,
         AgentStatus::Fresh => Lane::Done,
         _ if facts.has_changes => Lane::Review,
         _ => Lane::Done,
     }
+}
+
+/// The lane `agent`'s card goes in once it is read: [`lane_of`] with
+/// `unseen` cleared.
+fn read_lane(agent: &Agent, facts: &CardFacts) -> Lane {
+    lane_for(agent.status, false, facts)
 }
 
 /// Where a board card is let go: a lane, or the ARCHIVED zone the board
@@ -221,16 +232,23 @@ pub fn drop_verb(agent: &Agent, facts: &CardFacts, to: DropTarget) -> DropVerb {
         (Lane::Running, _) => DropVerb::Refuse(
             "Running is the agent\u{2019}s: the card moves on when the turn ends.",
         ),
-        // Read already: its changes hold it in Review, and marking it seen
-        // would leave it where it is.
-        (Lane::Review, Lane::Done) if !agent.unseen => DropVerb::Refuse(
-            "Its worktree has changes no pull request carries: commit and push them, ship them (drop on Ship) or archive the card.",
-        ),
-        (Lane::Review, Lane::Done) => DropVerb::MarkSeen,
-        (Lane::Review, Lane::Ship) if !facts.has_changes => {
-            DropVerb::Refuse("Nothing to ship: its worktree has no changes or unpushed commits.")
-        }
-        (Lane::Review, Lane::Ship) => DropVerb::OpenPr,
+        // Out of Review, by where reading the card puts it: an unread card
+        // dropped where it goes once read is marked seen; one whose
+        // changes keep it in Review ships, or refuses Done. No verb claims
+        // a move that would not happen.
+        (Lane::Review, _) => match (read_lane(agent, facts), to) {
+            (read, to) if agent.unseen && read == to => DropVerb::MarkSeen,
+            (Lane::Review, Lane::Ship) => DropVerb::OpenPr,
+            (Lane::Review, _) => DropVerb::Refuse(
+                "Its worktree has changes no pull request carries: commit and push them, ship them (drop on Ship) or archive the card.",
+            ),
+            (Lane::Ship, _) => DropVerb::Refuse(
+                "Its pull request is already open: read, the card goes to Ship; drop it there.",
+            ),
+            _ => DropVerb::Refuse(
+                "Nothing to ship: its worktree has no changes or unpushed commits, or its pull request already landed.",
+            ),
+        },
         (Lane::Ship, Lane::Done) if facts.pr == Some(PrState::Draft) => DropVerb::Refuse(
             "Its pull request is a draft: mark it ready for review before it can merge.",
         ),
@@ -244,9 +262,8 @@ pub fn drop_verb(agent: &Agent, facts: &CardFacts, to: DropTarget) -> DropVerb {
         (Lane::Done, _) => DropVerb::Refuse(
             "Nothing to ship from Done: its worktree has no changes, or its pull request already landed.",
         ),
-        // Review onto Review and Ship onto Ship: `from == to`, returned
-        // above.
-        (Lane::Review | Lane::Ship, _) => DropVerb::Reorder,
+        // Ship onto Ship: `from == to`, returned above.
+        (Lane::Ship, _) => DropVerb::Reorder,
     }
 }
 
@@ -489,6 +506,8 @@ mod tests {
         let needs = (agent(NeedsFeedback, false), facts(true, None));
         let unread = (agent(Finished, true), facts(false, None));
         let unread_changes = (agent(Finished, true), facts(true, None));
+        let unread_pr = (agent(Finished, true), facts(true, Some(Open)));
+        let unread_merged = (agent(Finished, true), facts(true, Some(Merged)));
         let changes = (agent(Finished, false), facts(true, None));
         let open = (agent(Finished, false), facts(true, Some(Open)));
         let draft = (agent(Finished, false), facts(true, Some(Draft)));
@@ -509,7 +528,7 @@ mod tests {
         let verb = |t: &(Agent, CardFacts), to: DropTarget| drop_verb(&t.0, &t.1, to);
         let to = DropTarget::Lane;
         // (card, target) → the verb; None: refused.
-        let table: [(&(Agent, CardFacts), DropTarget, Option<DropVerb>); 20] = [
+        let table: [(&(Agent, CardFacts), DropTarget, Option<DropVerb>); 24] = [
             // Its own lane reorders; Archived archives from anywhere.
             (&running, to(Lane::Running), Some(V::Reorder)),
             (&open, to(Lane::Ship), Some(V::Reorder)),
@@ -531,7 +550,13 @@ mod tests {
             // Review: to Done marks an unread card seen; to Ship opens the
             // composer when there is something to ship.
             (&unread, to(Lane::Done), Some(V::MarkSeen)),
-            (&unread_changes, to(Lane::Done), Some(V::MarkSeen)),
+            // Unread with changes: reading it leaves it in Review, so not
+            // Done; unread with a PR open: reading puts it in Ship.
+            (&unread_changes, to(Lane::Done), None),
+            (&unread_pr, to(Lane::Ship), Some(V::MarkSeen)),
+            (&unread_pr, to(Lane::Done), None),
+            (&unread_merged, to(Lane::Done), Some(V::MarkSeen)),
+            (&unread_merged, to(Lane::Ship), None),
             (&changes, to(Lane::Done), None),
             (&changes, to(Lane::Ship), Some(V::OpenPr)),
             (&unread_changes, to(Lane::Ship), Some(V::OpenPr)),

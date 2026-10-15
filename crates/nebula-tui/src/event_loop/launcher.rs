@@ -2567,7 +2567,14 @@ pub(super) fn drop_order(app: &mut App, out: &mut Vec<ClientRequest>) {
             LaneDrop::Refuse(why) => app.chrome.flash = Some(why.into()),
             LaneDrop::MarkSeen => {
                 super::mark_agent_seen(app, &agent, out);
-                app.chrome.flash = Some(crate::order::MARKED_SEEN.into());
+                app.chrome.flash = Some(
+                    if to == DropLane::Lane(view::Lane::Ship) {
+                        crate::order::MARKED_SEEN_SHIP
+                    } else {
+                        crate::order::MARKED_SEEN
+                    }
+                    .into(),
+                );
             }
             // The worktree delete offer is the board's to add.
             LaneDrop::Archive | LaneDrop::ArchiveAndOfferWorktreeDelete => {
