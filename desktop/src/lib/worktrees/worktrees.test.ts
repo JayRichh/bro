@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Agent, Model, PrInfo, TerminalTab, Worktree } from '../api';
+import type { Agent, Card, Model, PrInfo, TerminalTab, Worktree } from '../api';
 import type { Branch } from './api';
 import { FETCH_GAP_MS, branchName, fetchDue, localName, press, refusal, rows } from './branches';
 import { cardsLine, dirty, liveCardsIn, offerLine, stateLines, worktreeOffer } from './offer';
@@ -130,7 +130,7 @@ describe('pull request states', () => {
 
   it('reads each card lane from the model, which works it out (src-tauri board.rs)', () => {
     const a = agent('a', 'w');
-    expect(laneOf(model({ cards: { a: { lane: 'pr', tier: 3 } } }), a)).toBe('pr');
+    expect(laneOf(model({ cards: { a: { lane: 'pr', tier: 3 } as Card } }), a)).toBe('pr');
     expect(laneOf(model({ cards: {} }), a)).toBe('done');
   });
 

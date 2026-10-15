@@ -48,7 +48,7 @@ function model(agents: Agent[]): Model {
     ports: [],
     prs: {},
     subagents: [],
-    cards: {}, lanes: { needs: [], running: [], unseen: [], done: [], pr: [] },
+    cards: {}, lanes: { needs: [], running: [], unseen: [], done: [], pr: [] }, hidden: { needs: 0, running: 0, unseen: 0, done: 0, pr: 0 }, scope: {},
   };
 }
 

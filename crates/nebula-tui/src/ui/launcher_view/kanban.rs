@@ -1,6 +1,6 @@
 //! The KANBAN (`⇧K`; Settings → Appearance → **Kanban**): the LAUNCHER
 //! VIEW's grid laid out as five lanes by what each session wants from you
-//! — Needs you, Running, Unread, Done, PR open (`launcher::Lane`) —
+//! — Running, Needs you, Review, Ship, Done (`launcher::Lane`) —
 //! under the same PROJECT TABS header, beside the same PANE. Its cards
 //! are the grid's own session cards ([`super::draw_any_card`]), stacked
 //! down their lane, the most recently touched first; on the board across
@@ -31,9 +31,9 @@ fn lane_color(lane: Lane, th: Theme) -> Color {
     match lane {
         Lane::NeedsInput => th.err,
         Lane::Running => th.warn,
-        Lane::Unseen => th.done,
+        Lane::Review => th.done,
         Lane::Done => th.ok,
-        Lane::PrOpen => th.accent,
+        Lane::Ship => th.accent,
     }
 }
 
@@ -238,13 +238,19 @@ fn held_card(app: &App) -> Option<&crate::app::OrderDrag> {
 /// Some(true) when letting go there acts, Some(false) when it is refused.
 fn lane_mark(app: &App, lane: Lane) -> Option<bool> {
     let drag = held_card(app)?;
-    let OrderItem::Board { lane: from, .. } = &drag.item else {
+    let OrderItem::Board {
+        agent, lane: from, ..
+    } = &drag.item
+    else {
         return None;
     };
     match &drag.over {
-        Some(OrderOver::Lane(DropLane::Lane(to), None)) if *to == lane && *from != lane => Some(
-            !matches!(lane_drop(*from, DropLane::Lane(lane)), LaneDrop::Refuse(_)),
-        ),
+        Some(OrderOver::Lane(DropLane::Lane(to), None)) if *to == lane && *from != lane => {
+            Some(!matches!(
+                lane_drop(app, agent, *from, DropLane::Lane(lane)),
+                LaneDrop::Refuse(_)
+            ))
+        }
         _ => None,
     }
 }

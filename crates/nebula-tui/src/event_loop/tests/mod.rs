@@ -11379,6 +11379,92 @@ fn the_change_sweep_takes_the_stalest_unselected_checkout() {
     );
 }
 
+/// The sweep covers what the board shows: on the KANBAN in all-projects
+/// mode, another project's checkouts too; on the grid, only the project
+/// on screen's.
+#[test]
+fn the_change_sweep_covers_every_checkout_the_board_shows() {
+    use nebula_core::{Agent, Entity, Project, Worktree};
+    let mut app = App::new();
+    seed_tree(&mut app); // w1 selected, its agent a1 on the grid
+    let one = app.tree.agents[0].clone();
+    hse(
+        &mut app,
+        ServerEvent::EntityUpserted {
+            entity: Entity::Project(Project {
+                id: nebula_core::ProjectId("p9".into()),
+                name: "other".into(),
+                repo_path: "/tmp/other".into(),
+                sort_order: 9,
+            }),
+        },
+    );
+    hse(
+        &mut app,
+        ServerEvent::EntityUpserted {
+            entity: Entity::Worktree(Worktree {
+                id: WorktreeId("w9".into()),
+                project_id: nebula_core::ProjectId("p9".into()),
+                path: "/tmp/other-9".into(),
+                branch: "feat-9".into(),
+                is_main: false,
+                sort_order: 0,
+            }),
+        },
+    );
+    hse(
+        &mut app,
+        ServerEvent::EntityUpserted {
+            entity: Entity::Agent(Agent {
+                parent: None,
+                id: AgentId("a9".into()),
+                worktree_id: WorktreeId("w9".into()),
+                name: "agent-9".into(),
+                ..one.clone()
+            }),
+        },
+    );
+    let target = |app: &App| changes_sweep_target(app).map(|(id, _)| id.0);
+    assert_eq!(target(&app), None, "the grid shows one project");
+    app.launcher.launcher_kanban = true;
+    assert_eq!(target(&app), None, "nor does the board of this project");
+    app.launcher.kanban_all = true;
+    assert_eq!(target(&app).as_deref(), Some("w9"), "every project's board");
+}
+
+/// A poll's base read feeds the board: commits since the base put a read,
+/// clean card in Review, and the ref is kept for the next poll.
+#[test]
+fn a_polls_base_read_feeds_the_board() {
+    use nebula_core::review_base::{BaseRef, BaseStanding};
+    let mut app = App::new();
+    seed_tree(&mut app);
+    let w = app.tree.worktrees[0].clone();
+    app.tree.agents[0].status = nebula_core::AgentStatus::Finished;
+    let lane = |app: &App| {
+        let row = crate::launcher::row(app, &app.tree.agents[0].id).unwrap();
+        crate::launcher::lane_of(app, &row)
+    };
+    assert_eq!(lane(&app), crate::launcher::Lane::Done);
+    let base = BaseRef::Base("origin/main".into());
+    note_worktree_base(
+        &mut app,
+        &w.id,
+        Some((
+            w.branch.clone(),
+            base.clone(),
+            BaseStanding {
+                ahead_of_base: 2,
+                on_default_branch: false,
+            },
+        )),
+    );
+    assert_eq!(lane(&app), crate::launcher::Lane::Review);
+    assert_eq!(app.jobs.base_refs.cached(&w.path, &w.branch), Some(base));
+    let job = base_job(&app, &w.id).expect("a branch on record");
+    assert_eq!(job.1, Some(BaseRef::Base("origin/main".into())));
+}
+
 #[test]
 fn g_with_missing_path_flashes() {
     let dir = tempfile::tempdir().unwrap();

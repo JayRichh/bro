@@ -125,7 +125,7 @@ test('archived sessions show only when asked, as stopped, and never count for at
     worktrees: [{ id: 'w', project_id: 'p', path: '/p', branch: 'main', is_main: true, sort_order: 0 }],
     agents: [gone, live].map((a) => ({ ...a, worktree_id: 'w' })),
     terminals: [], ports: [], prs: {}, subagents: [],
-    cards: {}, lanes: { needs: [], running: [], unseen: [], done: [], pr: [] },
+    cards: {}, lanes: { needs: [], running: [], unseen: [], done: [], pr: [] }, hidden: { needs: 0, running: 0, unseen: 0, done: 0, pr: 0 }, scope: {},
   };
   expect(repoRows(m)[0].forest.map((n) => n.id)).toEqual(['live']);
   const shown = repoRows(m, { archived: true });

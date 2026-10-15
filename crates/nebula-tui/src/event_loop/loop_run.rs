@@ -376,9 +376,10 @@ macro_rules! main_loop_body {
             }
             answer = git_rx.recv() => {
                 // Never None: `git_tx` lives as long as the loop.
-                if let Some((worktree, files, lines)) = answer {
+                if let Some((worktree, files, lines, based)) = answer {
                     let count = files.as_ref().map(Vec::len);
                     note_worktree_lines(&mut app, &worktree, lines);
+                    note_worktree_base(&mut app, &worktree, based);
                     keep_changed_files(&mut app, &worktree, files);
                     land_git_changes(&mut app, worktree, count);
                     // The selection moved on while this one was being read:
@@ -390,8 +391,9 @@ macro_rules! main_loop_body {
             }
             answer = sweep_git_rx.recv() => {
                 // Never None: `sweep_git_tx` lives as long as the loop.
-                if let Some((worktree, count, lines)) = answer {
+                if let Some((worktree, count, lines, based)) = answer {
                     note_worktree_lines(&mut app, &worktree, lines);
+                    note_worktree_base(&mut app, &worktree, based);
                     land_swept_changes(&mut app, worktree, count);
                 }
             }

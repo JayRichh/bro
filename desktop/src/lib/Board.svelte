@@ -11,11 +11,18 @@
   import Icon from './ui/Icon.svelte';
   import { drag, dropCard, endDrag, leftFor, offsetIn, startDrag } from './reorder.svelte';
   import { dropZone, laneDrop, type Place } from './order';
+  import { onMount } from 'svelte';
+  import { watchGit } from './worktrees/rows.svelte';
+
+  // The Review lane reads each checkout's changes off the git reads the
+  // overview already makes (src-tauri keeps the last one); keep them
+  // coming while the board is up in its place.
+  onMount(watchGit);
 
   let { active = true }: { active?: boolean } = $props();
 
   // Drags on the board. A card dropped on a lane does what the lane means
-  // where the user can cause it (order.ts `laneDrop`): Unread to Done marks
+  // where the user can cause it (order.ts `laneDrop`): Review to Done marks
   // it seen, the Archived zone (shown while dragging) archives it, a drop
   // beside a card of its own checkout reorders them; a status the agent or
   // the pull request owns is refused with the reason. The keys: Alt+Up /

@@ -152,15 +152,38 @@ export interface AutoPick {
   profile: string | null;
   line: string;
 }
-/** A board lane (`nebula_core::board::Lane`): needs you, running, unread,
- *  done, PR open, left to right. */
+/** A board lane (`nebula_core::board::Lane`), by its kept id: running,
+ *  needs you, review (`unseen`), ship (`pr`), done, left to right. */
 export type Lane = 'needs' | 'running' | 'unseen' | 'done' | 'pr';
+/** Where a card can be let go: a lane, or the Archived zone. */
+export type DropTarget = Lane | 'archived';
+/** What letting a card go there does (`nebula_core::board::DropVerb`). */
+export type DropVerb =
+  | { act: 'reorder' }
+  | { act: 'mark_seen' }
+  | { act: 'open_pr' }
+  | { act: 'merge_pr' }
+  | { act: 'archive' }
+  | { act: 'archive_and_offer_worktree_delete' }
+  | { act: 'refuse'; reason: string };
+/** What the window is looking at (`nebula_core::scope::Scope`); a
+ *  missing field matches anything. Set with `board_scope`. */
+export interface Scope {
+  repo?: string | null;
+  worktree?: string | null;
+  session?: string | null;
+  account?: string | null;
+}
 /** A session's place on the board and in the attention order, worked out
  *  by the Tauri side with nebula-core's rule (src-tauri `board.rs`). */
 export interface Card {
   lane: Lane;
   /** 0 needs you, 1 running, 2 unread (finished, unseen), 3 the rest. */
   tier: number;
+  /** The scope admits it: what the attention strip counts. */
+  in_scope: boolean;
+  /** Core's verdict for letting the card go on each target. */
+  drops: Record<DropTarget, DropVerb>;
 }
 export interface Model {
   connected: boolean;
@@ -184,6 +207,10 @@ export interface Model {
   /** The board's cards by lane, in the order it shows them: live
    *  sessions only, the orchestrator left out. */
   lanes: Record<Lane, string[]>;
+  /** Cards each lane would hold but the scope leaves out. */
+  hidden: Record<Lane, number>;
+  /** The scope the lanes are narrowed to. */
+  scope: Scope;
 }
 
 /** `SessionRef` exactly as serde spells it: externally tagged. */
@@ -390,6 +417,86 @@ export interface Startup {
   diff_mode: string | null;
 }
 
+// ---- Ship: a worktree's pull request on GitHub (gh) or Azure DevOps ----
+
+export type ForgeKind = 'github' | 'ado';
+/** `signIn`: offer the forge's sign-in; `mergeInAdo`: open `url` to finish. */
+export type ShipErrorKind =
+  | 'signIn'
+  | 'noTool'
+  | 'noForge'
+  | 'noBranch'
+  | 'noPr'
+  | 'mergeInAdo'
+  | 'offline'
+  | 'other';
+/** What every ship command rejects with. */
+export interface ShipError {
+  kind: ShipErrorKind;
+  forge: ForgeKind | null;
+  message: string;
+  /** The page to finish on, when there is one. */
+  url: string | null;
+}
+export interface ShipPr {
+  forge: ForgeKind;
+  /** GitHub's number, or ADO's id. */
+  number: number;
+  url: string;
+  title: string;
+  state: 'open' | 'merged' | 'closed';
+  draft: boolean;
+  head: string;
+  base: string;
+  headSha: string | null;
+}
+export interface ShipSuggestion {
+  title: string;
+  body: string;
+}
+export interface ShipStatus {
+  /** null: no remote on GitHub or Azure DevOps. */
+  forge: ForgeKind | null;
+  remote: string | null;
+  /** null on a detached HEAD. */
+  branch: string | null;
+  /** The review base a new PR goes into. */
+  base: string | null;
+  /** Commits no remote has; null with no remote. */
+  unpushed: number | null;
+  pr: ShipPr | null;
+  /** Why `pr` could not be read; the rest stands. */
+  error: ShipError | null;
+  /** For a branch with no open PR: what the composer starts from. */
+  suggestion: ShipSuggestion | null;
+}
+export interface ShipNewPr {
+  title: string;
+  body?: string;
+  draft?: boolean;
+  /** null: the review base. */
+  base?: string | null;
+}
+export interface ShipCreated {
+  pr: ShipPr;
+  /** The open PR the push updated; nothing new was opened. */
+  existing: boolean;
+  note: string | null;
+}
+export type MergeMethod = 'squash' | 'merge' | 'rebase';
+export interface ShipMergeOpts {
+  method?: MergeMethod;
+  /** On the remote only; the worktree delete removes the local branch. */
+  deleteBranch?: boolean;
+}
+export interface ShipMerged {
+  pr: ShipPr;
+  /** `queued`: the forge took it behind its checks. */
+  state: 'merged' | 'queued';
+  branchDeleted: boolean;
+  note: string | null;
+}
+
 export const api = {
   state: () => invoke<Model>('get_state'),
   onState: (f: (m: Model) => void) => listen<Model>('kete://state', (e) => f(e.payload)),
@@ -422,6 +529,11 @@ export const api = {
    *  order after it. Refused (with what to run) by a daemon older than
    *  protocol 56. */
   reorder: (scope: ReorderScope, ids: string[]) => invoke<void>('reorder', { scope, ids }),
+  /** Rejects with a {@link ShipError}, as do the two below. */
+  shipStatus: (worktree: string, session?: string | null) =>
+    invoke<ShipStatus>('ship_status', { worktree, session: session ?? null }),
+  shipCreatePr: (worktree: string, pr: ShipNewPr) => invoke<ShipCreated>('ship_create_pr', { worktree, pr }),
+  shipMerge: (worktree: string, opts: ShipMergeOpts) => invoke<ShipMerged>('ship_merge', { worktree, opts }),
   renameTerminal: (terminal: string, name: string) => invoke<void>('rename_terminal', { terminal, name }),
   closeTerminal: (terminal: string) => invoke<void>('close_terminal', { terminal }),
   followUp: (agent: string, text: string) => invoke<void>('follow_up', { agent, text }),

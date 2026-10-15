@@ -133,9 +133,10 @@ pub fn run_spawn(
     kind: Option<nebula_core::AgentKind>,
     worktree: Option<String>,
     base: Option<String>,
+    profile: Option<String>,
 ) -> Result<()> {
     runtime()?.block_on(ipc::spawn_sibling_for_current_agent(
-        &task, kind, worktree, base,
+        &task, kind, worktree, base, profile,
     ))
 }
 

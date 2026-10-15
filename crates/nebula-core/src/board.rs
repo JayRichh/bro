@@ -1,56 +1,63 @@
 //! What a session's state means on the board and in the attention order:
-//! its KANBAN lane and its attention tier. Pure functions over the snapshot
-//! types, so the terminal app, the daemon and the desktop window (through
-//! its Tauri side) read one rule instead of three copies of it.
+//! its KANBAN lane, its attention tier, and what letting its card go on
+//! another lane does. Pure functions over the snapshot types, so the
+//! terminal app, the daemon and the desktop window (through its Tauri
+//! side) read one rule instead of three copies of it.
 //!
 //! Each is per session and knows nothing of what is on screen: a filter
-//! (a project, a worktree, an account) is the caller's, applied before or
-//! after. What a lane needs beyond the session's own row comes in
-//! [`CardFacts`], so a new lane can take a new fact without every caller's
-//! signature changing.
+//! (a [`crate::scope::Scope`], a project) is the caller's, applied before
+//! or after; [`split_by_scope`] does the board's. What a lane needs beyond
+//! the session's own row comes in [`CardFacts`], so a new lane can take a
+//! new fact without every caller's signature changing.
 
 use crate::entities::{Agent, AgentStatus};
 use serde::{Deserialize, Serialize};
 
 /// A KANBAN lane. [`Lane::ALL`] is the left-to-right order both apps lay
 /// the board out in, and the serde names are the desktop's lane ids.
+///
+/// The ids predate the review lane and are kept so saved state and the
+/// window's code keep reading them: `unseen` is Review (the old Unread
+/// lane, which it grew out of), `pr` is Ship (the old PR open lane).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Lane {
-    /// Waiting on you: a permission prompt or a question (the red dot).
-    #[serde(rename = "needs")]
-    NeedsInput,
     /// Mid-turn (the yellow dot).
     #[serde(rename = "running")]
     Running,
-    /// A finished turn nobody has read yet (the blue dot).
+    /// Waiting on you: a permission prompt or a question (the red dot).
+    #[serde(rename = "needs")]
+    NeedsInput,
+    /// Work to look at: a finished turn nobody has read yet (the blue
+    /// dot), or a checkout with changes no pull request carries.
     #[serde(rename = "unseen")]
-    Unseen,
-    /// Read, idle, or never run: nothing for you to do.
+    Review,
+    /// Its checkout's pull request is open or a draft: handed on, waiting
+    /// on review or the merge.
+    #[serde(rename = "pr")]
+    Ship,
+    /// Read, and nothing left to ship: no changes, or its pull request
+    /// merged or closed. A session that never ran is here too.
     #[serde(rename = "done")]
     Done,
-    /// Idle and read, its checkout's pull request still open: work handed
-    /// on to review rather than finished.
-    #[serde(rename = "pr")]
-    PrOpen,
 }
 
 impl Lane {
     /// The board's columns, left to right.
     pub const ALL: [Lane; 5] = [
-        Lane::NeedsInput,
         Lane::Running,
-        Lane::Unseen,
+        Lane::NeedsInput,
+        Lane::Review,
+        Lane::Ship,
         Lane::Done,
-        Lane::PrOpen,
     ];
 
     pub fn title(self) -> &'static str {
         match self {
-            Lane::NeedsInput => "Needs you",
             Lane::Running => "Running",
-            Lane::Unseen => "Unread",
+            Lane::NeedsInput => "Needs you",
+            Lane::Review => "Review",
+            Lane::Ship => "Ship",
             Lane::Done => "Done",
-            Lane::PrOpen => "PR open",
         }
     }
 
@@ -60,30 +67,247 @@ impl Lane {
     }
 }
 
-/// What the board knows about a session beyond its own row.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct CardFacts {
-    /// Its checkout's pull request is open (a draft counts; merged and
-    /// closed do not).
-    pub pr_open: bool,
+/// Where a checkout's pull request stands, as a card reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrState {
+    Open,
+    Draft,
+    Merged,
+    Closed,
 }
 
-/// The lane a session's card goes in. One lane per card, the most urgent
-/// that applies: waiting on you over working over unread, and an open pull
-/// request only once nothing else about the session needs you — a session
-/// asking a question on a branch under review is asking a question first.
+impl PrState {
+    /// From a host's state word (`open`, `merged`, `closed`, any case;
+    /// Azure DevOps' `completed` and `abandoned` too) and its draft flag.
+    /// A source that names no state reports open pull requests only, so
+    /// an empty or unknown word is open.
+    pub fn from_state(state: &str, draft: bool) -> PrState {
+        match state.to_ascii_lowercase().as_str() {
+            "merged" | "completed" => PrState::Merged,
+            "closed" | "abandoned" => PrState::Closed,
+            _ if draft => PrState::Draft,
+            _ => PrState::Open,
+        }
+    }
+
+    /// Open or a draft: still to land.
+    pub fn is_open(self) -> bool {
+        matches!(self, PrState::Open | PrState::Draft)
+    }
+}
+
+/// What the board knows about a session beyond its own row. Each app fills
+/// it from what it already holds; nothing here reads git.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CardFacts {
+    /// Its checkout has work no pull request carries yet: uncommitted or
+    /// untracked files, commits ahead of its upstream, or commits since
+    /// its base (`ahead_of_base > 0`). False when unknown.
+    pub has_changes: bool,
+    /// Commits on its branch since the base branch's merge-base
+    /// ([`crate::review_base::BaseRef::standing`]); 0 when unknown.
+    pub ahead_of_base: u32,
+    /// Its checkout is on the base branch itself: nothing there ships as a
+    /// pull request.
+    pub on_default_branch: bool,
+    /// Its checkout's pull request, when one is known.
+    pub pr: Option<PrState>,
+}
+
+/// The lane a session's card goes in. One lane per card, the first that
+/// applies:
 ///
-/// The Unread lane takes any unseen session, not only a finished one: the
+/// 1. waiting on you: Needs you; mid-turn: Running;
+/// 2. unseen (a turn finished while you were away): Review, whatever its
+///    pull request; reading it comes first;
+/// 3. a pull request open or a draft: Ship;
+/// 4. a merged or closed pull request: Done, changes or not (what is left
+///    is the worktree's to clean up, not the board's to review);
+/// 5. changes and no pull request: Review, for a session that ran
+///    (finished, or stopped since). One that never ran did not make them;
+/// 6. else Done.
+///
+/// The unseen rule takes any unseen session, not only a finished one: the
 /// daemon clears `unseen` when a session leaves finished, so in practice
 /// the two agree.
 pub fn lane_of(agent: &Agent, facts: &CardFacts) -> Lane {
-    match agent.status {
+    lane_for(agent.status, agent.unseen, facts)
+}
+
+/// [`lane_of`] over a session's status and unseen flag alone.
+fn lane_for(status: AgentStatus, unseen: bool, facts: &CardFacts) -> Lane {
+    match status {
         AgentStatus::NeedsFeedback => Lane::NeedsInput,
         AgentStatus::Running => Lane::Running,
-        _ if agent.unseen => Lane::Unseen,
-        _ if facts.pr_open => Lane::PrOpen,
+        _ if unseen => Lane::Review,
+        _ if facts.pr.is_some_and(PrState::is_open) => Lane::Ship,
+        _ if facts.pr.is_some() => Lane::Done,
+        AgentStatus::Fresh => Lane::Done,
+        _ if facts.has_changes => Lane::Review,
         _ => Lane::Done,
     }
+}
+
+/// The lane `agent`'s card goes in once it is read: [`lane_of`] with
+/// `unseen` cleared.
+fn read_lane(agent: &Agent, facts: &CardFacts) -> Lane {
+    lane_for(agent.status, false, facts)
+}
+
+/// Where a board card is let go: a lane, or the ARCHIVED zone the board
+/// shows while a card is held.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DropTarget {
+    Lane(Lane),
+    Archived,
+}
+
+impl DropTarget {
+    /// Every place a card can be let go: the lanes in board order, then
+    /// Archived.
+    pub const ALL: [DropTarget; 6] = [
+        DropTarget::Lane(Lane::Running),
+        DropTarget::Lane(Lane::NeedsInput),
+        DropTarget::Lane(Lane::Review),
+        DropTarget::Lane(Lane::Ship),
+        DropTarget::Lane(Lane::Done),
+        DropTarget::Archived,
+    ];
+
+    /// The window's id for it: the lane's serde id, or `archived`.
+    pub fn id(self) -> &'static str {
+        match self {
+            DropTarget::Lane(Lane::Running) => "running",
+            DropTarget::Lane(Lane::NeedsInput) => "needs",
+            DropTarget::Lane(Lane::Review) => "unseen",
+            DropTarget::Lane(Lane::Ship) => "pr",
+            DropTarget::Lane(Lane::Done) => "done",
+            DropTarget::Archived => "archived",
+        }
+    }
+}
+
+/// What letting a card go on a [`DropTarget`] does. The apps carry it out;
+/// the merge, which changes something on the host, is confirmed first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(tag = "act", content = "reason", rename_all = "snake_case")]
+pub enum DropVerb {
+    /// Its own lane: beside a card of its own checkout, a reorder;
+    /// anywhere else on it, nothing.
+    Reorder,
+    /// Review to Done: the session is marked seen.
+    MarkSeen,
+    /// Review to Ship: the pull request composer opens for its checkout.
+    OpenPr,
+    /// Ship to Done: its pull request merges, once the user confirms.
+    MergePr,
+    /// Onto Archived: the session is archived.
+    Archive,
+    /// Done onto Archived: archived, and the checkout's safe delete (the
+    /// one that refuses unpushed work) is offered.
+    ArchiveAndOfferWorktreeDelete,
+    /// A move the user can't make, and why.
+    Refuse(&'static str),
+}
+
+/// What letting `agent`'s card (in the lane [`lane_of`] gives it with
+/// `facts`) go on `to` does. Only moves the user can cause act; a lane
+/// the agent or the pull request owns refuses with the reason.
+pub fn drop_verb(agent: &Agent, facts: &CardFacts, to: DropTarget) -> DropVerb {
+    let from = lane_of(agent, facts);
+    let to = match to {
+        DropTarget::Archived if from == Lane::Done => {
+            return DropVerb::ArchiveAndOfferWorktreeDelete
+        }
+        DropTarget::Archived => return DropVerb::Archive,
+        DropTarget::Lane(l) => l,
+    };
+    if from == to {
+        return DropVerb::Reorder;
+    }
+    match (from, to) {
+        (_, Lane::NeedsInput) => {
+            DropVerb::Refuse("Only the agent puts a card in Needs you, by asking.")
+        }
+        (_, Lane::Running) => DropVerb::Refuse(
+            "Only the agent puts a card in Running, by starting a turn: send it a follow-up.",
+        ),
+        (Lane::NeedsInput, _) => DropVerb::Refuse(
+            "Needs you is the agent\u{2019}s: the card leaves it when you answer the session.",
+        ),
+        (Lane::Running, _) => DropVerb::Refuse(
+            "Running is the agent\u{2019}s: the card moves on when the turn ends.",
+        ),
+        // Out of Review, by where reading the card puts it: an unread card
+        // dropped where it goes once read is marked seen; one whose
+        // changes keep it in Review ships, or refuses Done. No verb claims
+        // a move that would not happen.
+        (Lane::Review, _) => match (read_lane(agent, facts), to) {
+            (read, to) if agent.unseen && read == to => DropVerb::MarkSeen,
+            (Lane::Review, Lane::Ship) if facts.on_default_branch => DropVerb::Refuse(
+                "This is the base branch: a pull request needs a branch of its own (cut a worktree, or move the work to one).",
+            ),
+            (Lane::Review, Lane::Ship) => DropVerb::OpenPr,
+            (Lane::Review, _) => DropVerb::Refuse(
+                "Its worktree has changes no pull request carries: commit and push them, ship them (drop on Ship) or archive the card.",
+            ),
+            (Lane::Ship, _) => DropVerb::Refuse(
+                "Its pull request is already open: read, the card goes to Ship; drop it there.",
+            ),
+            _ => DropVerb::Refuse(
+                "Nothing to ship: its worktree has no changes or unpushed commits, or its pull request already landed.",
+            ),
+        },
+        (Lane::Ship, Lane::Done) if facts.pr == Some(PrState::Draft) => DropVerb::Refuse(
+            "Its pull request is a draft: mark it ready for review before it can merge.",
+        ),
+        (Lane::Ship, Lane::Done) => DropVerb::MergePr,
+        (Lane::Ship, Lane::Review) => DropVerb::Refuse(
+            "Ship follows the worktree\u{2019}s pull request: the card leaves it when the PR merges or closes.",
+        ),
+        (Lane::Done, Lane::Review) => DropVerb::Refuse(
+            "Review comes from a turn finishing or from new changes; a card cannot be sent back to it.",
+        ),
+        (Lane::Done, _) => DropVerb::Refuse(
+            "Nothing to ship from Done: its worktree has no changes, or its pull request already landed.",
+        ),
+        // Ship onto Ship: `from == to`, returned above.
+        (Lane::Ship, _) => DropVerb::Reorder,
+    }
+}
+
+/// The board split by a scope: each lane's admitted cards, and how many
+/// more the scope leaves out there ("2 more outside scope").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Scoped<T> {
+    /// Lane by lane in [`Lane::ALL`] order, each in the order given.
+    pub lanes: Vec<Vec<T>>,
+    /// The cards each lane would hold but the scope leaves out, in
+    /// [`Lane::ALL`] order.
+    pub hidden: [usize; Lane::ALL.len()],
+}
+
+/// Sort `cards` into lanes by `lane`, keeping those `admitted` takes and
+/// counting the rest lane by lane. Order within a lane is the input's.
+pub fn split_by_scope<T>(
+    cards: impl IntoIterator<Item = T>,
+    lane: impl Fn(&T) -> Lane,
+    admitted: impl Fn(&T) -> bool,
+) -> Scoped<T> {
+    let mut out = Scoped {
+        lanes: Lane::ALL.iter().map(|_| Vec::new()).collect(),
+        hidden: [0; Lane::ALL.len()],
+    };
+    for card in cards {
+        let i = lane(&card).index();
+        if admitted(&card) {
+            out.lanes[i].push(card);
+        } else {
+            out.hidden[i] += 1;
+        }
+    }
+    out
 }
 
 /// Where a session sorts when the question is "what wants me first": the
@@ -156,49 +380,75 @@ mod tests {
         }
     }
 
+    fn facts(has_changes: bool, pr: Option<PrState>) -> CardFacts {
+        CardFacts {
+            has_changes,
+            pr,
+            ..CardFacts::default()
+        }
+    }
+
     /// Every client reads a session's lane and tier off this one table.
     #[test]
     fn each_state_has_one_lane_and_one_tier() {
         use AgentStatus::*;
         use Attention as T;
-        // (status, unseen, pr open) → (lane, tier)
+        use Lane as L;
+        use PrState::*;
+        // (status, unseen, changes, pr) → (lane, tier)
         let table = [
+            // The agent's lanes win over everything.
             (
                 NeedsFeedback,
                 false,
                 false,
-                Lane::NeedsInput,
+                None,
+                L::NeedsInput,
                 T::NeedsFeedback,
             ),
             (
                 NeedsFeedback,
                 true,
                 true,
-                Lane::NeedsInput,
+                Some(Open),
+                L::NeedsInput,
                 T::NeedsFeedback,
             ),
-            (Running, false, false, Lane::Running, T::Running),
-            (Running, true, true, Lane::Running, T::Running),
-            (Finished, true, false, Lane::Unseen, T::Unseen),
-            (Finished, true, true, Lane::Unseen, T::Unseen),
-            (Finished, false, true, Lane::PrOpen, T::Rest),
-            (Finished, false, false, Lane::Done, T::Rest),
-            (Fresh, false, false, Lane::Done, T::Rest),
-            (Fresh, false, true, Lane::PrOpen, T::Rest),
+            (Running, false, false, None, L::Running, T::Running),
+            (Running, true, true, Some(Open), L::Running, T::Running),
+            // Unseen is Review, whatever its pull request.
+            (Finished, true, false, None, L::Review, T::Unseen),
+            (Finished, true, false, Some(Open), L::Review, T::Unseen),
+            (Finished, true, true, Some(Merged), L::Review, T::Unseen),
+            // Read: changes and no PR is Review; an open PR or draft Ship.
+            (Finished, false, true, None, L::Review, T::Rest),
+            (Finished, false, true, Some(Open), L::Ship, T::Rest),
+            (Finished, false, false, Some(Draft), L::Ship, T::Rest),
+            // A landed PR is Done, changes or not.
+            (Finished, false, true, Some(Merged), L::Done, T::Rest),
+            (Finished, false, true, Some(Closed), L::Done, T::Rest),
+            (Finished, false, false, Some(Closed), L::Done, T::Rest),
+            (Finished, false, false, None, L::Done, T::Rest),
+            // Never ran: its checkout's changes are not its work.
+            (Fresh, false, false, None, L::Done, T::Rest),
+            (Fresh, false, true, None, L::Done, T::Rest),
+            (Fresh, false, false, Some(Open), L::Ship, T::Rest),
+            // Stopped after running: its changes stand.
+            (Terminated, false, true, None, L::Review, T::Rest),
+            (Disconnected, false, true, None, L::Review, T::Rest),
+            (Terminated, false, false, None, L::Done, T::Rest),
+            (Disconnected, false, false, Some(Draft), L::Ship, T::Rest),
             // A stopped session still flagged unseen: the card stays in
-            // Unread, but nothing finished, so it is not unread.
-            (Terminated, true, false, Lane::Unseen, T::Rest),
-            (Disconnected, true, true, Lane::Unseen, T::Rest),
-            (Terminated, false, false, Lane::Done, T::Rest),
-            (Disconnected, false, true, Lane::PrOpen, T::Rest),
+            // Review, but nothing finished, so it is not unread.
+            (Terminated, true, false, None, L::Review, T::Rest),
+            (Disconnected, true, false, Some(Open), L::Review, T::Rest),
         ];
-        for (status, unseen, pr_open, lane, tier) in table {
+        for (status, unseen, changes, pr, lane, tier) in table {
             let a = agent(status, unseen);
-            let facts = CardFacts { pr_open };
             assert_eq!(
-                lane_of(&a, &facts),
+                lane_of(&a, &facts(changes, pr)),
                 lane,
-                "{status:?} unseen={unseen} pr={pr_open}"
+                "{status:?} unseen={unseen} changes={changes} pr={pr:?}"
             );
             assert_eq!(attention(&a), tier, "{status:?} unseen={unseen}");
             assert_eq!(is_unread(&a), tier == T::Unseen);
@@ -209,7 +459,8 @@ mod tests {
         );
     }
 
-    /// The desktop names lanes by these ids; the order is the board's.
+    /// The desktop names lanes by these ids, the old ones kept; the order
+    /// is the board's.
     #[test]
     fn lanes_serialize_as_the_desktop_ids_in_board_order() {
         let ids: Vec<String> = Lane::ALL
@@ -219,13 +470,188 @@ mod tests {
         assert_eq!(
             ids,
             [
-                "\"needs\"",
                 "\"running\"",
+                "\"needs\"",
                 "\"unseen\"",
-                "\"done\"",
-                "\"pr\""
+                "\"pr\"",
+                "\"done\""
             ]
         );
-        assert_eq!(Lane::PrOpen.index(), 4);
+        assert_eq!(
+            Lane::ALL.map(Lane::title),
+            ["Running", "Needs you", "Review", "Ship", "Done"]
+        );
+        assert_eq!(Lane::Done.index(), 4);
+        let back: Lane = serde_json::from_str("\"unseen\"").unwrap();
+        assert_eq!(back, Lane::Review);
+        for t in DropTarget::ALL {
+            if let DropTarget::Lane(l) = t {
+                assert_eq!(
+                    format!("\"{}\"", t.id()),
+                    serde_json::to_string(&l).unwrap()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_hosts_state_word_reads_as_a_pr_state() {
+        use PrState::*;
+        assert_eq!(PrState::from_state("open", false), Open);
+        assert_eq!(PrState::from_state("OPEN", true), Draft);
+        assert_eq!(PrState::from_state("", false), Open);
+        assert_eq!(PrState::from_state("merged", true), Merged);
+        assert_eq!(PrState::from_state("completed", false), Merged);
+        assert_eq!(PrState::from_state("closed", false), Closed);
+        assert_eq!(PrState::from_state("abandoned", false), Closed);
+        assert!(Open.is_open() && Draft.is_open());
+        assert!(!Merged.is_open() && !Closed.is_open());
+    }
+
+    /// Every lane onto every target, for one card in each lane.
+    #[test]
+    fn each_drop_has_one_verb() {
+        use AgentStatus::*;
+        use DropVerb as V;
+        use PrState::*;
+        let refused = |v: DropVerb| matches!(v, V::Refuse(_));
+        // A card in each lane, and the facts that put it there.
+        let running = (agent(Running, false), facts(true, None));
+        let needs = (agent(NeedsFeedback, false), facts(true, None));
+        let unread = (agent(Finished, true), facts(false, None));
+        let unread_changes = (agent(Finished, true), facts(true, None));
+        let unread_pr = (agent(Finished, true), facts(true, Some(Open)));
+        let unread_merged = (agent(Finished, true), facts(true, Some(Merged)));
+        let changes = (agent(Finished, false), facts(true, None));
+        let on_base = (
+            agent(Finished, false),
+            CardFacts {
+                on_default_branch: true,
+                ..facts(true, None)
+            },
+        );
+        let open = (agent(Finished, false), facts(true, Some(Open)));
+        let draft = (agent(Finished, false), facts(true, Some(Draft)));
+        let done = (agent(Finished, false), facts(false, None));
+        let merged = (agent(Finished, false), facts(true, Some(Merged)));
+        let lane = |t: &(Agent, CardFacts)| lane_of(&t.0, &t.1);
+        assert_eq!(
+            [&running, &needs, &unread, &changes, &open, &done].map(lane),
+            [
+                Lane::Running,
+                Lane::NeedsInput,
+                Lane::Review,
+                Lane::Review,
+                Lane::Ship,
+                Lane::Done
+            ]
+        );
+        let verb = |t: &(Agent, CardFacts), to: DropTarget| drop_verb(&t.0, &t.1, to);
+        let to = DropTarget::Lane;
+        // (card, target) → the verb; None: refused.
+        let table: [(&(Agent, CardFacts), DropTarget, Option<DropVerb>); 26] = [
+            // Its own lane reorders; Archived archives from anywhere.
+            (&running, to(Lane::Running), Some(V::Reorder)),
+            (&open, to(Lane::Ship), Some(V::Reorder)),
+            (&running, DropTarget::Archived, Some(V::Archive)),
+            (&needs, DropTarget::Archived, Some(V::Archive)),
+            (&changes, DropTarget::Archived, Some(V::Archive)),
+            (&open, DropTarget::Archived, Some(V::Archive)),
+            // Done to Archived offers the safe worktree delete too.
+            (
+                &done,
+                DropTarget::Archived,
+                Some(V::ArchiveAndOfferWorktreeDelete),
+            ),
+            (
+                &merged,
+                DropTarget::Archived,
+                Some(V::ArchiveAndOfferWorktreeDelete),
+            ),
+            // Review: to Done marks an unread card seen; to Ship opens the
+            // composer when there is something to ship.
+            (&unread, to(Lane::Done), Some(V::MarkSeen)),
+            // Unread with changes: reading it leaves it in Review, so not
+            // Done; unread with a PR open: reading puts it in Ship.
+            (&unread_changes, to(Lane::Done), None),
+            (&unread_pr, to(Lane::Ship), Some(V::MarkSeen)),
+            (&unread_pr, to(Lane::Done), None),
+            (&unread_merged, to(Lane::Done), Some(V::MarkSeen)),
+            (&unread_merged, to(Lane::Ship), None),
+            (&changes, to(Lane::Done), None),
+            (&changes, to(Lane::Ship), Some(V::OpenPr)),
+            // On the base branch itself: no pull request to open.
+            (&on_base, to(Lane::Ship), None),
+            (&on_base, to(Lane::Done), None),
+            (&unread_changes, to(Lane::Ship), Some(V::OpenPr)),
+            (&unread, to(Lane::Ship), None),
+            // Ship: to Done merges an open PR; a draft can't merge.
+            (&open, to(Lane::Done), Some(V::MergePr)),
+            (&draft, to(Lane::Done), None),
+            (&open, to(Lane::Review), None),
+            // Done goes nowhere but Archived.
+            (&done, to(Lane::Review), None),
+            (&done, to(Lane::Ship), None),
+            (&merged, to(Lane::Ship), None),
+        ];
+        for (i, (card, target, want)) in table.into_iter().enumerate() {
+            let got = verb(card, target);
+            match want {
+                Some(v) => assert_eq!(got, v, "row {i}"),
+                None => assert!(refused(got), "row {i}: {got:?}"),
+            }
+        }
+        // Nothing drops into the agent's lanes, and nothing leaves them
+        // but to Archived.
+        for card in [&running, &needs, &unread, &changes, &open, &done] {
+            for l in [Lane::Running, Lane::NeedsInput] {
+                if lane(card) != l {
+                    assert!(refused(verb(card, to(l))), "{:?} onto {l:?}", lane(card));
+                }
+            }
+        }
+        for card in [&running, &needs] {
+            for l in [Lane::Review, Lane::Ship, Lane::Done] {
+                assert!(refused(verb(card, to(l))), "{:?} onto {l:?}", lane(card));
+            }
+        }
+        assert!(
+            matches!(verb(&on_base, to(Lane::Ship)), V::Refuse(why) if why.contains("base branch"))
+        );
+        // Every refusal says why.
+        for card in [&running, &needs, &unread, &changes, &open, &draft, &done] {
+            for t in DropTarget::ALL {
+                if let V::Refuse(why) = verb(card, t) {
+                    assert!(!why.is_empty());
+                }
+            }
+        }
+        assert_eq!(
+            serde_json::to_value(V::Refuse("no")).unwrap(),
+            serde_json::json!({ "act": "refuse", "reason": "no" })
+        );
+        assert_eq!(
+            serde_json::to_value(V::ArchiveAndOfferWorktreeDelete).unwrap(),
+            serde_json::json!({ "act": "archive_and_offer_worktree_delete" })
+        );
+    }
+
+    #[test]
+    fn a_scope_splits_the_board_and_counts_what_it_hides() {
+        // (lane, admitted)
+        let cards = [
+            (Lane::Review, true),
+            (Lane::Review, false),
+            (Lane::Review, false),
+            (Lane::Running, true),
+            (Lane::Done, false),
+            (Lane::Review, true),
+        ];
+        let s = split_by_scope(cards.iter().enumerate(), |c| c.1 .0, |c| c.1 .1);
+        let ids = |l: Lane| s.lanes[l.index()].iter().map(|c| c.0).collect::<Vec<_>>();
+        assert_eq!(ids(Lane::Review), [0, 5]);
+        assert_eq!(ids(Lane::Running), [3]);
+        assert!(ids(Lane::Done).is_empty());
+        assert_eq!(s.hidden, [0, 0, 2, 0, 1]);
     }
 }

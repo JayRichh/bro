@@ -5,6 +5,7 @@ mod desktop;
 mod hook;
 mod profile;
 mod setup;
+mod ship;
 mod ssh;
 mod statusline;
 mod tunnel;
@@ -131,7 +132,8 @@ fn main() -> Result<()> {
             kind,
             worktree,
             base,
-        }) => nebula_tui::run_spawn(task.join(" "), kind, worktree, base),
+            profile,
+        }) => nebula_tui::run_spawn(task.join(" "), kind, worktree, base, profile),
         Some(Command::Open { files }) => nebula_tui::run_open(files),
         Some(Command::Sessions { json }) => nebula_tui::run_sessions(json),
         Some(Command::Session { command }) => match command {
@@ -208,6 +210,11 @@ fn main() -> Result<()> {
                 nebula_tui::run_orchestrator_review(&sessions, tabs)
             }
         },
+        Some(Command::Ship {
+            project,
+            worktree,
+            command,
+        }) => ship::run_ship(command, ado::Target { project, worktree }),
         Some(Command::Ado {
             project,
             worktree,

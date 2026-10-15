@@ -406,7 +406,7 @@ pub async fn rename_current_agent(title: &str, mode: RenameMode) -> Result<()> {
 }
 
 /// CLI: `nebula spawn "<task>" [--kind <claude|codex|cursor>] [--worktree
-/// <branch> [--base <ref>]]` from inside an agent session — ask the daemon
+/// <branch> [--base <ref>]] [--profile <name>]` from inside an agent session — ask the daemon
 /// to start a new agent beside this one, in the same worktree or in the
 /// project's worktree on `worktree` (created when the branch has none),
 /// opening on `task` as its first prompt. The caller is untouched: no
@@ -417,11 +417,34 @@ pub async fn rename_current_agent(title: &str, mode: RenameMode) -> Result<()> {
 /// happened and that this session carries on. A daemon-side refusal (a
 /// blank task, a missing CLI, a worktree git could not create) is a
 /// nonzero exit the model reports.
+/// What `kete spawn --profile` says to a daemon older than
+/// [`nebula_core::SPAWN_PROFILE_PROTOCOL`]. The model in the session reads
+/// it, so the way out must be one the platform has: on unix `kete reload`
+/// moves to the new daemon and keeps every session (its own too). Windows
+/// has no reload, and `kete kill` stops every session, this one included,
+/// so there spawning without --profile is the way on and the restart is
+/// the user's to choose.
+fn spawn_profile_too_old(daemon: u32, windows: bool) -> String {
+    let need = nebula_core::SPAWN_PROFILE_PROTOCOL;
+    let way_out = if windows {
+        "On Windows the daemon is only replaced by `kete kill`, which stops every session, \
+         this one included: spawn without --profile, or tell the user the profile needs a \
+         daemon restart (`kete kill`, then reopen kete) when they are ready"
+    } else {
+        "Ask the user to run `kete reload` (it keeps every session), or spawn without --profile"
+    };
+    format!(
+        "`kete spawn --profile` needs daemon protocol v{need}, but the running daemon speaks \
+         v{daemon}: no session started. {way_out}"
+    )
+}
+
 pub async fn spawn_sibling_for_current_agent(
     task: &str,
     kind: Option<AgentKind>,
     worktree: Option<String>,
     base: Option<String>,
+    profile: Option<String>,
 ) -> Result<()> {
     let agent_id = current_agent_id("spawn")?;
     let task = task.trim();
@@ -443,11 +466,21 @@ pub async fn spawn_sibling_for_current_agent(
         Some("") => bail!("the base is empty: `--base <ref>` needs a branch, tag or commit"),
         other => other.map(str::to_string),
     };
+    let profile = match profile.as_deref().map(str::trim) {
+        Some("") => bail!("the profile is empty: `--profile <name>` needs an account's name"),
+        other => other.map(str::to_string),
+    };
     let sock = paths::socket_path();
     let Ok(stream) = try_connect(&sock).await else {
         bail!("no kete daemon is running, no session started");
     };
     let mut conn = handshake(stream).await?;
+    // Without a profile the frame is 57's, which every daemon in range
+    // reads; one naming a profile would make an older daemon drop the
+    // connection, so it is refused here with the way out.
+    if profile.is_some() && conn.protocol_version < nebula_core::SPAWN_PROFILE_PROTOCOL {
+        bail!(spawn_profile_too_old(conn.protocol_version, cfg!(windows)));
+    }
     let req_id = ONE_SHOT_REQ_ID;
     write_frame(
         &mut conn.stream,
@@ -458,17 +491,21 @@ pub async fn spawn_sibling_for_current_agent(
             starting_prompt: task.to_string(),
             worktree: worktree.clone(),
             base,
+            profile: profile.clone(),
         },
     )
     .await?;
     await_ack(&mut conn, req_id).await?;
     let harness = kind.map(|k| format!("{} ", k.as_str())).unwrap_or_default();
+    let account = profile
+        .map(|p| format!(" on the {p} account"))
+        .unwrap_or_default();
     let place = match &worktree {
         Some(branch) => format!("the worktree on branch \"{branch}\""),
         None => "this worktree".to_string(),
     };
     println!(
-        "started a new {harness}session in {place}; it is working on that task now and \
+        "started a new {harness}session in {place}{account}; it is working on that task now and \
          shows in the sessions list. This session is unaffected: carry on."
     );
     Ok(())
@@ -1816,6 +1853,19 @@ fn send_signal(pid: i32, sig: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The refusal names a way out the platform has: Windows has no
+    /// `kete reload`, and its `kete kill` stops the asking session too.
+    #[test]
+    fn spawn_profile_on_an_old_daemon_names_the_platforms_way_out() {
+        let unix = spawn_profile_too_old(57, false);
+        assert!(unix.contains("v57") && unix.contains("no session started"));
+        assert!(unix.contains("`kete reload`") && !unix.contains("kete kill"));
+        let windows = spawn_profile_too_old(57, true);
+        assert!(!windows.contains("kete reload"), "{windows}");
+        assert!(windows.contains("`kete kill`") && windows.contains("stops every session"));
+        assert!(windows.contains("without --profile"));
+    }
 
     #[test]
     fn a_move_names_one_agent_session_or_refuses() {

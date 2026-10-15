@@ -2563,14 +2563,25 @@ pub(super) fn drop_order(app: &mut App, out: &mut Vec<ClientRequest>) {
                 lane,
             },
             Some(OrderOver::Lane(to, beside)),
-        ) => match lane_drop(lane, to) {
+        ) => match lane_drop(app, &agent, lane, to) {
             LaneDrop::Refuse(why) => app.chrome.flash = Some(why.into()),
-            LaneDrop::Seen => {
+            LaneDrop::MarkSeen => {
                 super::mark_agent_seen(app, &agent, out);
-                app.chrome.flash = Some(crate::order::MARKED_SEEN.into());
+                app.chrome.flash = Some(
+                    if to == DropLane::Lane(view::Lane::Ship) {
+                        crate::order::MARKED_SEEN_SHIP
+                    } else {
+                        crate::order::MARKED_SEEN
+                    }
+                    .into(),
+                );
             }
-            LaneDrop::Archive => {
+            // The worktree delete offer is the board's to add.
+            LaneDrop::Archive | LaneDrop::ArchiveAndOfferWorktreeDelete => {
                 super::archive_agent(app, agent, out);
+            }
+            LaneDrop::OpenPr | LaneDrop::MergePr => {
+                app.chrome.flash = Some(crate::order::SHIP_ON_THE_CLI.into());
             }
             LaneDrop::Reorder => match beside {
                 Some((target, place)) => {
@@ -13542,21 +13553,21 @@ mod tests {
                 "the cursor lands on the one waiting on you"
             );
             let text = screen_text(&draw_at(&mut app, 240, 40));
-            for lane in ["Needs you", "Running", "Unread", "Done", "PR open"] {
+            for lane in ["Running", "Needs you", "Review", "Ship", "Done"] {
                 assert!(text.contains(lane), "the {lane} lane:\n{text}");
             }
             assert!(text.contains("polish-nav"), "{text}");
             assert!(!text.contains("tidy-css"), "web is a tab away:\n{text}");
 
-            key(&mut app, KeyCode::Char('l'), KeyModifiers::NONE);
+            key(&mut app, KeyCode::Char('h'), KeyModifiers::NONE);
             assert_eq!(selected(&app).as_deref(), Some("polish-nav"), "Running");
-            key(&mut app, KeyCode::Char('l'), KeyModifiers::NONE);
+            key(&mut app, KeyCode::Char('h'), KeyModifiers::NONE);
             assert_eq!(
                 selected(&app).as_deref(),
                 Some("polish-nav"),
-                "no lane right of it holds a card"
+                "no lane left of it"
             );
-            key(&mut app, KeyCode::Char('h'), KeyModifiers::NONE);
+            key(&mut app, KeyCode::Char('l'), KeyModifiers::NONE);
             assert_eq!(selected(&app).as_deref(), Some("agent-1"));
 
             key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
@@ -13568,7 +13579,7 @@ mod tests {
 
             key(&mut app, KeyCode::Char('K'), KeyModifiers::SHIFT);
             assert!(!app.launcher.launcher_kanban);
-            assert!(!screen_text(&draw(&mut app)).contains("PR open"));
+            assert!(!screen_text(&draw(&mut app)).contains("Needs you"));
         });
     }
 

@@ -78,9 +78,20 @@ export async function refreshGit(ids: string[], force = false) {
 
 let watchers = 0;
 let timer: ReturnType<typeof setInterval> | undefined;
-/** Checkouts in repos the overview has open: a folded repo's are not read. */
+/** Checkouts in repos the overview has open (a folded repo's are not
+ *  read), and every checkout with a card on the board, folded or not: the
+ *  board's Review and Ship lanes read the same git state (src-tauri keeps
+ *  the last read). */
 export function shownIds(): string[] {
-  return app.model.worktrees.filter((w) => !rows.collapsed.includes(repoKey(w.project_id))).map((w) => w.id);
+  const onBoard = new Set<string>();
+  const byId = new Map(app.model.agents.map((a) => [a.id, a.worktree_id]));
+  for (const ids of Object.values(app.model.lanes ?? {})) for (const id of ids) {
+    const w = byId.get(id);
+    if (w) onBoard.add(w);
+  }
+  return app.model.worktrees
+    .filter((w) => onBoard.has(w.id) || !rows.collapsed.includes(repoKey(w.project_id)))
+    .map((w) => w.id);
 }
 const onFocus = () => refreshGit(shownIds(), true);
 

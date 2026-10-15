@@ -20,12 +20,13 @@ export type Tone =
   | 'stopped'
   | 'shell';
 
+/** Core's `Lane::ALL`, left to right, with its titles. */
 export const LANES: { id: Lane; title: string; tone: Tone }[] = [
-  { id: 'needs', title: 'Needs you', tone: 'needs' },
   { id: 'running', title: 'Running', tone: 'running' },
-  { id: 'unseen', title: 'Unread', tone: 'unread' },
+  { id: 'needs', title: 'Needs you', tone: 'needs' },
+  { id: 'unseen', title: 'Review', tone: 'unread' },
+  { id: 'pr', title: 'Ship', tone: 'pr' },
   { id: 'done', title: 'Done', tone: 'done' },
-  { id: 'pr', title: 'PR open', tone: 'pr' },
 ];
 
 /** The lane session `a`'s card is in, as the model says; a session the

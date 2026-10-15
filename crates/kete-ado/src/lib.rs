@@ -12,6 +12,7 @@ pub mod git;
 pub mod naming;
 pub mod prs;
 pub mod remote;
+pub mod ship;
 pub mod store;
 pub mod tasks;
 

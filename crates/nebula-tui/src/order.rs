@@ -159,64 +159,36 @@ pub fn refill(cards: Vec<LauncherRow>, ordered: &HashSet<WorktreeId>) -> Vec<Lau
     })
 }
 
-/// Where a board card is dropped: a lane, or the ARCHIVED zone the board
-/// shows while a card is held.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DropLane {
-    Lane(Lane),
-    Archived,
-}
+/// Where a board card is let go: a lane, or the ARCHIVED zone the board
+/// shows while a card is held. Core's, shared with the desktop.
+pub use nebula_core::board::DropTarget as DropLane;
+/// What letting a board card go there does: core's verbs.
+pub use nebula_core::board::DropVerb as LaneDrop;
 
-/// What dropping a board card on a lane does.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LaneDrop {
-    /// The same lane: beside a card of its own checkout, a reorder.
-    Reorder,
-    /// Unread to Done: the session is marked seen.
-    Seen,
-    Archive,
-    /// A status the agent (or the pull request) owns: refused, with why.
-    Refuse(&'static str),
-}
-
-/// Only moves the user can cause: Unread to Done marks the session seen,
-/// the Archived zone archives it, the same lane reorders. A status the
-/// agent (or the pull request) owns is refused with the reason. The
-/// desktop's `laneDrop`, word for word.
-pub fn lane_drop(from: Lane, to: DropLane) -> LaneDrop {
-    let to = match to {
-        DropLane::Archived => return LaneDrop::Archive,
-        DropLane::Lane(l) => l,
+/// What letting session `id`'s card go on `to` does: nebula-core's
+/// [`nebula_core::board::drop_verb`] over the card's facts
+/// ([`crate::launcher::card_facts`]), the rule the desktop reads too. A
+/// session with no row any more refuses.
+///
+/// `from` is the lane the card was picked up in. Pressing a card lands
+/// the cursor on it, which reads it: an unread card picked up in Review
+/// is judged as it was picked up, so dropping it on Done still says it
+/// was marked seen rather than that it was already there.
+pub fn lane_drop(app: &App, id: &AgentId, from: Lane, to: DropLane) -> LaneDrop {
+    let Some(mut row) = crate::launcher::row(app, id) else {
+        return LaneDrop::Refuse("That session is gone.");
     };
-    if from == to {
-        return LaneDrop::Reorder;
+    let facts = crate::launcher::card_facts(app, &row);
+    if from == Lane::Review && nebula_core::board::lane_of(&row.agent, &facts) != Lane::Review {
+        row.agent.unseen = true;
     }
-    if to == Lane::Done {
-        return match from {
-            Lane::Unseen => LaneDrop::Seen,
-            Lane::NeedsInput => LaneDrop::Refuse(
-                "Needs you is the agent\u{2019}s: the card leaves it when you answer the session.",
-            ),
-            Lane::Running => LaneDrop::Refuse(
-                "Running is the agent\u{2019}s: the card lands in Done when the turn ends.",
-            ),
-            Lane::PrOpen => LaneDrop::Refuse(
-                "Its pull request is open: the card leaves PR open when the PR merges or closes.",
-            ),
-            Lane::Done => LaneDrop::Reorder,
-        };
-    }
-    LaneDrop::Refuse(match to {
-        Lane::NeedsInput => "Only the agent puts a card in Needs you, by asking.",
-        Lane::Running => {
-            "Only the agent puts a card in Running, by starting a turn: send it a follow-up (Space)."
-        }
-        Lane::Unseen => {
-            "Unread comes from a turn finishing while you were away; a card cannot be marked unread."
-        }
-        _ => "PR open follows the worktree\u{2019}s pull request: open one and the card moves.",
-    })
+    nebula_core::board::drop_verb(&row.agent, &facts, to)
 }
+
+/// What a drop the terminal board can't carry out yet says: the pull
+/// request verbs, until the board grows them.
+pub const SHIP_ON_THE_CLI: &str =
+    "the board can't open or merge pull requests yet: run `kete ship pr` or `kete ship merge` in the worktree";
 
 /// What a move says to a daemon too old to take one.
 #[cfg(unix)]
@@ -270,6 +242,8 @@ pub const ROOT_STAYS_FIRST: &str = "the root checkout stays first";
 
 /// What an Unread card let go on Done says.
 pub const MARKED_SEEN: &str = "marked read: the card is done";
+/// The same, onto Ship: read, its open pull request holds it there.
+pub const MARKED_SEEN_SHIP: &str = "marked read: its pull request is open, so the card is in Ship";
 
 /// The open PROJECT TABS, in the order the header draws them.
 fn tab_ids(app: &App) -> Vec<ProjectId> {
@@ -537,27 +511,95 @@ mod tests {
         assert_eq!(Place::of(5, 10), Place::After);
     }
 
+    /// The terminal board reads core's verb over the card's own facts.
     #[test]
-    fn lane_drops_only_do_what_the_user_can_cause() {
+    fn lane_drops_read_cores_rule_over_the_cards_facts() {
+        use nebula_core::{Agent, AgentKind, AgentRole, AgentStatus, Project, Worktree};
         use Lane::*;
-        assert_eq!(lane_drop(Unseen, DropLane::Lane(Done)), LaneDrop::Seen);
-        assert_eq!(lane_drop(Running, DropLane::Archived), LaneDrop::Archive);
-        assert_eq!(lane_drop(Done, DropLane::Lane(Done)), LaneDrop::Reorder);
-        for from in [NeedsInput, Running, PrOpen] {
-            assert!(matches!(
-                lane_drop(from, DropLane::Lane(Done)),
-                LaneDrop::Refuse(_)
-            ));
-        }
-        assert!(
-            matches!(lane_drop(NeedsInput, DropLane::Lane(Done)), LaneDrop::Refuse(why) if why.contains("Needs you"))
+        let mut app = App::new();
+        app.tree.projects = vec![Project {
+            id: ProjectId("p".into()),
+            name: "p".into(),
+            repo_path: "/tmp/p".into(),
+            sort_order: 0,
+        }];
+        app.tree.worktrees = vec![Worktree {
+            id: WorktreeId("w".into()),
+            project_id: ProjectId("p".into()),
+            path: "/tmp/w".into(),
+            branch: "b".into(),
+            is_main: false,
+            sort_order: 0,
+        }];
+        app.tree.agents = vec![Agent {
+            id: AgentId("a".into()),
+            worktree_id: WorktreeId("w".into()),
+            name: "a".into(),
+            status: AgentStatus::Finished,
+            archived: false,
+            archived_at: 0,
+            unseen: true,
+            status_changed_at: 0,
+            kind: AgentKind::Claude,
+            custom_harness: None,
+            model: None,
+            effort: None,
+            session_id: None,
+            cloud_session_id: None,
+            issue_url: None,
+            role: AgentRole::Worker,
+            sort_order: 0,
+            alive: true,
+            recent_prompts: Vec::new(),
+            profile: None,
+            parent: None,
+        }];
+        let id = AgentId("a".into());
+        // Unread with no changes: seen onto Done, nothing to ship.
+        assert_eq!(
+            lane_drop(&app, &id, Review, DropLane::Lane(Done)),
+            LaneDrop::MarkSeen
         );
-        for to in [NeedsInput, Running, Unseen, PrOpen] {
-            assert!(matches!(
-                lane_drop(Done, DropLane::Lane(to)),
-                LaneDrop::Refuse(_)
-            ));
-        }
+        assert!(matches!(
+            lane_drop(&app, &id, Review, DropLane::Lane(Ship)),
+            LaneDrop::Refuse(_)
+        ));
+        assert_eq!(
+            lane_drop(&app, &id, Review, DropLane::Lane(Review)),
+            LaneDrop::Reorder
+        );
+        assert_eq!(
+            lane_drop(&app, &id, Review, DropLane::Archived),
+            LaneDrop::Archive
+        );
+        // Its checkout's changed-file count makes it shippable.
+        app.jobs
+            .worktree_changes
+            .insert(WorktreeId("w".into()), (Some(2), std::time::Instant::now()));
+        assert_eq!(
+            lane_drop(&app, &id, Review, DropLane::Lane(Ship)),
+            LaneDrop::OpenPr
+        );
+        // Read and clean: Done, and archiving offers the worktree delete.
+        app.tree.agents[0].unseen = false;
+        app.jobs.worktree_changes.clear();
+        assert_eq!(
+            lane_drop(&app, &id, Done, DropLane::Archived),
+            LaneDrop::ArchiveAndOfferWorktreeDelete
+        );
+        assert!(
+            matches!(lane_drop(&app, &id, Done, DropLane::Lane(NeedsInput)), LaneDrop::Refuse(why) if why.contains("Needs you"))
+        );
+        // Picked up unread in Review, read by the press itself: judged as
+        // it was picked up.
+        assert_eq!(
+            lane_drop(&app, &id, Review, DropLane::Lane(Done)),
+            LaneDrop::MarkSeen
+        );
+        assert!(matches!(
+            lane_drop(&app, &AgentId("gone".into()), Done, DropLane::Lane(Done)),
+            LaneDrop::Refuse(_)
+        ));
     }
 
     #[test]

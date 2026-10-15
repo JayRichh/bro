@@ -24,16 +24,18 @@ pub fn word(tone: Tone, n: usize) -> &'static str {
     }
 }
 
-/// Every live (unarchived) session and subagent, by tone, as the sessions
-/// a press opens — in project order, each project's tree depth first.
+/// Every live (unarchived) session and subagent the bench's scope admits
+/// (`LauncherState::scope`), by tone, as the sessions a press opens — in
+/// project order, each project's tree depth first.
 pub fn tally(app: &App) -> HashMap<Tone, Vec<AgentId>> {
+    let scope = &app.launcher.scope;
     let mut out: HashMap<Tone, Vec<AgentId>> = HashMap::new();
     for p in &app.tree.projects {
         let agents: Vec<&Agent> = app
             .tree
             .agents
             .iter()
-            .filter(|a| !a.archived)
+            .filter(|a| !a.archived && scope.admits(a, Some(&p.id)))
             .filter(|a| {
                 app.tree
                     .worktrees

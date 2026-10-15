@@ -15,30 +15,86 @@ pub(crate) fn request_git_changes(
     else {
         return;
     };
+    let base = base_job(app, &id);
     app.jobs.git_changes_inflight = Some(id.clone());
     let git_tx = git_tx.clone();
     tokio::task::spawn_blocking(move || {
         let files = crate::git_diff::changed_files(&path).ok();
         let lines = line_changes_of(&path, files.as_deref());
-        let _ = git_tx.send((id, files, lines));
+        let based = read_base(&path, base);
+        let _ = git_tx.send((id, files, lines, based));
     });
 }
 
-/// What the badge's `git status` found in a checkout, and the lines behind
-/// it; None when git could not say.
+/// What the badge's `git status` found in a checkout, the lines behind
+/// it (None when git could not say), and where it stands on its base.
 pub(crate) type ChangedFiles = (
     WorktreeId,
     Option<Vec<crate::git_diff::DiffFile>>,
     Option<crate::git_diff::LineChanges>,
+    Based,
 );
 
-/// The sweep's answer for one checkout: its changed-file count and its
-/// line counts.
+/// The sweep's answer for one checkout: its changed-file count, its line
+/// counts and where it stands on its base.
 pub(crate) type SweptChanges = (
     WorktreeId,
     Option<usize>,
     Option<crate::git_diff::LineChanges>,
+    Based,
 );
+
+/// A checkout's base as a poll read it: the branch it was read on, its
+/// base ref (to keep), and its standing (for the board). None when the
+/// checkout has no branch on record.
+pub(crate) type Based = Option<(
+    String,
+    nebula_core::review_base::BaseRef,
+    nebula_core::review_base::BaseStanding,
+)>;
+
+/// What a poll's thread needs to read `worktree`'s base: its branch, and
+/// the base ref kept for it while still good.
+pub(crate) type BaseJob = Option<(String, Option<nebula_core::review_base::BaseRef>)>;
+
+pub(crate) fn base_job(app: &App, worktree: &WorktreeId) -> BaseJob {
+    let w = app.tree.worktrees.iter().find(|w| &w.id == worktree)?;
+    Some((
+        w.branch.clone(),
+        app.jobs.base_refs.cached(&w.path, &w.branch),
+    ))
+}
+
+/// Off the loop: the kept base ref, or one resolved now (the setting read
+/// only then), and one `rev-list --count` for the standing.
+pub(crate) fn read_base(path: &std::path::Path, job: BaseJob) -> Based {
+    let (branch, kept) = job?;
+    let base = kept.unwrap_or_else(|| {
+        nebula_core::review_base::base_ref(
+            path,
+            &crate::config::Config::load().worktree_base_branch,
+        )
+    });
+    let standing = base.standing(path);
+    Some((branch, base, standing))
+}
+
+/// Keep a poll's base read: the ref for the next poll, the standing for
+/// the board's cards. A changed standing redraws.
+pub(crate) fn note_worktree_base(app: &mut App, worktree: &WorktreeId, based: Based) {
+    let Some((branch, base, standing)) = based else {
+        return;
+    };
+    if let Some(w) = app.tree.worktrees.iter().find(|w| &w.id == worktree) {
+        if app.jobs.base_refs.cached(&w.path, &branch).as_ref() != Some(&base) {
+            let path = w.path.clone();
+            app.jobs.base_refs.insert(&path, &branch, base);
+        }
+    }
+    if app.jobs.worktree_base.insert(worktree.clone(), standing) != Some(standing) {
+        app.chrome.dirty = true;
+    }
+}
 
 /// The line counts behind `files` when the `git status` read them; a
 /// second git process, so only then.
@@ -126,28 +182,37 @@ pub(crate) fn sweep_git_changes(
     let Some((id, path)) = changes_sweep_target(app) else {
         return;
     };
+    let base = base_job(app, &id);
     app.jobs.worktree_changes_inflight = Some(id.clone());
     let tx = tx.clone();
     tokio::task::spawn_blocking(move || {
         let files = crate::git_diff::changed_files(&path).ok();
         let lines = line_changes_of(&path, files.as_deref());
-        let _ = tx.send((id, files.map(|f| f.len()), lines));
+        let based = read_base(&path, base);
+        let _ = tx.send((id, files.map(|f| f.len()), lines, based));
     });
 }
 
 /// The checkout the cards' sweep spends this tick on: of the unselected
-/// checkouts the grid has a card for, the one read least recently — never
-/// read at all first, so a card that just appeared gets its count on the
-/// next tick. Nothing off the grid: the collapsed view draws no cards.
+/// checkouts the grid (or the KANBAN, every project's in all-projects mode)
+/// has a card for, the one read least recently — never read at all first,
+/// so a card that just appeared gets its count on the next tick. Nothing
+/// off the grid: the collapsed view draws no cards.
 pub(crate) fn changes_sweep_target(app: &App) -> Option<(WorktreeId, std::path::PathBuf)> {
     if !app.launcher_grid() {
         return None;
     }
     let selected = app.selected_worktree().map(|w| &w.id);
-    let held: std::collections::HashSet<WorktreeId> = crate::launcher::rows(app)
-        .into_iter()
-        .map(|row| row.agent.worktree_id)
-        .collect();
+    let shown = if app.launcher.launcher_kanban {
+        crate::launcher::kanban(app, app.launcher.kanban_all)
+            .into_iter()
+            .flatten()
+            .collect()
+    } else {
+        crate::launcher::rows(app)
+    };
+    let held: std::collections::HashSet<WorktreeId> =
+        shown.into_iter().map(|row| row.agent.worktree_id).collect();
     app.tree
         .worktrees
         .iter()

@@ -4249,12 +4249,16 @@ pub struct LauncherState {
     pub launcher_columns: bool,
     /// The KANBAN (`⇧K`; Settings → Appearance → **Kanban**): the grid
     /// laid out as five lanes by what each session wants from you —
-    /// Needs input, Running, Unseen, Done, PR open (`launcher::Lane`) —
+    /// Running, Needs you, Review, Ship, Done (`launcher::Lane`) —
     /// in place of the bands, whatever the worktree layout says.
     pub launcher_kanban: bool,
     /// The KANBAN shows every project's sessions rather than the one on
     /// screen's (`Tab` on the board; **Kanban scope**).
     pub kanban_all: bool,
+    /// What the bench is looking at: narrows the KANBAN (on top of
+    /// `kanban_all`) and the ATTENTION STRIP's counts. The default is
+    /// everything.
+    pub scope: nebula_core::scope::Scope,
     pub columns_hide_projects: bool,
     pub columns_hide_worktrees: bool,
     pub columns_hide_sessions: bool,
@@ -4944,6 +4948,13 @@ pub struct JobState {
     pub worktree_changes: HashMap<WorktreeId, (Option<usize>, std::time::Instant)>,
     /// The checkout the sweep is reading right now; its answer clears it.
     pub worktree_changes_inflight: Option<WorktreeId>,
+    /// Where each checkout stands on its base branch, as its last change
+    /// read found it (the selected checkout's poll and the sweep both read
+    /// it): the board's commits-since-base and base-branch facts.
+    pub worktree_base: HashMap<WorktreeId, nebula_core::review_base::BaseStanding>,
+    /// Each checkout's base ref, kept between those reads so each spends
+    /// one `rev-list` on it.
+    pub base_refs: nebula_core::review_base::BaseRefs,
     /// The lines added and removed in each checkout, read beside its
     /// changed-file count: what its cards print after `+3 files`. Only a
     /// checkout with changed lines has an entry.

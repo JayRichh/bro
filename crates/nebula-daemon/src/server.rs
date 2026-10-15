@@ -406,9 +406,18 @@ impl ClientConnection {
                 starting_prompt,
                 worktree,
                 base,
+                profile,
             } => {
-                self.handle_spawn_sibling(req_id, id, kind, starting_prompt, worktree, base)
-                    .await;
+                self.handle_spawn_sibling(
+                    req_id,
+                    id,
+                    kind,
+                    starting_prompt,
+                    worktree,
+                    base,
+                    profile,
+                )
+                .await;
                 Ok(true)
             }
             ClientRequest::OpenFiles { req_id, id, paths } => {
@@ -1280,6 +1289,7 @@ impl ClientConnection {
         });
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn handle_spawn_sibling(
         &self,
         req_id: u64,
@@ -1288,6 +1298,7 @@ impl ClientConnection {
         starting_prompt: String,
         worktree: Option<String>,
         base: Option<String>,
+        profile: Option<String>,
     ) {
         // Logged by mode only — never the prompt text.
         let worktree = worktree
@@ -1298,7 +1309,7 @@ impl ClientConnection {
             });
         let result = self
             .daemon
-            .spawn_sibling_agent(&id, kind, worktree, &starting_prompt)
+            .spawn_sibling_agent(&id, kind, worktree, &starting_prompt, profile.as_deref())
             .await;
         match &result {
             Ok(nebula_core::EntityId::Agent(agent)) => tracing::info!(

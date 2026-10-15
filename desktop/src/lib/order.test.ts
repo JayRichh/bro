@@ -192,7 +192,7 @@ describe('board lanes', () => {
     // window only looks the ids up, skipping one it does not have.
     const m = model({
       agents: [agent('x', 'A'), agent('y', 'A'), agent('z', 'B')],
-      lanes: { needs: [], running: ['x'], unseen: [], done: ['z', 'gone', 'y'], pr: [] },
+      lanes: { needs: [], running: ['x'], unseen: [], done: ['z', 'gone', 'y'], pr: [] }, hidden: { needs: 0, running: 0, unseen: 0, done: 0, pr: 0 }, scope: {},
     });
     const l = lanes(m);
     expect(l.done.map((a) => a.id)).toEqual(['z', 'y']);

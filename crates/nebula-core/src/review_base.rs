@@ -115,6 +115,15 @@ pub fn pick_base(
     refs: &[String],
     origin_head: Option<&str>,
 ) -> Option<(String, String)> {
+    pick_any(configured, refs, origin_head).filter(|(_, branch)| branch != current)
+}
+
+/// [`pick_base`] without the check that the checkout is not on it.
+fn pick_any(
+    configured: Option<&str>,
+    refs: &[String],
+    origin_head: Option<&str>,
+) -> Option<(String, String)> {
     let has = |full: &str| refs.iter().any(|r| r == full);
     let both = |name: &str| {
         [
@@ -134,9 +143,6 @@ pub fn pick_base(
     order.extend(both("main"));
     order.extend(both("master"));
     let (full, branch) = order.into_iter().find(|(full, _)| has(full))?;
-    if branch == current {
-        return None;
-    }
     let short = full
         .strip_prefix("refs/remotes/")
         .or_else(|| full.strip_prefix("refs/heads/"))
@@ -189,6 +195,20 @@ fn git_line(root: &Path, args: &[&str]) -> Option<String> {
 /// branch itself, with no base branch in the clone, or with no shared
 /// history.
 pub fn resolve(root: &Path, configured: &str) -> Option<ReviewBase> {
+    let (current, picked) = current_and_base(root, configured)?;
+    let (refname, branch) = picked.filter(|(_, branch)| branch != &current)?;
+    let sha = git_line(root, &["merge-base", "HEAD", &refname])?;
+    Some(ReviewBase {
+        sha,
+        branch,
+        refname,
+    })
+}
+
+/// The checkout's branch, and the base ref and branch [`pick_base`]'s
+/// order finds in the clone, whether or not the checkout is on it. None
+/// on a detached HEAD or when git can't say.
+fn current_and_base(root: &Path, configured: &str) -> Option<(String, Option<(String, String)>)> {
     let configured = normalize_setting(configured);
     let current = git_line(root, &["symbolic-ref", "-q", "--short", "HEAD"])?;
     let mut args = vec![
@@ -213,13 +233,111 @@ pub fn resolve(root: &Path, configured: &str) -> Option<ReviewBase> {
             refs.push(name.to_string());
         }
     }
-    let (refname, branch) = pick_base(&current, configured, &refs, origin_head.as_deref())?;
-    let sha = git_line(root, &["merge-base", "HEAD", &refname])?;
-    Some(ReviewBase {
-        sha,
-        branch,
-        refname,
-    })
+    let picked = pick_any(configured, &refs, origin_head.as_deref());
+    Some((current, picked))
+}
+
+/// Where a checkout's branch stands against the base, as the board reads
+/// it: the base ref to count commits from, or on the base branch itself.
+/// Resolving it takes two git calls; [`BaseRefs`] keeps it between polls.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BaseRef {
+    /// The checkout is on the base branch (`main`): nothing to ship from it.
+    OnBase,
+    /// The ref to count from (`origin/main`).
+    Base(String),
+    /// A detached HEAD, no base branch in the clone, or git couldn't say.
+    Unknown,
+}
+
+/// The checkout at `root`'s [`BaseRef`]. `configured` is the raw
+/// `worktree_base_branch` setting.
+pub fn base_ref(root: &Path, configured: &str) -> BaseRef {
+    match current_and_base(root, configured) {
+        Some((current, Some((_, branch)))) if branch == current => BaseRef::OnBase,
+        Some((_, Some((refname, _)))) => BaseRef::Base(refname),
+        _ => BaseRef::Unknown,
+    }
+}
+
+/// What the board needs from a checkout's base: the commits HEAD has that
+/// the base lacks, and whether it is on the base branch.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BaseStanding {
+    pub ahead_of_base: u32,
+    pub on_default_branch: bool,
+}
+
+impl BaseRef {
+    /// Its standing: one `git rev-list --count <base>..HEAD` for a base
+    /// ref (the commits since the merge-base, without finding it), none
+    /// otherwise.
+    pub fn standing(&self, root: &Path) -> BaseStanding {
+        match self {
+            BaseRef::OnBase => BaseStanding {
+                ahead_of_base: 0,
+                on_default_branch: true,
+            },
+            BaseRef::Base(refname) => BaseStanding {
+                ahead_of_base: git_line(
+                    root,
+                    &["rev-list", "--count", &format!("{refname}..HEAD")],
+                )
+                .and_then(|n| n.parse().ok())
+                .unwrap_or(0),
+                on_default_branch: false,
+            },
+            BaseRef::Unknown => BaseStanding::default(),
+        }
+    }
+}
+
+/// How long a resolved [`BaseRef`] is kept: a changed setting, or a base
+/// branch new to the clone, is picked up within this.
+pub const BASE_REF_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Each checkout's [`BaseRef`] between polls, so a poll spends one
+/// `rev-list` on it rather than three calls. Keyed by checkout path, and
+/// good while its branch (as the caller knows it) is the one it was
+/// resolved on and [`BASE_REF_TTL`] has not passed.
+#[derive(Debug, Clone, Default)]
+pub struct BaseRefs {
+    map: std::collections::HashMap<std::path::PathBuf, (String, std::time::Instant, BaseRef)>,
+}
+
+impl BaseRefs {
+    /// The kept ref for `root` on `branch`, while still good.
+    pub fn cached(&self, root: &Path, branch: &str) -> Option<BaseRef> {
+        self.cached_at(root, branch, std::time::Instant::now())
+    }
+
+    fn cached_at(&self, root: &Path, branch: &str, now: std::time::Instant) -> Option<BaseRef> {
+        let (on, at, base) = self.map.get(root)?;
+        (on == branch && now.saturating_duration_since(*at) < BASE_REF_TTL).then(|| base.clone())
+    }
+
+    pub fn insert(&mut self, root: &Path, branch: &str, base: BaseRef) {
+        self.map.insert(
+            root.to_path_buf(),
+            (branch.to_string(), std::time::Instant::now(), base),
+        );
+    }
+
+    /// The kept ref, else one resolved now (and kept); `configured` is
+    /// only read on a miss.
+    pub fn get(
+        &mut self,
+        root: &Path,
+        branch: &str,
+        configured: impl FnOnce() -> String,
+    ) -> BaseRef {
+        if let Some(base) = self.cached(root, branch) {
+            return base;
+        }
+        let base = base_ref(root, &configured());
+        self.insert(root, branch, base.clone());
+        base
+    }
 }
 
 /// One commit made since the base.
@@ -560,5 +678,71 @@ mod tests {
         assert_eq!(resolve(&repo, "").expect("a base").branch, "main");
         run(&repo, &["checkout", "-q", "--detach"]);
         assert_eq!(resolve(&repo, ""), None);
+    }
+
+    /// The board's base standing: on the base branch, or the commits since
+    /// the fork, counted from the base ref with no merge-base of its own.
+    #[test]
+    fn the_board_reads_commits_since_the_base_and_the_base_branch_itself() {
+        let dir = tempfile::tempdir().unwrap();
+        let (repo, _) = repo(&dir);
+        assert_eq!(base_ref(&repo, ""), BaseRef::OnBase);
+        assert_eq!(
+            BaseRef::OnBase.standing(&repo),
+            BaseStanding {
+                ahead_of_base: 0,
+                on_default_branch: true
+            }
+        );
+        run(&repo, &["checkout", "-q", "-b", "feat"]);
+        let base = base_ref(&repo, "");
+        assert_eq!(base, BaseRef::Base("main".into()));
+        assert_eq!(base.standing(&repo).ahead_of_base, 0, "no commits yet");
+        commit(
+            &repo, "b.txt", "two
+", "add b",
+        );
+        commit(
+            &repo, "c.txt", "three
+", "add c",
+        );
+        // main moving on does not count against the branch.
+        run(&repo, &["checkout", "-q", "main"]);
+        commit(
+            &repo,
+            "d.txt",
+            "main only
+",
+            "main moves",
+        );
+        run(&repo, &["checkout", "-q", "feat"]);
+        assert_eq!(
+            base.standing(&repo),
+            BaseStanding {
+                ahead_of_base: 2,
+                on_default_branch: false
+            }
+        );
+        run(&repo, &["checkout", "-q", "--detach"]);
+        assert_eq!(base_ref(&repo, ""), BaseRef::Unknown);
+        assert_eq!(BaseRef::Unknown.standing(&repo), BaseStanding::default());
+    }
+
+    #[test]
+    fn a_kept_base_ref_holds_for_its_branch_until_it_expires() {
+        let root = Path::new("/r");
+        let mut refs = BaseRefs::default();
+        assert_eq!(refs.cached(root, "feat"), None);
+        refs.insert(root, "feat", BaseRef::Base("origin/main".into()));
+        assert_eq!(
+            refs.cached(root, "feat"),
+            Some(BaseRef::Base("origin/main".into()))
+        );
+        assert_eq!(refs.cached(root, "other"), None, "the branch moved");
+        let later = std::time::Instant::now() + BASE_REF_TTL;
+        assert_eq!(refs.cached_at(root, "feat", later), None, "expired");
+        // A hit never reads the setting.
+        let got = refs.get(root, "feat", || unreachable!());
+        assert_eq!(got, BaseRef::Base("origin/main".into()));
     }
 }

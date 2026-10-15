@@ -22,6 +22,7 @@ mod profiles;
 mod projects;
 mod sessions;
 mod settings;
+mod ship;
 mod update;
 
 use ado::client::CmdError;
@@ -836,6 +837,7 @@ fn main() {
             branches::worktree_settings,
             branches::checkout_state,
             branches::worktree_git,
+            board::board_scope,
             branches::worktree_reveal,
             branches::branch_list,
             branches::branch_fetch,
@@ -925,6 +927,10 @@ fn main() {
             ado_recent_reviewers,
             // PR composer (Task 17)
             ado_compose_seed,
+            // Ship: a worktree's PR on GitHub or Azure DevOps
+            ship::ship_status,
+            ship::ship_create_pr,
+            ship::ship_merge,
             session_ask,
             ado::branches::ado_branches,
             ado::branches::ado_fetch,

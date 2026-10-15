@@ -19,6 +19,7 @@ pub mod project_file;
 pub mod protocol;
 pub mod remote;
 pub mod review_base;
+pub mod scope;
 pub mod settings;
 pub mod shell;
 pub mod usage;
