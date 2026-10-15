@@ -174,6 +174,34 @@ describe('menus from the registry', () => {
     expect(calls).toEqual(['scope p/w1']);
   });
 
+  it('greys Create pull request on a checkout on its base branch, and says why', async () => {
+    const { rows } = await import('./worktrees/rows.svelte');
+    app.model = {
+      ...app.model,
+      agents: [],
+      terminals: [],
+      worktrees: [{ id: 'w1', project_id: 'p', path: '/p', branch: 'main', is_main: true, sort_order: 0 }],
+      projects: [{ id: 'p', name: 'demo', repo_path: '/p', sort_order: 0 }],
+      cards: {},
+      prs: {},
+    } as unknown as Model;
+    const create = () =>
+      actions
+        .menuFor({ kind: 'worktree', id: 'w1' })
+        .find((e) => typeof e === 'object' && 'label' in e && e.label.startsWith('Create pull request')) as
+        | { label: string; disabled?: boolean; title?: string }
+        | undefined;
+    expect(create()?.disabled).toBeFalsy();
+    rows.git = { ...rows.git, w1: { changed: 0, untracked: 0, upstream: null, ahead: null, behind: null, committed: 0, ahead_of_base: 0, on_default_branch: true } };
+    const row = create();
+    expect(row?.disabled).toBe(true);
+    expect(row?.label).toContain('(on the base branch)');
+    expect(row?.title).toMatch(/base branch/);
+    expect(actions.runVerb({ kind: 'worktree', id: 'w1' }, 'create_pull_request')).toBe(false);
+    expect(app.toast).toMatch(/base branch/);
+    rows.git = {};
+  });
+
   it('runs a verb on its target as the menu row does, and refuses one that means nothing there', async () => {
     setAgents([agent('a', { archived: true })]);
     expect(actions.runVerb({ kind: 'agent', id: 'a' }, 'archive')).toBe(false);

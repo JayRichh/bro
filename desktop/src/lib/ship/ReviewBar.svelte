@@ -24,7 +24,7 @@
   const card = $derived(app.model.cards[agent.id]);
   const pr = $derived(app.model.prs[agent.worktree_id] ?? null);
   const where = $derived(placeOf(app.model, agent.worktree_id));
-  const verbs = $derived(reviewVerbs(pr, card?.drops?.pr, where.isMain));
+  const verbs = $derived(reviewVerbs(pr, card?.drops?.pr, where.isMain, !!rows.git[agent.worktree_id]?.on_default_branch));
   const commits = $derived(commitsWord(rows.git[agent.worktree_id]?.ahead_of_base));
   const lane = $derived(LANES.find((l) => l.id === card?.lane)?.title ?? '');
 

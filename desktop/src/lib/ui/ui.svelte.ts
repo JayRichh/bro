@@ -13,6 +13,8 @@ export type MenuItem = {
   keys?: string[];
   danger?: boolean;
   disabled?: boolean;
+  /** Why it is greyed out, as its tooltip. */
+  title?: string;
   /** Kept last whatever a searchable menu's query (the verbs menu's All
    *  keys). */
   pinned?: boolean;

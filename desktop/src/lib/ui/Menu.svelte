@@ -131,6 +131,7 @@
             role="menuitem"
             data-i={i}
             disabled={entry.disabled}
+            title={entry.title}
             class="flex w-full items-center gap-4 border-0 px-3 py-1 text-left {at === i ? 'bg-ink text-bg' : 'bg-transparent'} {entry.danger && at !== i
               ? 'text-fail'
               : ''} disabled:text-faint"
