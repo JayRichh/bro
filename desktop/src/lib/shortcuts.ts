@@ -95,7 +95,7 @@ export const SHORTCUTS: Shortcut[] = [
   { id: 'home_overview', keys: ['ctrl+shift+o'], scope: 'anywhere', label: 'Overview', group: 'Views' },
   { id: 'toggle_home', keys: ['shift+k'], scope: 'global', label: 'Switch overview and board', group: 'Views' },
   { id: 'open_session', keys: ['ctrl+shift+t'], scope: 'anywhere', label: 'Show the session', group: 'Views' },
-  { id: 'open_diff', keys: ['ctrl+shift+d'], scope: 'anywhere', label: 'Diff the worktree', group: 'Views' },
+  { id: 'open_diff', keys: ['ctrl+shift+d'], scope: 'anywhere', label: 'Diff the checkout in context: the focused row, the session, the repo (again: back from the diff)', group: 'Views' },
   { id: 'go_home', keys: ['1'], scope: 'global', label: 'Home', group: 'Views' },
   { id: 'go_session', keys: ['2'], scope: 'global', label: 'Session', group: 'Views' },
   { id: 'go_diff', keys: ['3'], scope: 'global', label: 'Diff', group: 'Views' },

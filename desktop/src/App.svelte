@@ -2,7 +2,7 @@
   import { onMount, tick, untrack } from 'svelte';
   import { app, boot, checkAdoStore, focusQuickPrompt, follow, loadDesktopPrefs, openDiff, openSession, sessionWorktree, setHome } from './lib/store.svelte';
   import { shortcutFor, withKey } from './lib/shortcuts';
-  import { currentRepo, focusedTarget, runShortcut, toggleArchived } from './lib/commands';
+  import { currentRepo, focusedTarget, runShortcut, toggleArchived, toggleDiff } from './lib/commands';
   import { layerOpen, ui } from './lib/ui/ui.svelte';
   import Icon from './lib/ui/Icon.svelte';
   import { LAYER_SEL, focusBack } from './lib/ui/focus';
@@ -235,6 +235,17 @@
           onclick={toggleArchived}>Archived</button
         >
       {/if}
+      <!-- Diff and the home toggle in every view: the diff for the checkout
+           in context (pressed: back to where it was opened), and Overview |
+           Board, which keeps an open session or diff in the split. -->
+      <button
+        class="inline-flex h-6 flex-none items-center gap-1.5 border px-2 text-[12px] {view === 'diff'
+          ? 'border-ink bg-ink text-bg'
+          : 'border-rule bg-transparent text-muted hover:text-ink'}"
+        aria-pressed={view === 'diff'}
+        title={withKey(view === 'diff' ? 'Close the diff: back to where it was opened' : 'Diff the checkout in context: the focused row, the session, the repo', 'open_diff')}
+        onclick={toggleDiff}><Icon name="diff" size={12} /><span class="hidden @min-[700px]:inline">Diff</span></button
+      >
       <div class="flex h-6 flex-none border border-rule" role="radiogroup" aria-label="Home view">
         {#each [{ id: 'overview', label: 'Overview' }, { id: 'board', label: 'Board' }] as h, i (h.id)}
           {@const on = app.home === h.id}
@@ -242,8 +253,12 @@
             role="radio"
             aria-checked={on}
             class="border-0 px-2 text-[12px] {i ? 'border-l border-rule' : ''} {on ? 'bg-ink text-bg' : 'bg-transparent text-muted hover:text-ink'}"
-            title="{h.label} (Shift+K switches)"
-            onclick={() => setHome(h.id as 'overview' | 'board', nav.current.repo)}>{h.label}</button
+            title={withKey(h.label, h.id === 'board' ? ['home_board', 'toggle_home'] : ['home_overview', 'toggle_home'])}
+            onclick={() => {
+              setHome(h.id as 'overview' | 'board', nav.current.repo);
+              // A narrow window shows the list it was asked for.
+              if (narrow && split) listShown = true;
+            }}>{h.label}</button
           >
         {/each}
       </div>

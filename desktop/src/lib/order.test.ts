@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Agent, Model, Project, Worktree } from './api';
 import {
   agentIds,
+  boardIds,
   dropZone,
   hasUserOrder,
   laneDrop,
@@ -208,5 +209,18 @@ describe('board lanes', () => {
       ],
     });
     expect(lanes(m).done.map((a) => a.id)).toEqual(['z', 'y', 'x']);
+  });
+});
+
+describe('board moves', () => {
+  it('start from the cards as they stand: newest first until the checkout is ordered', () => {
+    const m = model({
+      agents: [agent('old', 'A', { status_changed_at: 1 }), agent('mid', 'A', { status_changed_at: 2 }), agent('new', 'A', { status_changed_at: 3 })],
+    });
+    expect(boardIds(m, 'A')).toEqual(['new', 'mid', 'old']);
+    // Alt+Down on the top card: one place down, the rest kept as shown.
+    expect(stepId(boardIds(m, 'A'), ['new', 'mid', 'old'], 'new', 1)).toEqual(['mid', 'new', 'old']);
+    m.agents = [agent('old', 'A', { sort_order: 0 }), agent('mid', 'A', { sort_order: 2 }), agent('new', 'A', { sort_order: 1 })];
+    expect(boardIds(m, 'A')).toEqual(['old', 'new', 'mid']);
   });
 });

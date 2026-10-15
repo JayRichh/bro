@@ -91,10 +91,13 @@ export function setThemePref(p: ThemePref) {
   saveDesktopPref('theme', p);
 }
 
-/** Overview or board, picked by the user: shown and saved. */
+/** Overview or board, picked by the user: shown and saved. A session or
+ *  diff open beside the list stays open: the pick takes the split's left
+ *  side (Esc closes the split). */
 export function setHome(h: Home, repo?: string) {
   app.home = h;
   saveDesktopPref('home', h);
+  if (nav.current.view === 'session' || nav.current.view === 'diff') return;
   goHome(repo);
 }
 
@@ -199,10 +202,15 @@ export function openDiffRange(worktree: string, range: DiffRange) {
  *  a session), or home when it was the first place. */
 export function closeDiff() {
   const repo = nav.current.repo;
+  const home = app.home;
   // Past every diff place (a worktree picked, a range opened) to the view
   // the diff was opened from.
   while (nav.canBack && nav.current.view === 'diff') nav.back();
   if (nav.current.view === 'diff') goHome(repo);
+  // Home switched while the diff was up (Overview | Board keeps the
+  // split): land on the home picked, not the one the diff was opened from.
+  else if ((nav.current.view === 'overview' || nav.current.view === 'board') && nav.current.view !== home)
+    nav.replace({ ...nav.current, view: home });
 }
 
 /** Back to the overview (or the board), closing any split. */

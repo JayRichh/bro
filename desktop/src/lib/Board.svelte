@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, markSeen, openSession, openDiff } from './store.svelte';
+  import { app, markSeen, openSession, openDiff, toast } from './store.svelte';
   import { LANES, lanes, toneOf, harnessLabel, lastPrompt, age, placeOf, prWord, type Lane } from './status';
   import Status from './Status.svelte';
   import { retract } from './motion';
@@ -9,8 +9,67 @@
   import { layerOpen, openMenu } from './ui/ui.svelte';
   import { withKey } from './shortcuts';
   import Icon from './ui/Icon.svelte';
+  import { drag, dropCard, endDrag, leftFor, offsetIn, startDrag } from './reorder.svelte';
+  import { dropZone, laneDrop, type Place } from './order';
 
   let { active = true }: { active?: boolean } = $props();
+
+  // Drags on the board. A card dropped on a lane does what the lane means
+  // where the user can cause it (order.ts `laneDrop`): Unread to Done marks
+  // it seen, the Archived zone (shown while dragging) archives it, a drop
+  // beside a card of its own checkout reorders them; a status the agent or
+  // the pull request owns is refused with the reason. The keys: Alt+Up /
+  // Alt+Down reorder, A archives, the menu's Mark seen.
+  /** The lane under the pointer, and the card it would land beside. */
+  let target = $state<{ lane: Lane | 'archived'; card?: { id: string; place: Place } } | null>(null);
+  const dragged = $derived(drag.item?.kind === 'agent' && drag.item.lane ? drag.item : null);
+
+  function overLane(e: DragEvent, lane: Lane | 'archived') {
+    if (!dragged) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    if (target?.lane !== lane || target.card) target = { lane };
+  }
+
+  function overCard(e: DragEvent, lane: Lane, a: Agent) {
+    if (!dragged || dragged.lane !== lane || dragged.id === a.id) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    // Only beside a card of its own checkout: the order is per checkout.
+    if (a.worktree_id !== dragged.worktree) return void (target = { lane });
+    const [y, h] = offsetIn(e);
+    target = { lane, card: { id: a.id, place: dropZone(y, h, { insert: true, onto: false }) as Place } };
+  }
+
+  async function dropOn(e: DragEvent, lane: Lane | 'archived', over?: Agent) {
+    const d = dragged;
+    const at = target;
+    target = null;
+    if (!d?.lane) return;
+    e.preventDefault();
+    e.stopPropagation();
+    endDrag();
+    const what = laneDrop(d.lane, lane);
+    if (what.act === 'refuse') return toast(what.reason);
+    if (what.act === 'seen') return markSeen({ Agent: d.id });
+    if (what.act === 'archive') return archiveAgent(d.id);
+    if (at?.card) return dropCard(d.worktree, d.id, at.card.id, at.card.place);
+    if (over && over.id !== d.id && over.worktree_id !== d.worktree)
+      toast(`Cards reorder beside cards of their own worktree (${placeOf(app.model, d.worktree).branch}); move the session (M) to change worktree.`);
+  }
+
+  function endBoardDrag() {
+    target = null;
+    endDrag();
+  }
+
+  /** A lane's look while a card is over it: ember for a drop that acts. */
+  function laneMark(lane: Lane): string {
+    if (!dragged || target?.lane !== lane || target.card || dragged.lane === lane) return '';
+    const act = laneDrop(dragged.lane!, lane).act;
+    return act === 'refuse' ? 'bg-surface' : 'outline-2 -outline-offset-2 outline-ember';
+  }
   const board = $derived(lanes(app.model));
   const total = $derived(LANES.reduce((n, l) => n + board[l.id].length, 0));
   let cursor = $state<{ lane: number; row: number } | null>(null);
@@ -91,6 +150,7 @@
 {#if total === 0}
   <Empty />
 {:else}
+  <div class="relative h-full min-h-0" data-board>
   <div
     class="grid h-full min-h-0 grid-cols-[repeat(5,minmax(220px,1fr))] overflow-x-auto"
     role="grid"
@@ -98,7 +158,14 @@
   >
     {#each LANES as lane, li (lane.id)}
       {@const cards = board[lane.id]}
-      <section class="flex min-h-0 min-w-0 flex-col border-r border-rule last:border-r-0" aria-label={lane.title}>
+      <section
+        class="flex min-h-0 min-w-0 flex-col border-r border-rule last:border-r-0 {laneMark(lane.id)}"
+        aria-label={lane.title}
+        ondragenter={(e) => overLane(e, lane.id)}
+        ondragover={(e) => overLane(e, lane.id)}
+        ondragleave={(e) => leftFor(e) && target?.lane === lane.id && (target = null)}
+        ondrop={(e) => dropOn(e, lane.id)}
+      >
         <header class="flex h-10 flex-none items-center gap-2 border-b border-rule-strong px-4">
           <h2 class="m-0 text-[15px] font-semibold {lane.id === 'needs' && cards.length ? 'text-ember-ink' : 'text-ink'}">{lane.title}</h2>
           <span class="ml-auto font-mono text-[12px] font-bold {cards.length ? 'text-ink' : 'text-muted'}">{cards.length}</span>
@@ -112,8 +179,23 @@
             {@const alert = lane.id === 'needs'}
             <!-- The card's verbs show on hover or focus; the card keys (F, A, D,
                  Shift+F10) do the same from the card. -->
-            <div class="group relative" data-target="agent:{a.id}">
+            {@const mark = dragged && target?.card?.id === a.id ? target.card.place : null}
+            <div
+              class="group relative {dragged?.id === a.id ? 'opacity-60' : ''}"
+              data-target="agent:{a.id}"
+              role="presentation"
+              draggable="true"
+              ondragstart={(e) => startDrag(e, { kind: 'agent', id: a.id, worktree: a.worktree_id, lane: lane.id })}
+              ondragend={endBoardDrag}
+              ondragenter={(e) => overCard(e, lane.id, a)}
+              ondragover={(e) => overCard(e, lane.id, a)}
+              ondrop={(e) => dropOn(e, lane.id, a)}
+            >
+            {#if mark}
+              <span class="pointer-events-none absolute inset-x-0 z-10 h-px bg-ember {mark === 'before' ? '-top-px' : '-bottom-px'}" aria-hidden="true"></span>
+            {/if}
             <button
+              title="{a.name}: {withKey('drag to reorder beside cards of its worktree', ['move_up', 'move_down'])}, or onto a lane, Archived or a repo in the rail"
               data-card-sel={sel || undefined}
               oncontextmenu={(e) => {
                 e.preventDefault();
@@ -175,6 +257,23 @@
         </div>
       </section>
     {/each}
+  </div>
+  {#if dragged}
+    <!-- Only while a card is dragged: drop it here to archive it (A on the card). -->
+    <div
+      class="absolute inset-x-4 bottom-4 z-20 flex h-12 items-center justify-center gap-2 border bg-bg text-[13px] {target?.lane === 'archived'
+        ? 'border-ember text-ink'
+        : 'border-rule-strong text-muted'}"
+      role="region"
+      aria-label="Archive"
+      ondragenter={(e) => overLane(e, 'archived')}
+      ondragover={(e) => overLane(e, 'archived')}
+      ondragleave={(e) => leftFor(e) && target?.lane === 'archived' && (target = null)}
+      ondrop={(e) => dropOn(e, 'archived')}
+    >
+      <Icon name="archive" size={12} />Drop here to archive
+    </div>
+  {/if}
   </div>
 {/if}
 
