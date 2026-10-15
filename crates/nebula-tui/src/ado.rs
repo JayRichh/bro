@@ -32,6 +32,7 @@ pub fn remote_url(repo: &Path) -> Option<String> {
     let git = |args: &[&str]| {
         let mut cmd = std::process::Command::new("git");
         cmd.arg("-C").arg(repo).args(args);
+        #[cfg(windows)]
         nebula_core::platform::no_window(&mut cmd);
         cmd.output()
             .ok()
@@ -385,6 +386,7 @@ pub fn run_cli(project: &ProjectId, args: &[&str]) -> Result<String, String> {
         .arg(&project.0)
         .args(args)
         .stdin(std::process::Stdio::null());
+    #[cfg(windows)]
     nebula_core::platform::no_window(&mut cmd);
     let out = cmd.output().map_err(|e| e.to_string())?;
     if out.status.success() {
@@ -406,6 +408,7 @@ pub fn read_branches(repo: &Path) -> Result<Vec<AdoBranch>, String> {
     let remote = {
         let mut cmd = std::process::Command::new("git");
         cmd.arg("-C").arg(repo).arg("remote");
+        #[cfg(windows)]
         nebula_core::platform::no_window(&mut cmd);
         cmd.output()
             .ok()
@@ -427,6 +430,7 @@ pub fn read_branches(repo: &Path) -> Result<Vec<AdoBranch>, String> {
     if !remote.is_empty() {
         cmd.arg(format!("refs/remotes/{remote}"));
     }
+    #[cfg(windows)]
     nebula_core::platform::no_window(&mut cmd);
     let out = cmd.output().map_err(|e| e.to_string())?;
     if !out.status.success() {
