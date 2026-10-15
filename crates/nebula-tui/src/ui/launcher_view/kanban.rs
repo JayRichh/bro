@@ -54,9 +54,27 @@ pub(super) fn draw(f: &mut Frame, app: &mut App, body: Rect) {
     );
     let g = crate::launcher::bands_layout(body);
     let mut area = g.area;
+    // The REVIEW UNIT docks its diff on the board's right: the lanes keep
+    // the left, where they still fit five abreast; a board too narrow for
+    // both gives the diff the whole of it.
+    app.launcher.review_dock = Rect::default();
+    if review_docked(app) {
+        let lanes_w = (area.width * 2 / 5).max(Lane::ALL.len() as u16 * 8);
+        if area.width >= lanes_w + 40 {
+            app.launcher.review_dock = Rect {
+                x: area.x + lanes_w + 1,
+                width: area.width - lanes_w - 1,
+                ..area
+            };
+            area.width = lanes_w;
+        } else {
+            app.launcher.review_dock = area;
+        }
+    }
     if area.height <= LANE_HEAD_H || area.width < Lane::ALL.len() as u16 * 8 {
         return;
     }
+    let hidden = crate::launcher::kanban_hidden(app, app.launcher.kanban_all);
     // A card held: the ARCHIVED zone takes the board's foot, under the
     // lanes rather than beside them, so no lane moves under the pointer.
     let held = held_card(app);
@@ -89,14 +107,22 @@ pub(super) fn draw(f: &mut Frame, app: &mut App, body: Rect) {
             // word rather than the number.
             let count = format!("{} ", cards.len());
             let room = (head.width as usize).saturating_sub(2 + count.chars().count());
-            let title = Line::from(vec![
-                Span::styled("● ", Style::default().fg(color)),
-                Span::styled(count, Style::default().fg(th.dim)),
-                Span::styled(
-                    truncate(lane.title(), room),
-                    Style::default().fg(color).add_modifier(Modifier::BOLD),
-                ),
-            ]);
+            // A held card over a lane that refuses it: the title says why,
+            // dimmed, until the card moves on (the drop flashes it too).
+            let title = match refusal(app, lane) {
+                Some(why) => Line::from(Span::styled(
+                    truncate(why, head.width as usize),
+                    Style::default().fg(th.dim).add_modifier(Modifier::ITALIC),
+                )),
+                None => Line::from(vec![
+                    Span::styled("● ", Style::default().fg(color)),
+                    Span::styled(count, Style::default().fg(th.dim)),
+                    Span::styled(
+                        truncate(lane.title(), room),
+                        Style::default().fg(color).add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+            };
             f.render_widget(Paragraph::new(title), head);
         }
         // The lane a held card is over: its rule in the accent for a drop
@@ -108,6 +134,29 @@ pub(super) fn draw(f: &mut Frame, app: &mut App, body: Rect) {
             None => color,
         };
         draw_rule(f, r, 1, rule);
+        // The lane's foot says what the scope leaves out of it.
+        let outside = hidden[i];
+        let foot = u16::from(outside > 0);
+        if outside > 0 {
+            if let Some(line) = row_rect(r, r.height.saturating_sub(1) as usize)
+                .filter(|_| r.height > LANE_HEAD_H + 1)
+            {
+                f.render_widget(
+                    Paragraph::new(Span::styled(
+                        truncate(
+                            &format!("{outside} more outside scope"),
+                            line.width as usize,
+                        ),
+                        Style::default().fg(th.dim),
+                    )),
+                    line,
+                );
+            }
+        }
+        let r = Rect {
+            height: r.height.saturating_sub(foot),
+            ..r
+        };
         let room = r.height.saturating_sub(LANE_HEAD_H);
         let fit = (room / CARD_H).max(1) as usize;
         let at = cursor.filter(|(l, _)| *l == i).map(|(_, row)| row);
@@ -147,9 +196,15 @@ pub(super) fn draw(f: &mut Frame, app: &mut App, body: Rect) {
                 th,
                 &mut cfg,
             );
-            if app.launcher.kanban_all {
-                draw_project_label(f, rect, &row.project, th);
-            }
+            let label = app.launcher.kanban_all
+                || app.launcher.scope.repo.is_some()
+                || app.launcher.scope.worktree.is_some();
+            let taken = if label {
+                draw_project_label(f, rect, &row.project, th)
+            } else {
+                0
+            };
+            draw_card_facts(f, app, rect, row, taken, th);
             let placed = crate::launcher::Placed {
                 rect,
                 cut_top: 0,
@@ -221,6 +276,35 @@ pub(super) fn draw(f: &mut Frame, app: &mut App, body: Rect) {
     app.chrome
         .hits
         .push((area, HitTarget::PanelBg(Focus::Sessions)));
+}
+
+/// Is the REVIEW UNIT's diff docked over the board?
+fn review_docked(app: &App) -> bool {
+    matches!(
+        &app.modals.overlay,
+        Some(crate::app::Overlay::Diff(v)) if v.review.is_some()
+    )
+}
+
+/// Why letting the held card go on `lane` is refused, while it is over
+/// that lane.
+fn refusal(app: &App, lane: Lane) -> Option<&'static str> {
+    let drag = held_card(app)?;
+    let OrderItem::Board {
+        agent, lane: from, ..
+    } = &drag.item
+    else {
+        return None;
+    };
+    match &drag.over {
+        Some(OrderOver::Lane(DropLane::Lane(to), None)) if *to == lane && *from != lane => {
+            match lane_drop(app, agent, *from, DropLane::Lane(lane)) {
+                LaneDrop::Refuse(why) => Some(why),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
 }
 
 /// Rows the ARCHIVED zone takes: its box, a line of words inside.
@@ -307,14 +391,66 @@ fn draw_archive_zone(f: &mut Frame, app: &App, zone: Rect) {
     );
 }
 
-/// On the all-projects board, a card's project on its top border, left,
-/// where a band's rule would have named it.
-fn draw_project_label(f: &mut Frame, rect: Rect, project: &str, th: Theme) {
-    let room = (rect.width as usize).saturating_sub(6);
-    if room < 3 {
+/// What a board card says about its checkout on its top border, right:
+/// the commits since its base (`3 commits`) and its pull request in the
+/// PR rows' own colors (`#12 ready`) — what a band's rule says on the
+/// grid, which the board has no rule for. `taken` columns at the left
+/// are the project's label; what does not fit after it is left off,
+/// the pull request first kept.
+fn draw_card_facts(
+    f: &mut Frame,
+    app: &App,
+    rect: Rect,
+    row: &crate::launcher::LauncherRow,
+    taken: u16,
+    th: Theme,
+) {
+    let facts = crate::launcher::card_facts(app, row);
+    let mut parts: Vec<Span<'static>> = Vec::new();
+    if let Some(pr) = &row.pr {
+        let look = crate::pr_row::look(pr.standing, pr.trouble, th);
+        parts.push(Span::styled(
+            format!(" #{} {} ", pr.number, pr.badge()),
+            Style::default().fg(look.badge),
+        ));
+    }
+    if facts.ahead_of_base > 0 {
+        let n = facts.ahead_of_base;
+        parts.insert(
+            0,
+            Span::styled(
+                format!(" {n} commit{} ", if n == 1 { "" } else { "s" }),
+                Style::default().fg(th.muted),
+            ),
+        );
+    }
+    // Two corners and a dash of rule either side; the label's room.
+    let room = rect.width.saturating_sub(4 + taken + u16::from(taken > 0)) as usize;
+    while parts.iter().map(Span::width).sum::<usize>() > room && !parts.is_empty() {
+        parts.remove(0);
+    }
+    let w = parts.iter().map(Span::width).sum::<usize>() as u16;
+    if w == 0 {
         return;
     }
-    let label = format!(" {} ", truncate(project, room));
+    let at = Rect {
+        x: rect.right().saturating_sub(2 + w),
+        y: rect.y,
+        width: w,
+        height: 1,
+    };
+    f.render_widget(Paragraph::new(Line::from(parts)), at);
+}
+
+/// On the all-projects board, a card's project on its top border, left,
+/// where a band's rule would have named it. The columns it took.
+fn draw_project_label(f: &mut Frame, rect: Rect, project: &str, th: Theme) -> u16 {
+    let room = (rect.width as usize).saturating_sub(6);
+    if room < 3 {
+        return 0;
+    }
+    // Short enough to leave the right of the border to the card's facts.
+    let label = format!(" {} ", truncate(project, room.min(PROJECT_LABEL_MAX)));
     let at = Rect {
         x: rect.x + 2,
         y: rect.y,
@@ -325,4 +461,8 @@ fn draw_project_label(f: &mut Frame, rect: Rect, project: &str, th: Theme) {
         Paragraph::new(Span::styled(label, Style::default().fg(th.muted))),
         at,
     );
+    at.width
 }
+
+/// The most of a project's name a board card's border spells out.
+const PROJECT_LABEL_MAX: usize = 14;

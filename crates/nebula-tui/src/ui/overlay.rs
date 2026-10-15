@@ -48,6 +48,7 @@ impl Overlay {
             Overlay::Accounts(view) => super::accounts_view::draw(f, app, view),
             Overlay::Subagents(view) => super::subagents_view::draw(f, app, view),
             Overlay::Ado(view) => super::ado_view::draw(f, app, view),
+            Overlay::Ship(view) => super::ship_view::draw(f, app, view),
         }
     }
 }
@@ -485,6 +486,10 @@ const HELP_LEFT: &[HelpSection] = &[
             ),
             (Act(&[NavBack, NavForward]), "back / forward a place"),
             (Act(&[ReorderUp, ReorderDown]), "move card / band / tab"),
+            (
+                Act(&[MoveCardLeft, MoveCardRight]),
+                "board: card to the next lane",
+            ),
             (Act(&[FindFile, Grep]), "find file / in files (git grep)"),
             (Act(&[TreeBrowser]), "file tree browser"),
         ],
@@ -1346,8 +1351,32 @@ fn draw_metrics_overlay(f: &mut Frame, app: &mut App, view: crate::app::MetricsV
 
 fn draw_diff_overlay(f: &mut Frame, app: &mut App, view: crate::app::DiffView) {
     let th = app.chrome.theme;
-    let area = centered_rect_pct(f.area(), SPLIT_MODAL_PCT.0, SPLIT_MODAL_PCT.1);
+    // The REVIEW UNIT docks beside the board, in the room the board left
+    // it, its verb row along the foot; anywhere else the modal centers.
+    let dock = app.launcher.review_dock;
+    let docked = view.review.is_some() && dock.width > 0 && dock.height > 2;
+    let area = if docked {
+        Rect {
+            height: dock.height - 1,
+            ..dock
+        }
+    } else {
+        centered_rect_pct(f.area(), SPLIT_MODAL_PCT.0, SPLIT_MODAL_PCT.1)
+    };
     f.render_widget(Clear, area);
+    if docked {
+        let row = Rect {
+            y: dock.bottom() - 1,
+            height: 1,
+            ..dock
+        };
+        let verbs = draw_review_verbs(f, app, &view, row);
+        if let Some(Overlay::Diff(v)) = &mut app.modals.overlay {
+            if let Some(r) = &mut v.review {
+                r.verbs = verbs;
+            }
+        }
+    }
     // Cap first, floor second: on a tiny screen the file list keeps
     // its minimum and SPLIT_PANE_LAYOUT_MIN squeezes the diff pane
     // instead.
@@ -3023,6 +3052,54 @@ fn draw_tree_overlay(f: &mut Frame, app: &mut App, mut view: crate::tree_browser
         v.area = area;
         v.files_width = files_w;
     }
+}
+
+/// The REVIEW UNIT's verb row under its docked diff: each verb a button
+/// naming its key (`Space reply`, `⌥p open PR`…), in the room there is,
+/// the ones that do not fit left off the end. Returns each one's cells.
+fn draw_review_verbs(
+    f: &mut Frame,
+    app: &App,
+    view: &crate::app::DiffView,
+    row: Rect,
+) -> Vec<(Rect, crate::app::ReviewVerb)> {
+    let th = app.chrome.theme;
+    f.render_widget(Clear, row);
+    let Some(dock) = &view.review else {
+        return Vec::new();
+    };
+    let hover = app.modals.button_hover;
+    let mut x = row.x;
+    let mut out = Vec::new();
+    let mut spans = Vec::new();
+    for (verb, key, word) in crate::event_loop::review_verbs() {
+        let word = match verb {
+            crate::app::ReviewVerb::Pr => crate::event_loop::review_pr_word(app, &dock.worktree),
+            _ => word,
+        };
+        let text = format!(" {key} {word} ");
+        let w = text.chars().count() as u16;
+        if x + w > row.right() {
+            break;
+        }
+        let rect = Rect {
+            x,
+            y: row.y,
+            width: w,
+            height: 1,
+        };
+        let destructive = matches!(verb, crate::app::ReviewVerb::DeleteWorktree);
+        let mut style = Style::default().fg(if destructive { th.err } else { th.text });
+        if hover == Some(rect) {
+            style = style.add_modifier(Modifier::UNDERLINED | Modifier::BOLD);
+        }
+        spans.push(Span::styled(text, style));
+        spans.push(Span::raw(" "));
+        out.push((rect, verb));
+        x += w + 1;
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), row);
+    out
 }
 
 #[cfg(test)]

@@ -71,6 +71,11 @@ macro_rules! main_loop_body {
     let (prcomment_tx, mut prcomment_rx) =
         tokio::sync::mpsc::unbounded_channel::<PrCommentAnswer>();
     app.github.pr_comment_tx = Some(prcomment_tx);
+    // The SHIP OVERLAY's jobs — the suggestion, the push and create, the
+    // merge — land here (`ship::land_ship`).
+    let (ship_tx, mut ship_rx) =
+        tokio::sync::mpsc::unbounded_channel::<crate::ship_view::ShipAnswer>();
+    app.github.ship_tx = Some(ship_tx);
     // The ISSUES MODAL's `gh issue list` / `gh issue view` answers, on the
     // same footing: the modal's own handlers start the fetch, the loop
     // lands it.
@@ -435,6 +440,11 @@ macro_rules! main_loop_body {
             answer = prcomment_rx.recv() => {
                 if let Some(answer) = answer {
                     land_pr_comment(&mut app, answer);
+                }
+            }
+            answer = ship_rx.recv() => {
+                if let Some(answer) = answer {
+                    ship::land_ship(&mut app, answer, &mut out);
                 }
             }
             // The ISSUES MODAL's hover debounce: the cursor has rested on

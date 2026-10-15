@@ -549,7 +549,19 @@ pub(crate) fn jump_attention(
     attaches: bool,
     out: &mut Vec<ClientRequest>,
 ) {
-    let ring = crate::palette::attention_sessions(&app.tree);
+    // The ring the SCOPE CHIP admits: a scope narrowed to one worktree
+    // walks that worktree's sessions.
+    let scope = crate::launcher::effective_scope(app);
+    let ring: Vec<AgentId> = crate::palette::attention_sessions(&app.tree)
+        .into_iter()
+        .filter(|id| {
+            app.tree
+                .agents
+                .iter()
+                .find(|a| &a.id == id)
+                .is_some_and(|a| crate::launcher::scope_admits(app, &scope, a))
+        })
+        .collect();
     if ring.is_empty() {
         app.chrome.flash = Some(NO_SESSIONS_TO_JUMP.into());
         return;

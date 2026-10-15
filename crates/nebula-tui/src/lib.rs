@@ -60,6 +60,7 @@ pub mod quick_prompt;
 pub mod remote;
 pub mod review;
 pub mod review_modal;
+pub mod ship_view;
 pub mod splash;
 pub mod subagents;
 pub mod syntax;

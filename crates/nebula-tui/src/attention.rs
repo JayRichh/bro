@@ -28,7 +28,7 @@ pub fn word(tone: Tone, n: usize) -> &'static str {
 /// (`LauncherState::scope`), by tone, as the sessions a press opens — in
 /// project order, each project's tree depth first.
 pub fn tally(app: &App) -> HashMap<Tone, Vec<AgentId>> {
-    let scope = &app.launcher.scope;
+    let scope = &crate::launcher::effective_scope(app);
     let mut out: HashMap<Tone, Vec<AgentId>> = HashMap::new();
     for p in &app.tree.projects {
         let agents: Vec<&Agent> = app

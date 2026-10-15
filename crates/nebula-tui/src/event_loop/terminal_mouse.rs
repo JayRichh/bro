@@ -552,7 +552,8 @@ pub(crate) fn update_pointer(app: &mut App, mouse: &MouseEvent) {
                 | HitTarget::LauncherTabAdd
                 | HitTarget::LauncherTabMore
                 | HitTarget::LauncherHome(_)
-                | HitTarget::LauncherKanbanScope
+                | HitTarget::ScopeChip(_)
+                | HitTarget::ScopeClear
                 | HitTarget::LauncherCrumb
                 | HitTarget::LauncherPullRequests
                 | HitTarget::LauncherIssues

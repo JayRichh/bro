@@ -840,28 +840,7 @@ fn head_count(
             None => (span, None),
         })
         .collect();
-    // On the board, which sessions it holds — this project's or every
-    // project's — and the click that flips it, as `Tab` does.
-    let scope: Part = if app.launcher.launcher_kanban {
-        let word = if app.launcher.kanban_all {
-            "all projects"
-        } else {
-            "this project"
-        };
-        let hit = HitTarget::LauncherKanbanScope;
-        vec![
-            (Span::raw(" · "), None),
-            (
-                Span::styled(
-                    format!("{word} ⇥"),
-                    underline(&hit, Style::default().fg(th.muted)),
-                ),
-                Some(hit),
-            ),
-        ]
-    } else {
-        Vec::new()
-    };
+    let scope: Part = scope_chip(app, th);
     // Once a piece has not fitted, nothing after it is tried: a narrower
     // piece slipping into the room a wider one left would swap what the
     // row says as the window narrows, rather than only take it away.
@@ -931,6 +910,57 @@ fn head_count(
         .chain(toggle)
         .chain(tools)
         .collect()
+}
+
+/// The SCOPE CHIP: what the bench is looking at, `all ▸ repo ▸ worktree`
+/// (and the account, when the scope has one), each segment a button that
+/// widens the scope back to it and a `✕` that clears it — the board, the
+/// ATTENTION STRIP, `.`/`,` and the quick prompt all follow it. Drawn on
+/// the board always, and on the grid while something is narrowed. FOCUS
+/// HERE (the menus, `?`) narrows it; Esc, once the cursor has let go of
+/// the card, clears it as the `✕` does.
+fn scope_chip(app: &App, th: Theme) -> Vec<(Span<'static>, Option<HitTarget>)> {
+    let segments = crate::launcher::scope_segments(app);
+    if segments.is_empty() && !app.launcher.launcher_kanban {
+        return Vec::new();
+    }
+    let lit = |hit: &HitTarget, style: Style| {
+        if app.launcher.hover_crumb.as_ref() == Some(hit) {
+            style.add_modifier(Modifier::UNDERLINED)
+        } else {
+            style
+        }
+    };
+    let mut out = vec![(Span::raw(" · "), None)];
+    let all = HitTarget::ScopeChip(0);
+    let all_style = if segments.is_empty() {
+        Style::default().fg(th.muted)
+    } else {
+        Style::default().fg(th.dim)
+    };
+    out.push((Span::styled("all", lit(&all, all_style)), Some(all)));
+    let last = segments.len();
+    for (i, (word, keep)) in segments.into_iter().enumerate() {
+        out.push((Span::styled(" ▸ ", Style::default().fg(th.dim)), None));
+        let hit = HitTarget::ScopeChip(keep);
+        let style = if i + 1 == last {
+            Style::default().fg(th.accent).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(th.muted)
+        };
+        out.push((
+            Span::styled(truncate(&word, 18), lit(&hit, style)),
+            Some(hit),
+        ));
+    }
+    if last > 0 {
+        let hit = HitTarget::ScopeClear;
+        out.push((
+            Span::styled(" ✕", lit(&hit, Style::default().fg(th.muted))),
+            Some(hit),
+        ));
+    }
+    out
 }
 
 /// The HEADER TOOLS' buttons ([`head_count`]): Settings, then Help.
@@ -5481,12 +5511,15 @@ mod tests {
 
         app.launcher.launcher_kanban = true;
         assert!(lit(&app, "Board") && !lit(&app, "Overview"));
-        assert!(hits(&app).contains(&HitTarget::LauncherKanbanScope));
+        // On the board, the SCOPE CHIP: `all` with nothing narrowed, a
+        // button back to everything.
+        assert!(hits(&app).contains(&HitTarget::ScopeChip(0)));
         let text = row_text(&count_spans(&app, 2, Hidden::default(), 120, th));
-        assert!(text.starts_with("2 sessions · this project ⇥"), "{text:?}");
-        app.launcher.kanban_all = true;
-        let text = row_text(&count_spans(&app, 2, Hidden::default(), 120, th));
-        assert!(text.contains("all projects ⇥"), "{text:?}");
+        assert!(text.starts_with("2 sessions · all"), "{text:?}");
+        assert!(
+            !hits(&app).contains(&HitTarget::ScopeClear),
+            "nothing to clear"
+        );
     }
 
     /// [`head_count`]'s spans without the buttons they carry.

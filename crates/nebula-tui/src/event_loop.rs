@@ -35,6 +35,7 @@ mod activate;
 mod ado;
 mod alerts;
 mod background;
+mod board;
 mod commands;
 mod desk;
 mod focus_walk;
@@ -52,10 +53,12 @@ mod placeholder;
 mod prompts;
 mod quick_launch;
 mod release_watch;
+mod review;
 mod selection;
 mod server_events;
 mod server_state;
 mod settings_handlers;
+mod ship;
 mod state_io;
 mod terminal_events;
 mod terminal_mouse;
@@ -78,6 +81,13 @@ pub(crate) use loop_run::*;
 use mouse_modes::handle_mouse;
 pub(crate) use overlays::handle_overlay_key;
 pub(crate) use prompts::*;
+pub(crate) use review::close_diff as close_diff_to_card;
+pub(crate) use review::{pr_word as review_pr_word, VERBS as REVIEW_VERBS};
+
+/// The REVIEW UNIT's verbs, with their keys and words, for its row.
+pub(crate) fn review_verbs() -> [(crate::app::ReviewVerb, &'static str, &'static str); 5] {
+    REVIEW_VERBS
+}
 pub use release_watch::ReleaseWatch;
 pub(crate) use selection::*;
 pub(crate) use server_events::handle_server_event;

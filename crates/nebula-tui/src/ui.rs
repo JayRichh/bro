@@ -21,6 +21,7 @@ mod launcher_view;
 mod overlay;
 mod review_view;
 mod rows;
+mod ship_view;
 pub(crate) mod subagents_view;
 
 pub(crate) use rows::{fit_to_width, render_row, status_color, status_dot};

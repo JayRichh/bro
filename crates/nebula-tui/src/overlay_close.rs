@@ -47,6 +47,7 @@ pub(crate) fn overlay_area(overlay: &Overlay) -> Rect {
         Overlay::Accounts(v) => v.area,
         Overlay::Subagents(v) => v.area,
         Overlay::Ado(v) => v.area,
+        Overlay::Ship(v) => v.area,
     }
 }
 
@@ -76,6 +77,11 @@ pub(crate) fn click_outside(app: &mut App, out: &mut Vec<ClientRequest>) {
         // submenu level at a time — but a picker opened from the QUICK
         // PROMPT still owes that box back.
         Some(Overlay::Menu(_)) => close_menu(app),
+        // A diff opened from a board card (the REVIEW UNIT among them)
+        // closes onto that card, as its Esc does.
+        Some(Overlay::Diff(v)) if v.from_card.is_some() => {
+            crate::event_loop::close_diff_to_card(app, out)
+        }
         // The PROJECT PICKER owes its box back, typed text and all — Esc
         // would only clear a typed query first.
         Some(Overlay::ProjectPicker(picker)) => {

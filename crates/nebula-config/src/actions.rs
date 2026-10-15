@@ -72,6 +72,25 @@ pub enum Action {
     /// in the browser — the `#42 title` line on the card. `v` lists the
     /// project's pull requests in nebula; the shifted key goes to GitHub.
     OpenPullRequest,
+    /// The PULL REQUEST COMPOSER for the checkout of the card or band
+    /// under the cursor: title, body, base and draft, prefilled from the
+    /// session and the commits since the base; Enter pushes the branch and
+    /// opens the pull request (GitHub through `gh`, Azure DevOps through
+    /// its API). What dropping a Review card on Ship does.
+    CreatePullRequest,
+    /// Merge the open pull request of the checkout under the cursor, once
+    /// its confirm (method, delete the remote branch) is answered. What
+    /// dropping a Ship card on Done does.
+    MergePullRequest,
+    /// FOCUS HERE: narrow the bench's SCOPE (the header's scope chip) to
+    /// the repo, worktree or card under the cursor: the board, the
+    /// attention strip, `.`/`,` and the quick prompt follow it.
+    FocusScope,
+    /// `Shift+←` on the KANBAN: the card under the cursor let go on the
+    /// lane to its left, as a drop there does (core's `drop_verb`).
+    MoveCardLeft,
+    /// `Shift+→`: the lane to its right; off Done, the Archived zone.
+    MoveCardRight,
     /// `Shift+I`: the GitHub issue the session card under the cursor was
     /// started from, in the browser. `i` lists the project's issues in
     /// nebula; the shifted key goes to GitHub.
@@ -813,6 +832,81 @@ pub const ACTIONS: &[ActionSpec] = &[
         destructive: false,
         applies_to: &[AppliesTo::Worktree, AppliesTo::Session],
         works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::CreatePullRequest,
+        id: "create_pull_request",
+        label: "Create pull request\u{2026}",
+        hint: "The pull request composer for the checkout under the cursor: title, body, base branch and draft, prefilled from the session and its commits; Enter pushes the branch and opens it. Dropping a Review card on Ship does the same",
+        group: "PROJECTS & WORKTREES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "open PR",
+        destructive: false,
+        applies_to: &[AppliesTo::Session, AppliesTo::Worktree],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Diff],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::MergePullRequest,
+        id: "merge_pull_request",
+        label: "Merge pull request\u{2026}",
+        hint: "Merge the open pull request of the checkout under the cursor, after a confirm that picks the method and whether the remote branch goes. Dropping a Ship card on Done does the same",
+        group: "PROJECTS & WORKTREES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "merge",
+        destructive: false,
+        applies_to: &[AppliesTo::Session, AppliesTo::Worktree],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Diff],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::FocusScope,
+        id: "focus_scope",
+        label: "Focus here",
+        hint: "Narrow the scope chip in the header to the repo, worktree or card under the cursor: the board, the attention strip, . and , and the quick prompt follow it. The chip's \u{2715} widens it back to everything, as Esc does once the cursor has let go of the card",
+        group: "PROJECTS & WORKTREES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "focus",
+        destructive: false,
+        applies_to: &[AppliesTo::Repo, AppliesTo::Worktree, AppliesTo::Session],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::MoveCardLeft,
+        id: "move_card_left",
+        label: "Move card to the lane on the left",
+        hint: "On the board: let the card under the cursor go on the lane to its left, as dropping it there does. A lane the agent owns refuses, saying why",
+        group: "PROJECTS & WORKTREES",
+        scope: Scope::Global,
+        defaults: &["shift+left"],
+        word: "\u{2190} lane",
+        destructive: false,
+        applies_to: &[AppliesTo::Session],
+        works_in: &[WorksIn::Board],
+        surface: Surface::Tui,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::MoveCardRight,
+        id: "move_card_right",
+        label: "Move card to the lane on the right",
+        hint: "On the board: let the card under the cursor go on the lane to its right, as dropping it there does: Review to Ship opens the pull request composer, Ship to Done merges, and past Done archives (offering the worktree's safe delete)",
+        group: "PROJECTS & WORKTREES",
+        scope: Scope::Global,
+        defaults: &["shift+right"],
+        word: "lane \u{2192}",
+        destructive: false,
+        applies_to: &[AppliesTo::Session],
+        works_in: &[WorksIn::Board],
         surface: Surface::Tui,
         desktop: &[],
     },
@@ -1917,7 +2011,10 @@ pub const MENUS: &[(AppliesTo, &[&str])] = &[
             "rename",
             "pin_orchestrator",
             "open_pull_request",
+            "create_pull_request",
+            "merge_pull_request",
             "open_issue",
+            "focus_scope",
             "reorder_up",
             "reorder_down",
             "unarchive",
@@ -1937,6 +2034,9 @@ pub const MENUS: &[(AppliesTo, &[&str])] = &[
             "open_worktree",
             "open_repo",
             "switch_branch",
+            "create_pull_request",
+            "merge_pull_request",
+            "focus_scope",
             "reorder_up",
             "reorder_down",
             "delete_all",
@@ -1953,6 +2053,7 @@ pub const MENUS: &[(AppliesTo, &[&str])] = &[
             "open_worktree",
             "open_repo",
             "refresh_pull_requests",
+            "focus_scope",
             "rename",
             "reorder_up",
             "reorder_down",
@@ -2523,7 +2624,7 @@ mod tests {
         // jump, the window's Ctrl+K is `command_palette`; `move_up` walks
         // the cursor where the window's reorders, `reorder_up`): the
         // window's key ids are their own namespace.
-        assert_eq!(ACTIONS.len(), 81);
+        assert_eq!(ACTIONS.len(), 86);
         for id in [
             "palette",
             "move_up",

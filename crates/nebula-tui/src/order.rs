@@ -185,11 +185,6 @@ pub fn lane_drop(app: &App, id: &AgentId, from: Lane, to: DropLane) -> LaneDrop 
     nebula_core::board::drop_verb(&row.agent, &facts, to)
 }
 
-/// What a drop the terminal board can't carry out yet says: the pull
-/// request verbs, until the board grows them.
-pub const SHIP_ON_THE_CLI: &str =
-    "the board can't open or merge pull requests yet: run `kete ship pr` or `kete ship merge` in the worktree";
-
 /// What a move says to a daemon too old to take one.
 #[cfg(unix)]
 pub const DAEMON_TOO_OLD: &str =

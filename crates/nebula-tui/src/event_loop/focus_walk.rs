@@ -129,7 +129,8 @@ pub(super) fn land_click_focus(app: &mut App, column: u16, row: u16, out: &mut V
             | HitTarget::LauncherTabAdd
             | HitTarget::LauncherTabMore
             | HitTarget::LauncherHome(_)
-            | HitTarget::LauncherKanbanScope
+            | HitTarget::ScopeChip(_)
+            | HitTarget::ScopeClear
             | HitTarget::LauncherPaneClose
             | HitTarget::LauncherPaneSide
             | HitTarget::LauncherPaneZoom

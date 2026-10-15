@@ -166,9 +166,13 @@ pub enum HitTarget {
     /// names: `true` the KANBAN, `false` the bands. A click on the half
     /// not lit switches as `⇧K` does.
     LauncherHome(bool),
-    /// The KANBAN's scope beside it (`this project` / `all projects`): a
-    /// click flips it, as `Tab` on the board does.
-    LauncherKanbanScope,
+    /// A segment of the SCOPE CHIP in the header (`all ▸ repo ▸ worktree`):
+    /// a click widens the scope to that segment, keeping this many of the
+    /// segments after `all` (0, the `all`, is everything).
+    ScopeChip(usize),
+    /// The chip's `✕`: the scope back to everything, as Esc does once the
+    /// cursor has let go of the card.
+    ScopeClear,
     /// Draggable top edge of the LAUNCHER VIEW's PANE: the blank row the
     /// pane opens with, plus the grid row above it. Registered ahead of
     /// the cards so a card ending on that row never swallows the grab.
@@ -433,6 +437,18 @@ pub enum MenuAction {
     OpenWorktree(WorktreeId),
     AddProject,
     RemoveProject(ProjectId),
+    /// The PULL REQUEST COMPOSER on a checkout, from a card (`ship_view`).
+    CreatePullRequest {
+        worktree: WorktreeId,
+        agent: Option<AgentId>,
+    },
+    /// The MERGE CONFIRM on a checkout's open pull request.
+    MergePullRequest {
+        worktree: WorktreeId,
+        agent: Option<AgentId>,
+    },
+    /// FOCUS HERE: the SCOPE CHIP set to this.
+    FocusScope(nebula_core::scope::Scope),
     /// Retitle a project's row. Display only — the folder keeps its name and
     /// stays visible under the new one.
     RenameProject(ProjectId),
@@ -1563,6 +1579,34 @@ pub struct DiffView {
     /// The list is being read again for a toggle: an empty answer keeps
     /// the modal up (saying so) rather than closing it.
     pub keep_open: bool,
+    /// The REVIEW UNIT: this diff docked beside the board for one Review
+    /// card, with its verb row (`event_loop::review`). None: the modal.
+    pub review: Option<ReviewDock>,
+    /// The board card this diff was opened from: closing it (Esc, `⇧K`)
+    /// lands the cursor back on that card, wherever reading it moved it.
+    pub from_card: Option<AgentId>,
+}
+
+/// The REVIEW UNIT's card and the verb row the draw laid out.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReviewDock {
+    pub agent: AgentId,
+    pub worktree: WorktreeId,
+    /// Each verb's cells on the row, written back by the draw.
+    pub verbs: Vec<(Rect, ReviewVerb)>,
+}
+
+/// The REVIEW UNIT's verbs, in the order its row lists them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReviewVerb {
+    /// Space: the follow-up box on the session.
+    Reply,
+    /// The pull request: the composer when there is none, the browser on
+    /// the open one.
+    Pr,
+    Merge,
+    Archive,
+    DeleteWorktree,
 }
 
 /// A diff read and laid out: the document, its rows in the view's DIFF
@@ -2007,6 +2051,8 @@ impl DiffView {
             commits: Vec::new(),
             against_area: Rect::default(),
             keep_open: false,
+            review: None,
+            from_card: None,
         };
         view.apply_filter();
         view
@@ -2728,6 +2774,9 @@ pub enum Overlay {
     Subagents(crate::subagents::SubagentsView),
     /// `⇧B`: the AZURE DEVOPS OVERLAY — tasks, pull requests, branches.
     Ado(crate::ado::AdoView),
+    /// The SHIP OVERLAY: the pull request composer, or the merge
+    /// confirm, for one checkout (`ship_view`).
+    Ship(crate::ship_view::ShipView),
 }
 
 /// Rows optimistically removed for an in-flight DeleteWorktree, kept so an
@@ -4259,6 +4308,9 @@ pub struct LauncherState {
     /// `kanban_all`) and the ATTENTION STRIP's counts. The default is
     /// everything.
     pub scope: nebula_core::scope::Scope,
+    /// Where the board left room for the REVIEW UNIT's docked diff, as
+    /// the last frame laid it out; zero while no review is docked.
+    pub review_dock: Rect,
     pub columns_hide_projects: bool,
     pub columns_hide_worktrees: bool,
     pub columns_hide_sessions: bool,
@@ -4878,6 +4930,16 @@ pub struct GithubState {
     /// Where a finished `gh pr comment` lands (`PrCommentAnswer`);
     /// installed by the loop at startup like `pr_diff_tx`.
     pub pr_comment_tx: Option<tokio::sync::mpsc::UnboundedSender<PrCommentAnswer>>,
+    /// Where a finished SHIP OVERLAY job lands (`ship_view::ShipAnswer`);
+    /// installed by the loop at startup. None (the unit tests): a job is
+    /// queued in `ship_queued` instead, for the test to answer.
+    pub ship_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::ship_view::ShipAnswer>>,
+    pub ship_queued: Vec<(u64, WorktreeId, crate::ship_view::ShipJob)>,
+    /// The last ticket handed to a ship job.
+    pub ship_ticket: u64,
+    /// Checkouts with a push, a create or a merge still running: a second
+    /// one waits for the first to land.
+    pub ship_inflight: std::collections::HashSet<WorktreeId>,
     /// The on-disk memory of every pull-request answer (`pr_cache`), when
     /// this instance has one: the main loop installs the real one at
     /// startup and hydrates from it; the unit tests leave it `None`, so no

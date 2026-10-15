@@ -183,6 +183,22 @@ pub(crate) fn menu_action(app: &App, action: Action, t: &Target) -> Option<MenuA
                     .and_then(|row| row.pr)
                     .map(|pr| MenuAction::OpenLink(pr.url)),
                 Action::OpenIssue => a.issue_url.clone().map(MenuAction::OpenLink),
+                // The checkout's pull request: the composer while it has
+                // none, the merge while one is open.
+                Action::CreatePullRequest if !a.archived => {
+                    ships(app, &a.worktree_id).then(|| MenuAction::CreatePullRequest {
+                        worktree: a.worktree_id.clone(),
+                        agent: Some(id),
+                    })
+                }
+                Action::MergePullRequest if !a.archived => {
+                    merges(app, &a.worktree_id).then(|| MenuAction::MergePullRequest {
+                        worktree: a.worktree_id.clone(),
+                        agent: Some(id),
+                    })
+                }
+                Action::CreatePullRequest | Action::MergePullRequest => None,
+                Action::FocusScope => super::board::scope_for(app, t).map(MenuAction::FocusScope),
                 Action::ReorderUp | Action::ReorderDown if !a.archived => {
                     Some(MenuAction::Reorder(
                         crate::order::OrderTarget::Agent(id),
@@ -215,6 +231,19 @@ pub(crate) fn menu_action(app: &App, action: Action, t: &Target) -> Option<MenuA
                 // worktree, named for its branch, is deleted instead.
                 Action::SwitchBranch => w.is_main.then_some(MenuAction::SwitchBranch(id)),
                 Action::DeleteWorktree => (!w.is_main).then_some(MenuAction::DeleteWorktree(id)),
+                Action::CreatePullRequest => {
+                    ships(app, &id).then(|| MenuAction::CreatePullRequest {
+                        worktree: id,
+                        agent: None,
+                    })
+                }
+                Action::MergePullRequest => {
+                    merges(app, &id).then(|| MenuAction::MergePullRequest {
+                        worktree: id,
+                        agent: None,
+                    })
+                }
+                Action::FocusScope => super::board::scope_for(app, t).map(MenuAction::FocusScope),
                 // The band's place among the project's; the root's stays
                 // first.
                 Action::ReorderUp | Action::ReorderDown => (!w.is_main).then(|| {
@@ -258,10 +287,34 @@ pub(crate) fn menu_action(app: &App, action: Action, t: &Target) -> Option<MenuA
                     if action == Action::ReorderUp { -1 } else { 1 },
                 )),
                 Action::RemoveProject => Some(MenuAction::RemoveProject(id.clone())),
+                Action::FocusScope => super::board::scope_for(app, t).map(MenuAction::FocusScope),
                 _ => keyed(app),
             }
         }
     }
+}
+
+/// Can checkout `w` open a pull request from here: none open on it, not
+/// on its base branch, not a stand-in still being cut.
+fn ships(app: &App, w: &WorktreeId) -> bool {
+    !app.is_placeholder_worktree(w)
+        && !merges(app, w)
+        && !app
+            .jobs
+            .worktree_base
+            .get(w)
+            .is_some_and(|b| b.on_default_branch)
+        && app.tree.worktrees.iter().any(|x| &x.id == w)
+}
+
+/// Has checkout `w` an open pull request to merge?
+fn merges(app: &App, w: &WorktreeId) -> bool {
+    crate::launcher::worktree_pr(app, w).is_some_and(|pr| {
+        matches!(
+            pr.standing,
+            crate::pull_request::Standing::Open | crate::pull_request::Standing::Draft
+        )
+    })
 }
 
 /// The words a row for `action` on `t` says: the registry's menu label,

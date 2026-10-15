@@ -802,6 +802,11 @@ pub(super) fn escape(app: &mut App) {
         app.chrome.dirty = true;
     } else if !app.launcher.launcher_unaimed {
         clear_aim(app);
+    } else if !app.launcher.scope.is_everything() {
+        // Nothing left to let go of on the cards: the SCOPE CHIP is
+        // next, back to everything (its `✕`).
+        super::board::widen_scope(app, 0);
+        app.chrome.flash = Some("scope: everything".into());
     }
 }
 
@@ -988,7 +993,14 @@ pub(super) fn board_key_closes(app: &App, chord: &crate::keymap::KeyChord) -> bo
 /// What [`board_key_closes`] lets through: the overlay closed as Ctrl+Q
 /// closes it (Settings saving its place), then the board.
 pub(super) fn show_board(app: &mut App, out: &mut Vec<ClientRequest>) {
+    // A diff opened from a board card closes onto that card, wherever
+    // reading it moved the card: the board comes back on it.
+    let card = match &app.modals.overlay {
+        Some(Overlay::Diff(v)) => v.from_card.clone(),
+        _ => None,
+    };
     crate::overlay_close::force_close(app);
+    super::board::return_to_card(app, card.as_ref(), out);
     if app.launcher.launcher_kanban && !app.pane.collapsed {
         kanban_move(app, 0, 0, out);
         app.chrome.flash = Some(kanban_flash(app));
@@ -998,23 +1010,26 @@ pub(super) fn show_board(app: &mut App, out: &mut Vec<ClientRequest>) {
     toggle_kanban(app, out);
 }
 
-/// What the footer says the board is showing.
+/// What the footer says the board is showing: the SCOPE CHIP's words.
 fn kanban_flash(app: &App) -> String {
-    let scope = if app.launcher.kanban_all {
-        "every project"
+    let words = super::board::scope_words(app);
+    let scope = if words.is_empty() {
+        "everything".to_string()
     } else {
-        "this project"
+        words.join(" ▸ ")
     };
-    format!("kanban: {scope} · h/l lanes · j/k cards · Tab: scope · ⇧K: overview")
+    format!("kanban: {scope} · h/l lanes · j/k cards · ⇧←/⇧→ move · Tab: scope · ⇧K: overview")
 }
 
 /// The KANBAN's own keys, ahead of the grid's: `h`/`l` (`←`/`→`) walk the
-/// lanes, `j`/`k` (`↓`/`↑`) and `Ctrl+d`/`Ctrl+u` the cards of one, and
-/// `Tab` — the ACCORDION's key, with no band to open here — flips the
-/// board between the project on screen and every project, saved as
-/// **Kanban scope**. Everything else — Enter, Space, `a`, `d`, `g`, the
-/// pickers — acts on the card under the cursor as it does on the grid,
-/// since the cursor is the grid's own selection.
+/// lanes, `j`/`k` (`↓`/`↑`) and `Ctrl+d`/`Ctrl+u` the cards of one, Enter
+/// on a Review card opens the REVIEW UNIT, and `Tab` — the ACCORDION's
+/// key, with no band to open here — is the SCOPE CHIP's old switch
+/// ([`super::board::flip_board_scope`]): a narrowed scope back to
+/// everything, else the project on screen or every project, saved as
+/// **Kanban scope**. Everything else — Space, `a`, `d`, `g`, the pickers —
+/// acts on the card under the cursor as it does on the grid, since the
+/// cursor is the grid's own selection.
 fn kanban_action(app: &mut App, action: Action, out: &mut Vec<ClientRequest>) -> bool {
     match action {
         Action::FocusLeft => kanban_move(app, -1, 0, out),
@@ -1023,29 +1038,24 @@ fn kanban_action(app: &mut App, action: Action, out: &mut Vec<ClientRequest>) ->
         Action::MoveUp => kanban_move(app, 0, -1, out),
         Action::HalfPageDown => kanban_move(app, 0, HALF_PAGE * 2, out),
         Action::HalfPageUp => kanban_move(app, 0, -HALF_PAGE * 2, out),
-        Action::FocusNext => flip_kanban_scope(app, out),
+        Action::FocusNext => {
+            super::board::flip_board_scope(app);
+            after_scope_change(app, out);
+        }
+        Action::Activate if super::review::on_review_card(app) => super::review::open(app, out),
         _ => return false,
     }
     app.chrome.dirty = true;
     true
 }
 
-/// `Tab` on the KANBAN, or a click on the scope in the header: the board
-/// between the project on screen and every project, saved as **Kanban
-/// scope**.
-pub(super) fn flip_kanban_scope(app: &mut App, out: &mut Vec<ClientRequest>) {
-    let mut cfg = crate::config::Config::load();
-    cfg.kanban_scope = if app.launcher.kanban_all {
-        "project"
-    } else {
-        "all"
+/// The SCOPE CHIP changed (a click on it, `Tab`, FOCUS HERE): the board's
+/// cursor onto a card it still shows, and the footer says the scope.
+pub(super) fn after_scope_change(app: &mut App, out: &mut Vec<ClientRequest>) {
+    if app.launcher.launcher_kanban && app.launcher_active() {
+        kanban_move(app, 0, 0, out);
+        app.chrome.flash = Some(kanban_flash(app));
     }
-    .into();
-    if super::save_config(app, &cfg) {
-        super::apply_config(app, &cfg);
-    }
-    kanban_move(app, 0, 0, out);
-    app.chrome.flash = Some(kanban_flash(app));
     app.chrome.dirty = true;
 }
 
@@ -1077,7 +1087,12 @@ pub(super) fn click_kanban(app: &mut App, id: &AgentId, out: &mut Vec<ClientRequ
         &mut app.pane.last_session_click,
         crate::app::RowKey::Session(SessionRef::Agent(id.clone())),
     ) {
-        enter_pane(app, out);
+        // Enter's twin: a Review card opens the REVIEW UNIT.
+        if super::review::on_review_card(app) {
+            super::review::open(app, out);
+        } else {
+            enter_pane(app, out);
+        }
     }
     app.chrome.dirty = true;
 }
@@ -1679,6 +1694,8 @@ const LAST_TAB: &str = "all projects closed: their sessions run on; + opens one 
 /// The tab the grid is already on is left alone: opening it again would
 /// throw the cursor off the card it was walked to.
 pub(super) fn open_tab(app: &mut App, id: &ProjectId, out: &mut Vec<ClientRequest>) {
+    // A scope on another repo follows the tab, as "this project" does.
+    super::board::scope_follows_tab(app, id);
     if app.selected_project().is_some_and(|p| &p.id == id) {
         return;
     }
@@ -2206,7 +2223,7 @@ fn last_focused(app: &App, card: &view::ProjectCard) -> Option<AgentId> {
 /// as ↑/↓ down the SESSIONS PANEL previews a row — the same debounced
 /// attach, and the same mark-as-seen, since that session is now on screen.
 /// FOCUS stays on the grid: the pane is opened, never entered.
-fn select(app: &mut App, id: AgentId, out: &mut Vec<ClientRequest>) {
+pub(super) fn select(app: &mut App, id: AgentId, out: &mut Vec<ClientRequest>) {
     // A pointer moved onto another card is the one way the cursor leaves
     // an open FOLLOW-UP STRIP while it holds the keyboard: the strip is
     // aimed at the card it was opened on, so it folds rather than sending
@@ -2540,7 +2557,6 @@ pub(super) fn drag_order(app: &mut App, pos: (u16, u16)) {
 /// left its cell: that was the click it already ran as.
 pub(super) fn drop_order(app: &mut App, out: &mut Vec<ClientRequest>) {
     use crate::app::{OrderItem, OrderOver};
-    use crate::order::{lane_drop, DropLane, LaneDrop};
     let Some(drag) = app.launcher.order_drag.take() else {
         return;
     };
@@ -2563,40 +2579,7 @@ pub(super) fn drop_order(app: &mut App, out: &mut Vec<ClientRequest>) {
                 lane,
             },
             Some(OrderOver::Lane(to, beside)),
-        ) => match lane_drop(app, &agent, lane, to) {
-            LaneDrop::Refuse(why) => app.chrome.flash = Some(why.into()),
-            LaneDrop::MarkSeen => {
-                super::mark_agent_seen(app, &agent, out);
-                app.chrome.flash = Some(
-                    if to == DropLane::Lane(view::Lane::Ship) {
-                        crate::order::MARKED_SEEN_SHIP
-                    } else {
-                        crate::order::MARKED_SEEN
-                    }
-                    .into(),
-                );
-            }
-            // The worktree delete offer is the board's to add.
-            LaneDrop::Archive | LaneDrop::ArchiveAndOfferWorktreeDelete => {
-                super::archive_agent(app, agent, out);
-            }
-            LaneDrop::OpenPr | LaneDrop::MergePr => {
-                app.chrome.flash = Some(crate::order::SHIP_ON_THE_CLI.into());
-            }
-            LaneDrop::Reorder => match beside {
-                Some((target, place)) => {
-                    let shown = crate::order::board_order(app, &worktree);
-                    crate::order::drop_agent(app, &agent, &target, place, &shown, out);
-                }
-                None if to != DropLane::Archived => {
-                    app.chrome.flash = Some(
-                        "cards reorder beside cards of their own worktree; m moves the session to another"
-                            .into(),
-                    );
-                }
-                None => {}
-            },
-        },
+        ) => super::board::run_lane_drop(app, agent, worktree, lane, to, beside, out),
         _ => {}
     }
 }
@@ -13602,11 +13585,16 @@ mod tests {
             assert!(app.launcher.launcher_kanban);
             assert!(crate::config::Config::load().kanban, "saved");
 
+            // The board on this project: the SCOPE CHIP names it, and its
+            // ✕ widens the board to every project (saved, as Tab saves it).
             let text = screen_text(&draw_at(&mut app, 200, 40));
-            assert!(text.contains("this project ⇥"), "{text}");
-            let (x, y) = crumb_cell(&app, HitTarget::LauncherKanbanScope);
+            assert!(text.contains("all ▸ demo ✕"), "{text}");
+            let (x, y) = crumb_cell(&app, HitTarget::ScopeClear);
             mouse(&mut app, MouseEventKind::Down(MouseButton::Left), x, y);
             assert!(app.launcher.kanban_all);
+            assert!(crate::config::Config::load().kanban_all());
+            let text = screen_text(&draw_at(&mut app, 200, 40));
+            assert!(!text.contains("✕"), "nothing narrowed: {text}");
 
             draw_at(&mut app, 200, 40);
             let (x, y) = crumb_cell(&app, HitTarget::LauncherHome(false));

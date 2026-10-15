@@ -382,6 +382,20 @@ pub(crate) fn load_worktree_files(
 /// can be two seconds behind an agent, so git is still asked, and the
 /// modal opens after all if it disagrees (`App::diff_probe`).
 pub(crate) fn open_diff_view(app: &mut App) {
+    // Opened from a board card: closing it lands back on that card.
+    let card =
+        (app.launcher.launcher_kanban && app.launcher_active() && !app.launcher.launcher_unaimed)
+            .then(|| app.selected_session().map(|a| a.id))
+            .flatten();
+    open_diff_view_inner(app);
+    if let Some(Overlay::Diff(v)) = &mut app.modals.overlay {
+        if v.from_card.is_none() {
+            v.from_card = card;
+        }
+    }
+}
+
+fn open_diff_view_inner(app: &mut App) {
     let Some((path, branch)) = selected_checkout(app) else {
         return;
     };

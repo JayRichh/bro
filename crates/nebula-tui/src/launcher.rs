@@ -262,6 +262,9 @@ pub fn kanban_hidden(app: &App, all: bool) -> [usize; Lane::ALL.len()] {
 fn kanban_scoped(app: &App, all: bool) -> nebula_core::board::Scoped<LauncherRow> {
     let on_screen = app.selected_project().map(|p| p.id.clone());
     let scope = &app.launcher.scope;
+    // A scope that names a place (FOCUS HERE on a tab, a band, a card)
+    // picks its own project: the board follows it, not the tab.
+    let all = all || scope.repo.is_some() || scope.worktree.is_some();
     let project_of = |row: &LauncherRow| {
         app.tree
             .worktrees
@@ -288,6 +291,75 @@ fn kanban_scoped(app: &App, all: bool) -> nebula_core::board::Scoped<LauncherRow
             .collect(),
         hidden: split.hidden,
     }
+}
+
+/// The bench's scope as the attention strip, `.`/`,` and the quick prompt
+/// read it: the chip's, and on the board in its this-project mode
+/// (**Kanban scope**) the project on screen as well — what the chip says.
+pub fn effective_scope(app: &App) -> nebula_core::scope::Scope {
+    let mut scope = app.launcher.scope.clone();
+    if app.launcher.launcher_kanban
+        && !app.launcher.kanban_all
+        && scope.repo.is_none()
+        && scope.worktree.is_none()
+    {
+        scope.repo = app.selected_project().map(|p| p.id.clone());
+    }
+    scope
+}
+
+/// Does the scope ([`effective_scope`]) admit session `agent`?
+pub fn scope_admits(app: &App, scope: &nebula_core::scope::Scope, agent: &Agent) -> bool {
+    let project = app
+        .tree
+        .worktrees
+        .iter()
+        .find(|w| w.id == agent.worktree_id)
+        .map(|w| w.project_id.clone());
+    scope.admits(agent, project.as_ref())
+}
+
+/// What a segment of the SCOPE CHIP narrows to, for a click on it: how
+/// many segments of the scope it keeps (1 the repo, 2 its worktree…).
+pub type ScopeKeep = usize;
+
+/// The SCOPE CHIP's segments after `all`, each with how much of the scope
+/// a click on it keeps: the repo's name, the worktree's branch, the
+/// session's name, and the account (`@name`) when the scope has one.
+pub fn scope_segments(app: &App) -> Vec<(String, ScopeKeep)> {
+    let scope = effective_scope(app);
+    let worktree = scope
+        .worktree
+        .as_ref()
+        .and_then(|id| app.tree.worktrees.iter().find(|w| &w.id == id));
+    let repo = scope
+        .repo
+        .clone()
+        .or_else(|| worktree.map(|w| w.project_id.clone()));
+    let mut out = Vec::new();
+    if let Some(p) = repo.and_then(|id| app.tree.projects.iter().find(|p| p.id == id)) {
+        out.push((p.name.clone(), 1));
+    }
+    if let Some(w) = worktree {
+        out.push((w.branch.clone(), 2));
+    }
+    if let Some(a) = scope
+        .session
+        .as_ref()
+        .and_then(|id| app.tree.agents.iter().find(|a| &a.id == id))
+    {
+        out.push((a.name.clone(), 3));
+    }
+    if let Some(account) = &scope.account {
+        out.push((format!("@{}", account.trim_start_matches('@')), 4));
+    }
+    out
+}
+
+/// The pull request on checkout `worktree`, as its cards show it.
+pub fn worktree_pr(app: &App, worktree: &WorktreeId) -> Option<RowPr> {
+    let w = app.tree.worktrees.iter().find(|w| &w.id == worktree)?;
+    row_pr(app, &w.id, &w.project_id, &w.branch)
 }
 
 /// Where session `id` sits on `lanes`: its lane and its place in it.
@@ -1999,14 +2071,18 @@ pub fn launch_checkout(app: &App, project: &ProjectId) -> Option<WorktreeId> {
     } else {
         cursor_checkout(app)
     };
+    let usable = |id: &WorktreeId| {
+        app.tree
+            .worktrees
+            .iter()
+            .any(|w| &w.id == id && &w.project_id == project)
+            && !app.is_placeholder_worktree(id)
+    };
+    // With nothing under the cursor, the worktree the SCOPE CHIP names
+    // is where the prompt is aimed, before the root.
     checkout
-        .filter(|id| {
-            app.tree
-                .worktrees
-                .iter()
-                .any(|w| &w.id == id && &w.project_id == project)
-                && !app.is_placeholder_worktree(id)
-        })
+        .filter(|id| usable(id))
+        .or_else(|| app.launcher.scope.worktree.clone().filter(|id| usable(id)))
         .or_else(|| root_checkout(app, project))
 }
 
