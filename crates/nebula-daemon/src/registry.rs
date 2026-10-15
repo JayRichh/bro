@@ -5658,6 +5658,64 @@ pub(crate) mod tests {
         assert_eq!(daemon.store.daemon_id().unwrap(), ns);
     }
 
+    fn kete_refs(repo: &Path) -> Vec<String> {
+        git_out(repo, &["for-each-ref", "--format=%(refname)", "refs/kete/"])
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Removing a project takes this daemon's refs there with it: its
+    /// sessions' and an orphan's (a session whose delete crashed before
+    /// its refs went), never another daemon's.
+    #[test]
+    fn removing_a_project_sweeps_its_repo() {
+        let daemon = test_daemon();
+        let ns = daemon.store.daemon_id().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = init_repo(tmp.path());
+        let project = project_at(&daemon, &repo);
+        seed_agent(&daemon, "a1", "rt", None);
+        daemon.snapshot_session_start(&AgentId("a1".into()));
+        daemon.settle_snapshots();
+        let tree = git_out(&repo, &["rev-parse", "HEAD^{tree}"]);
+        for name in [
+            format!("refs/kete/d/{ns}/sessions/ghost/start"),
+            "refs/kete/d/0th3r/sessions/ghost/start".to_string(),
+        ] {
+            git_in(&repo, &["update-ref", &name, tree.trim()]);
+        }
+        assert_eq!(kete_refs(&repo).len(), 3);
+        daemon.remove_project(&project.id).unwrap();
+        daemon.settle_snapshots();
+        assert_eq!(
+            kete_refs(&repo),
+            vec!["refs/kete/d/0th3r/sessions/ghost/start"]
+        );
+    }
+
+    /// Adding a project sweeps what this daemon left in its repo (a
+    /// project removed and added back, refs from a crash between).
+    #[tokio::test]
+    async fn adding_a_project_sweeps_its_repo() {
+        let daemon = test_daemon();
+        let ns = daemon.store.daemon_id().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let root = nebula_core::paths::canonical(tmp.path()).unwrap();
+        let repo = init_repo(&root);
+        let tree = git_out(&repo, &["rev-parse", "HEAD^{tree}"]);
+        for name in [
+            format!("refs/kete/d/{ns}/sessions/ghost/start"),
+            format!("refs/kete/d/{ns}/sessions/ghost/t1/e"),
+            "refs/kete/sessions/stranger/start".to_string(),
+        ] {
+            git_in(&repo, &["update-ref", &name, tree.trim()]);
+        }
+        daemon.add_project(&repo, None, false).await.unwrap();
+        daemon.settle_snapshots();
+        assert_eq!(kete_refs(&repo), vec!["refs/kete/sessions/stranger/start"]);
+    }
+
     /// A session from 0.51 (start and last, refs in the old namespace):
     /// the startup sweep moves its refs into this daemon's namespace, its
     /// review still shows what it did before the upgrade, and a 0.52 turn

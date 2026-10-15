@@ -2,10 +2,12 @@
 //! and one thread of its own, in the order it was asked for.
 //!
 //! A write to a PTY blocks for as long as the child is slow to read, and
-//! a pseudoconsole reads slowly: one 110 KB paste written to ConPTY took
-//! three seconds to go in. Written where it was asked for, that blocked
-//! the client's whole request loop behind the paste (its next key, its
-//! resize, its detach) — and the pump, which answers the child's terminal
+//! a pseudoconsole reads slowly: one 110 KB paste written to ConPTY takes
+//! three to five seconds to go in, however it is cut (`paste_bench`: the
+//! pseudoconsole's own parse, not this writer). Written where it was
+//! asked for, that blocked the client's whole request loop behind the
+//! paste (its next key, its resize, its detach) — and the pump, which
+//! answers the child's terminal
 //! queries from a tokio worker, would block on the same writer, stop
 //! draining the child's output and leave it stuck writing, unable to read
 //! the rest of the paste. Queued, a write returns at once; a paste waits

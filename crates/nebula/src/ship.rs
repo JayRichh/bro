@@ -21,6 +21,10 @@ use std::fmt::Write as _;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
+/// How long `kete ship` outside a session waits on a running daemon for
+/// its tree (the recorded base) before deriving without it.
+const PLAIN_DAEMON_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
 pub fn run_ship(command: ShipCommand, target: Target) -> Result<()> {
     // Before any thread or child exists: every git and gh inherits these,
     // so nothing can open a sign-in window or ask on the terminal.
@@ -41,7 +45,13 @@ async fn run(command: ShipCommand, target: Target) -> Result<String> {
     let (dir, tree) = checkout(&target).await?;
     let state = AdoState::system();
     let ship = Ship::new(&state, true);
-    let place = Place::new(dir, nebula_config::Config::load().worktree_base_branch);
+    // The base the daemon recorded when it cut this checkout, as the apps
+    // read it; a checkout with none (or an older daemon) derives it.
+    let recorded = tree
+        .as_ref()
+        .and_then(|t| daemon::recorded_base_at(t, &dir));
+    let place =
+        Place::new(dir, nebula_config::Config::load().worktree_base_branch).with_recorded(recorded);
     match command {
         ShipCommand::Status { json } => {
             let st = ship.status(&place).await;
@@ -112,7 +122,8 @@ async fn run(command: ShipCommand, target: Target) -> Result<String> {
 /// The checkout the command acts in, and the daemon's tree when it was
 /// read for that (or to find this session): `--project` and `--worktree`
 /// from the tree, else the checkout the command runs in. Outside a
-/// session and without either flag no daemon is asked, so none is started.
+/// session and without either flag only a daemon already running is asked
+/// (for the base it recorded), so none is started.
 async fn checkout(target: &Target) -> Result<(PathBuf, Option<Tree>)> {
     let worktree = target.worktree.as_deref();
     if let Some(project) = &target.project {
@@ -138,7 +149,13 @@ async fn checkout(target: &Target) -> Result<(PathBuf, Option<Tree>)> {
     }
     let tree = match env::non_empty(env::AGENT_ID) {
         Some(_) => daemon::fetch_tree().await.ok().map(|(t, _)| t),
-        None => None,
+        // A running daemon that has stopped answering must not hang a
+        // command that never needed one: no answer, no record, derived.
+        None => tokio::time::timeout(PLAIN_DAEMON_WAIT, daemon::fetch_tree_if_running())
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .flatten(),
     };
     Ok((top, tree))
 }

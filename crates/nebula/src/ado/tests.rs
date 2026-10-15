@@ -438,6 +438,7 @@ fn project_names_a_checkout_from_anywhere() {
             worktree("w2", "p1", "jari/gst-rounding", false),
         ],
         agents: vec![],
+        bases: vec![],
     };
     assert_eq!(
         resolve_checkout(&t, "ledger-api", None).unwrap(),
@@ -491,4 +492,113 @@ fn project_and_worktree_parse_before_or_after_the_verb() {
         (Some("web".into()), Some("jari/x".into()))
     );
     assert!(parse(&["kete", "ado", "--worktree", "x", "prs"]).is_err());
+}
+
+mod recorded_bases {
+    use super::*;
+    use crate::ado::daemon::{read_tree, recorded_base_at};
+    use nebula_core::codec::{read_frame, write_frame};
+    use nebula_core::review_base::RecordedBase;
+    use nebula_core::ServerEvent;
+
+    fn snapshot(worktrees: Vec<Worktree>) -> ServerEvent {
+        ServerEvent::Snapshot {
+            projects: vec![],
+            worktrees,
+            agents: vec![],
+            terminals: vec![],
+            links: vec![],
+            pr_seen: vec![],
+            ui_state: None,
+            subagents: vec![],
+        }
+    }
+
+    fn base(worktree: &str) -> RecordedBase {
+        RecordedBase {
+            worktree: WorktreeId(worktree.into()),
+            refname: "origin/develop".into(),
+            sha: "abc123".into(),
+        }
+    }
+
+    /// A daemon on the far end of a pipe: takes the Subscribe, then says
+    /// `events` in order, as `send_snapshot` does.
+    async fn tree_from(protocol: u32, events: Vec<ServerEvent>) -> Tree {
+        let (mut client, mut daemon) = tokio::io::duplex(1 << 16);
+        let serve = tokio::spawn(async move {
+            let req: Option<ClientRequest> = read_frame(&mut daemon).await.unwrap();
+            assert!(matches!(req, Some(ClientRequest::Subscribe)));
+            for ev in events {
+                write_frame(&mut daemon, &ev).await.unwrap();
+            }
+            daemon
+        });
+        let tree = read_tree(&mut client, protocol).await.unwrap();
+        drop(serve.await.unwrap());
+        tree
+    }
+
+    /// A 59+ daemon's recorded bases, sent behind the Snapshot and its
+    /// ports, are what `kete ship` reads, as the apps do.
+    #[tokio::test]
+    async fn a_59_daemon_hands_over_its_recorded_bases() {
+        let tree = tree_from(
+            nebula_core::RECORDED_BASE_PROTOCOL,
+            vec![
+                snapshot(vec![worktree("w2", "p1", "feat", false)]),
+                ServerEvent::WorktreePorts { ports: vec![] },
+                ServerEvent::WorktreeBases {
+                    bases: vec![base("w2")],
+                },
+                ServerEvent::AccountUsage { accounts: vec![] },
+            ],
+        )
+        .await;
+        assert_eq!(tree.bases, vec![base("w2")]);
+        assert_eq!(
+            recorded_base_at(&tree, Path::new("/p1/feat")),
+            Some(base("w2"))
+        );
+        assert_eq!(recorded_base_at(&tree, Path::new("/p1/other")), None);
+    }
+
+    /// A daemon whose base store failed skips the bases and goes on to the
+    /// usage lists: no record, and no wait for one.
+    #[tokio::test]
+    async fn no_bases_before_the_usage_lists_means_no_record() {
+        let started = std::time::Instant::now();
+        let tree = tree_from(
+            nebula_core::RECORDED_BASE_PROTOCOL,
+            vec![
+                snapshot(vec![]),
+                ServerEvent::WorktreePorts { ports: vec![] },
+                ServerEvent::AccountUsage { accounts: vec![] },
+                ServerEvent::WorktreeBases {
+                    bases: vec![base("late")],
+                },
+            ],
+        )
+        .await;
+        assert!(tree.bases.is_empty());
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    }
+
+    /// An older daemon never sends bases: the tree is read off the
+    /// Snapshot alone, and every base is derived.
+    #[tokio::test]
+    async fn an_older_daemon_derives() {
+        let tree = tree_from(
+            nebula_core::RECORDED_BASE_PROTOCOL - 1,
+            vec![
+                snapshot(vec![worktree("w2", "p1", "feat", false)]),
+                ServerEvent::WorktreeBases {
+                    bases: vec![base("w2")],
+                },
+            ],
+        )
+        .await;
+        assert!(tree.bases.is_empty());
+        assert_eq!(tree.worktrees.len(), 1);
+    }
 }

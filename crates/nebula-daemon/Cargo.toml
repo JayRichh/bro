@@ -36,3 +36,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Threading",
 ] }
 
+
+[target.'cfg(windows)'.dev-dependencies]
+# The paste bench's child reads its console the way node does (pty/paste_bench.rs).
+windows-sys = { version = "0.61", features = ["Win32_System_Console"] }

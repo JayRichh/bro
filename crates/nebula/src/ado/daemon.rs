@@ -11,11 +11,12 @@ use anyhow::{anyhow, bail, Result};
 use kete_ado::tasks::{taken_from_refs, NewWorktree, Workspace, CREATE_WORKTREE_TIMEOUT};
 use kete_ado::{AdoContext, NewAgent};
 use nebula_core::codec::{read_frame, write_frame};
+use nebula_core::review_base::RecordedBase;
 use nebula_core::{
     Agent, AgentId, AgentKind, AgentRole, ClientRequest, EntityId, Project, ProjectId, ServerEvent,
     Worktree, WorktreeId,
 };
-use nebula_tui::ipc::{connect_or_spawn, Connection};
+use nebula_tui::ipc::{connect_existing, connect_or_spawn, Connection};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -30,6 +31,10 @@ pub struct Tree {
     pub projects: Vec<Project>,
     pub worktrees: Vec<Worktree>,
     pub agents: Vec<Agent>,
+    /// The base each worktree was cut from, as the daemon recorded it
+    /// (`ServerEvent::WorktreeBases`): empty from a daemon older than
+    /// `RECORDED_BASE_PROTOCOL`, whose clients derive every base.
+    pub bases: Vec<RecordedBase>,
 }
 
 pub struct DaemonWorkspace {
@@ -335,26 +340,80 @@ pub fn next_agent_name(agents: &[Agent]) -> String {
 
 pub(crate) async fn fetch_tree() -> Result<(Tree, u32)> {
     let mut conn = connect_or_spawn().await?;
-    write_frame(&mut conn.stream, &ClientRequest::Subscribe).await?;
-    loop {
-        match read_frame::<ServerEvent, _>(&mut conn.stream).await? {
+    let tree = read_tree(&mut conn.stream, conn.protocol_version).await?;
+    Ok((tree, conn.protocol_version))
+}
+
+/// The tree from a daemon that is already running, None when none is: for
+/// a command that would rather derive what it needs than start one.
+pub(crate) async fn fetch_tree_if_running() -> Result<Option<Tree>> {
+    let Some(mut conn) = connect_existing().await? else {
+        return Ok(None);
+    };
+    Ok(Some(
+        read_tree(&mut conn.stream, conn.protocol_version).await?,
+    ))
+}
+
+/// How long the recorded bases may lag the Snapshot. The daemon sends them
+/// right behind it (after `WorktreePorts`), so this only bounds a daemon
+/// that has stopped talking.
+const BASES_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Subscribe on `stream` and read the tree: the Snapshot, then, from a
+/// daemon at `protocol` 59 or later, the recorded bases it sends behind it.
+/// A daemon whose base store failed sends none and goes straight on to the
+/// usage lists, which end the wait with no record (every base derived).
+pub(crate) async fn read_tree<S>(stream: &mut S, protocol: u32) -> Result<Tree>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    write_frame(stream, &ClientRequest::Subscribe).await?;
+    let mut tree = loop {
+        match read_frame::<ServerEvent, _>(stream).await? {
             Some(ServerEvent::Snapshot {
                 projects,
                 worktrees,
                 agents,
                 ..
             }) => {
-                let tree = Tree {
+                break Tree {
                     projects,
                     worktrees,
                     agents,
-                };
-                return Ok((tree, conn.protocol_version));
+                    bases: Vec::new(),
+                }
             }
             Some(_) => continue,
             None => bail!("the daemon closed the connection before sending its sessions"),
         }
+    };
+    if protocol < nebula_core::RECORDED_BASE_PROTOCOL {
+        return Ok(tree);
     }
+    let bases = tokio::time::timeout(BASES_WAIT, async {
+        loop {
+            match read_frame::<ServerEvent, _>(stream).await {
+                Ok(Some(ServerEvent::WorktreeBases { bases })) => return bases,
+                Ok(Some(
+                    ServerEvent::AccountUsage { .. } | ServerEvent::SessionContexts { .. },
+                ))
+                | Ok(None)
+                | Err(_) => return Vec::new(),
+                Ok(Some(_)) => continue,
+            }
+        }
+    })
+    .await
+    .unwrap_or_default();
+    tree.bases = bases;
+    Ok(tree)
+}
+
+/// The base the daemon recorded for the worktree checked out at `path`.
+pub fn recorded_base_at(tree: &Tree, path: &Path) -> Option<RecordedBase> {
+    let wt = worktree_at(tree, path)?;
+    tree.bases.iter().find(|b| b.worktree == wt.id).cloned()
 }
 
 /// Send `req` on a fresh connection and wait for its Ack (what it made)

@@ -3,6 +3,8 @@ pub mod cursor;
 mod input;
 pub mod kitty;
 mod osc;
+#[cfg(all(test, windows))]
+mod paste_bench;
 pub mod progress;
 pub mod question;
 pub mod ring;

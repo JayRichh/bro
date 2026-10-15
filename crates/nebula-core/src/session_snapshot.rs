@@ -52,7 +52,8 @@
 //! beside Windows') that shares the repo. 0.51 wrote
 //! `refs/kete/sessions/<agent>/{start,last}` with no owner; a daemon moves
 //! those of its own sessions into its namespace ([`adopt_legacy`]) and
-//! never deletes one by absence.
+//! never deletes one by absence. [`tidy`] does both in one pass over a
+//! repo's refs.
 //!
 //! A working tree whose untracked files are too many or too big, or an
 //! add that runs past [`Limits::timeout`], records no tree ("unavailable")
@@ -363,10 +364,14 @@ fn update_refs(repo: &Path, script: &str) -> bool {
 
 /// Every ref under `prefix` in the repo at `repo`, with what it points at.
 fn refs_under(repo: &Path, prefix: &str) -> Vec<(String, String)> {
-    let Some(out) = git_ok(
-        repo,
-        &["for-each-ref", "--format=%(refname) %(objectname)", prefix],
-    ) else {
+    refs_matching(repo, &[prefix])
+}
+
+/// Every ref under any of `prefixes`, from one `for-each-ref`.
+fn refs_matching(repo: &Path, prefixes: &[&str]) -> Vec<(String, String)> {
+    let mut args = vec!["for-each-ref", "--format=%(refname) %(objectname)"];
+    args.extend_from_slice(prefixes);
+    let Some(out) = git_ok(repo, &args) else {
         return Vec::new();
     };
     String::from_utf8_lossy(&out)
@@ -467,23 +472,68 @@ pub fn adopt_legacy(repo: &Path, daemon: &str, agents: &[String]) -> bool {
 /// Only `daemon`'s namespace is read; 0.51 refs and other daemons' are
 /// never swept. Returns the ids swept.
 pub fn sweep(repo: &Path, daemon: &str, live: &std::collections::HashSet<String>) -> Vec<String> {
-    let gone: Vec<String> = kept_agents(repo, daemon)
-        .into_iter()
-        .filter(|a| !live.contains(a))
-        .collect();
+    tidy_refs(repo, daemon, live, false).swept
+}
+
+/// What [`tidy`] did in one repo: the sessions whose 0.51 refs it adopted
+/// and those whose refs it swept, each sorted.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Tidied {
+    pub adopted: Vec<String>,
+    pub swept: Vec<String>,
+}
+
+/// [`adopt_legacy`] for the sessions in `live` and [`sweep`] for the rest
+/// of `daemon`'s, from one `for-each-ref` and in one transaction: cheap
+/// enough to run whenever a project comes or goes, and on a timer. The
+/// same rules: 0.51 refs of a session not in `live` and other daemons'
+/// refs are never touched. Nothing done when the transaction fails.
+pub fn tidy(repo: &Path, daemon: &str, live: &std::collections::HashSet<String>) -> Tidied {
+    tidy_refs(repo, daemon, live, true)
+}
+
+fn tidy_refs(
+    repo: &Path,
+    daemon: &str,
+    live: &std::collections::HashSet<String>,
+    adopt: bool,
+) -> Tidied {
     let Some(ns) = namespace(daemon) else {
-        return Vec::new();
+        return Tidied::default();
     };
+    let mut prefixes = vec![ns.as_str()];
+    if adopt {
+        prefixes.push(LEGACY_PREFIX);
+    }
     let mut script = String::new();
-    for agent in &gone {
-        for (name, _) in refs_under(repo, &format!("{ns}{agent}/")) {
-            script.push_str(&format!("delete {name}\n"));
+    let mut adopted = std::collections::BTreeSet::new();
+    let mut swept = std::collections::BTreeSet::new();
+    for (name, oid) in refs_matching(repo, &prefixes) {
+        if let Some(rest) = name.strip_prefix(&ns) {
+            let Some((agent, _)) = rest.split_once('/') else {
+                continue;
+            };
+            if !live.contains(agent) {
+                script.push_str(&format!("delete {name}\n"));
+                swept.insert(agent.to_string());
+            }
+        } else if let Some(rest) = name.strip_prefix(LEGACY_PREFIX) {
+            let Some((agent, slot)) = rest.split_once('/') else {
+                continue;
+            };
+            if live.contains(agent) && safe_component(agent) {
+                script.push_str(&format!("update {ns}{agent}/{slot} {oid}\n"));
+                script.push_str(&format!("delete {name} {oid}\n"));
+                adopted.insert(agent.to_string());
+            }
         }
     }
-    if update_refs(repo, &script) {
-        gone
-    } else {
-        Vec::new()
+    if !update_refs(repo, &script) {
+        return Tidied::default();
+    }
+    Tidied {
+        adopted: adopted.into_iter().collect(),
+        swept: swept.into_iter().collect(),
     }
 }
 
@@ -861,6 +911,46 @@ mod tests {
         );
         // Nothing to move is not an error.
         assert!(adopt_legacy(&repo, "d1", &["A1".into()]));
+    }
+
+    /// One pass adopts the 0.51 refs of known sessions and sweeps this
+    /// daemon's refs for gone ones, by the same rules as the two apart:
+    /// another daemon's refs and an unknown session's 0.51 refs stay.
+    #[test]
+    fn a_tidy_adopts_and_sweeps_in_one_pass() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = repo(&dir);
+        let tree = take(&repo).tree.unwrap();
+        keep(&repo, "d1", "live", Slot::Start, &tree);
+        keep(&repo, "d1", "dead", Slot::Start, &tree);
+        keep(&repo, "d1", "dead", Slot::TurnEnd(2), &tree);
+        keep(&repo, "d2", "dead", Slot::Start, &tree);
+        run(
+            &repo,
+            &["update-ref", "refs/kete/sessions/live/last", &tree],
+        );
+        run(
+            &repo,
+            &["update-ref", "refs/kete/sessions/gone/start", &tree],
+        );
+        let live: std::collections::HashSet<String> = ["live".to_string()].into();
+        assert_eq!(
+            tidy(&repo, "d1", &live),
+            Tidied {
+                adopted: vec!["live".into()],
+                swept: vec!["dead".into()],
+            }
+        );
+        assert_eq!(kept_agents(&repo, "d1"), vec!["live".to_string()]);
+        assert_eq!(
+            refs_under(&repo, "refs/kete/d/d1/sessions/live/").len(),
+            2,
+            "start kept, 0.51 last adopted beside it"
+        );
+        assert_eq!(kept_agents(&repo, "d2"), vec!["dead".to_string()]);
+        assert_eq!(legacy_agents(&repo), vec!["gone".to_string()]);
+        // Again: nothing left to do.
+        assert_eq!(tidy(&repo, "d1", &live), Tidied::default());
     }
 
     fn tree_with(repo: &Path, files: &[(&str, &str)]) -> String {
