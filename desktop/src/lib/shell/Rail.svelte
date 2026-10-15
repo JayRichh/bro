@@ -8,6 +8,7 @@
   import { toneOf } from '../status';
   import Status from '../Status.svelte';
   import AccountsSection from '../accounts/AccountsSection.svelte';
+  import { openAccounts } from '../accounts/actions';
   import VersionPlate from './VersionPlate.svelte';
 
   /** Icons only, for a narrow window: the repos as their initials. */
@@ -118,6 +119,16 @@
       {/each}
     </nav>
     <div class="flex flex-none flex-col gap-1 border-t border-rule py-2">
+      <!-- The rail's Accounts section has no room here: its view does. -->
+      <button
+        class="{tile} text-[11px] {nav.current.view === 'accounts' ? 'bg-surface text-ink' : 'bg-transparent text-muted hover:text-ink'}"
+        onclick={openAccounts}
+        title="Accounts: every login, its use and its sessions (Shift+U)"
+        aria-label="Accounts"
+        aria-current={nav.current.view === 'accounts' ? 'page' : undefined}
+      >
+        <span aria-hidden="true">Ac</span>
+      </button>
       <button
         class="{tile} {inSettings ? 'bg-surface text-ink' : 'bg-transparent text-muted hover:text-ink'}"
         onclick={() => openSettings()}
