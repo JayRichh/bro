@@ -25,6 +25,7 @@ import { moveStep, stepInFor, type StepIn } from './reorder.svelte';
 import { openComposer, openMerge } from './ship/sheet.svelte';
 import { reviewVerbs } from './ship/ship';
 import { repoScope, worktreeScope } from './scope';
+import { groupOf } from './worktrees/groups';
 
 export type Target =
   /** `viaSub`: picked from one of its subagents' rows, so it acts on
@@ -580,6 +581,19 @@ function projectVerbs(project: string): VerbTable {
     remove_project: { run: () => removeProject(project) },
   };
   if (canSwitchBranch(project)) t.switch_branch = { run: () => openBranchSwitch(project) };
+  // The Worktrees view's sweep, with a linked checkout to look at. Its
+  // module imports this one, so it loads when asked.
+  const linked = m().worktrees.filter((w) => w.project_id === project && !w.is_main);
+  if (linked.length)
+    t.sweep_worktrees = {
+      run: () =>
+        import('./worktrees/verbs').then((v) =>
+          v.sweepWorktrees(
+            project,
+            linked.map((w) => groupOf(m(), w)),
+          ),
+        ),
+    };
   return t;
 }
 

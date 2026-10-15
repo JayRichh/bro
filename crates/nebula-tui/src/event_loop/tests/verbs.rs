@@ -622,3 +622,88 @@ fn the_overlay_under_a_verbs_menu_never_comes_back_late() {
     assert_eq!(link[0].verb, Some(Action::Activate));
     assert!(link.iter().any(|i| i.verb == Some(Action::Delete)));
 }
+
+/// The project menu's **Delete merged & clean worktrees…**: the linked
+/// checkouts with nothing in them and their commits on a remote are
+/// listed in one confirm; one with uncommitted work, or a session, stays
+/// off it; the yes deletes each unforced and bulk.
+#[test]
+fn the_sweep_lists_the_clean_worktrees_and_deletes_them_unforced() {
+    let dir = tempfile::tempdir().unwrap();
+    let origin = test_repo(&dir);
+    let clone = dir.path().join("clone");
+    let out = std::process::Command::new("git")
+        .arg("clone")
+        .arg(&origin)
+        .arg(&clone)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let (clean, dirty, busy) = (
+        dir.path().join("clean"),
+        dir.path().join("dirty"),
+        dir.path().join("busy"),
+    );
+    for (path, branch) in [(&clean, "clean"), (&dirty, "dirty"), (&busy, "busy")] {
+        run_git(
+            &clone,
+            &["worktree", "add", "-b", branch, &path.display().to_string()],
+        );
+    }
+    std::fs::write(dirty.join("new.txt"), "x").unwrap();
+
+    let mut app = App::new();
+    seed_repo_tree(&mut app, &clone);
+    for (i, (path, branch)) in [(&clean, "clean"), (&dirty, "dirty"), (&busy, "busy")]
+        .into_iter()
+        .enumerate()
+    {
+        hse(
+            &mut app,
+            ServerEvent::EntityUpserted {
+                entity: Entity::Worktree(Worktree {
+                    id: WorktreeId(format!("w-{branch}")),
+                    project_id: ProjectId("p1".into()),
+                    path: path.clone(),
+                    branch: branch.into(),
+                    is_main: false,
+                    sort_order: i as i64 + 1,
+                }),
+            },
+        );
+    }
+    seed_agent_in(&mut app, "worker", &WorktreeId("w-busy".into()));
+    let p1 = ProjectId("p1".into());
+    let menu = verbs::menu_for(&app, &Target::Repo(p1.clone()));
+    let row = menu
+        .iter()
+        .find(|i| i.action == MenuAction::SweepWorktrees(p1.clone()))
+        .expect("the project menu offers the sweep");
+    assert_eq!(row.label, "Delete merged & clean worktrees\u{2026}");
+
+    let mut out = Vec::new();
+    run_menu_action(&mut app, MenuAction::SweepWorktrees(p1), &mut out);
+    let Some(Overlay::Confirm(c)) = app.modals.overlay.clone() else {
+        panic!(
+            "no sweep confirm: {:?} {:?}",
+            app.modals.overlay, app.chrome.flash
+        );
+    };
+    assert_eq!(c.title, "Delete 1 worktree");
+    assert!(c.message.contains("  clean · clean"), "{}", c.message);
+    assert!(!c.message.contains("dirty") && !c.message.contains("busy"));
+    app.modals.overlay = None;
+    run_pending_action(&mut app, c.action, &mut out);
+    let deletes: Vec<_> = out
+        .iter()
+        .filter_map(|r| match r {
+            ClientRequest::DeleteWorktree { id, force, .. } => Some((id.0.clone(), *force)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(deletes, vec![("w-clean".to_string(), false)]);
+}

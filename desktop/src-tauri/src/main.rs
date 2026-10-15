@@ -22,6 +22,7 @@ mod profiles;
 mod projects;
 mod sessions;
 mod settings;
+mod settings_io;
 mod ship;
 mod update;
 
@@ -796,6 +797,7 @@ fn main() {
     let client = Client::new();
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(client.clone())
         // One token source, one ado.json store and one set of clients for
         // every ADO command and the PR poll.
@@ -897,6 +899,9 @@ fn main() {
             settings::settings_schema,
             settings::settings_set,
             settings::settings_reset,
+            settings_io::settings_export,
+            settings_io::settings_import_preview,
+            settings_io::settings_import,
             settings::desktop_prefs,
             settings::desktop_set_collapsed,
             settings::config_problem,

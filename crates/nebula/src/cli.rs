@@ -1244,12 +1244,16 @@ pub(crate) enum ConfigCommand {
     /// never written, and still wins.
     #[command(
         after_help = "Examples:\n  kete config import nebula-settings.json\n  \
-                            kete config import ~/dotfiles/nebula   a folder holding config.json"
+                            kete config import ~/dotfiles/nebula   a folder holding config.json\n  \
+                            kete config import --dry-run backup.json   what it would change"
     )]
     Import {
         /// The file, the folder, or `-` for stdin.
         #[arg(value_name = "SOURCE")]
         source: String,
+        /// Say what the import would change, and write nothing.
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Print the effective harness registry: every harness kete knows (
     /// the built-ins, `custom_harnesses` entries and `harnesses` map ids)

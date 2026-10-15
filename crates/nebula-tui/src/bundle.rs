@@ -154,11 +154,15 @@ pub fn section_count(bundle: &Value) -> usize {
 pub struct Report {
     /// `config.json` keys whose value changed.
     pub config_changed: usize,
+    /// Their names, sorted.
+    pub config_keys: Vec<String>,
     /// Imported keys `config.local.json` holds a different value for, so they
     /// don't take effect on this machine.
     pub held_local: Vec<String>,
     pub presets_added: usize,
     pub presets_replaced: usize,
+    /// The presets added or replaced, by name.
+    pub presets: Vec<String>,
     pub hosts_added: usize,
     /// Whether the SSH HOSTS FILE changed at all (a newer stamp counts).
     pub hosts_changed: bool,
@@ -208,6 +212,19 @@ impl Report {
         }
         parts.join(" · ")
     }
+
+    /// The summary, then a line per thing it changes: what a confirm
+    /// shows before an import is written.
+    pub fn details(&self) -> Vec<String> {
+        let mut lines = vec![self.summary()];
+        if !self.config_keys.is_empty() {
+            lines.push(format!("config.json: {}", self.config_keys.join(", ")));
+        }
+        if !self.presets.is_empty() {
+            lines.push(format!("presets: {}", self.presets.join(", ")));
+        }
+        lines
+    }
 }
 
 fn plural(n: usize, noun: &str) -> String {
@@ -223,6 +240,17 @@ fn plural(n: usize, noun: &str) -> String {
 /// and stays locked until the last write, in one order: config, presets,
 /// hosts.
 pub fn import(paths: &Paths, bundle: &Value) -> Result<Report> {
+    merge(paths, bundle, true)
+}
+
+/// What [`import`] would change, read under the same locks and through
+/// the same merges, with nothing written: the Settings screens' import
+/// shows it and asks before the import itself.
+pub fn preview(paths: &Paths, bundle: &Value) -> Result<Report> {
+    merge(paths, bundle, false)
+}
+
+fn merge(paths: &Paths, bundle: &Value, write_back: bool) -> Result<Report> {
     let Some(obj) = bundle.as_object().filter(|obj| obj.contains_key(MARKER)) else {
         bail!("not a kete settings bundle (it has no \"{MARKER}\" key)");
     };
@@ -270,6 +298,7 @@ pub fn import(paths: &Paths, bundle: &Value) -> Result<Report> {
             if root.get(key) != Some(value) {
                 root.insert(key.clone(), value.clone());
                 report.config_changed += 1;
+                report.config_keys.push(key.clone());
             }
             if held.get(key).is_some_and(|local| local != value) {
                 report.held_local.push(key.clone());
@@ -277,12 +306,16 @@ pub fn import(paths: &Paths, bundle: &Value) -> Result<Report> {
         }
     }
     if let (Some(incoming), Some(list)) = (incoming_presets, presets.as_mut()) {
-        (report.presets_added, report.presets_replaced) = merge_presets(list, incoming);
+        (report.presets_added, report.presets_replaced) =
+            merge_presets(list, incoming, &mut report.presets);
     }
     if let (Some(incoming), Some(list)) = (incoming_hosts, hosts.as_mut()) {
         (report.hosts_added, report.hosts_changed) = merge_hosts(list, incoming);
     }
 
+    if !write_back {
+        return Ok(report);
+    }
     if let Some(root) = config.filter(|_| report.config_changed > 0) {
         write(&paths.config, Value::Object(root))?;
     }
@@ -331,8 +364,12 @@ fn write(path: &Path, value: Value) -> Result<()> {
 
 /// Incoming presets merged by name, case-insensitively as the preset editor
 /// keeps names unique: a match is replaced, a new name appended, an entry
-/// with no name skipped. Returns (added, replaced).
-fn merge_presets(list: &mut Vec<Value>, incoming: &[Value]) -> (usize, usize) {
+/// with no name skipped. Returns (added, replaced); `names` gets each.
+fn merge_presets(
+    list: &mut Vec<Value>,
+    incoming: &[Value],
+    names: &mut Vec<String>,
+) -> (usize, usize) {
     use crate::agent_presets::entry_name;
     let (mut added, mut replaced) = (0, 0);
     for entry in incoming {
@@ -347,10 +384,12 @@ fn merge_presets(list: &mut Vec<Value>, incoming: &[Value]) -> (usize, usize) {
             Some(slot) => {
                 *slot = entry.clone();
                 replaced += 1;
+                names.push(name.to_string());
             }
             None => {
                 list.push(entry.clone());
                 added += 1;
+                names.push(name.to_string());
             }
         }
     }
@@ -541,8 +580,14 @@ pub fn apply_forwarded() {
 #[derive(Debug, Clone)]
 pub enum ConfigOp {
     Path,
-    Export { path: Option<String> },
-    Import { source: String },
+    Export {
+        path: Option<String>,
+    },
+    /// `dry_run`: say what it would change, write nothing.
+    Import {
+        source: String,
+        dry_run: bool,
+    },
     Harnesses,
 }
 
@@ -610,8 +655,14 @@ pub fn run(op: ConfigOp) -> Result<()> {
             );
             Ok(())
         }
-        ConfigOp::Import { source } => {
+        ConfigOp::Import { source, dry_run } => {
             let bundle = read_source(&source)?;
+            if dry_run {
+                for line in preview(&paths, &bundle)?.details() {
+                    println!("{line}");
+                }
+                return Ok(());
+            }
             let report = import(&paths, &bundle)?;
             println!("{}", report.summary());
             Ok(())

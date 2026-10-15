@@ -19,6 +19,7 @@
   import DesktopKeys from './DesktopKeys.svelte';
   import Presets from './Presets.svelte';
   import Profiles from './Profiles.svelte';
+  import { exportSettings, importSettings } from './io';
 
   /** Tabs the window draws itself, after the schema's: their data is not
    *  settings rows but lists (agent_presets.json, config.json profiles). */
@@ -230,7 +231,7 @@
 
 <section class="flex min-h-0 min-w-0 flex-1 flex-col" aria-labelledby="settings-title">
   <header class="flex-none border-b border-rule px-6 pt-6 pb-4">
-    <div class="flex items-baseline gap-4">
+    <div class="flex flex-wrap items-baseline gap-x-4 gap-y-2">
       <h1 id="settings-title" class="m-0 text-[28px] leading-tight font-semibold tracking-tight text-ink">Settings</h1>
       <span class={label}>shared with the terminal app</span>
       <span class="flex-1"></span>
@@ -244,6 +245,18 @@
           onkeydown={(e) => e.key === 'Escape' && filter && (e.stopPropagation(), (filter = ''))}
         />
       </label>
+      <button
+        class="h-7 border border-rule bg-transparent px-2.5 text-[13px] text-ink enabled:hover:border-rule-strong disabled:text-faint"
+        title="Write config.json, the agent presets and the ssh hosts to one file, as kete config export does"
+        disabled={!!blocked}
+        onclick={exportSettings}>Export&hellip;</button
+      >
+      <button
+        class="h-7 border border-rule bg-transparent px-2.5 text-[13px] text-ink enabled:hover:border-rule-strong disabled:text-faint"
+        title="Merge a settings file in, as kete config import does: what it changes is shown first"
+        disabled={!!blocked}
+        onclick={async () => (await importSettings()) && (await load())}>Import&hellip;</button
+      >
       <button
         class="h-7 border border-rule bg-transparent px-2.5 text-[13px] text-ink enabled:hover:border-rule-strong disabled:text-faint"
         disabled={!schema || resetting || !!blocked}

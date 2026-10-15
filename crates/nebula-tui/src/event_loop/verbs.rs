@@ -287,6 +287,13 @@ pub(crate) fn menu_action(app: &App, action: Action, t: &Target) -> Option<MenuA
                     if action == Action::ReorderUp { -1 } else { 1 },
                 )),
                 Action::RemoveProject => Some(MenuAction::RemoveProject(id.clone())),
+                // Only with a linked worktree to look at.
+                Action::SweepWorktrees => app
+                    .tree
+                    .worktrees
+                    .iter()
+                    .any(|w| &w.project_id == id && !w.is_main)
+                    .then(|| MenuAction::SweepWorktrees(id.clone())),
                 Action::FocusScope => super::board::scope_for(app, t).map(MenuAction::FocusScope),
                 _ => keyed(app),
             }

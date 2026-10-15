@@ -134,6 +134,14 @@ describe('menus from the registry', () => {
     expect(repo[0]).toBe('New session\u2026');
     expect(repo).toContain('Remove from Kete\u2026');
     expect(repo.indexOf('Locate folder\u2026')).toBe(repo.indexOf('Remove from Kete\u2026') - 1);
+    // The sweep only with a linked worktree to look at, as the terminal app.
+    expect(repo).not.toContain('Delete merged & clean worktrees\u2026');
+    app.model = {
+      ...app.model,
+      worktrees: [...app.model.worktrees, { id: 'w2', project_id: 'p', path: '/p2', branch: 'feat', is_main: false, sort_order: 1 }],
+    } as unknown as Model;
+    const swept = words(actions.menuFor({ kind: 'project', id: 'p' }));
+    expect(swept.indexOf('Delete merged & clean worktrees\u2026')).toBeLessThan(swept.indexOf('Remove from Kete\u2026'));
   });
 
   it('offers the pull request verbs and Focus here under the shared ids, in the terminal app words', () => {

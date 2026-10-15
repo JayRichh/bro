@@ -401,6 +401,14 @@ export interface SettingsSchema {
   /** Why the settings files can't be written now (one can't be parsed). */
   problem: string | null;
 }
+/** What importing a settings file would change (src-tauri settings_io.rs). */
+export interface ImportPreview {
+  path: string;
+  /** `kete config import --dry-run`: the summary, then what changes. */
+  lines: string[];
+  changes: boolean;
+}
+
 export interface DesktopPrefs {
   theme: string;
   diff_mode: string;
@@ -592,6 +600,11 @@ export const api = {
   settingsSchema: () => invoke<SettingsSchema>('settings_schema'),
   settingsSet: (target: SettingTarget, value: boolean | string) => invoke<void>('settings_set', { target, value }),
   settingsReset: () => invoke<void>('settings_reset'),
+  /** Save dialog, then `kete config export`; null when cancelled. */
+  settingsExport: () => invoke<string | null>('settings_export'),
+  /** Open dialog, then `kete config import --dry-run`; null when cancelled. */
+  settingsImportPreview: () => invoke<ImportPreview | null>('settings_import_preview'),
+  settingsImport: (path: string) => invoke<string>('settings_import', { path }),
   desktopPrefs: () => invoke<DesktopPrefs>('desktop_prefs'),
   /** The verb registry and the window's own key bindings. */
   actionsList: () => invoke<ActionsList>('actions_list'),

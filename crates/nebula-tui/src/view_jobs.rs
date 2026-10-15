@@ -136,6 +136,14 @@ pub enum Answer {
     },
     /// An AZURE DEVOPS OVERLAY read, or the remote probe behind its button.
     Ado(crate::ado::AdoAnswer),
+    /// The WORKTREE SWEEP's reads of a project's free checkouts.
+    Sweep {
+        project: nebula_core::ProjectId,
+        results: Vec<(
+            nebula_core::WorktreeId,
+            Result<crate::delete_check::Findings, String>,
+        )>,
+    },
 }
 
 /// A view's way onto the blocking pool and back. Cheap to clone — the

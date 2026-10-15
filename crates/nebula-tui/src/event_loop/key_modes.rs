@@ -410,6 +410,9 @@ fn handle_global_action(
         // The views ported from the desktop window.
         // ⇧B: the AZURE DEVOPS OVERLAY.
         Action::Ado => ado::open(app),
+        // `kete config export / import`, from the palette or a user's key.
+        Action::ExportSettings => open_prompt(app, PromptKind::ExportSettings),
+        Action::ImportSettings => open_prompt(app, PromptKind::ImportSettings),
         // ⌥↑ / ⌥↓: the card, band or tab under the cursor along its order.
         Action::ReorderUp => launcher::reorder_focused(app, -1, out),
         Action::ReorderDown => launcher::reorder_focused(app, 1, out),
@@ -427,6 +430,7 @@ fn handle_global_action(
         | Action::ToggleRun
         | Action::DeleteWorktree
         | Action::RemoveProject
+        | Action::SweepWorktrees
         | Action::CreatePullRequest
         | Action::MergePullRequest
         | Action::FocusScope => super::verbs::run_on_selection(app, action, out),

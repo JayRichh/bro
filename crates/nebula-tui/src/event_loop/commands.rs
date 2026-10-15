@@ -296,6 +296,25 @@ fn dispatch_prompt(
         PromptKind::IssueComment { view, issue } => {
             crate::issues::post_comment(app, view, issue, value);
         }
+        PromptKind::ExportSettings => {
+            app.chrome.flash = Some(match crate::settings_io::export_to(&value) {
+                Ok(said) => said,
+                Err(e) => format!("export failed: {e}"),
+            });
+        }
+        PromptKind::ImportSettings => match crate::settings_io::preview(&value) {
+            Ok(lines) => {
+                let mut message = lines.join("\n");
+                message.push_str("\nNothing is written until you confirm.");
+                app.modals.overlay = Some(Overlay::Confirm(ConfirmDialog {
+                    title: "Import settings".into(),
+                    message,
+                    action: PendingAction::ImportSettings { source: value },
+                    area: ratatui::layout::Rect::default(),
+                }));
+            }
+            Err(e) => app.chrome.flash = Some(format!("import: {e}")),
+        },
         PromptKind::EditLink { id } => {
             send(app, out, |req_id| ClientRequest::UpdateLink {
                 req_id,
@@ -386,6 +405,13 @@ pub(crate) fn run_pending_action(
                 id,
             });
         }
+        PendingAction::SweepWorktrees(ids) => {
+            let before = selection_snapshot(app);
+            for id in crate::sweep::still_free(app, ids) {
+                send_delete_worktree(app, id, false, true, out);
+            }
+            reconcile_selection(app, before, out);
+        }
         PendingAction::CloseProjectTab(id) => launcher::close_cursor_tab(app, &id, out),
         PendingAction::DeleteAgentPreset {
             index,
@@ -408,6 +434,12 @@ pub(crate) fn run_pending_action(
                 quick.map(|back| *back),
                 index,
             );
+        }
+        PendingAction::ImportSettings { source } => {
+            app.chrome.flash = Some(match crate::settings_io::import(&source) {
+                Ok(said) => said,
+                Err(e) => format!("import failed: {e}"),
+            });
         }
         PendingAction::ResetSettings => reset_settings(app),
         PendingAction::Quit => app.chrome.should_quit = true,
@@ -785,6 +817,7 @@ pub(crate) fn run_menu_action(app: &mut App, action: MenuAction, out: &mut Vec<C
                 app.modals.overlay = Some(Overlay::Confirm(confirm_remove_project(&p.name, id)));
             }
         }
+        MenuAction::SweepWorktrees(id) => crate::sweep::start(app, &id),
         MenuAction::CreatePullRequest { worktree, agent } => {
             ship::open_composer(app, &worktree, agent, None)
         }

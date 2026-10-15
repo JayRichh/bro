@@ -1828,9 +1828,10 @@ fn tabs_action(
         // `?` and the project's own verbs keep the tab: the project
         // under the header's cursor is what they act on.
         Action::Verbs => super::verbs::open(app),
-        Action::NewWorktree | Action::RemoveProject | Action::ToggleRun => {
-            super::verbs::run_on_selection(app, action, out)
-        }
+        Action::NewWorktree
+        | Action::RemoveProject
+        | Action::SweepWorktrees
+        | Action::ToggleRun => super::verbs::run_on_selection(app, action, out),
         _ => {
             leave_tabs(app);
             return false;

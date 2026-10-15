@@ -824,14 +824,50 @@ fn draw_settings_overlay(f: &mut Frame, app: &mut App, view: crate::app::Setting
         ),
         dim,
     )));
+    // The file's path, and on the same row the buttons that carry the
+    // settings to a file and back (`kete config export / import`).
     let path = nebula_core::paths::config_path();
-    lines.push(Line::from(Span::styled(
-        truncate(&format!(" {}", path.display()), inner.width as usize),
+    let buttons = [("⇧E export", false), ("⇧I import", true)];
+    let room: usize = buttons.iter().map(|(l, _)| l.chars().count() + 3).sum();
+    let mut io_hits = Vec::new();
+    let mut last = vec![Span::styled(
+        format!(
+            "{:<w$}",
+            truncate(
+                &format!(" {}", path.display()),
+                (inner.width as usize).saturating_sub(room)
+            ),
+            w = (inner.width as usize).saturating_sub(room)
+        ),
         dim,
-    )));
+    )];
+    if inner.width as usize > room + 8 {
+        let mut x = inner.x + inner.width - room as u16;
+        let row = inner.y + lines.len() as u16;
+        for (label, import) in buttons {
+            let w = label.chars().count() as u16 + 2;
+            last.push(Span::raw(" "));
+            last.push(Span::styled(
+                format!("[{label}]"),
+                Style::default().fg(th.accent),
+            ));
+            io_hits.push((
+                Rect {
+                    x: x + 1,
+                    y: row,
+                    width: w,
+                    height: 1,
+                },
+                import,
+            ));
+            x += w + 1;
+        }
+    }
+    lines.push(Line::from(last));
     f.render_widget(Paragraph::new(lines), inner);
     if let Some(Overlay::Settings(v)) = &mut app.modals.overlay {
         v.area = area;
+        v.io_hits = io_hits;
         v.tab_hits = hits;
         v.first_row = first_row;
         v.body_area = Rect {

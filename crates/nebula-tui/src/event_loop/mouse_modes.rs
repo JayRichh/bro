@@ -641,7 +641,6 @@ fn handle_settings_mouse(
     out: &mut Vec<ClientRequest>,
 ) -> bool {
     let _ = &mut *out;
-    let _ = mouse_pos;
     // Settings: click a tab to switch, a row to select (or activate it if
     // it was already selected); everything else inside the box is swallowed.
     // While a hotkey capture is live the mouse is inert — the overlay is
@@ -663,6 +662,24 @@ fn handle_settings_mouse(
                 view.is_hotkeys(),
             );
             let tab_hits = view.tab_hits.clone();
+            // The bottom row's Export / Import: their keys, pressed.
+            if let Some(import) = view
+                .io_hits
+                .iter()
+                .find(|(r, _)| r.contains(mouse_pos))
+                .map(|(_, i)| *i)
+            {
+                run_settings_cmd(
+                    app,
+                    if import {
+                        SettingsCmd::Import
+                    } else {
+                        SettingsCmd::Export
+                    },
+                );
+                app.chrome.dirty = true;
+                return true;
+            }
             // The mouse only says which command; `run_settings_cmd` is the
             // one place the overlay changes, as it is for the keys.
             // The strip first: its labels are recorded during draw. A

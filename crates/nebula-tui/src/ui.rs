@@ -833,7 +833,7 @@ fn settings_keys_hint(view: &crate::app::SettingsView) -> &'static str {
         return "Enter: reassign it here   Esc: leave it where it is";
     }
     if view.on_tabs {
-        return "←/→: tab   ↓: into the list   1-9: jump   R: reset all   Esc: close";
+        return "←/→: tab   ↓: into the list   1-9: jump   R: reset all   E/I: export/import   Esc: close";
     }
     if view.is_hotkeys() {
         return "Enter: rebind  a: add  ⌫: default  x: unbind  R: reset all  Tab: next  ↑: tabs";
