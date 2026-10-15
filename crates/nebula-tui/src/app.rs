@@ -4263,6 +4263,12 @@ pub struct LauncherState {
     /// The ACCOUNT SPREAD the config sets, mirrored beside `profiles`:
     /// whether a launch's profile field offers "auto".
     pub spread: nebula_core::accounts::Policy,
+    /// Each project's DEFAULT ACCOUNTS (repo path → harness → profile),
+    /// mirrored beside `profiles` from the projects' settings
+    /// (`ProjectSettings::default_profiles`): what a launch naming no
+    /// profile runs on in that project, ahead of the spread.
+    pub project_accounts:
+        std::collections::BTreeMap<std::path::PathBuf, std::collections::BTreeMap<String, String>>,
     /// Every ACCOUNT's latest plan usage (`nebula_core::usage`): pushed
     /// by a 55+ daemon (`ServerEvent::AccountUsage`), else read from the
     /// kept files as a box opens (`quick_prompt::refresh_profiles`).

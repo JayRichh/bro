@@ -132,7 +132,7 @@ fn box_launch(app: &mut App) -> Option<QuickLaunch> {
     };
     let cfg = crate::config::Config::load();
     let target = view::target_for(app, &project, cfg.quick_prompt_new_worktree);
-    Some(QuickLaunch::from_config(target, &cfg))
+    Some(QuickLaunch::from_config(target, &cfg).in_project(app, &cfg))
 }
 
 /// Put the cursor back on a card: anything that lands on one — a key that
@@ -1220,14 +1220,16 @@ pub(super) fn duplicate_agent(app: &mut App, id: AgentId) {
         .issue_url
         .as_deref()
         .and_then(|url| issue_ref(app, &worktree.project_id, url));
+    let cfg = crate::config::Config::load();
     let launch = QuickLaunch::of_kind(
         QuickTarget::Worktree(worktree.id),
         agent.kind,
         agent.custom_harness,
         agent.model,
         agent.effort,
-        &crate::config::Config::load(),
+        &cfg,
     )
+    .in_project(app, &cfg)
     .with_issue(issue)
     .with_cloud(agent.cloud_session_id.is_some());
     crate::quick_prompt::reopen(app, launch, "");

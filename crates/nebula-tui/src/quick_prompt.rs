@@ -261,8 +261,48 @@ pub(crate) fn refresh_profiles(app: &mut App) {
         app.launcher.account_usage = crate::accounts_overlay::kept_readings();
     }
     let cfg = crate::config::Config::load();
-    app.launcher.spread = spread_policy(&cfg);
-    app.launcher.profiles = cfg.profiles;
+    mirror_accounts(app, &cfg);
+}
+
+/// Mirror the settings a launch's account reads — the PROFILES, the
+/// ACCOUNT SPREAD and every project's DEFAULT ACCOUNTS — into the app.
+pub(crate) fn mirror_accounts(app: &mut App, cfg: &Config) {
+    app.launcher.spread = spread_policy(cfg);
+    app.launcher.profiles = cfg.profiles.clone();
+    app.launcher.project_accounts = cfg
+        .projects
+        .iter()
+        .map(|(repo, s)| (repo.clone(), s.default_profiles()))
+        .filter(|(_, m)| !m.is_empty())
+        .collect();
+}
+
+/// The repo path of the project `target` launches in.
+fn target_repo(app: &App, target: &QuickTarget) -> Option<std::path::PathBuf> {
+    let id = crate::launcher::project_of(app, target)?;
+    app.tree
+        .projects
+        .iter()
+        .find(|p| p.id == id)
+        .map(|p| p.repo_path.clone())
+}
+
+/// The project default account for `harness` of the project `target`
+/// launches in, from the app's mirror (`mirror_accounts`): what a frame
+/// reads.
+pub fn project_default(app: &App, target: &QuickTarget, harness: &str) -> Option<String> {
+    project_accounts(app, target).remove(harness.trim())
+}
+
+/// Every default account (harness → profile) of the project `target`
+/// launches in, from the app's mirror.
+pub fn project_accounts(
+    app: &App,
+    target: &QuickTarget,
+) -> std::collections::BTreeMap<String, String> {
+    target_repo(app, target)
+        .and_then(|repo| app.launcher.project_accounts.get(&repo).cloned())
+        .unwrap_or_default()
 }
 
 /// What a launch's profile field or picker offers for `harness`, in
@@ -276,17 +316,37 @@ pub fn profile_choices_in(
     profiles: &[nebula_core::profiles::Profile],
     harness: &str,
     policy: nebula_core::accounts::Policy,
+    project_default: Option<&str>,
 ) -> Vec<Option<String>> {
     let usable = nebula_core::profiles::for_harness(profiles, harness);
     if usable.is_empty() {
         return Vec::new();
     }
+    // Under `manual` "none" is offered only while it means the own login:
+    // with a default standing — the project's, else the harness's — None
+    // would run on that one, which its own row already names.
     let lead = (policy.spread != nebula_core::accounts::Spread::Manual
-        || nebula_core::profiles::default_for(profiles, harness).is_none())
+        || (usable_project_default(profiles, harness, project_default).is_none()
+            && nebula_core::profiles::default_for(profiles, harness).is_none()))
     .then_some(None);
+    // Under `manual` the account a launch naming none runs on leads the
+    // named ones: what the box opens on and the `n` picker's first row.
+    let first = (policy.spread == nebula_core::accounts::Spread::Manual)
+        .then(|| {
+            usable_project_default(profiles, harness, project_default)
+                .map(str::to_string)
+                .or_else(|| {
+                    nebula_core::profiles::default_for(profiles, harness)
+                        .map(|p| p.name.trim().to_string())
+                })
+        })
+        .flatten();
     let name = |p: &&nebula_core::profiles::Profile| Some(p.name.trim().to_string());
+    let enabled = usable.iter().filter(|p| !p.disabled).map(name);
+    let (lead_named, rest): (Vec<_>, Vec<_>) = enabled.partition(|n| *n == first);
     lead.into_iter()
-        .chain(usable.iter().filter(|p| !p.disabled).map(name))
+        .chain(lead_named)
+        .chain(rest)
         .chain(usable.iter().filter(|p| p.disabled).map(name))
         .collect()
 }
@@ -301,40 +361,78 @@ pub fn resolved_profile(
     harness: &str,
     policy: nebula_core::accounts::Policy,
     readings: &[nebula_core::usage::AccountUsage],
+    project_default: Option<&str>,
 ) -> Option<String> {
     match choice {
         Some(name) => Some(name.to_string()),
-        None => nebula_core::accounts::pick(
-            profiles,
-            harness,
-            policy,
-            nebula_core::clock::now_secs() as i64,
-            |key| readings.iter().find(|u| u.account == key).cloned(),
-        )
-        .profile
-        .map(|p| p.name.trim().to_string()),
+        None => auto_pick(profiles, harness, policy, readings, project_default)
+            .profile
+            .map(|p| p.name.trim().to_string()),
     }
 }
 
+/// What a launch naming no profile runs on, in the daemon's order
+/// (`accounts::pick_for_project`): the project's default account for the
+/// harness, else the ACCOUNT SPREAD's pick now against `readings`.
+pub fn auto_pick<'a>(
+    profiles: &'a [nebula_core::profiles::Profile],
+    harness: &str,
+    policy: nebula_core::accounts::Policy,
+    readings: &[nebula_core::usage::AccountUsage],
+    project_default: Option<&str>,
+) -> nebula_core::accounts::Pick<'a> {
+    nebula_core::accounts::pick_for_project(
+        profiles,
+        harness,
+        project_default,
+        policy,
+        nebula_core::clock::now_secs() as i64,
+        |key| readings.iter().find(|u| u.account == key).cloned(),
+    )
+}
+
+/// The project default when it is one a launch can run on: enabled and an
+/// account of `harness`; a stale one falls through, as at the daemon.
+fn usable_project_default<'a>(
+    profiles: &[nebula_core::profiles::Profile],
+    harness: &str,
+    project_default: Option<&'a str>,
+) -> Option<&'a str> {
+    let name = project_default.map(str::trim).filter(|n| !n.is_empty())?;
+    nebula_core::profiles::enabled_for(profiles, harness)
+        .iter()
+        .any(|p| p.name.trim() == name)
+        .then_some(name)
+}
+
 /// How a profile choice reads: `auto → max2` (what the spread would pick
-/// now), `none`, `work`, or `old (off)` for a switched-off profile.
+/// now), `auto → work (project default)`, `none`, `work`, `work (project
+/// default)` for the project's own, or `old (off)` for a switched-off
+/// profile.
 pub fn profile_choice_label(
     choice: Option<&str>,
     profiles: &[nebula_core::profiles::Profile],
     harness: &str,
     policy: nebula_core::accounts::Policy,
     readings: &[nebula_core::usage::AccountUsage],
+    project_default: Option<&str>,
 ) -> String {
+    let pick = auto_pick(profiles, harness, policy, readings, project_default);
+    let by_project = pick.reason == nebula_core::accounts::Reason::ProjectDefault;
     match choice {
-        None if policy.spread != nebula_core::accounts::Spread::Manual => {
-            match resolved_profile(None, profiles, harness, policy, readings) {
-                Some(name) => format!("auto → {name}"),
+        None if by_project || policy.spread != nebula_core::accounts::Spread::Manual => {
+            match pick.profile {
+                Some(p) if by_project => format!("auto → {} (project default)", p.name.trim()),
+                Some(p) => format!("auto → {}", p.name.trim()),
                 None => "auto → own login".into(),
             }
         }
         None => "none".into(),
         Some(name) if profiles.iter().any(|p| p.name.trim() == name && p.disabled) => {
             format!("{name} (off)")
+        }
+        Some(name) if usable_project_default(profiles, harness, project_default) == Some(name) => {
+            format!("{name} (project default)")
         }
         Some(name) => name.to_string(),
     }
@@ -361,7 +459,16 @@ pub(crate) fn cycle_box_profile(app: &mut App) {
     let PromptKind::QuickPrompt(launch) = &mut prompt.kind else {
         return;
     };
-    if !launch.cycle_profile(&profiles, policy) {
+    let target = launch.target.clone();
+    let harness = launch.harness_id().to_string();
+    let project = project_default(app, &target, &harness);
+    let Some(Overlay::Prompt(prompt)) = &mut app.modals.overlay else {
+        return;
+    };
+    let PromptKind::QuickPrompt(launch) = &mut prompt.kind else {
+        return;
+    };
+    if !launch.cycle_profile(&profiles, policy, project.as_deref()) {
         let harness = launch.harness_id().to_string();
         app.chrome.flash = Some(format!(
             "{harness} has no profiles: kete profile add <name> --harness {harness}"
@@ -448,13 +555,7 @@ impl QuickLaunch {
         // the account Enter will use. Under another ACCOUNT SPREAD,
         // "auto": no profile is sent and the DAEMON's spread picks at
         // launch, the field saying what it would pick now.
-        let policy = spread_policy(cfg);
-        let profile = if policy.spread == nebula_core::accounts::Spread::Manual {
-            resolved_profile(None, &cfg.profiles, &descriptor.id, policy, &[])
-        } else {
-            None
-        };
-        Self {
+        let mut launch = Self {
             target,
             kind,
             custom,
@@ -465,8 +566,43 @@ impl QuickLaunch {
             pr: None,
             under: None,
             cloud: false,
-            profile,
+            profile: None,
+        };
+        launch.profile = launch.preselected_profile(cfg, None);
+        launch
+    }
+
+    /// The account the box opens on, as the DAEMON would pick it for a
+    /// launch naming none: under `manual` named (the project's default
+    /// account for the harness, else the harness default, else none) so
+    /// the field shows what Enter uses; under another ACCOUNT SPREAD
+    /// "auto" (None): no profile is sent and the daemon picks at launch.
+    fn preselected_profile(&self, cfg: &Config, project_default: Option<&str>) -> Option<String> {
+        let policy = spread_policy(cfg);
+        if policy.spread != nebula_core::accounts::Spread::Manual {
+            return None;
         }
+        resolved_profile(
+            None,
+            &cfg.profiles,
+            self.harness_id(),
+            policy,
+            &[],
+            project_default,
+        )
+    }
+
+    /// The same launch, its account preselected for the project it lands
+    /// in: that project's default account for the harness ranks ahead of
+    /// the harness default, as at the DAEMON (`accounts::resolve_launch`).
+    /// Run on a launch just built ([`QuickLaunch::from_config`],
+    /// [`QuickLaunch::of_kind`]), before any choice of the user's is put
+    /// on it.
+    pub fn in_project(mut self, app: &App, cfg: &Config) -> Self {
+        let project = target_repo(app, &self.target)
+            .and_then(|repo| cfg.project(&repo).default_profile(self.harness_id()));
+        self.profile = self.preselected_profile(cfg, project.as_deref());
+        self
     }
 
     /// The same launch on `before`'s PROFILE when it runs the same harness
@@ -491,8 +627,9 @@ impl QuickLaunch {
         &self,
         profiles: &[nebula_core::profiles::Profile],
         policy: nebula_core::accounts::Policy,
+        project_default: Option<&str>,
     ) -> Vec<Option<String>> {
-        profile_choices_in(profiles, self.harness_id(), policy)
+        profile_choices_in(profiles, self.harness_id(), policy, project_default)
     }
 
     /// `^A`: step to the next of [`QuickLaunch::profile_choices`],
@@ -501,8 +638,9 @@ impl QuickLaunch {
         &mut self,
         profiles: &[nebula_core::profiles::Profile],
         policy: nebula_core::accounts::Policy,
+        project_default: Option<&str>,
     ) -> bool {
-        let choices = self.profile_choices(profiles, policy);
+        let choices = self.profile_choices(profiles, policy, project_default);
         if choices.is_empty() {
             return false;
         }
@@ -759,7 +897,8 @@ pub(crate) fn open_quick_prompt(app: &mut App) {
 /// Open the box for a known target, resolving the launch options now so
 /// the title can name what Enter is about to start.
 pub(crate) fn open_for(app: &mut App, target: QuickTarget) {
-    let launch = QuickLaunch::from_config(target, &Config::load());
+    let cfg = Config::load();
+    let launch = QuickLaunch::from_config(target, &cfg).in_project(app, &cfg);
     open_box(app, launch);
 }
 
@@ -827,6 +966,7 @@ pub(crate) fn pr_launch_for(
     };
     Some(
         QuickLaunch::from_config(QuickTarget::Worktree(root), &Config::load())
+            .in_project(app, &Config::load())
             .with_pr(Some(PrLaunch::of(pr))),
     )
 }
@@ -1421,7 +1561,7 @@ mod tests {
         let manual = nebula_core::accounts::Policy::default();
         assert_eq!(claude.profile.as_deref(), Some("main"));
         assert_eq!(
-            claude.profile_choices(&cfg.profiles, manual),
+            claude.profile_choices(&cfg.profiles, manual, None),
             vec![
                 Some("main".to_string()),
                 Some("max2".to_string()),
@@ -1429,7 +1569,7 @@ mod tests {
             ]
         );
         let label = |choice: Option<&str>, policy| {
-            profile_choice_label(choice, &cfg.profiles, "claude", policy, &[])
+            profile_choice_label(choice, &cfg.profiles, "claude", policy, &[], None)
         };
         assert_eq!(label(Some("off"), manual), "off (off)");
         assert_eq!(label(Some("max2"), manual), "max2");
@@ -1443,7 +1583,7 @@ mod tests {
         let auto = QuickLaunch::of_kind(worktree(), AgentKind::Claude, None, None, None, &spread);
         assert_eq!(auto.profile, None, "auto: the daemon's spread picks");
         assert_eq!(
-            auto.profile_choices(&spread.profiles, policy),
+            auto.profile_choices(&spread.profiles, policy, None),
             vec![
                 None,
                 Some("main".to_string()),
@@ -1485,26 +1625,26 @@ mod tests {
             QuickLaunch::of_kind(worktree(), AgentKind::Claude, None, None, None, &cfg);
         assert_eq!(claude.profile.as_deref(), Some("main"));
         assert_eq!(
-            claude.profile_choices(&cfg.profiles, Default::default()),
+            claude.profile_choices(&cfg.profiles, Default::default(), None),
             vec![Some("main".to_string()), Some("max2".to_string())]
         );
-        assert!(claude.cycle_profile(&cfg.profiles, Default::default()));
+        assert!(claude.cycle_profile(&cfg.profiles, Default::default(), None));
         assert_eq!(claude.profile.as_deref(), Some("max2"));
-        assert!(claude.cycle_profile(&cfg.profiles, Default::default()));
+        assert!(claude.cycle_profile(&cfg.profiles, Default::default(), None));
         assert_eq!(claude.profile.as_deref(), Some("main"), "it wraps");
 
         let mut codex = QuickLaunch::of_kind(worktree(), AgentKind::Codex, None, None, None, &cfg);
         assert_eq!(codex.profile, None, "no default: the CLI's own login");
         assert_eq!(
-            codex.profile_choices(&cfg.profiles, Default::default()),
+            codex.profile_choices(&cfg.profiles, Default::default(), None),
             vec![None, Some("work".to_string())]
         );
-        assert!(codex.cycle_profile(&cfg.profiles, Default::default()));
+        assert!(codex.cycle_profile(&cfg.profiles, Default::default(), None));
         assert_eq!(codex.profile.as_deref(), Some("work"));
 
         let mut pi = QuickLaunch::of_kind(worktree(), AgentKind::Pi, None, None, None, &cfg);
         assert!(
-            !pi.cycle_profile(&cfg.profiles, Default::default()),
+            !pi.cycle_profile(&cfg.profiles, Default::default(), None),
             "no profiles, no field"
         );
 

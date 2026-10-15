@@ -263,6 +263,105 @@ mod tests {
         });
     }
 
+    /// The settings the launch-order tests stand on: `main` the harness
+    /// default, `proj` the seeded project's default account, `spare` a third.
+    fn launch_json(spread: &str, proj_disabled: bool) -> String {
+        format!(
+            r#"{{"account_spread":"{spread}","profiles":[{{"name":"main","harness":"claude","default":true}},{{"name":"spare","harness":"claude"}},{{"name":"proj","harness":"claude","disabled":{proj_disabled}}}],"projects":{{"/tmp/demo":{{"default_profiles":{{"claude":"proj"}}}}}}}}"#
+        )
+    }
+
+    fn box_launch(app: &App) -> crate::quick_prompt::QuickLaunch {
+        match &app.modals.overlay {
+            Some(Overlay::Prompt(p)) => match &p.kind {
+                PromptKind::QuickPrompt(launch) => launch.clone(),
+                other => panic!("{other:?}"),
+            },
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// The box and the `n` picker preselect what the daemon would pick for
+    /// a launch naming none: the project's default account ahead of the
+    /// harness default (named under `manual`, "auto" under a spread), and
+    /// the harness default again once the project's is switched off.
+    #[test]
+    fn a_launch_preselects_the_project_default_account() {
+        let worktree = || crate::quick_prompt::QuickTarget::Worktree(WorktreeId("w1".into()));
+        with_config_json(&launch_json("manual", false), || {
+            let mut app = App::new();
+            seed_tree(&mut app);
+            crate::quick_prompt::open_for(&mut app, worktree());
+            let launch = box_launch(&app);
+            assert_eq!(launch.profile.as_deref(), Some("proj"));
+            let label = crate::quick_prompt::profile_choice_label(
+                launch.profile.as_deref(),
+                &app.launcher.profiles,
+                "claude",
+                app.launcher.spread,
+                &[],
+                crate::quick_prompt::project_default(&app, &launch.target, "claude").as_deref(),
+            );
+            assert_eq!(label, "proj (project default)");
+            assert_eq!(
+                launch.profile_choices(&app.launcher.profiles, app.launcher.spread, Some("proj")),
+                vec![
+                    Some("proj".to_string()),
+                    Some("main".to_string()),
+                    Some("spare".to_string())
+                ],
+                "the project's leads; no \"none\" while a default stands"
+            );
+            // `n`: the Claude rows lead with the project's account.
+            app.modals.overlay = None;
+            super::super::tests::open_picker(&mut app);
+            let Some(Overlay::Menu(menu)) = &app.modals.overlay else {
+                panic!("{:?}", app.modals.overlay);
+            };
+            let first = menu
+                .items
+                .iter()
+                .find_map(|i| match &i.action {
+                    MenuAction::NewAgentOfKind {
+                        kind: nebula_core::AgentKind::Claude,
+                        custom: None,
+                        profile,
+                        ..
+                    } => Some((i.label.clone(), profile.clone())),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(first.1.as_deref(), Some("proj"), "{first:?}");
+            assert!(first.0.contains("proj (project default)"), "{first:?}");
+        });
+        with_config_json(&launch_json("least_used", false), || {
+            let mut app = App::new();
+            seed_tree(&mut app);
+            crate::quick_prompt::open_for(&mut app, worktree());
+            let launch = box_launch(&app);
+            assert_eq!(launch.profile, None, "auto: the daemon picks");
+            let label = crate::quick_prompt::profile_choice_label(
+                None,
+                &app.launcher.profiles,
+                "claude",
+                app.launcher.spread,
+                &[],
+                Some("proj"),
+            );
+            assert_eq!(label, "auto → proj (project default)");
+        });
+        with_config_json(&launch_json("manual", true), || {
+            let mut app = App::new();
+            seed_tree(&mut app);
+            crate::quick_prompt::open_for(&mut app, worktree());
+            assert_eq!(
+                box_launch(&app).profile.as_deref(),
+                Some("main"),
+                "a switched-off project default falls through to the harness default"
+            );
+        });
+    }
+
     /// The overlay edits the layers the test override (or a real override)
     /// routes to, never the data dir's config.json behind its back.
     #[test]

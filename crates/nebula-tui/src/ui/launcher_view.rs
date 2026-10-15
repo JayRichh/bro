@@ -3754,13 +3754,16 @@ impl Details {
         };
         let (profiles, policy) = (&app.launcher.profiles, app.launcher.spread);
         let harness_id = launch.harness_id();
-        let profile = (!launch.profile_choices(profiles, policy).is_empty()).then(|| {
+        let project = crate::quick_prompt::project_default(app, &launch.target, harness_id);
+        let project = project.as_deref();
+        let profile = (!launch.profile_choices(profiles, policy, project).is_empty()).then(|| {
             let name = crate::quick_prompt::profile_choice_label(
                 launch.profile.as_deref(),
                 profiles,
                 harness_id,
                 policy,
                 &app.launcher.account_usage,
+                project,
             );
             // The bars are the account Enter lands on: "auto"'s pick.
             let on = crate::quick_prompt::resolved_profile(
@@ -3769,6 +3772,7 @@ impl Details {
                 harness_id,
                 policy,
                 &app.launcher.account_usage,
+                project,
             );
             let key = nebula_core::usage::account_key(on.as_deref(), harness_id);
             let reading = app.launcher.account_usage.iter().find(|u| u.account == key);

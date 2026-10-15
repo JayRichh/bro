@@ -462,8 +462,7 @@ pub(crate) fn apply_config(app: &mut App, cfg: &crate::config::Config) {
     app.launcher.auto_cleanup_merged = cfg.auto_cleanup_merged;
     app.launcher.hide_card_marks = cfg.hide_card_marks;
     app.launcher.highlight_current_card = cfg.highlight_current_card;
-    app.launcher.profiles = cfg.profiles.clone();
-    app.launcher.spread = crate::quick_prompt::spread_policy(cfg);
+    crate::quick_prompt::mirror_accounts(app, cfg);
     app.launcher.launcher_pane_at = cfg.pane_side();
     app.launcher.launcher_list = cfg.list_layout();
     app.launcher.launcher_nested = cfg.nested_layout();

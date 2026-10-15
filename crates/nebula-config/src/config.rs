@@ -1634,6 +1634,30 @@ impl ProjectSettings {
             _ => false,
         }
     }
+
+    /// The PROJECT DEFAULT ACCOUNTS: harness id to profile name, as the
+    /// entry's `default_profiles` holds them
+    /// (`nebula_core::profiles::PROJECT_DEFAULTS_KEY`), carried in
+    /// [`ProjectSettings::other`] so a save writes them back untouched.
+    /// They are written in place by `profiles::set_project_default_in_file`,
+    /// never through this struct.
+    pub fn default_profiles(&self) -> BTreeMap<String, String> {
+        let mut obj = serde_json::Map::new();
+        if let Some(v) = self.other.get(nebula_core::profiles::PROJECT_DEFAULTS_KEY) {
+            obj.insert(
+                nebula_core::profiles::PROJECTS_KEY.into(),
+                serde_json::json!({ "_": { nebula_core::profiles::PROJECT_DEFAULTS_KEY: v } }),
+            );
+        }
+        nebula_core::profiles::project_defaults_from(&obj)
+            .remove("_")
+            .unwrap_or_default()
+    }
+
+    /// The project's default account for `harness`, if it names one.
+    pub fn default_profile(&self, harness: &str) -> Option<String> {
+        self.default_profiles().remove(harness.trim())
+    }
 }
 
 impl Default for Config {
@@ -3485,6 +3509,38 @@ mod update_tests {
             json!({"editor": "nvim", "someone_elses": [1], "kanban": true}),
             "no defaults materialised, unknown keys kept"
         );
+    }
+
+    /// A project's default accounts, as `profiles::set_project_default_in_file`
+    /// writes them, read back through the loaded config and kept by an
+    /// unrelated save.
+    #[test]
+    fn project_default_accounts_read_back_and_survive_a_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let (path, local) = layers(&dir);
+        std::fs::write(&path, r#"{"projects": {"/repo": {"run_command": "make"}}}"#).unwrap();
+        nebula_core::profiles::set_project_default_in_file(&path, "/repo", "claude", Some("work"))
+            .unwrap();
+        nebula_core::profiles::set_project_default_in_file(&path, "/repo", "codex", Some("gpt"))
+            .unwrap();
+        let cfg = Config::load_at(&path, &local);
+        let repo = cfg.project(Path::new("/repo"));
+        assert_eq!(repo.default_profile("claude").as_deref(), Some("work"));
+        assert_eq!(repo.default_profile(" codex ").as_deref(), Some("gpt"));
+        assert_eq!(repo.default_profile("cursor"), None);
+        assert!(cfg
+            .project(Path::new("/other"))
+            .default_profiles()
+            .is_empty());
+        Config::update_in(&path, &local, |cfg| cfg.kanban = true).unwrap();
+        let cfg = Config::load_at(&path, &local);
+        assert_eq!(
+            cfg.project(Path::new("/repo"))
+                .default_profile("claude")
+                .as_deref(),
+            Some("work")
+        );
+        assert_eq!(cfg.project(Path::new("/repo")).run_command, "make");
     }
 
     #[test]

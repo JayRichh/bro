@@ -653,14 +653,16 @@ pub(crate) fn run_menu_action(app: &mut App, action: MenuAction, out: &mut Vec<C
             if let Some(back) = quick {
                 // The picker's `worktree` is only what its menu was built
                 // against; where the launch lands is the box's own target.
+                let cfg = crate::config::Config::load();
                 let launch = crate::quick_prompt::QuickLaunch::of_kind(
                     back.launch.target.clone(),
                     kind,
                     custom.clone(),
                     model.filter(|m| m != crate::config::DEFAULT_CHOICE),
                     effort.filter(|e| e != crate::config::DEFAULT_CHOICE),
-                    &crate::config::Config::load(),
+                    &cfg,
                 )
+                .in_project(app, &cfg)
                 .with_issue(back.launch.issue.clone())
                 .with_pr(back.launch.pr.clone())
                 // The Claude row's `Tab` toggle rides the pick: the box

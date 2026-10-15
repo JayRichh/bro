@@ -171,6 +171,7 @@ pub(crate) fn with_account_rows(
     profiles: &[nebula_core::profiles::Profile],
     policy: nebula_core::accounts::Policy,
     readings: &[nebula_core::usage::AccountUsage],
+    project: &std::collections::BTreeMap<String, String>,
     now_secs: i64,
 ) -> Vec<MenuItem> {
     let mut out = Vec::with_capacity(items.len());
@@ -180,7 +181,11 @@ pub(crate) fn with_account_rows(
             continue;
         };
         let harness = custom.clone().unwrap_or_else(|| kind.as_str().to_string());
-        let choices = crate::quick_prompt::profile_choices_in(profiles, &harness, policy);
+        // The project's default account for the harness ranks ahead of the
+        // spread, as at the DAEMON.
+        let project_default = project.get(&harness).map(String::as_str);
+        let choices =
+            crate::quick_prompt::profile_choices_in(profiles, &harness, policy, project_default);
         if choices.is_empty() {
             out.push(item);
             continue;
@@ -192,6 +197,7 @@ pub(crate) fn with_account_rows(
                 &harness,
                 policy,
                 readings,
+                project_default,
             );
             let on = crate::quick_prompt::resolved_profile(
                 choice.as_deref(),
@@ -199,6 +205,7 @@ pub(crate) fn with_account_rows(
                 &harness,
                 policy,
                 readings,
+                project_default,
             );
             let key = nebula_core::usage::account_key(on.as_deref(), &harness);
             let reading = readings.iter().find(|u| u.account == key);
@@ -257,11 +264,16 @@ pub(crate) fn open_kind_picker(app: &mut App, picker: KindPicker) {
     // PROMPT's own `Tab` picker keeps the box's account (`^A`).
     if quick.as_ref().is_none_or(|back| !back.from_box) {
         crate::quick_prompt::refresh_profiles(app);
+        let project = crate::quick_prompt::project_accounts(
+            app,
+            &crate::quick_prompt::QuickTarget::Worktree(worktree.clone()),
+        );
         items = with_account_rows(
             items,
             &app.launcher.profiles,
             app.launcher.spread,
             &app.launcher.account_usage,
+            &project,
             nebula_core::clock::now_secs() as i64,
         );
     }
