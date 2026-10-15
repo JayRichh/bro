@@ -134,6 +134,10 @@ pub(super) fn land_click_focus(app: &mut App, column: u16, row: u16, out: &mut V
             | HitTarget::LauncherPullRequests
             | HitTarget::LauncherIssues
             | HitTarget::LauncherWelcomePrompt
+            | HitTarget::SubagentChip(_)
+            | HitTarget::Attention(_)
+            | HitTarget::NavBack
+            | HitTarget::NavForward
             | HitTarget::OrchestratorChip(_)
             | HitTarget::FooterUsage
             | HitTarget::ModalBrowser,

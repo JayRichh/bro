@@ -304,6 +304,40 @@ fn handle_global_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>)
     handle_global_action(app, action, armed, chord, out);
 }
 
+/// Run `action` as its key would — the COMMAND PALETTE's Enter on an
+/// action row: the same closed-splash check and grid-first dispatch a
+/// press of its chord takes after the keymap lookup, with no double tap
+/// armed.
+pub(crate) fn run_action(
+    app: &mut App,
+    action: crate::keymap::Action,
+    out: &mut Vec<ClientRequest>,
+) {
+    let chord = app
+        .chrome
+        .keymap
+        .shown_first(action)
+        .unwrap_or(crate::keymap::KeyChord {
+            code: KeyCode::Null,
+            mods: KeyModifiers::NONE,
+        });
+    crate::key_combo::note(
+        app,
+        &[chord],
+        crate::keymap::spec_of(action).map(|s| s.label),
+    );
+    if app.launcher.projects_closed && !opens_from_closed_splash(action) {
+        return;
+    }
+    if app.launcher_grid()
+        && !app.launcher.launcher_columns
+        && launcher::handle_action(app, action, None, &chord, out)
+    {
+        return;
+    }
+    handle_global_action(app, action, None, chord, out);
+}
+
 fn handle_global_action(
     app: &mut App,
     action: crate::keymap::Action,
@@ -355,6 +389,10 @@ fn handle_global_action(
         Action::ToggleOrchestratorView => orchestrator::toggle(app, out),
         // ⇧U: the ACCOUNTS OVERLAY.
         Action::Accounts => accounts::open(app),
+        // The views ported from the desktop window.
+        Action::CommandPalette | Action::NavBack | Action::NavForward | Action::Subagents => {
+            desk::handle_action(app, action, out)
+        }
         // Listed rather than `_`: a new action is a compile error here
         // until it is routed, never an `unreachable!` at the user's press.
         Action::GitDiff

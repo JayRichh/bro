@@ -189,6 +189,10 @@ pub(crate) fn dispatch_terminal_event(app: &mut App, event: Event, out: &mut Vec
     if let Some(before) = launcher_before {
         launcher::keep_cursor(app, before, out);
     }
+    // Where that left the grid, for BACK / FORWARD.
+    if pressed {
+        desk::note_place(app);
+    }
 }
 
 /// [`dispatch_terminal_event`]'s body: the event to its handler.

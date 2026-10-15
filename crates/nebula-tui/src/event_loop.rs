@@ -35,6 +35,7 @@ mod activate;
 mod alerts;
 mod background;
 mod commands;
+mod desk;
 mod focus_walk;
 mod host_terminal;
 mod key_modes;

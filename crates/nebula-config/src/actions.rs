@@ -30,6 +30,15 @@ pub enum Action {
     HalfPageUp,
     Activate,
     Palette,
+    /// `^K`: the COMMAND PALETTE — the `/` palette's projects, worktrees,
+    /// sessions and pull requests, plus every action here by its label,
+    /// Enter running it.
+    CommandPalette,
+    /// `⌥←`: BACK to the place (project tab, card, full-screen) the grid
+    /// was on before this one.
+    NavBack,
+    /// `⌥→`: FORWARD again, after a back.
+    NavForward,
     /// `.`: the next session in the PALETTE's attention order, no modal.
     NextAttention,
     /// `,`: the same walk backwards.
@@ -122,6 +131,9 @@ pub enum Action {
     /// project or another one, picked from a list. Dragging the card onto
     /// another band or project tab does the same.
     MoveSession,
+    /// `⇧S`: the SUBAGENTS OVERLAY — the project's sessions as a tree,
+    /// each with the subagents running inside it.
+    Subagents,
     // files
     FindFile,
     Grep,
@@ -274,6 +286,33 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "NAVIGATE",
         scope: Scope::Global,
         defaults: &["/"],
+    },
+    ActionSpec {
+        action: Action::CommandPalette,
+        id: "command_palette",
+        label: "Command palette",
+        hint: "Search every project, worktree, session and pull request, and every action by its name: Enter jumps to the row or runs the action",
+        group: "NAVIGATE",
+        scope: Scope::Global,
+        defaults: &["ctrl+k"],
+    },
+    ActionSpec {
+        action: Action::NavBack,
+        id: "nav_back",
+        label: "Back",
+        hint: "Go back to the place the grid was on before (its project tab, the card under the cursor, full-screen or not), as the header's ‹ does. < is bound beside ⌥←, which needs Option as Meta on a Mac",
+        group: "NAVIGATE",
+        scope: Scope::Global,
+        defaults: &["alt+left", "<"],
+    },
+    ActionSpec {
+        action: Action::NavForward,
+        id: "nav_forward",
+        label: "Forward",
+        hint: "Go forward again after a back, as the header's › does. > is bound beside ⌥→, which needs Option as Meta on a Mac",
+        group: "NAVIGATE",
+        scope: Scope::Global,
+        defaults: &["alt+right", ">"],
     },
     ActionSpec {
         action: Action::NextAttention,
@@ -587,6 +626,15 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "SESSIONS",
         scope: Scope::Global,
         defaults: &["m"],
+    },
+    ActionSpec {
+        action: Action::Subagents,
+        id: "subagents",
+        label: "Subagents and session tree",
+        hint: "The project's sessions as a tree, each session under the one that started it and the subagents running inside it under that; Enter opens the session, → and ← open and fold, Tab every project. A card's ⑂ chip opens it on that session",
+        group: "SESSIONS",
+        scope: Scope::Global,
+        defaults: &["shift+s"],
     },
     // ---- FILES ----
     ActionSpec {

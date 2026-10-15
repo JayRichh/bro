@@ -78,6 +78,7 @@ fn handle_overlay_mouse(
         }
         Overlay::Settings(_) => handle_settings_mouse(app, mouse, mouse_pos, out),
         Overlay::Metrics(_) => handle_metrics_mouse(app, mouse, mouse_pos, out),
+        Overlay::Subagents(_) => desk::handle_subagents_mouse(app, mouse, out),
         _ => true,
     }
 }
@@ -828,6 +829,13 @@ fn handle_left_click_target(app: &mut App, mouse: MouseEvent, out: &mut Vec<Clie
         // Never in the hit map: the ISSUES and PULL REQUESTS MODALS route
         // the click on their button themselves, before this is reached.
         Some(HitTarget::ModalBrowser) => {}
+        // The views ported from the desktop: a card's or the pane's ⑂`n        // chip opens the SUBAGENTS OVERLAY on its session, an ATTENTION
+        // STRIP count the next session in that state, ‹ › back and
+        // forward.
+        Some(HitTarget::SubagentChip(id)) => desk::open_subagents(app, Some(id)),
+        Some(HitTarget::Attention(tone)) => desk::jump_attention_kind(app, tone, out),
+        Some(HitTarget::NavBack) => desk::go(app, -1, out),
+        Some(HitTarget::NavForward) => desk::go(app, 1, out),
         Some(
             target @ (HitTarget::ProjectRow(_)
             | HitTarget::WorktreeRow(_)

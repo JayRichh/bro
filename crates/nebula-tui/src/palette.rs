@@ -37,6 +37,12 @@ pub enum PaletteTarget {
         project: ProjectId,
         url: String,
     },
+    /// The COMMAND PALETTE's rows (`^K`): an action from the keymap's
+    /// table, run as its key would run it (`event_loop::desk::run_action`).
+    Action(crate::keymap::Action),
+    /// The ATTENTION STRIP's counts as commands: the next session in that
+    /// state, as a click on the count opens.
+    Attention(crate::subagents::Tone),
 }
 
 /// Where a `/` row sits before the query has said anything — the tiers of
@@ -127,9 +133,21 @@ pub struct Palette {
     pub enter_attaches: bool,
     /// Whole modal rect, written back during draw so clicks outside close.
     pub area: Rect,
+    /// The COMMAND PALETTE (`^K`): the rows carry every action too
+    /// ([`command_items`]), kept across [`Palette::rebuild`].
+    pub commands: bool,
 }
 
 impl Palette {
+    /// The COMMAND PALETTE: [`Palette::new`]'s rows, then every action
+    /// and the ATTENTION STRIP's jumps, by name.
+    pub fn with_commands(mut self) -> Self {
+        self.commands = true;
+        self.list.items.extend(command_items());
+        self.apply_filter();
+        self
+    }
+
     pub fn new(
         tree: &Tree,
         enter_attaches: bool,
@@ -140,6 +158,7 @@ impl Palette {
             list: FilterList::new(build_palette_items(tree, open_prs, hide_draft_prs)),
             enter_attaches,
             area: Rect::default(),
+            commands: false,
         };
         palette.apply_filter();
         palette
@@ -158,6 +177,9 @@ impl Palette {
     ) {
         let keep = self.selected_target().cloned();
         self.list.items = build_palette_items(tree, open_prs, hide_draft_prs);
+        if self.commands {
+            self.list.items.extend(command_items());
+        }
         self.apply_filter();
         if let Some(target) = keep {
             if let Some(row) = self
@@ -225,8 +247,69 @@ impl PaletteItem {
     /// before anything is typed: the sessions, and only those. The
     /// projects, worktrees and pull requests wait for a query.
     fn in_overview(&self) -> bool {
-        matches!(self.target, PaletteTarget::Session(_))
+        matches!(
+            self.target,
+            PaletteTarget::Session(_) | PaletteTarget::Action(_) | PaletteTarget::Attention(_)
+        )
     }
+
+    /// A command row: `label` searched and drawn whole.
+    fn command(target: PaletteTarget, label: &str) -> Self {
+        PaletteItem {
+            target,
+            text: label.to_string(),
+            label_at: 0,
+            crumb: None,
+            stamped: 0,
+            status: None,
+            unseen: false,
+            tier: PaletteTier::Rest,
+            interacted: 0,
+            standing: None,
+            trouble: None,
+        }
+    }
+}
+
+/// Whether `action` is offered as a command: everything but the keys that
+/// only make sense as keys — the cursor's steps, the palettes themselves,
+/// the pane's unlock and the numbered project tabs (the project rows
+/// already jump there).
+pub fn is_command(action: crate::keymap::Action) -> bool {
+    use crate::keymap::Action as A;
+    !matches!(
+        action,
+        A::Palette
+            | A::CommandPalette
+            | A::UnlockTerminal
+            | A::MoveDown
+            | A::MoveUp
+            | A::HalfPageDown
+            | A::HalfPageUp
+            | A::FocusLeft
+            | A::FocusRight
+            | A::FocusNext
+            | A::Activate
+            | A::SelectProjectTab(_)
+    )
+}
+
+/// The COMMAND PALETTE's own rows, after the jump targets: every action
+/// in the keymap's table by its label ([`is_command`]), then the
+/// ATTENTION STRIP's four jumps.
+pub fn command_items() -> Vec<PaletteItem> {
+    let mut items: Vec<PaletteItem> = crate::keymap::ACTIONS
+        .iter()
+        .filter(|spec| is_command(spec.action))
+        .map(|spec| PaletteItem::command(PaletteTarget::Action(spec.action), spec.label))
+        .collect();
+    for tone in crate::attention::KINDS {
+        items.push(PaletteItem::command(
+            PaletteTarget::Attention(tone),
+            &format!("Next session: {}", crate::attention::word(tone, 1)),
+        ));
+    }
+    items
 }
 
 /// Each item's position in the attention order: tier first, then most

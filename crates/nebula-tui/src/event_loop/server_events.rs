@@ -31,6 +31,7 @@ pub(crate) fn handle_server_event(app: &mut App, event: ServerEvent, out: &mut V
         }
         ServerEvent::AccountUsage { accounts } => accounts::on_account_usage(app, accounts),
         ServerEvent::SessionContexts { contexts } => accounts::on_session_contexts(app, contexts),
+        ServerEvent::SubagentChanged { sub } => desk::on_subagent_changed(app, sub),
         _ => {}
     }
 }
@@ -45,9 +46,9 @@ fn handle_snapshot_event(app: &mut App, event: ServerEvent, out: &mut Vec<Client
             links,
             pr_seen,
             ui_state,
-            // The TUI draws no subagent tree yet.
-            subagents: _,
+            subagents,
         } => {
+            desk::on_snapshot_subagents(app, subagents);
             let first_snapshot = !app.chrome.snapshot_loaded;
             app.chrome.snapshot_loaded = true;
             let before = (!first_snapshot).then(|| selection_snapshot(app));

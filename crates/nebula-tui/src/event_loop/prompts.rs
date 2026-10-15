@@ -299,6 +299,7 @@ pub(crate) fn opens_from_closed_splash(action: crate::keymap::Action) -> bool {
             | Action::AddProject
             | Action::ProjectDropdown
             | Action::Palette
+            | Action::CommandPalette
             | Action::NextAttention
             | Action::PrevAttention
             | Action::Quit

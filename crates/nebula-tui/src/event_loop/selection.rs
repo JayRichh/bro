@@ -316,6 +316,10 @@ pub(crate) fn jump_to_target_inner(
         // (`launcher::open_tab`): the card it was last left on, or with no
         // session in it the empty grid and no pane.
         PaletteTarget::Project(id) => launcher::open_tab(app, &id, out),
+        // The COMMAND PALETTE's own rows: an action run as its key runs
+        // it, an ATTENTION STRIP jump.
+        PaletteTarget::Action(action) => key_modes::run_action(app, action, out),
+        PaletteTarget::Attention(tone) => desk::jump_attention_kind(app, tone, out),
         PaletteTarget::Worktree(id) => {
             if app.selected_worktree().is_some_and(|w| w.id == id) {
                 app.nav.focus = Focus::Sessions;

@@ -10175,9 +10175,12 @@ mod tests {
                 Some("1".to_string()),
                 "one red dot, carrying its count: {text}"
             );
-            assert!(
-                !text.contains("needs you"),
-                "the dot says it; the header spends no words on it: {text}"
+            // The tab's dot says it for the project; the words are the
+            // ATTENTION STRIP's, which counts across every project, once.
+            assert_eq!(
+                text.matches("needs you").count(),
+                1,
+                "the tab spends no words on it, the strip does: {text}"
             );
         });
     }

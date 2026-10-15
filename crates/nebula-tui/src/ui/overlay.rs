@@ -46,6 +46,7 @@ impl Overlay {
             Overlay::Review(view) => draw_review_overlay(f, app, view),
             Overlay::OrchestratorStart(view) => draw_orchestrator_start_overlay(f, app, view),
             Overlay::Accounts(view) => super::accounts_view::draw(f, app, view),
+            Overlay::Subagents(view) => super::subagents_view::draw(f, app, view),
         }
     }
 }
@@ -2000,14 +2001,15 @@ fn draw_diff_file_list(
 fn draw_palette_overlay(f: &mut Frame, app: &mut App, palette: crate::palette::Palette) {
     let th = app.chrome.theme;
     let area = centered_rect(f.area(), PALETTE_SIZE.0, PALETTE_SIZE.1);
-    let title = if palette.list.query.is_empty() {
-        " Jump to ".to_string()
+    let name = if palette.commands {
+        "Commands"
     } else {
-        format!(
-            " Jump to ({}/{}) ",
-            palette.hits(),
-            palette.list.items.len()
-        )
+        "Jump to"
+    };
+    let title = if palette.list.query.is_empty() {
+        format!(" {name} ")
+    } else {
+        format!(" {name} ({}/{}) ", palette.hits(), palette.list.items.len())
     };
     let inner = render_modal_frame(f, area, title, th);
 
@@ -2049,6 +2051,8 @@ fn draw_palette_overlay(f: &mut Frame, app: &mut App, palette: crate::palette::P
             // The arrow its Worktrees-panel row wears (`pr_row`),
             // since that row is where picking it lands.
             PaletteTarget::PullRequest { .. } => ("↗ ", "↗ "),
+            // The COMMAND PALETTE's actions and jumps.
+            PaletteTarget::Action(_) | PaletteTarget::Attention(_) => ("› ", "› "),
         };
         let status = item.status;
         // A pull request carries no status; its colors are its
@@ -2107,7 +2111,14 @@ fn draw_palette_overlay(f: &mut Frame, app: &mut App, palette: crate::palette::P
         };
         // Pinned right, dim: when the row last ran — its panel
         // row's "23m ago".
-        let tail = if item.stamped > 0 {
+        // An action's row ends in its key instead, where it has one.
+        let tail = if let PaletteTarget::Action(action) = &item.target {
+            app.chrome
+                .keymap
+                .shown_first(*action)
+                .map(|c| c.display())
+                .unwrap_or_default()
+        } else if item.stamped > 0 {
             crate::hosts::ago_label(crate::app::now_ms() - item.stamped)
         } else {
             String::new()
