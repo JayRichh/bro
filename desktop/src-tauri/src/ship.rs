@@ -9,7 +9,7 @@ use crate::ado::ship::{
 };
 use crate::ado::AdoState;
 use crate::daemon::Client;
-use nebula_core::{Agent, AgentId, WorktreeId};
+use nebula_core::{AgentId, WorktreeId};
 use serde::Serialize;
 use std::sync::Arc;
 use tauri::State;
@@ -37,33 +37,6 @@ fn place(client: &Client, worktree: &str) -> ShipRes<Place> {
     ))
 }
 
-/// The session a suggestion is written from: `session` when named, else
-/// the worktree's most recently active live row. Its name and last prompt.
-pub fn session_words(
-    agents: &[Agent],
-    worktree: &str,
-    session: Option<&str>,
-) -> (Option<String>, Option<String>) {
-    let wt = WorktreeId(worktree.to_string());
-    let pick = match session {
-        Some(id) => {
-            let id = AgentId(id.to_string());
-            agents.iter().find(|a| a.id == id)
-        }
-        None => agents
-            .iter()
-            .filter(|a| a.worktree_id == wt && !a.archived)
-            .max_by_key(|a| a.status_changed_at),
-    };
-    match pick {
-        Some(a) => (
-            Some(a.name.clone()),
-            a.recent_prompts.last().map(|p| p.text.clone()),
-        ),
-        None => (None, None),
-    }
-}
-
 /// Where `worktree` stands for shipping, with a suggested title and body
 /// while its branch has no open PR.
 #[tauri::command]
@@ -79,8 +52,11 @@ pub async fn ship_status(
     let suggestion = if open || status.branch.is_none() {
         None
     } else {
-        let (name, prompt) =
-            session_words(&client.snapshot().agents, &worktree, session.as_deref());
+        let (name, prompt) = ship::session_words(
+            &client.snapshot().agents,
+            &WorktreeId(worktree.clone()),
+            session.map(AgentId).as_ref(),
+        );
         Some(place.suggest(name.as_deref(), prompt.as_deref()).await)
     };
     Ok(ShipView { status, suggestion })
@@ -115,61 +91,6 @@ pub async fn ship_merge(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nebula_core::{AgentKind, AgentRole, AgentStatus, PromptEntry};
-
-    fn agent(id: &str, worktree: &str, at: i64, prompts: &[&str]) -> Agent {
-        Agent {
-            id: AgentId(id.into()),
-            worktree_id: WorktreeId(worktree.into()),
-            name: format!("name-{id}"),
-            status: AgentStatus::Finished,
-            archived: false,
-            archived_at: 0,
-            unseen: false,
-            status_changed_at: at,
-            kind: AgentKind::Claude,
-            custom_harness: None,
-            model: None,
-            effort: None,
-            session_id: None,
-            cloud_session_id: None,
-            issue_url: None,
-            role: AgentRole::Worker,
-            sort_order: 0,
-            alive: true,
-            recent_prompts: prompts
-                .iter()
-                .map(|t| PromptEntry {
-                    text: t.to_string(),
-                    submitted_at: 0,
-                })
-                .collect(),
-            profile: None,
-            parent: None,
-        }
-    }
-
-    #[test]
-    fn the_suggestion_reads_the_named_session_else_the_worktrees_latest() {
-        let mut gone = agent("c", "w1", 99, &["old"]);
-        gone.archived = true;
-        let agents = vec![
-            agent("a", "w1", 5, &["first", "fix the login"]),
-            agent("b", "w1", 9, &[]),
-            agent("d", "w2", 50, &["elsewhere"]),
-            gone,
-        ];
-        assert_eq!(
-            session_words(&agents, "w1", Some("a")),
-            (Some("name-a".into()), Some("fix the login".into()))
-        );
-        assert_eq!(
-            session_words(&agents, "w1", None),
-            (Some("name-b".into()), None)
-        );
-        assert_eq!(session_words(&agents, "w3", None), (None, None));
-    }
-
     #[test]
     fn the_view_flattens_the_status_beside_the_suggestion() {
         let view = ShipView {
