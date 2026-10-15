@@ -36,7 +36,9 @@
     return out;
   });
 
-  const changed = (s: Shortcut) => s.keys.join(' ') !== defaultKeys(s.id).join(' ');
+  /** Set by the user: a default row that gave a chord up to one of theirs
+   *  is not, and gets it back when theirs lets it go. */
+  const changed = (s: Shortcut) => !!s.mine;
 
   async function save(id: ShortcutId, keys: string[] | null) {
     busy = true;
@@ -57,8 +59,10 @@
     const held = capture?.chord === chord && !clash.some((c) => isFixed(c.scope));
     if (clash.length && !held) return void (capture = { id: s.id, chord, clash });
     capture = null;
-    // Confirmed: the chord moves here from the rows that had it.
-    for (const c of clash) await save(c.id, c.keys.filter((x) => x !== chord));
+    // Confirmed: the chord moves here from the rows that had it. A row on
+    // its defaults is left unsaved: it gives the chord up to this one at
+    // every load (shortcuts.ts applyOverrides).
+    for (const c of clash) if (c.mine) await save(c.id, c.keys.filter((x) => x !== chord));
     await save(s.id, [...s.keys, chord]);
   }
 

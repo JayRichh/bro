@@ -380,12 +380,17 @@ pub const UNBOUND: &str = "-";
 #[derive(Debug, Clone)]
 pub struct Keymap {
     binds: Vec<Vec<KeyChord>>,
+    /// Rows the user set (in the config or the Hotkeys tab), as against
+    /// rows on their defaults, which may have given a chord up to one of
+    /// theirs: only these are written back.
+    mine: Vec<bool>,
 }
 
 impl Default for Keymap {
     fn default() -> Self {
         Self {
             binds: ACTIONS.iter().map(|s| parse_list(s.defaults)).collect(),
+            mine: vec![false; ACTIONS.len()],
         }
     }
 }
@@ -439,14 +444,18 @@ impl Keymap {
                 .collect();
             map.binds[index].retain(|c| !taken.contains(c));
         }
+        map.mine = mine;
         map
     }
 
-    /// Only what differs from the defaults, for writing back to the config.
+    /// Only what the user set and differs from the defaults, for writing
+    /// back to the config. A default row that gave a chord up to one of
+    /// theirs stays out: it gives it up again on the next load, and gets
+    /// it back once theirs lets it go.
     pub fn overrides(&self) -> BTreeMap<String, String> {
         let mut out = BTreeMap::new();
         for (index, spec) in ACTIONS.iter().enumerate() {
-            if self.binds[index] != parse_list(spec.defaults) {
+            if self.mine[index] && self.binds[index] != parse_list(spec.defaults) {
                 out.insert(spec.id.to_string(), self.spec_list(index));
             }
         }
@@ -562,6 +571,7 @@ impl Keymap {
         for other in self.conflicts(index, &chord) {
             self.binds[other].retain(|c| *c != chord);
         }
+        self.mine[index] = true;
         let slot = &mut self.binds[index];
         if add {
             if !slot.contains(&chord) {
@@ -576,12 +586,14 @@ impl Keymap {
     pub fn reset(&mut self, index: usize) {
         if let Some(spec) = ACTIONS.get(index) {
             self.binds[index] = parse_list(spec.defaults);
+            self.mine[index] = false;
         }
     }
 
     pub fn clear(&mut self, index: usize) {
         if let Some(slot) = self.binds.get_mut(index) {
             slot.clear();
+            self.mine[index] = true;
         }
     }
 
@@ -897,6 +909,36 @@ mod tests {
             map.lookup(Scope::Global, &KeyChord::parse("?").unwrap()),
             Some(Action::Help)
         );
+    }
+
+    #[test]
+    fn a_default_row_that_gave_a_chord_up_is_never_saved() {
+        let mut map =
+            Keymap::from_overrides(&BTreeMap::from([("delete".into(), "d, delete".into())]));
+        map.bind(
+            index_of(Action::Help).unwrap(),
+            KeyChord::parse("f1").unwrap(),
+            false,
+        );
+        let saved = map.overrides();
+        assert!(!saved.contains_key("git_diff"), "{saved:?}");
+        assert_eq!(saved["delete"], "d, delete");
+        // Once the user's row lets `d` go, the diff has it back.
+        let map = Keymap::from_overrides(&BTreeMap::from([("delete".into(), "delete".into())]));
+        assert_eq!(
+            map.chords(Action::GitDiff),
+            parse_list(&["d", "g"]).as_slice()
+        );
+        // A steal is the stealer's: the row it came from is not saved.
+        let mut map = Keymap::default();
+        map.bind(
+            index_of(Action::Help).unwrap(),
+            KeyChord::parse("g").unwrap(),
+            false,
+        );
+        assert_eq!(map.overrides().keys().collect::<Vec<_>>(), ["help"]);
+        let loaded = Keymap::from_overrides(&map.overrides());
+        assert_eq!(loaded.chords(Action::GitDiff), map.chords(Action::GitDiff));
     }
 
     #[test]

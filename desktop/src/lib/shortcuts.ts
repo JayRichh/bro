@@ -40,6 +40,8 @@ export interface Shortcut {
   /** The diff editor (Monaco) binds this chord itself: it stands down
    *  while the focus is in one. */
   editorOwns?: boolean;
+  /** The user set this row's keys (a `desktop.*` entry in keybindings). */
+  mine?: boolean;
 }
 
 // The live table, kept in a rune module so a tooltip drawn from it
@@ -70,6 +72,7 @@ export function applyOverrides(over: Partial<Record<string, string[]>>, table: S
     if (!k) continue;
     const mine = isFixed(k.scope) ? undefined : over[s.id];
     if (mine) theirs.add(s.id);
+    s.mine = !!mine;
     s.keys = [...(mine ?? k.chords)];
   }
   // A chord the user gave a row is theirs: a row still on its defaults

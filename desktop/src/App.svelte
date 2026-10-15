@@ -278,7 +278,7 @@
         <!-- The palette's button gives way first in a narrow window (Ctrl+K stays). -->
         <button
           class="hidden size-7 place-items-center border-0 bg-transparent text-muted hover:bg-surface hover:text-ink @min-[760px]:grid"
-          title={withKey('Command palette: jump anywhere, run any action', ['palette', 'palette_alt'])}
+          title={withKey('Command palette: jump anywhere, run any action', ['palette', 'palette_alt', 'find'])}
           aria-label="Command palette"
           onclick={() => ((ui.help = false), (ui.palette = true))}><Icon name="palette" /></button
         >

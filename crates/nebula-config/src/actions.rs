@@ -343,8 +343,9 @@ macro_rules! project_tab_slot {
             works_in: &[WorksIn::Grid, WorksIn::Board],
             surface: Surface::Both,
             // The window's digit is the Nth repo on its rail, in the
-            // user's order. One label for all nine: its help shows one row.
-            desktop: &[dk($desk, "Repo 1\u{2013}9 on the rail, in its order", "Views", DeskScope::Global, &[$digit])],
+            // user's order. A label each, so a rebound row in Settings,
+            // Hotkeys still says which repo it opens.
+            desktop: &[dk($desk, concat!("Repo ", $digit, " on the rail"), "Views", DeskScope::Global, &[$digit])],
         }
     };
 }

@@ -39,6 +39,8 @@ describe('the registry behind the table', () => {
     // keep them, the default rows give them up.
     applyOverrides({ rename: ['d'], cycle_theme: ['ctrl+shift+l'], help: ['z'] });
     expect(keysOf('diff')).toEqual([]);
+    // Only the user's rows count as changed: the diff gave D up, nothing more.
+    expect(SHORTCUTS.filter((s) => s.mine).map((s) => s.id).sort()).toEqual(['cycle_theme', 'help', 'rename']);
     expect(keysOf('maximize_z')).toEqual([]);
     expect(shortcutFor(press('d'), { ...idle, onRow: true })?.id).toBe('rename');
     expect(shortcutFor(press('z'), idle)?.id).toBe('help');
