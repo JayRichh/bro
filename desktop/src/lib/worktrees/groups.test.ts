@@ -150,9 +150,9 @@ describe('the Worktrees table', () => {
     prs: { 'b-two': pr(1, 'merged'), 'a-one': pr(2, 'open') },
   });
   const git: Record<string, WorktreeGit> = {
-    main: { changed: 0, untracked: 0, upstream: 'origin/main', ahead: 0, behind: 2, committed: 1 },
-    'b-two': { changed: 4, untracked: 1, upstream: null, ahead: null, behind: null, committed: 9 },
-    'a-one': { changed: 1, untracked: 0, upstream: 'origin/a-one', ahead: 3, behind: 0, committed: 2 },
+    main: { changed: 0, untracked: 0, upstream: 'origin/main', ahead: 0, behind: 2, committed: 1, ahead_of_base: 0, on_default_branch: true },
+    'b-two': { changed: 4, untracked: 1, upstream: null, ahead: null, behind: null, committed: 9, ahead_of_base: 0, on_default_branch: false },
+    'a-one': { changed: 1, untracked: 0, upstream: 'origin/a-one', ahead: 3, behind: 0, committed: 2, ahead_of_base: 3, on_default_branch: false },
   };
   const table = m.worktrees.map((w) => tableRow(groupOf(m, w), git[w.id]));
 

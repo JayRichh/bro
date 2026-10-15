@@ -4948,6 +4948,13 @@ pub struct JobState {
     pub worktree_changes: HashMap<WorktreeId, (Option<usize>, std::time::Instant)>,
     /// The checkout the sweep is reading right now; its answer clears it.
     pub worktree_changes_inflight: Option<WorktreeId>,
+    /// Where each checkout stands on its base branch, as its last change
+    /// read found it (the selected checkout's poll and the sweep both read
+    /// it): the board's commits-since-base and base-branch facts.
+    pub worktree_base: HashMap<WorktreeId, nebula_core::review_base::BaseStanding>,
+    /// Each checkout's base ref, kept between those reads so each spends
+    /// one `rev-list` on it.
+    pub base_refs: nebula_core::review_base::BaseRefs,
     /// The lines added and removed in each checkout, read beside its
     /// changed-file count: what its cards print after `+3 files`. Only a
     /// checkout with changed lines has an entry.

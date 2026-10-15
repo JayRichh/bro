@@ -78,7 +78,7 @@ pub struct Model {
     /// `worktree_git` read found it: the board's `has_changes`. Filled by
     /// those reads, never by a read of its own.
     #[serde(skip)]
-    pub worktree_changes: HashMap<String, bool>,
+    pub worktree_changes: HashMap<String, nebula_core::board::CardFacts>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -197,6 +197,8 @@ pub struct Client {
     panes: Mutex<HashMap<SessionRef, Channel<PtyEvent>>>,
     reviews: Mutex<Option<ReviewSink>>,
     notices: Mutex<Option<NoticeSink>>,
+    /// Each checkout's base ref, kept between `worktree_git` polls.
+    bases: Mutex<nebula_core::review_base::BaseRefs>,
     next_req: AtomicU64,
     /// Bumped on every model change; the emitter task watches it.
     pub changed: tokio::sync::Notify,
@@ -217,6 +219,7 @@ impl Client {
             panes: Mutex::new(HashMap::new()),
             reviews: Mutex::new(None),
             notices: Mutex::new(None),
+            bases: Mutex::new(Default::default()),
             next_req: AtomicU64::new(1),
             changed: tokio::sync::Notify::new(),
             retry: tokio::sync::Notify::new(),
@@ -436,18 +439,32 @@ impl Client {
         }
     }
 
-    /// Take in what a `worktree_git` read found, worktree by worktree;
-    /// the rest keep what they had.
-    pub fn set_worktree_changes(&self, changes: impl IntoIterator<Item = (String, bool)>) {
+    /// Take in what a `worktree_git` read found, worktree by worktree
+    /// (its board facts, the pull request aside); the rest keep what they
+    /// had.
+    pub fn set_worktree_changes(
+        &self,
+        changes: impl IntoIterator<Item = (String, nebula_core::board::CardFacts)>,
+    ) {
         let mut model = self.model.lock().expect("model lock");
         let mut changed = false;
-        for (id, has) in changes {
-            changed |= model.worktree_changes.insert(id, has) != Some(has);
+        for (id, facts) in changes {
+            changed |= model.worktree_changes.insert(id, facts) != Some(facts);
         }
         drop(model);
         if changed {
             self.touch();
         }
+    }
+
+    /// The base refs `worktree_git` keeps between polls, to read from.
+    pub fn base_refs(&self) -> nebula_core::review_base::BaseRefs {
+        self.bases.lock().expect("bases lock").clone()
+    }
+
+    /// Keep what a `worktree_git` read resolved.
+    pub fn keep_base_refs(&self, bases: nebula_core::review_base::BaseRefs) {
+        *self.bases.lock().expect("bases lock") = bases;
     }
 
     fn pane(&self, session: &SessionRef) -> Option<Channel<PtyEvent>> {

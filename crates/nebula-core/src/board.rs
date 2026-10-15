@@ -101,9 +101,16 @@ impl PrState {
 /// it from what it already holds; nothing here reads git.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CardFacts {
-    /// Its checkout has work no push carries: uncommitted or untracked
-    /// files, or commits ahead of its upstream. False when unknown.
+    /// Its checkout has work no pull request carries yet: uncommitted or
+    /// untracked files, commits ahead of its upstream, or commits since
+    /// its base (`ahead_of_base > 0`). False when unknown.
     pub has_changes: bool,
+    /// Commits on its branch since the base branch's merge-base
+    /// ([`crate::review_base::BaseRef::standing`]); 0 when unknown.
+    pub ahead_of_base: u32,
+    /// Its checkout is on the base branch itself: nothing there ships as a
+    /// pull request.
+    pub on_default_branch: bool,
     /// Its checkout's pull request, when one is known.
     pub pr: Option<PrState>,
 }
@@ -238,6 +245,9 @@ pub fn drop_verb(agent: &Agent, facts: &CardFacts, to: DropTarget) -> DropVerb {
         // a move that would not happen.
         (Lane::Review, _) => match (read_lane(agent, facts), to) {
             (read, to) if agent.unseen && read == to => DropVerb::MarkSeen,
+            (Lane::Review, Lane::Ship) if facts.on_default_branch => DropVerb::Refuse(
+                "This is the base branch: a pull request needs a branch of its own (cut a worktree, or move the work to one).",
+            ),
             (Lane::Review, Lane::Ship) => DropVerb::OpenPr,
             (Lane::Review, _) => DropVerb::Refuse(
                 "Its worktree has changes no pull request carries: commit and push them, ship them (drop on Ship) or archive the card.",
@@ -371,7 +381,11 @@ mod tests {
     }
 
     fn facts(has_changes: bool, pr: Option<PrState>) -> CardFacts {
-        CardFacts { has_changes, pr }
+        CardFacts {
+            has_changes,
+            pr,
+            ..CardFacts::default()
+        }
     }
 
     /// Every client reads a session's lane and tier off this one table.
@@ -509,6 +523,13 @@ mod tests {
         let unread_pr = (agent(Finished, true), facts(true, Some(Open)));
         let unread_merged = (agent(Finished, true), facts(true, Some(Merged)));
         let changes = (agent(Finished, false), facts(true, None));
+        let on_base = (
+            agent(Finished, false),
+            CardFacts {
+                on_default_branch: true,
+                ..facts(true, None)
+            },
+        );
         let open = (agent(Finished, false), facts(true, Some(Open)));
         let draft = (agent(Finished, false), facts(true, Some(Draft)));
         let done = (agent(Finished, false), facts(false, None));
@@ -528,7 +549,7 @@ mod tests {
         let verb = |t: &(Agent, CardFacts), to: DropTarget| drop_verb(&t.0, &t.1, to);
         let to = DropTarget::Lane;
         // (card, target) → the verb; None: refused.
-        let table: [(&(Agent, CardFacts), DropTarget, Option<DropVerb>); 24] = [
+        let table: [(&(Agent, CardFacts), DropTarget, Option<DropVerb>); 26] = [
             // Its own lane reorders; Archived archives from anywhere.
             (&running, to(Lane::Running), Some(V::Reorder)),
             (&open, to(Lane::Ship), Some(V::Reorder)),
@@ -559,6 +580,9 @@ mod tests {
             (&unread_merged, to(Lane::Ship), None),
             (&changes, to(Lane::Done), None),
             (&changes, to(Lane::Ship), Some(V::OpenPr)),
+            // On the base branch itself: no pull request to open.
+            (&on_base, to(Lane::Ship), None),
+            (&on_base, to(Lane::Done), None),
             (&unread_changes, to(Lane::Ship), Some(V::OpenPr)),
             (&unread, to(Lane::Ship), None),
             // Ship: to Done merges an open PR; a draft can't merge.
@@ -591,6 +615,9 @@ mod tests {
                 assert!(refused(verb(card, to(l))), "{:?} onto {l:?}", lane(card));
             }
         }
+        assert!(
+            matches!(verb(&on_base, to(Lane::Ship)), V::Refuse(why) if why.contains("base branch"))
+        );
         // Every refusal says why.
         for card in [&running, &needs, &unread, &changes, &open, &draft, &done] {
             for t in DropTarget::ALL {

@@ -73,20 +73,46 @@ pub async fn worktree_git(
     worktrees: Vec<String>,
 ) -> Res<std::collections::BTreeMap<String, git::WorktreeGit>> {
     let snap = client.snapshot();
-    let roots: Vec<(String, PathBuf)> = worktrees
+    let roots: Vec<(String, PathBuf, String)> = worktrees
         .into_iter()
         .filter_map(|id| {
-            let path = snap.worktrees.iter().find(|w| w.id.0 == id)?.path.clone();
-            Some((id, path))
+            let w = snap.worktrees.iter().find(|w| w.id.0 == id)?;
+            Some((id, w.path.clone(), w.branch.clone()))
         })
         .collect();
-    let out = tauri::async_runtime::spawn_blocking(move || {
+    let mut bases = client.base_refs();
+    let (out, bases) = tauri::async_runtime::spawn_blocking(move || {
+        // Each checkout's base ref, kept between polls: resolved (two git
+        // calls) only for a branch new to it, the setting read only then.
+        let mut setting: Option<String> = None;
+        let roots: Vec<_> = roots
+            .into_iter()
+            .map(|(id, root, branch)| {
+                let base = bases.get(&root, &branch, || {
+                    setting
+                        .get_or_insert_with(|| nebula_config::Config::load().worktree_base_branch)
+                        .clone()
+                });
+                (id, root, base)
+            })
+            .collect();
         let mut out = std::collections::BTreeMap::new();
         for chunk in roots.chunks(GIT_READERS) {
             std::thread::scope(|s| {
                 let reads: Vec<_> = chunk
                     .iter()
-                    .map(|(id, root)| s.spawn(move || (id.clone(), git::worktree_git(root))))
+                    .map(|(id, root, base)| {
+                        s.spawn(move || {
+                            // One `rev-list --count` beside the status read.
+                            let read = git::worktree_git(root).map(|mut g| {
+                                let standing = base.standing(root);
+                                g.ahead_of_base = standing.ahead_of_base;
+                                g.on_default_branch = standing.on_default_branch;
+                                g
+                            });
+                            (id.clone(), read)
+                        })
+                    })
                     .collect();
                 for r in reads {
                     if let Ok((id, Ok(state))) = r.join() {
@@ -95,13 +121,14 @@ pub async fn worktree_git(
                 }
             });
         }
-        out
+        (out, bases)
     })
     .await
     .map_err(|e| e.to_string())?;
-    // The board's Review lane reads these too, so it costs no git of its
-    // own.
-    client.set_worktree_changes(out.iter().map(|(id, g)| (id.clone(), g.has_changes())));
+    client.keep_base_refs(bases);
+    // The board's Review and Ship lanes read these too, so it costs no
+    // git of its own.
+    client.set_worktree_changes(out.iter().map(|(id, g)| (id.clone(), g.card_facts())));
     Ok(out)
 }
 

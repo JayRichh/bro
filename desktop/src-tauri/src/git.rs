@@ -939,13 +939,30 @@ pub struct WorktreeGit {
     pub behind: Option<u32>,
     /// Committer date of HEAD, unix seconds; 0 before the first commit.
     pub committed: i64,
+    /// Commits on the branch since its base branch's merge-base
+    /// (`nebula_core::review_base`); 0 on the base branch or with none.
+    pub ahead_of_base: u32,
+    /// The checkout is on the base branch itself.
+    pub on_default_branch: bool,
 }
 
 impl WorktreeGit {
-    /// Work no push carries: changed or untracked files, or commits ahead
-    /// of the upstream. A branch with no upstream counts its files only.
+    /// Work no pull request carries yet: changed or untracked files,
+    /// commits ahead of the upstream, or commits since the base.
     pub fn has_changes(&self) -> bool {
-        self.changed + self.untracked > 0 || self.ahead.is_some_and(|n| n > 0)
+        self.changed + self.untracked > 0
+            || self.ahead.is_some_and(|n| n > 0)
+            || self.ahead_of_base > 0
+    }
+
+    /// What the board reads off it, the pull request aside.
+    pub fn card_facts(&self) -> nebula_core::board::CardFacts {
+        nebula_core::board::CardFacts {
+            has_changes: self.has_changes(),
+            ahead_of_base: self.ahead_of_base,
+            on_default_branch: self.on_default_branch,
+            pr: None,
+        }
     }
 }
 
@@ -1771,6 +1788,15 @@ pub(crate) mod tests {
         assert!(g(1, 0, None).has_changes());
         assert!(g(0, 2, Some(0)).has_changes());
         assert!(g(0, 0, Some(3)).has_changes());
+        // Committed since the base and never pushed: no upstream to be
+        // ahead of, but work all the same.
+        let committed = WorktreeGit {
+            ahead_of_base: 2,
+            ..WorktreeGit::default()
+        };
+        assert!(committed.has_changes());
+        let facts = committed.card_facts();
+        assert!(facts.has_changes && facts.ahead_of_base == 2 && !facts.on_default_branch);
     }
 
     #[test]
@@ -1789,6 +1815,7 @@ u UU N... 100644 100644 100644 100644 a a a c.txt\0\
                 ahead: Some(2),
                 behind: Some(3),
                 committed: 0,
+                ..WorktreeGit::default()
             }
         );
         let none = parse_status_v2(b"# branch.oid (initial)\0# branch.head main\0", |_| false);

@@ -57,8 +57,8 @@ pub fn fill(model: &mut Model) {
     for a in &model.agents {
         let wt = a.worktree_id.0.as_str();
         let facts = CardFacts {
-            has_changes: model.worktree_changes.get(wt).copied().unwrap_or(false),
             pr: pr_state(model.prs.get(wt)),
+            ..model.worktree_changes.get(wt).copied().unwrap_or_default()
         };
         let lane = lane_of(a, &facts);
         let in_scope = model.scope.admits(a, project_of.get(wt).copied());
@@ -214,12 +214,25 @@ mod tests {
                 agent("fresh", "w1", Fresh, false, 0),
                 agent("clean", "w2", Finished, false, 0),
                 agent("shipped", "w3", Finished, false, 0),
+                agent("root", "w4", Finished, false, 0),
             ],
             ..Model::default()
         };
-        m.worktree_changes.insert("w1".into(), true);
-        m.worktree_changes.insert("w2".into(), false);
-        m.worktree_changes.insert("w3".into(), true);
+        let git = |changed, ahead_of_base, on_default_branch| {
+            crate::git::WorktreeGit {
+                changed,
+                ahead_of_base,
+                on_default_branch,
+                ..Default::default()
+            }
+            .card_facts()
+        };
+        // w1: committed since the base, never pushed, tree clean.
+        m.worktree_changes.insert("w1".into(), git(0, 2, false));
+        m.worktree_changes.insert("w2".into(), git(0, 0, false));
+        m.worktree_changes.insert("w3".into(), git(3, 0, false));
+        // w4: the root checkout, dirty, on the base branch.
+        m.worktree_changes.insert("w4".into(), git(1, 0, true));
         m.prs.insert("w3".into(), pr("merged", false));
         fill(&mut m);
         assert_eq!(m.cards["dirty"].lane, Lane::Review);
@@ -227,6 +240,10 @@ mod tests {
         assert_eq!(m.cards["fresh"].lane, Lane::Done);
         assert_eq!(m.cards["clean"].lane, Lane::Done);
         assert_eq!(m.cards["shipped"].lane, Lane::Done);
+        assert_eq!(m.cards["root"].lane, Lane::Review);
+        assert!(
+            matches!(m.cards["root"].drops["pr"], DropVerb::Refuse(why) if why.contains("base branch"))
+        );
         assert_eq!(
             m.cards["clean"].drops["archived"],
             DropVerb::ArchiveAndOfferWorktreeDelete

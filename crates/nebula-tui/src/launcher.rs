@@ -201,14 +201,23 @@ fn row_pr(app: &App, worktree: &WorktreeId, project: &ProjectId, branch: &str) -
 pub use nebula_core::board::Lane;
 
 /// What the board knows about `row`'s card beyond the row: its pull
-/// request, and whether its checkout has changes as the last read of its
-/// changed-file count found them (none read yet: no changes). No git here.
+/// request, whether its checkout has changes, and where it stands on its
+/// base, as the last reads found them (none read yet: none). No git here.
 pub fn card_facts(app: &App, row: &LauncherRow) -> nebula_core::board::CardFacts {
     use nebula_core::board::PrState;
+    let base = app
+        .jobs
+        .worktree_base
+        .get(&row.agent.worktree_id)
+        .copied()
+        .unwrap_or_default();
     nebula_core::board::CardFacts {
         has_changes: app
             .worktree_changes(&row.agent.worktree_id)
-            .is_some_and(|n| n > 0),
+            .is_some_and(|n| n > 0)
+            || base.ahead_of_base > 0,
+        ahead_of_base: base.ahead_of_base,
+        on_default_branch: base.on_default_branch,
         pr: row.pr.as_ref().map(|pr| match pr.standing {
             Standing::Open => PrState::Open,
             Standing::Draft => PrState::Draft,

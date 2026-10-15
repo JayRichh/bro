@@ -36,6 +36,11 @@ export interface WorktreeGit {
   behind: number | null;
   /** HEAD's committer date, unix seconds; 0 before the first commit. */
   committed: number;
+  /** Commits on the branch since its base branch's merge-base; 0 on the
+   *  base branch or with none. */
+  ahead_of_base: number;
+  /** The checkout is on the base branch itself. */
+  on_default_branch: boolean;
 }
 
 export interface Change {
