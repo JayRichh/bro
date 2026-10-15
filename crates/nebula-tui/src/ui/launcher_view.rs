@@ -781,13 +781,38 @@ fn head_count(
             }
         }
     };
+    // The HEADER TOOLS at the row's right end: Settings and Help, the two
+    // things every screen of kete has and a pointer had no way to. Lit
+    // under the pointer as the toggle is; the footer names their keys
+    // while it rests there.
+    let tools: Part = std::iter::once((Span::raw(" "), None))
+        .chain(
+            [
+                (HEAD_SETTINGS, crate::keymap::Action::Settings),
+                (HEAD_HELP, crate::keymap::Action::Help),
+            ]
+            .into_iter()
+            .map(|(glyph, action)| {
+                let hit = HitTarget::Button(action);
+                let style = if app.launcher.hover_crumb.as_ref() == Some(&hit) {
+                    Style::default().fg(th.accent)
+                } else {
+                    Style::default().fg(th.muted)
+                };
+                (Span::styled(glyph, style), Some(hit))
+            }),
+        )
+        .collect();
     // The VIEW TOGGLE is kept first, so it is the last thing a narrow
     // row gives up: it is the one way to the board a pointer can see.
+    // The tools after everything that says something about the grid:
+    // the footer offers both keys as buttons too.
     let mut toggle = keep(toggle);
     let scope = keep(scope);
     let mark = keep(mark);
     let badge = keep(badge);
     let words = keep(words);
+    let tools = keep(tools);
     // The toggle's key last of all, in what the rest left: a narrow row
     // keeps its counts over the reminder of a key the footer also names.
     let key = Span::styled(
@@ -806,8 +831,13 @@ fn head_count(
         .chain(badge)
         .chain(mark)
         .chain(toggle)
+        .chain(tools)
         .collect()
 }
+
+/// The HEADER TOOLS' buttons ([`head_count`]): Settings, then Help.
+const HEAD_SETTINGS: &str = " ⚙ ";
+const HEAD_HELP: &str = " ? ";
 
 /// The header's VIEW TOGGLE, the desktop's Overview|Board radio: the two
 /// homes side by side, the one on screen lit as a solid chip, the other a
@@ -1076,15 +1106,16 @@ fn draw_bands(
                     draw_cut(f, placed, |buf, r| {
                         draw_any_card(buf, &*app, r, card, selected, keys, th, &mut cfg)
                     });
+                    let at = crate::launcher::CardRef {
+                        band: index,
+                        card: i,
+                    };
+                    selected_card_buttons(f, app, card, at, placed, selected);
                     note_tail_card(app, card);
                     app.chrome.hits.extend(card_issue_hit(app, card, placed));
-                    app.chrome.hits.push((
-                        placed.rect,
-                        HitTarget::LauncherCard(crate::launcher::CardRef {
-                            band: index,
-                            card: i,
-                        }),
-                    ));
+                    app.chrome
+                        .hits
+                        .push((placed.rect, HitTarget::LauncherCard(at)));
                 }
             }
             Some(strip) => {
@@ -1107,18 +1138,11 @@ fn draw_bands(
                         cut_bottom: row_placed.cut_bottom,
                     };
                     let card = &band.cards[slot.at.card];
+                    let selected = on && at == Some(slot.at.card);
                     draw_cut(f, placed, |buf, r| {
-                        draw_any_card(
-                            buf,
-                            &*app,
-                            r,
-                            card,
-                            on && at == Some(slot.at.card),
-                            keys,
-                            th,
-                            &mut cfg,
-                        )
+                        draw_any_card(buf, &*app, r, card, selected, keys, th, &mut cfg)
                     });
+                    selected_card_buttons(f, app, card, slot.at, placed, selected);
                     note_tail_card(app, card);
                     app.chrome.hits.extend(card_issue_hit(app, card, placed));
                     app.chrome
@@ -1866,8 +1890,8 @@ fn draw_band_rule(
         branch_style = branch_style.add_modifier(Modifier::BOLD);
     }
     // `── ` before, ` ` after the words, ` ` before the right end and
-    // ` ──` after it: what the words have to fit between.
-    let room = width.saturating_sub(3 + right_w + 5);
+    // ` + ─` (the NEW BUTTON) after it: what the words have to fit between.
+    let room = width.saturating_sub(3 + right_w + 6);
     let changes = app
         .worktree_changes(&band.worktree)
         .filter(|n| *n > 0)
@@ -1956,18 +1980,47 @@ fn draw_band_rule(
         }
     }
     let used: usize = left.iter().map(|s| s.width()).sum();
-    let fill = width.saturating_sub(used + 1 + 1 + right_w + 1 + 2);
+    let new_w = BAND_NEW.chars().count();
+    let fill = width.saturating_sub(used + 1 + 1 + right_w + new_w + 1);
     let mut spans = left;
     spans.push(Span::raw(" "));
     spans.push(dash(fill));
     spans.push(Span::raw(" "));
     spans.extend(right);
-    spans.push(Span::raw(" "));
-    spans.push(dash(2));
+    // The NEW BUTTON at the rule's right end: a session in this checkout,
+    // the box `p` opens here — the grid had no pointer's way to start
+    // one where you are looking. Only on a rule that fits it whole.
+    let new_hit = HitTarget::LauncherBandNew(rule.index);
+    let total = used + 1 + fill + 1 + right_w + new_w + 1;
+    let shows_new = !drop && total <= width;
+    if shows_new {
+        let fg = if app.launcher.hover_crumb.as_ref() == Some(&new_hit) {
+            th.accent
+        } else {
+            th.muted
+        };
+        spans.push(Span::styled(BAND_NEW, Style::default().fg(fg)));
+        hits.push((
+            Rect {
+                x: r.x + (total - new_w - 1) as u16,
+                width: new_w as u16,
+                height: 1,
+                ..r
+            },
+            new_hit,
+        ));
+    } else {
+        spans.push(Span::raw(" "));
+        spans.push(dash(new_w.saturating_sub(1)));
+    }
+    spans.push(dash(1));
     Paragraph::new(Line::from(spans)).render(r, buf);
     hits.push((r, HitTarget::LauncherBand(rule.index)));
     hits
 }
+
+/// A BAND rule's NEW BUTTON ([`draw_band_rule`]).
+const BAND_NEW: &str = " + ";
 
 /// A TERMINAL's card: what a session's card is to a session, and the
 /// same size — its name behind the glyph the SESSIONS PANEL gave the row
@@ -2406,6 +2459,132 @@ fn draw_card(
         Paragraph::new(Line::from(spans)).render(r, buf);
     }
 }
+
+/// The CARD BUTTONS on the bottom edge of the card under the cursor, as
+/// (label, target), most wanted first: a narrow card keeps the head of
+/// the list. The `⋯` is first of all — it holds every verb the rest do —
+/// though it is drawn last, at the right end.
+fn card_button_list(
+    card: &crate::launcher::Card,
+    at: crate::launcher::CardRef,
+) -> Vec<(&'static str, HitTarget)> {
+    use crate::keymap::Action;
+    let act = |label, action| (label, HitTarget::CardButton(at, action));
+    let mut list = vec![(CARD_MENU, HitTarget::CardMenu(at))];
+    match card {
+        crate::launcher::Card::Session(row) if row.agent.archived => {
+            list.push(act(" unarchive ", Action::Unarchive));
+            list.push(act(" delete ", Action::Delete));
+        }
+        crate::launcher::Card::Session(_) => {
+            list.push(act(" reply ", Action::FollowUp));
+            list.push(act(" delete ", Action::Delete));
+            list.push(act(" archive ", Action::Archive));
+            list.push(act(" diff ", Action::GitDiff));
+        }
+        crate::launcher::Card::Terminal(_) => {
+            list.push(act(" close ", Action::Delete));
+            list.push(act(" diff ", Action::GitDiff));
+        }
+    }
+    list
+}
+
+/// The order the CARD BUTTONS read in, left to right; the `⋯` last.
+fn card_button_rank(hit: &HitTarget) -> usize {
+    use crate::keymap::Action;
+    match hit {
+        HitTarget::CardButton(_, Action::FollowUp | Action::Unarchive) => 0,
+        HitTarget::CardButton(_, Action::GitDiff) => 1,
+        HitTarget::CardButton(_, Action::Archive) => 2,
+        HitTarget::CardButton(_, Action::Delete) => 3,
+        _ => 4,
+    }
+}
+
+/// The CARD BUTTONS of the card at `at`, drawn at `placed`, laid out on
+/// its bottom border: right-aligned inside the corners, each whole or not
+/// at all ([`card_button_list`] says which go first), and none on a card
+/// whose bottom row the window cut off.
+fn card_buttons(
+    card: &crate::launcher::Card,
+    at: crate::launcher::CardRef,
+    placed: crate::launcher::Placed,
+) -> Vec<(Rect, HitTarget, &'static str)> {
+    let r = placed.rect;
+    if placed.cut_bottom > 0 || r.height < 3 || r.width < 8 {
+        return Vec::new();
+    }
+    // A corner and a cell of rule at either end stay the card's.
+    let room = usize::from(r.width) - 4;
+    let mut kept: Vec<(&'static str, HitTarget)> = Vec::new();
+    let mut used = 0;
+    for (label, hit) in card_button_list(card, at) {
+        let w = label.chars().count();
+        if used + w > room {
+            break;
+        }
+        used += w;
+        kept.push((label, hit));
+    }
+    kept.sort_by_key(|(_, hit)| card_button_rank(hit));
+    let mut x = r.x + r.width - 2 - used as u16;
+    let y = r.y + r.height - 1;
+    kept.into_iter()
+        .map(|(label, hit)| {
+            let width = label.chars().count() as u16;
+            let rect = Rect {
+                x,
+                y,
+                width,
+                height: 1,
+            };
+            x += width;
+            (rect, hit, label)
+        })
+        .collect()
+}
+
+/// Draw [`card_buttons`] over the card's bottom border: muted, the one
+/// under the pointer in the accent and underlined, as every button on the
+/// grid is.
+fn draw_card_buttons(buf: &mut Buffer, app: &App, buttons: &[(Rect, HitTarget, &'static str)]) {
+    let th = app.chrome.theme;
+    for (rect, hit, label) in buttons {
+        let style = if app.launcher.hover_crumb.as_ref() == Some(hit) {
+            Style::default()
+                .fg(th.accent)
+                .add_modifier(Modifier::UNDERLINED | Modifier::BOLD)
+        } else {
+            Style::default().fg(th.muted)
+        };
+        buf.set_stringn(rect.x, rect.y, label, usize::from(rect.width), style);
+    }
+}
+
+/// The card under the cursor's CARD BUTTONS, drawn and registered ahead of
+/// the card's own hit so they win `hit_at`'s first-match scan. Nothing on
+/// any other card, or with the aim let go: the buttons are the cursor's.
+fn selected_card_buttons(
+    f: &mut Frame,
+    app: &mut App,
+    card: &crate::launcher::Card,
+    at: crate::launcher::CardRef,
+    placed: crate::launcher::Placed,
+    selected: bool,
+) {
+    if !selected || app.launcher.launcher_unaimed {
+        return;
+    }
+    let buttons = card_buttons(card, at, placed);
+    draw_card_buttons(f.buffer_mut(), app, &buttons);
+    app.chrome
+        .hits
+        .extend(buttons.into_iter().map(|(rect, hit, _)| (rect, hit)));
+}
+
+/// The `⋯` CARD BUTTON: the card's menu.
+const CARD_MENU: &str = " ⋯ ";
 
 /// What the orchestrator's card says ahead of its harness.
 pub(crate) const ORCHESTRATOR_BADGE: &str = "◆ orchestrator ";
@@ -2852,6 +3031,19 @@ const PANE_TO_BOTTOM: &str = " ⬓ ";
 /// header ends in the NORMAL-SIZE BUTTON, which brings it back down.
 const PANE_FULL_SCREEN: &str = " ⤢ ";
 const PANE_NORMAL_SIZE: &str = " ⤡ ";
+/// The PANE's DIFF BUTTON: the checkout's diff, the modal `g` opens.
+const PANE_DIFF: &str = " ± ";
+/// The PANE's MENU BUTTON: the card's CONTEXT MENU, a right-click's.
+const PANE_MENU: &str = " ⋯ ";
+
+/// Is the PANE reading a card on the grid — the one the cursor is on —
+/// rather than a session the grid no longer lists?
+fn pane_reads_card(app: &App) -> bool {
+    let bands = crate::launcher::bands(app);
+    crate::launcher::cursor(app, &bands)
+        .and_then(|at| crate::launcher::card_at(&bands, at))
+        .is_some()
+}
 
 /// A header button of `glyph` at `rect`, muted until the pointer is on
 /// it and lit in `lit` then, registered as `hit`.
@@ -2901,10 +3093,33 @@ pub(super) fn pane_frame(
             crate::launcher::PaneSide::Right => PANE_TO_RIGHT,
             crate::launcher::PaneSide::Bottom => PANE_TO_BOTTOM,
         });
-        let side_w = side_button.map_or(0, |b| b.chars().count() as u16);
         let zoom_w = PANE_FULL_SCREEN.chars().count() as u16;
         let close_w = PANE_CLOSE.chars().count() as u16;
-        let buttons_w = zoom_w + side_w + close_w;
+        // The DIFF and MENU BUTTONS lead the row's buttons, on a pane
+        // reading a card: the checkout's diff (`g`) and the card's own
+        // menu, a right-click's. They, then the SIDE BUTTON, are what a
+        // narrow pane gives up first; the FULL-SCREEN and CLOSE BUTTONS
+        // stay while there is room for the two.
+        let reads_card = pane_reads_card(app);
+        let mut extras: Vec<(&'static str, HitTarget)> = Vec::new();
+        if reads_card {
+            extras.push((PANE_DIFF, HitTarget::Button(crate::keymap::Action::GitDiff)));
+            extras.push((PANE_MENU, HitTarget::LauncherPaneMenu));
+        }
+        if let Some(glyph) = side_button {
+            extras.push((glyph, HitTarget::LauncherPaneSide));
+        }
+        // What the title needs to say anything: a dot and a few letters.
+        let title_min = 12u16;
+        while !extras.is_empty() {
+            let w: u16 = extras.iter().map(|(g, _)| g.chars().count() as u16).sum();
+            if zoom_w + close_w + w + title_min <= r.width {
+                break;
+            }
+            extras.remove(0);
+        }
+        let extras_w: u16 = extras.iter().map(|(g, _)| g.chars().count() as u16).sum();
+        let buttons_w = zoom_w + extras_w + close_w;
         let taken = usize::from(buttons_w)
             + right
                 .as_ref()
@@ -2942,6 +3157,19 @@ pub(super) fn pane_frame(
         }
         if r.width >= buttons_w {
             let mut x = tag_r.x + tag_r.width;
+            for (glyph, hit) in extras
+                .iter()
+                .filter(|(_, hit)| *hit != HitTarget::LauncherPaneSide)
+            {
+                let w = glyph.chars().count() as u16;
+                header_button(f, app, Rect { x, width: w, ..r }, glyph, hit.clone(), th.accent);
+                x += w;
+            }
+            let side_button = extras
+                .iter()
+                .find(|(_, hit)| *hit == HitTarget::LauncherPaneSide)
+                .map(|(glyph, _)| *glyph);
+            let side_w = side_button.map_or(0, |b| b.chars().count() as u16);
             let zoom = Rect {
                 x,
                 width: zoom_w,
@@ -4872,6 +5100,8 @@ mod tests {
             assert_eq!(mark, width >= toggle_w + mark_w, "{width}: {text:?}");
             assert!(!badge || mark, "{width}: the marker went first: {text:?}");
             assert!(!words || badge, "{width}: the counts went first: {text:?}");
+            let tools = text.contains('⚙') && text.contains(" ? ");
+            assert!(!tools || words, "{width}: the tools went first: {text:?}");
         }
         assert_eq!(
             row_text(&count_spans(&app, 9, hidden, 120, th)),
@@ -4880,8 +5110,9 @@ mod tests {
         );
     }
 
-    /// The VIEW TOGGLE as the row ends in it, its key included.
-    const TOGGLE_ROW: &str = "   Overview │ Board  ⇧K";
+    /// The VIEW TOGGLE as the row ends in it, its key and the HEADER
+    /// TOOLS after it included.
+    const TOGGLE_ROW: &str = "   Overview │ Board  ⇧K  ⚙  ? ";
 
     /// A session on a profile names it, the default one too: the label
     /// never changes because the default moved. No profile, no `@`.
@@ -4970,7 +5201,9 @@ mod tests {
             hits(&app),
             [
                 HitTarget::LauncherHome(false),
-                HitTarget::LauncherHome(true)
+                HitTarget::LauncherHome(true),
+                HitTarget::Button(crate::keymap::Action::Settings),
+                HitTarget::Button(crate::keymap::Action::Help),
             ]
         );
         let lit = |app: &App, label: &str| {
@@ -5640,7 +5873,7 @@ mod tests {
         let text = row_string(&buf, 0);
         assert!(text.starts_with("❯  ⌂ main"), "{text:?}");
         assert!(
-            text.contains(&format!("8 sessions  ▸ 6 more  {key}: see all 8 ──")),
+            text.contains(&format!("8 sessions  ▸ 6 more  {key}: see all 8 + ─")),
             "{text:?}"
         );
         // The mark and the key in the accent, the checkout still in its
@@ -5654,7 +5887,7 @@ mod tests {
         let buf = rule_row_as(&app, &band, 96, lit(0));
         let text = row_string(&buf, 0);
         assert!(
-            text.contains(&format!("8 sessions  {key}: expand ──")),
+            text.contains(&format!("8 sessions  {key}: expand + ─")),
             "{text:?}"
         );
 
@@ -5675,7 +5908,7 @@ mod tests {
         );
         let text = row_string(&buf, 0);
         assert!(text.starts_with("── ⌂ main"), "keys elsewhere: {text:?}");
-        assert!(text.contains("8 sessions  ▸ 6 more ──"), "{text:?}");
+        assert!(text.contains("8 sessions  ▸ 6 more + ─"), "{text:?}");
         assert!(!text.contains(&key), "{text:?}");
         assert_eq!(painted(&buf, 0, th.accent), "", "{text:?}");
     }
@@ -5703,13 +5936,13 @@ mod tests {
         let buf = rule_row_as(&app, &band, 40, rule);
         let text = row_string(&buf, 0);
         assert!(text.starts_with("❯  ↳ feat-x"), "{text:?}");
-        assert!(text.contains("3 sessions  ▸ 2 more ──"), "{text:?}");
+        assert!(text.contains("3 sessions  ▸ 2 more + ─"), "{text:?}");
         assert!(!text.contains(&key), "{text:?}");
 
         let buf = rule_row_as(&app, &band, 72, rule);
         let text = row_string(&buf, 0);
         assert!(
-            text.contains(&format!("3 sessions  ▸ 2 more  {key}: see all 3 ──")),
+            text.contains(&format!("3 sessions  ▸ 2 more  {key}: see all 3 + ─")),
             "{text:?}"
         );
     }
@@ -6023,7 +6256,8 @@ mod tests {
         assert_eq!(added.trim(), "+120");
         assert_eq!(removed.trim(), "-45");
 
-        let (text, warn, added, _) = rule(&app, 37);
+        // One column more than before the rule's NEW BUTTON took one.
+        let (text, warn, added, _) = rule(&app, 38);
         assert!(text.contains("↳ feat-x +3 +120 -45"), "{text:?}");
         assert_eq!((warn.trim(), added.trim()), ("+3", "+120"));
 

@@ -6320,12 +6320,24 @@ mod tests {
                 session.width * 2 + crate::launcher::GAP_X,
                 "two columns wide: {text}"
             );
-            // No `+` anywhere under the header: the tab strip's own is the
-            // one on screen.
+            // No `+` for a terminal anywhere under the header: the only ones
+            // are the bands' NEW BUTTONS, which open the box `p` does.
             let buffer = terminal.backend().buffer();
+            let new_buttons: Vec<ratatui::layout::Rect> = app
+                .chrome
+                .hits
+                .iter()
+                .filter(|(_, h)| matches!(h, HitTarget::LauncherBandNew(_)))
+                .map(|(r, _)| *r)
+                .collect();
             let pluses: Vec<(u16, u16)> = (crate::launcher::HEAD_H..50u16)
                 .flat_map(|y| (0..130u16).map(move |x| (x, y)))
                 .filter(|&(x, y)| buffer[(x, y)].symbol() == "+")
+                .filter(|&(x, y)| {
+                    !new_buttons
+                        .iter()
+                        .any(|r| r.contains(ratatui::layout::Position::new(x, y)))
+                })
                 .collect();
             assert!(pluses.is_empty(), "no + on the grid: {pluses:?}\n{text}");
 
@@ -11454,7 +11466,8 @@ mod tests {
             let rule = app
                 .hit_rect(&HitTarget::LauncherBand(1))
                 .expect("feat's rule");
-            let (x, y) = (rule.x + rule.width - 2, rule.y);
+            // The rule's last cell: the NEW BUTTON stands just before it.
+            let (x, y) = (rule.x + rule.width - 1, rule.y);
             app.chrome.flash = None;
             mouse(&mut app, MouseEventKind::Down(MouseButton::Left), x, y);
             draw_tall(&mut app);
