@@ -178,6 +178,14 @@ export interface Model {
 /** `SessionRef` exactly as serde spells it: externally tagged. */
 export type SessionRef = { Agent: string } | { Terminal: string };
 
+/** What `reorder` reorders: every project, one project's worktrees, or
+ *  one worktree's sessions. Rows lay out by `sort_order`, then the view's
+ *  tiebreak, a project's main checkout first; the daemon keeps that rule. */
+export type ReorderScope =
+  | { kind: 'projects' }
+  | { kind: 'worktrees'; project: string }
+  | { kind: 'agents'; worktree: string };
+
 export type PtyEvent =
   | { kind: 'scrollback'; data: string }
   | { kind: 'output'; data: string }
@@ -230,6 +238,8 @@ export interface Launchables {
   follow?: boolean;
   /** Archive asks first (Confirm on archive). */
   ask_before_archive?: boolean;
+  /** Show all worktrees: an empty checkout keeps its overview group. */
+  show_all_worktrees?: boolean;
 }
 /** An agent preset (agent_presets.json, shared with the terminal app). */
 export interface Preset {
@@ -340,6 +350,8 @@ export interface DesktopPrefs {
   home: string;
   /** `home` or `orchestrator`: what the window opens on. */
   startup?: string;
+  /** Folded overview groups: `repo:<id>`, `wt:<id>`. */
+  collapsed?: string[];
 }
 export interface Startup {
   view: string | null;
@@ -376,6 +388,10 @@ export const api = {
   deleteAgent: (agent: string) => invoke<void>('delete_agent', { agent }),
   restartAgent: (agent: string) => invoke<void>('restart_agent', { agent }),
   moveAgent: (agent: string, worktree: string) => invoke<void>('move_agent', { agent, worktree }),
+  /** The scope's new order, first to last; ids left out keep their old
+   *  order after it. Refused (with what to run) by a daemon older than
+   *  protocol 56. */
+  reorder: (scope: ReorderScope, ids: string[]) => invoke<void>('reorder', { scope, ids }),
   renameTerminal: (terminal: string, name: string) => invoke<void>('rename_terminal', { terminal, name }),
   closeTerminal: (terminal: string) => invoke<void>('close_terminal', { terminal }),
   followUp: (agent: string, text: string) => invoke<void>('follow_up', { agent, text }),
@@ -427,6 +443,7 @@ export const api = {
   settingsSet: (target: SettingTarget, value: boolean | string) => invoke<void>('settings_set', { target, value }),
   settingsReset: () => invoke<void>('settings_reset'),
   desktopPrefs: () => invoke<DesktopPrefs>('desktop_prefs'),
+  desktopSetCollapsed: (keys: string[]) => invoke<void>('desktop_set_collapsed', { keys }),
   /** Why config.json can't be written (it can't be parsed); null: fine. */
   configProblem: () => invoke<string | null>('config_problem'),
   diffFiles: (worktree: string) => invoke<DiffFile[]>('diff_files', { worktree }),

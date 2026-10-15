@@ -73,11 +73,11 @@ describe('the add form', () => {
 });
 
 describe('moving a session to another account', () => {
-  it('needs a 56 daemon', () => {
-    expect(SWITCH_ACCOUNT_PROTOCOL).toBe(56);
-    expect(canSwitch({ connected: true, protocol_version: 55 })).toBe(false);
-    expect(canSwitch({ connected: false, protocol_version: 56 })).toBe(false);
-    expect(canSwitch({ connected: true, protocol_version: 56 })).toBe(true);
+  it('needs a 57 daemon', () => {
+    expect(SWITCH_ACCOUNT_PROTOCOL).toBe(57);
+    expect(canSwitch({ connected: true, protocol_version: 56 })).toBe(false);
+    expect(canSwitch({ connected: false, protocol_version: 57 })).toBe(false);
+    expect(canSwitch({ connected: true, protocol_version: 57 })).toBe(true);
   });
 
   it('offers the other profiles of its harness, off ones last, then its own login', () => {

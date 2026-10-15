@@ -60,6 +60,64 @@ pub async fn checkout_state(
         .map_err(|e| e.to_string())?
 }
 
+/// How many checkouts one [`worktree_git`] call reads at once.
+const GIT_READERS: usize = 4;
+
+/// Each named worktree's [`git::WorktreeGit`], for the overview's worktree
+/// rows and the Worktrees view. A worktree that is gone, or whose git
+/// can't be read, is left out rather than failing the rest; the window
+/// keeps what it had for it.
+#[tauri::command]
+pub async fn worktree_git(
+    client: State<'_, Arc<Client>>,
+    worktrees: Vec<String>,
+) -> Res<std::collections::BTreeMap<String, git::WorktreeGit>> {
+    let snap = client.snapshot();
+    let roots: Vec<(String, PathBuf)> = worktrees
+        .into_iter()
+        .filter_map(|id| {
+            let path = snap.worktrees.iter().find(|w| w.id.0 == id)?.path.clone();
+            Some((id, path))
+        })
+        .collect();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut out = std::collections::BTreeMap::new();
+        for chunk in roots.chunks(GIT_READERS) {
+            std::thread::scope(|s| {
+                let reads: Vec<_> = chunk
+                    .iter()
+                    .map(|(id, root)| s.spawn(move || (id.clone(), git::worktree_git(root))))
+                    .collect();
+                for r in reads {
+                    if let Ok((id, Ok(state))) = r.join() {
+                        out.insert(id, state);
+                    }
+                }
+            });
+        }
+        out
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Open a worktree's folder in the system's file manager.
+#[tauri::command]
+pub fn worktree_reveal(
+    app: tauri::AppHandle,
+    client: State<'_, Arc<Client>>,
+    worktree: String,
+) -> Res<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let root = worktree_path(&client, &worktree)?;
+    if !root.is_dir() {
+        return Err(format!("{} is not there any more", root.display()));
+    }
+    app.opener()
+        .open_path(root.display().to_string(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
 // ---- git ----
 
 /// One row: a local branch, or a remote-tracking branch nothing local

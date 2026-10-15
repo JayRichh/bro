@@ -588,6 +588,16 @@
       {/if}
     </span>
     {#if loading}<span class="font-mono text-[12px] text-muted" role="status">Loading</span>{/if}
+    {#if !showFiles && working && hunks.unstaged.length + hunks.staged.length}
+      <!-- Stage, Unstage and Discard live under the file in the list: with
+           the list hidden, say they are there and bring it back. -->
+      <button
+        class="h-7 flex-none border border-rule bg-transparent px-2 font-mono text-[12px] whitespace-nowrap text-ink hover:border-rule-strong"
+        title="Stage, unstage or discard this file's hunks: shows the file list (F)"
+        onclick={() => (showFiles = true)}
+        >{hunks.unstaged.length + hunks.staged.length} {hunks.unstaged.length + hunks.staged.length === 1 ? 'hunk' : 'hunks'}</button
+      >
+    {/if}
     <div class="flex h-7 flex-none items-center border border-rule" aria-label="Changes">
       <button
         class="grid h-full w-7 place-items-center border-0 bg-transparent text-muted enabled:hover:bg-surface enabled:hover:text-ink disabled:text-faint"
@@ -711,6 +721,7 @@
                             <button
                               class="flex-none border border-rule bg-bg px-1.5 leading-5 text-ink enabled:hover:bg-raised disabled:text-faint"
                               disabled={busy}
+                              title="Stage this hunk: add it to the next commit"
                               onclick={() => act(h, 'stage')}>Stage</button
                             >
                             <button
@@ -718,6 +729,7 @@
                               disabled={busy}
                               data-discard={k}
                               aria-expanded={confirming === k}
+                              title="Discard this hunk from disk (asks first)"
                               onclick={() => askDiscard(k)}>Discard</button
                             >
                           {:else}
@@ -725,6 +737,7 @@
                             <button
                               class="flex-none border border-rule bg-bg px-1.5 leading-5 text-ink enabled:hover:bg-raised disabled:text-faint"
                               disabled={busy}
+                              title="Unstage this hunk: keep it on disk, out of the next commit"
                               onclick={() => act(h, 'unstage')}>Unstage</button
                             >
                           {/if}

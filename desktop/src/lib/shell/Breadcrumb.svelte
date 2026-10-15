@@ -14,6 +14,7 @@
     settings: 'Settings',
     orchestrator: 'Orchestrator',
     accounts: 'Accounts',
+    worktrees: 'Worktrees',
   };
 
   const crumbs = $derived.by((): Crumb[] => {
@@ -57,7 +58,7 @@
   });
 
   const btn =
-    'grid size-7 place-items-center border-0 bg-transparent text-ink enabled:hover:bg-surface disabled:text-faint';
+    'grid size-7 flex-none place-items-center border-0 bg-transparent text-ink enabled:hover:bg-surface disabled:text-faint';
 </script>
 
 <nav class="flex min-w-0 items-center gap-1" aria-label="Where you are">

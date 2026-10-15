@@ -442,7 +442,7 @@ impl Daemon {
         path: PathBuf,
         branch: &str,
     ) -> Result<Worktree> {
-        let worktree = Worktree {
+        let mut worktree = Worktree {
             id: WorktreeId::generate(),
             project_id: project_id.clone(),
             path,
@@ -450,8 +450,8 @@ impl Daemon {
             is_main: false,
             sort_order: 0,
         };
-        let worktree_to_insert = worktree.clone();
-        self.store_blocking(move |store| store.insert_worktree(&worktree_to_insert))
+        worktree = self
+            .store_blocking(move |store| store.append_worktree(worktree))
             .await?;
         self.broadcast(ServerEvent::EntityUpserted {
             entity: Entity::Worktree(worktree.clone()),
@@ -716,8 +716,8 @@ impl Daemon {
                 branch: entry.branch.clone(),
                 sort_order: 0,
             };
-            let worktree_to_insert = worktree.clone();
-            self.store_blocking(move |store| store.insert_worktree(&worktree_to_insert))
+            let worktree = self
+                .store_blocking(move |store| store.append_worktree(worktree))
                 .await?;
             adopted = true;
             self.broadcast(ServerEvent::EntityUpserted {

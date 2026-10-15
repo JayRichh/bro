@@ -259,6 +259,7 @@ pub struct Daemon {
 
 mod exit;
 mod lifecycle;
+mod order;
 mod ports;
 mod prewarm;
 mod projects;
@@ -3805,6 +3806,62 @@ pub(crate) mod tests {
 
         daemon.move_agent(&a1, &WorktreeId("other".into())).unwrap();
         assert_eq!(agent_worktree(&daemon, "a1"), "other");
+    }
+
+    /// A reorder reaches every subscriber as one upsert per row whose slot
+    /// changed, carrying the new slot: nothing for rows that stayed, and
+    /// nothing at all for a refused order.
+    #[test]
+    fn reorder_broadcasts_an_upsert_for_each_row_that_moved() {
+        use nebula_core::ReorderScope;
+        let upserts = |rx: &mut tokio::sync::broadcast::Receiver<ServerEvent>| {
+            let mut out = Vec::new();
+            while let Ok(ev) = rx.try_recv() {
+                match ev {
+                    ServerEvent::EntityUpserted { entity } => out.push(match entity {
+                        Entity::Project(p) => (p.id.0, p.sort_order),
+                        Entity::Worktree(w) => (w.id.0, w.sort_order),
+                        Entity::Agent(a) => (a.id.0, a.sort_order),
+                        other => panic!("unexpected upsert {other:?}"),
+                    }),
+                    other => panic!("expected upserts only, got {other:?}"),
+                }
+            }
+            out
+        };
+        let daemon = test_daemon();
+        seed_projects(&daemon, &["p", "q"]);
+        seed_worktree(&daemon, "p", "root", "/nebula-test/p", true);
+        seed_worktree(&daemon, "p", "feat", "/nebula-test/p-feat", false);
+        seed_agent(&daemon, "a1", "root", None);
+        seed_agent(&daemon, "a2", "root", None);
+        let ids = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let mut rx = daemon.events.subscribe();
+
+        daemon
+            .reorder(&ReorderScope::Projects, &ids(&["q", "p"]))
+            .unwrap();
+        let mut got = upserts(&mut rx);
+        got.sort();
+        assert_eq!(got, vec![("p".into(), 1), ("q".into(), 0)]);
+
+        daemon
+            .reorder(
+                &ReorderScope::Agents(WorktreeId("root".into())),
+                &ids(&["a2", "a1"]),
+            )
+            .unwrap();
+        // Both seeded at 0: a2 keeps its slot, only a1 moves.
+        assert_eq!(upserts(&mut rx), vec![("a1".into(), 1)]);
+
+        // root (main) and feat already sit main-first at 0, 0: feat moves
+        // to 1 and is the only upsert.
+        let worktrees = ReorderScope::Worktrees(ProjectId("p".into()));
+        daemon.reorder(&worktrees, &ids(&["feat"])).unwrap();
+        assert_eq!(upserts(&mut rx), vec![("feat".into(), 1)]);
+
+        assert!(daemon.reorder(&worktrees, &ids(&["feat", "root"])).is_err());
+        assert!(upserts(&mut rx).is_empty(), "a refused order says nothing");
     }
 
     /// A live session: idle, it is respawned in the target at once; mid

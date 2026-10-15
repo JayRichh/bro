@@ -895,6 +895,71 @@ pub fn checkout_state(root: &Path) -> Result<CheckoutState, String> {
     })
 }
 
+/// A checkout as the overview's worktree rows show it: its uncommitted
+/// work, where it stands against its upstream, and when HEAD last moved.
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct WorktreeGit {
+    /// Tracked files changed, staged or not.
+    pub changed: u32,
+    pub untracked: u32,
+    /// The upstream (`origin/feature-x`); None for a branch with none.
+    pub upstream: Option<String>,
+    /// Commits HEAD has that the upstream lacks, and the other way round;
+    /// None with no upstream.
+    pub ahead: Option<u32>,
+    pub behind: Option<u32>,
+    /// Committer date of HEAD, unix seconds; 0 before the first commit.
+    pub committed: i64,
+}
+
+/// The checkout's [`WorktreeGit`]: one `git status --porcelain=v2
+/// --branch` (counts and ahead/behind in one go) and one `git log -1`.
+pub fn worktree_git(root: &Path) -> Result<WorktreeGit, String> {
+    let raw = git(root, &["status", "--porcelain=v2", "--branch", "-z"])?;
+    // An untracked folder that is a repository of its own (a worktree
+    // nested in the root, like `.claude/worktrees/x`) is not a change, as
+    // the branch switcher's `changes` reads it.
+    let mut out = parse_status_v2(&raw, |dir| root.join(dir).join(".git").exists());
+    out.committed = git_text(root, &["log", "-1", "--format=%ct"])
+        .ok()
+        .and_then(|t| t.parse().ok())
+        .unwrap_or(0);
+    Ok(out)
+}
+
+/// `git status --porcelain=v2 --branch -z` output as a [`WorktreeGit`]
+/// (all but `committed`). A rename or copy (`2`) carries its old path as
+/// one more entry; an untracked folder `nested` says is a repository is
+/// skipped.
+pub fn parse_status_v2(raw: &[u8], nested: impl Fn(&str) -> bool) -> WorktreeGit {
+    let mut out = WorktreeGit::default();
+    let mut entries = raw.split(|b| *b == 0);
+    while let Some(e) = entries.next() {
+        let line = String::from_utf8_lossy(e);
+        if let Some(up) = line.strip_prefix("# branch.upstream ") {
+            out.upstream = Some(up.trim().to_string());
+        } else if let Some(ab) = line.strip_prefix("# branch.ab ") {
+            let mut it = ab.split_whitespace();
+            out.ahead = it
+                .next()
+                .and_then(|a| a.trim_start_matches('+').parse().ok());
+            out.behind = it
+                .next()
+                .and_then(|b| b.trim_start_matches('-').parse().ok());
+        } else if let Some(path) = line.strip_prefix("? ") {
+            if !(path.ends_with('/') && nested(path)) {
+                out.untracked += 1;
+            }
+        } else if line.starts_with(['1', '2', 'u']) {
+            out.changed += 1;
+            if line.starts_with("2 ") {
+                entries.next();
+            }
+        }
+    }
+    out
+}
+
 /// (tracked changes, untracked files) in `git status --porcelain=v1 -z`
 /// output. A rename or copy carries its old path as one more entry.
 fn count_status(raw: &[u8]) -> (u32, u32) {
@@ -1621,6 +1686,56 @@ pub(crate) mod tests {
                 unpushed: Some(1)
             }
         );
+    }
+
+    #[test]
+    fn status_v2_counts_changes_and_reads_ahead_behind() {
+        let raw = b"# branch.oid abc\0# branch.head topic\0# branch.upstream origin/topic\0# branch.ab +2 -3\0\
+1 .M N... 100644 100644 100644 a a a.txt\0\
+2 R. N... 100644 100644 100644 a a R100 new.txt\0old.txt\0\
+u UU N... 100644 100644 100644 100644 a a a c.txt\0\
+? n.txt\0? m.txt\0! ignored.txt\0";
+        assert_eq!(
+            parse_status_v2(raw, |_| false),
+            WorktreeGit {
+                changed: 3,
+                untracked: 2,
+                upstream: Some("origin/topic".into()),
+                ahead: Some(2),
+                behind: Some(3),
+                committed: 0,
+            }
+        );
+        let none = parse_status_v2(b"# branch.oid (initial)\0# branch.head main\0", |_| false);
+        assert_eq!(
+            parse_status_v2(b"? sub/\0? dir/\0", |d| d == "sub/").untracked,
+            1,
+            "a nested repository is not an untracked change"
+        );
+        assert_eq!(none, WorktreeGit::default());
+    }
+
+    #[test]
+    fn worktree_git_reads_a_real_checkout() {
+        let origin = Repo::new("wtgit-origin");
+        origin.write("a.txt", b"a\n");
+        origin.commit("one");
+        let clone = clone_of(&origin);
+        clone.git(&["checkout", "-q", "-b", "topic", "origin/main"]);
+        let clean = worktree_git(&clone.0).unwrap();
+        assert_eq!((clean.changed, clean.untracked), (0, 0));
+        assert_eq!(clean.upstream.as_deref(), Some("origin/main"));
+        assert_eq!((clean.ahead, clean.behind), (Some(0), Some(0)));
+        assert!(clean.committed > 0);
+        clone.write("b.txt", b"b\n");
+        clone.commit("two");
+        clone.write("a.txt", b"edited\n");
+        clone.write("new.txt", b"n\n");
+        let busy = worktree_git(&clone.0).unwrap();
+        assert_eq!((busy.changed, busy.untracked), (1, 1));
+        assert_eq!((busy.ahead, busy.behind), (Some(1), Some(0)));
+        let gone = std::env::temp_dir().join("kete-git-test-no-such-worktree");
+        assert!(worktree_git(&gone).is_err());
     }
 
     #[test]

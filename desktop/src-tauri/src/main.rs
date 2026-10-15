@@ -14,6 +14,7 @@ mod files;
 mod git;
 mod launch;
 mod orchestrator;
+mod order;
 mod pr_poll;
 mod presets;
 mod profiles;
@@ -400,6 +401,9 @@ struct Launchables {
     follow: bool,
     /// Archive asks first (Sessions tab, Confirm on archive).
     ask_before_archive: bool,
+    /// Every worktree gets a row in the overview, an empty one too (Show all
+    /// worktrees, shared with the terminal app's grid).
+    show_all_worktrees: bool,
     /// The ACCOUNT SPREAD (`manual`, `failover`, `least_used`): off
     /// `manual`, the quick prompt starts on "auto" so the spread chooses.
     spread: String,
@@ -430,6 +434,7 @@ fn launchables() -> Launchables {
         new_worktree: cfg.quick_prompt_new_worktree,
         follow: cfg.follow_new_session,
         ask_before_archive: cfg.ask_before_archive,
+        show_all_worktrees: cfg.show_all_worktrees,
     }
 }
 
@@ -755,6 +760,8 @@ fn main() {
             pr_poll::refresh_prs,
             branches::worktree_settings,
             branches::checkout_state,
+            branches::worktree_git,
+            branches::worktree_reveal,
             branches::branch_list,
             branches::branch_fetch,
             branches::branch_switch,
@@ -776,6 +783,7 @@ fn main() {
             sessions::delete_agent,
             sessions::restart_agent,
             sessions::move_agent,
+            order::reorder,
             sessions::rename_terminal,
             sessions::close_terminal,
             sessions::follow_up,
@@ -812,6 +820,7 @@ fn main() {
             settings::settings_set,
             settings::settings_reset,
             settings::desktop_prefs,
+            settings::desktop_set_collapsed,
             settings::config_problem,
             settings::run_commands,
             diff_files,

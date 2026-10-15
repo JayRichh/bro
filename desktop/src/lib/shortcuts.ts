@@ -26,6 +26,7 @@ export type ShortcutId =
   | 'orchestrator'
   | 'orchestrator_f10'
   | 'close_split'
+  | 'maximize'
   | 'toggle_archived'
   | 'next_attention'
   | 'prev_attention'
@@ -99,7 +100,11 @@ export const SHORTCUTS: Shortcut[] = [
   // F10 as in the terminal app, but never inside a shell (htop and mc quit on it).
   { id: 'orchestrator', keys: ['0'], scope: 'global', label: 'Orchestrator (start one when there is none)', group: 'Views' },
   { id: 'orchestrator_f10', keys: ['f10'], scope: 'fields', label: 'Orchestrator (start one when there is none)', group: 'Views' },
-  { id: 'close_split', keys: ['escape'], scope: 'global', label: 'Close the split or Settings', group: 'Views' },
+  { id: 'close_split', keys: ['escape'], scope: 'global', label: 'Close the split or Settings (a full pane comes back down first)', group: 'Views' },
+  // The terminal app's full-screen session is Ctrl+F; here Ctrl+F is the
+  // diff editor's find and the shell's forward-char, so the window's own
+  // chord takes Shift too (the terminal pane lets it through).
+  { id: 'maximize', keys: ['ctrl+shift+m'], scope: 'anywhere', label: 'Full pane: the session or diff takes the window, or comes back down', group: 'Views' },
   { id: 'toggle_archived', keys: ['shift+a'], scope: 'global', label: 'Show or hide archived sessions', group: 'Views' },
   // The terminal app's `.` and `,`: the palette's attention order, every repo.
   { id: 'next_attention', keys: ['.'], scope: 'global', label: 'Next session needing you', group: 'Views' },
@@ -198,6 +203,13 @@ export function keyLabel(chord: string): string {
 /** The keys of an action, for a palette row or a menu item. */
 export function keysOf(id: ShortcutId, table: Shortcut[] = SHORTCUTS): string[] {
   return table.find((s) => s.id === id)?.keys ?? [];
+}
+
+/** A tooltip naming an action's keys from the table: `Restart (Shift+R)`,
+ *  so a button's hint can't drift from the key it promises. */
+export function withKey(label: string, ids: ShortcutId | ShortcutId[], table: Shortcut[] = SHORTCUTS): string {
+  const keys = [ids].flat().flatMap((id) => keysOf(id, table));
+  return keys.length ? `${label} (${keys.map(keyLabel).join(' or ')})` : label;
 }
 
 /** A help row: one action's keys, merged across the table entries that

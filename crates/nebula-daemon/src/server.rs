@@ -655,6 +655,13 @@ impl ClientConnection {
                 reply_done(&self.out_tx, req_id, result).await;
                 Ok(true)
             }
+            ClientRequest::Reorder { req_id, scope, ids } => {
+                let result = self
+                    .blocking_daemon(move |daemon| daemon.reorder(&scope, &ids))
+                    .await;
+                reply_done(&self.out_tx, req_id, result).await;
+                Ok(true)
+            }
             ClientRequest::SendCloudMessage {
                 req_id,
                 id,
@@ -1732,6 +1739,48 @@ mod tests {
         assert!(err.contains("cannot grant the orchestrator role"), "{err}");
         assert!(daemon.store.load_tree().unwrap().2.is_empty());
         assert!(daemon.store.orchestrator().unwrap().is_none());
+    }
+
+    /// `Reorder` answers its req_id: Ack when written, the reason when
+    /// refused.
+    #[tokio::test]
+    async fn reorder_is_acked_or_refused_with_its_reason() {
+        use nebula_core::{ProjectId, ReorderScope, Worktree, WorktreeId};
+        let daemon = test_daemon();
+        let dir = tempfile::tempdir().unwrap();
+        seed(&daemon, dir.path());
+        daemon
+            .store
+            .insert_worktree(&Worktree {
+                id: WorktreeId("feat".into()),
+                project_id: ProjectId("p".into()),
+                path: dir.path().join("feat"),
+                branch: "feat".into(),
+                is_main: false,
+                sort_order: 0,
+            })
+            .unwrap();
+        let (mut client, mut rx) = connection(daemon.clone());
+        let scope = ReorderScope::Worktrees(ProjectId("p".into()));
+        client
+            .handle_request(ClientRequest::Reorder {
+                req_id: 3,
+                scope: scope.clone(),
+                ids: vec!["feat".into()],
+            })
+            .await
+            .unwrap();
+        assert_eq!(error_for(&mut rx, 3).await, None, "acked");
+        client
+            .handle_request(ClientRequest::Reorder {
+                req_id: 4,
+                scope,
+                ids: vec!["feat".into(), "w".into()],
+            })
+            .await
+            .unwrap();
+        let err = error_for(&mut rx, 4).await.expect("refused");
+        assert!(err.contains("main checkout"), "{err}");
     }
 
     /// A worker claiming the orchestrator's id (`NEBULA_AGENT_ID=<orch>`)

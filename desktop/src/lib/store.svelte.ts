@@ -57,6 +57,8 @@ export const app = $state({
   quickPreset: null as QuickPreset | null,
   /** Width of the right split (session, diff) in px. */
   splitWidth: 0,
+  /** The split's right side (session, diff) has the whole window. */
+  paneMax: false,
   themePref: 'system' as ThemePref,
   dark: false,
   now: Date.now(),

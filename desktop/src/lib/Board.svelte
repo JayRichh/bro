@@ -5,8 +5,10 @@
   import { retract } from './motion';
   import Empty from './Empty.svelte';
   import type { Agent } from './api';
-  import { agentMenu } from './actions';
+  import { agentMenu, archiveAgent, followUp, unarchiveAgent } from './actions';
   import { layerOpen, openMenu } from './ui/ui.svelte';
+  import { withKey } from './shortcuts';
+  import Icon from './ui/Icon.svelte';
 
   let { active = true }: { active?: boolean } = $props();
   const board = $derived(lanes(app.model));
@@ -58,17 +60,25 @@
       e.preventDefault();
       step(...map[e.key]);
     } else if (e.key === 'Enter') {
+      // A card's own action button takes its Enter itself.
+      if (t.closest('[data-card-tools]')) return;
       const a = selectedAgent();
       if (a) openSession({ Agent: a.id });
     } else if (e.key === 'd' && !e.ctrlKey) {
       const a = selectedAgent();
-      if (a) {
-        app.session = { Agent: a.id };
-        markSeen(app.session);
-        openDiff(a.worktree_id);
-      }
+      if (a) diffCard(a);
     }
   }
+
+  /** D, or a card's Diff: the card becomes the session, its worktree diffed. */
+  function diffCard(a: Agent) {
+    app.session = { Agent: a.id };
+    markSeen(app.session);
+    openDiff(a.worktree_id);
+  }
+
+  const tool =
+    'grid size-6 place-items-center border-0 border-l border-rule bg-transparent p-0 text-muted first:border-l-0 hover:bg-surface hover:text-ink';
 
   function isSel(lane: Lane, row: number) {
     return cursor !== null && LANES[cursor.lane].id === lane && cursor.row === row;
@@ -100,16 +110,18 @@
             {@const pr = app.model.prs[a.worktree_id]}
             {@const sel = isSel(lane.id, ri)}
             {@const alert = lane.id === 'needs'}
+            <!-- The card's verbs show on hover or focus; the card keys (F, A, D,
+                 Shift+F10) do the same from the card. -->
+            <div class="group relative" data-target="agent:{a.id}">
             <button
               data-card-sel={sel || undefined}
-              data-target="agent:{a.id}"
               oncontextmenu={(e) => {
                 e.preventDefault();
                 cursor = { lane: li, row: ri };
                 (e.currentTarget as HTMLElement).focus();
                 openMenu(agentMenu(a), { x: e.clientX, y: e.clientY }, a.name);
               }}
-              class="relative flex flex-col gap-1 border-0 border-b border-rule px-4 py-2.5 text-left focus-visible:-outline-offset-2
+              class="relative flex w-full flex-col gap-1 border-0 border-b border-rule px-4 py-2.5 text-left focus-visible:-outline-offset-2
                 {sel ? 'bg-surface' : 'bg-transparent hover:bg-surface'}"
               onclick={() => {
                 cursor = { lane: li, row: ri };
@@ -129,6 +141,31 @@
               >
               {#if prompt}<span class="line-clamp-2 text-[13px] text-muted">{prompt}</span>{/if}
             </button>
+            <div
+              data-card-tools
+              class="absolute top-2 right-3 hidden border border-rule bg-bg group-focus-within:flex group-hover:flex"
+              role="toolbar"
+              aria-label="{a.name} actions"
+            >
+              <button class={tool} title={withKey('Diff its worktree', 'board_diff')} aria-label="Diff {a.name}" onclick={() => diffCard(a)}><Icon name="diff" size={12} /></button>
+              {#if a.archived}
+                <button class={tool} title={withKey('Unarchive', 'unarchive')} aria-label="Unarchive {a.name}" onclick={() => unarchiveAgent(a.id)}><Icon name="unarchive" size={12} /></button>
+              {:else}
+                <button class={tool} title={withKey('Follow-up prompt', 'follow_up')} aria-label="Follow-up to {a.name}" onclick={() => followUp(a.id)}><Icon name="reply" size={12} /></button>
+                <button class={tool} title={withKey('Archive', 'archive')} aria-label="Archive {a.name}" onclick={() => archiveAgent(a.id)}><Icon name="archive" size={12} /></button>
+              {/if}
+              <button
+                class={tool}
+                title={withKey('Actions: restart, move, rename, delete', 'row_menu')}
+                aria-label="{a.name} actions"
+                aria-haspopup="menu"
+                onclick={(e) => {
+                  cursor = { lane: li, row: ri };
+                  openMenu(agentMenu(a), e.currentTarget as HTMLElement, a.name);
+                }}><Icon name="dots" size={12} /></button
+              >
+            </div>
+            </div>
           {/each}
           {#if !cards.length}
             <p class="m-0 px-4 py-3 text-[13px] text-muted">

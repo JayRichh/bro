@@ -479,16 +479,16 @@ mod tests {
             .contains("disabled"));
     }
 
-    /// A 55 daemon never gets the switch (it would drop the connection);
+    /// A 56 daemon never gets the switch (it would drop the connection);
     /// a 56 one gets the request with the profile trimmed, or none.
     #[tokio::test]
     async fn a_switch_goes_only_to_a_daemon_that_takes_it() {
         use crate::sessions::testkit::{ok, run};
         let (client, mut rx) = Client::connected_for_test();
-        client.set_model(|m| m.protocol_version = 55);
+        client.set_model(|m| m.protocol_version = 56);
         let refused = switch_account_in(&client, "a1".into(), Some("work".into())).await;
         assert_eq!(refused.unwrap_err(), crate::orchestrator::RELOAD_HINT);
-        assert!(rx.try_recv().is_err(), "nothing may reach a 55 daemon");
+        assert!(rx.try_recv().is_err(), "nothing may reach a 56 daemon");
 
         client.set_model(|m| m.protocol_version = nebula_core::SWITCH_ACCOUNT_PROTOCOL);
         for (asked, sent) in [

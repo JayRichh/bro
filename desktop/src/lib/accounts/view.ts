@@ -9,7 +9,7 @@ import { accountKey, sessionHarness } from './usage';
 
 /** The first daemon protocol that moves a session to another account
  *  (`nebula_core::SWITCH_ACCOUNT_PROTOCOL`). */
-export const SWITCH_ACCOUNT_PROTOCOL = 56;
+export const SWITCH_ACCOUNT_PROTOCOL = 57;
 
 /** Does the connected daemon take a move to another account? */
 export function canSwitch(m: Pick<Model, 'connected' | 'protocol_version'>): boolean {

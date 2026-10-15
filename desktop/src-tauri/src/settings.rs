@@ -86,6 +86,16 @@ pub fn desktop_prefs() -> DesktopPrefs {
     DesktopPrefs::load()
 }
 
+/// The overview groups the user has folded, saved whole.
+#[tauri::command]
+pub fn desktop_set_collapsed(keys: Vec<String>) -> Res<()> {
+    DesktopPrefs::update(|p| {
+        p.collapsed = keys;
+        Ok(())
+    })
+    .map(|_| ())
+}
+
 /// The run command each worktree's Run button would start, by worktree
 /// id: the project's own `run_command` setting, else the checkout's
 /// `.kete.json` `run` — the order the daemon's StartRun reads them in.

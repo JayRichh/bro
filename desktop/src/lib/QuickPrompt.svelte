@@ -6,6 +6,7 @@
   import { nav } from './shell/history.svelte';
   import { ORCH_TARGET, orchestratorOf, quickPromptTarget } from './orchestrator';
   import { sendToOrchestrator } from './orch.svelte';
+  import { whileCutting } from './worktrees/rows.svelte';
 
   // The quick prompt: pinned under the main column. Pick where and with
   // what, type the task, Enter starts it (Shift+Enter for a new line). P
@@ -198,7 +199,7 @@
     busy = true;
     try {
       const c = info?.choices;
-      const out = await api.quickLaunch({
+      const launch = () => api.quickLaunch({
         project,
         worktree: worktree === NEW_WT ? '' : worktree,
         newWorktree: worktree === NEW_WT,
@@ -210,6 +211,8 @@
         effort: !isTerminal && efforts.length && effort && effort !== c?.effort ? effort : null,
         preset: !isTerminal && preset ? preset : null,
       });
+      // A new worktree shows as a placeholder in its repo while git cuts it.
+      const out = await (worktree === NEW_WT ? whileCutting(project, 'new worktree', launch) : launch());
       const follow = app.launch.follow !== false;
       if (out.agent) {
         if (follow) openSession({ Agent: out.agent });

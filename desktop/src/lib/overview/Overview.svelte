@@ -1,14 +1,24 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import { app } from '../store.svelte';
   import Empty from '../Empty.svelte';
   import RepoRow from './RepoRow.svelte';
   import { repoRows } from './repos';
+  import { refreshGit, shownIds, watchGit } from '../worktrees/rows.svelte';
+  import { gitSignal } from '../worktrees/groups';
 
   let { active = true }: { active?: boolean } = $props();
   let scroller: HTMLDivElement;
 
   const rows = $derived(repoRows(app.model, { archived: app.showArchived }));
+
+  // The worktree groups' git state: read while the overview is up, and
+  // again when a checkout comes or goes or a session there changes state.
+  onMount(watchGit);
+  const gitSig = $derived(gitSignal(app.model));
+  $effect(() => {
+    if (gitSig) untrack(() => refreshGit(shownIds()));
+  });
 
   // Only a repo picked in the rail scrolls the overview (`revealRepo`, which
   // nothing else sets). Session clicks, strip jumps, Esc and back/forward

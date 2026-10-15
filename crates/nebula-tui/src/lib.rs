@@ -40,6 +40,7 @@ pub(crate) mod list_hit;
 pub mod localhost;
 pub mod markdown;
 pub mod orchestrator_view;
+pub mod order;
 pub mod overlay_close;
 pub mod palette;
 pub mod perf;

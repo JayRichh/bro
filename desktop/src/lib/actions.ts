@@ -17,6 +17,7 @@ import { canSwitchBranch, openBranchSwitch } from './worktrees/switcher.svelte';
 import { checkoutSessions, deleteAllSessions } from './checkout';
 import { moveToAccount, pickProjectAccount, SWITCH_UNAVAILABLE } from './accounts/actions';
 import { canSwitch } from './accounts/view';
+import { whileCutting } from './worktrees/rows.svelte';
 
 export type Target =
   /** `viaSub`: picked from one of its subagents' rows, so it acts on
@@ -262,7 +263,8 @@ export async function newWorktree(project: string | undefined) {
   if (!v) return;
   toast('Making the worktree\u2026');
   await attempt('Could not make the worktree', async () => {
-    const id = await api.createWorktree(project, v.branch.trim() || suggestion, v.base.trim() || null);
+    const branch = v.branch.trim() || suggestion;
+    const id = await whileCutting(project, branch, () => api.createWorktree(project, branch, v.base.trim() || null));
     toast(`Worktree ready: ${worktreeOf(id)?.branch ?? v.branch}`);
     focusQuickPrompt({ project, worktree: id, newWorktree: false });
   });

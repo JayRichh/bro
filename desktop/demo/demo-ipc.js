@@ -60,7 +60,7 @@ const model = {
 // session per state, a nested one, a terminal and a PR.
 const ORCH_VIEWS = ['orchestrator', 'start-orchestrator', 'review', 'overview-cue'];
 const ORCH = ORCH_VIEWS.includes(q.get('view'));
-const W2 = ['menu', 'palette', 'help', 'quick', 'selftest', 'accounts', 'context'].includes(q.get('view')) || ORCH;
+const W2 = ['menu', 'palette', 'help', 'quick', 'selftest', 'accounts', 'context', 'worktrees', 'wt-overview'].includes(q.get('view')) || ORCH;
 if (W2) {
   const a = (id, worktree_id, name, status, extra = {}) => ({
     id, worktree_id, name, status, archived: false, unseen: false, status_changed_at: now - 60_000,
@@ -76,6 +76,16 @@ if (W2) {
   );
   model.terminals.push({ id: 't1', worktree_id: 'w3', name: 'shell', sort_order: 0, alive: true, run_command: null });
   model.prs = { w2: { number: 418, url: 'https://dev.azure.com/demo-org/Platform/_git/ledger-api/pullrequest/418', title: 'Round GST per invoice', draft: true } };
+  // The worktree shots: an empty checkout (Show all worktrees), a merged one.
+  if (q.get('view') === 'worktrees' || q.get('view') === 'wt-overview') {
+    model.worktrees.push(
+      { id: 'w5', project_id: 'p2', path: 'C:\\demo\\storefront-web-worktrees\\old-promo', branch: 'jari/old-promo', is_main: false, sort_order: 2 },
+      { id: 'w6', project_id: 'p2', path: 'C:\\demo\\storefront-web-worktrees\\font-swap', branch: 'jari/font-swap', is_main: false, sort_order: 3 },
+    );
+    model.prs.w5 = { number: 77, url: 'https://github.com/demo/storefront-web/pull/77', title: 'Retire the spring promo', draft: false, state: 'merged' };
+    model.ports.push({ worktree: 'w3', block: null, live: [5173] });
+    model.terminals.push({ id: 't2', worktree_id: 'w3', name: 'run', sort_order: 1, alive: true, run_command: 'npm run dev' });
+  }
 }
 
 // The orchestrator shots: a protocol-54 daemon, the orchestrator in its own
@@ -345,6 +355,17 @@ const handlers = {
   ado_delete_local: () => null,
   diff_range: () => range,
   open_url: () => null,
+  worktree_git: ({ worktrees }) =>
+    Object.fromEntries(
+      worktrees.map((id, i) => [
+        id,
+        { changed: [0, 3, 0, 1, 0, 0][i % 6], untracked: i % 3 === 1 ? 1 : 0, upstream: id === 'w6' ? null : 'origin/x', ahead: id === 'w6' ? null : i % 3, behind: i === 0 ? 2 : 0, committed: Math.round((now - i * 7_200_000) / 1000) },
+      ]),
+    ),
+  worktree_reveal: () => null,
+  desktop_set_collapsed: () => null,
+  checkout_state: ({ worktree }) => ({ changed: 0, untracked: 0, unpushed: worktree === 'w6' ? 0 : 2 }),
+  worktree_settings: () => ({ delete_empty_worktree: false }),
   settings_schema: () => loadSchema(),
   settings_set: async ({ target, value }) => {
     const s = await loadSchema();
@@ -516,7 +537,11 @@ window.addEventListener('load', async () => {
     (await until(byText('aside nav button span', 'Start orchestrator'))).closest('button').click();
     return;
   }
-  if (view === 'overview-cue') return;
+  if (view === 'overview-cue' || view === 'wt-overview') return;
+  if (view === 'worktrees') {
+    (await until(() => document.querySelector('[aria-label="storefront-web views"] button'))).click();
+    return;
+  }
   const label = view === 'tasks' ? 'Tasks' : 'Branches';
   (await until(byText('aside nav button', label))).click();
   if (view === 'tasks') {
