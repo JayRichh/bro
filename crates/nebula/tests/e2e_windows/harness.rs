@@ -28,7 +28,13 @@ type Writer = Arc<Mutex<Box<dyn Write + Send>>>;
 pub struct Tui {
     writer: Writer,
     parser: Arc<Mutex<vt100::Parser>>,
+    /// Every byte the TUI's ConPTY sent, for replaying a screen that went
+    /// wrong outside the run.
+    raw: Arc<Mutex<Vec<u8>>>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
+    /// Held, not dropped: dropping it closes the pseudoconsole under the
+    /// TUI. Kept so the host's size can be changed under it.
+    master: Box<dyn portable_pty::MasterPty + Send>,
     pub runtime_dir: PathBuf,
     pub data_dir: PathBuf,
     pub repos: PathBuf,
@@ -153,12 +159,13 @@ impl Tui {
 
         let mut reader = pty.master.try_clone_reader().unwrap();
         let writer: Writer = Arc::new(Mutex::new(pty.master.take_writer().unwrap()));
-        // Dropping the master closes the pseudoconsole under the TUI.
-        std::mem::forget(pty.master);
+        let master = pty.master;
 
         let parser = Arc::new(Mutex::new(vt100::Parser::new(ROWS, COLS, 0)));
+        let raw = Arc::new(Mutex::new(Vec::new()));
         {
             let parser = parser.clone();
+            let raw = raw.clone();
             let writer = writer.clone();
             std::thread::spawn(move || {
                 let mut buf = [0u8; 16384];
@@ -167,6 +174,7 @@ impl Tui {
                     if n == 0 {
                         break;
                     }
+                    raw.lock().unwrap().extend_from_slice(&buf[..n]);
                     let mut parser = parser.lock().unwrap();
                     parser.process(&buf[..n]);
                     // ConPTY asks where the cursor is before it draws a
@@ -193,7 +201,9 @@ impl Tui {
         Self {
             writer,
             parser,
+            raw,
             child,
+            master,
             runtime_dir,
             data_dir,
             repos,
@@ -261,6 +271,32 @@ impl Tui {
         std::fs::write(self.gates.join(name), "").unwrap();
     }
 
+    /// Narrow the host by a column and widen it back, as a user dragging
+    /// the window would: the TUI repaints every cell (`on_host_resize`),
+    /// so a screen that heals after this had lost cells on the way to the
+    /// host, not in the TUI's own state.
+    pub fn host_repaint(&self) {
+        for cols in [COLS - 1, COLS] {
+            self.master
+                .resize(PtySize {
+                    rows: ROWS,
+                    cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                })
+                .unwrap();
+            std::thread::sleep(Duration::from_millis(300));
+        }
+    }
+
+    /// Write every byte the host was sent so far to a file that outlives
+    /// the run, and say where.
+    pub fn save_raw(&self, name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("kete-e2e-{name}-{}.vt", std::process::id()));
+        let _ = std::fs::write(&path, &*self.raw.lock().unwrap());
+        path
+    }
+
     pub fn send(&self, bytes: &[u8]) {
         let mut w = self.writer.lock().unwrap();
         w.write_all(bytes).unwrap();
@@ -315,6 +351,20 @@ impl Tui {
         let deadline = Instant::now() + window;
         loop {
             if self.screen_text().contains(needle) {
+                return true;
+            }
+            if Instant::now() > deadline {
+                return false;
+            }
+            std::thread::sleep(POLL_STEP);
+        }
+    }
+
+    /// `wait_for` that gives up after `window`, saying whether it held.
+    pub fn try_wait_for(&self, window: Duration, pred: impl Fn(&vt100::Screen) -> bool) -> bool {
+        let deadline = Instant::now() + window;
+        loop {
+            if pred(self.parser.lock().unwrap().screen()) {
                 return true;
             }
             if Instant::now() > deadline {

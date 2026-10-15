@@ -22609,6 +22609,7 @@ mod buttons;
 mod dispatch;
 mod learn;
 mod orch_view;
+mod pane_stream;
 mod paste_speed;
 mod verbs;
 mod visual;
