@@ -222,6 +222,8 @@ export interface Launchables {
   follow?: boolean;
   /** Archive asks first (Confirm on archive). */
   ask_before_archive?: boolean;
+  /** Show all worktrees: an empty checkout keeps its overview group. */
+  show_all_worktrees?: boolean;
 }
 /** An agent preset (agent_presets.json, shared with the terminal app). */
 export interface Preset {
@@ -332,6 +334,8 @@ export interface DesktopPrefs {
   home: string;
   /** `home` or `orchestrator`: what the window opens on. */
   startup?: string;
+  /** Folded overview groups: `repo:<id>`, `wt:<id>`. */
+  collapsed?: string[];
 }
 export interface Startup {
   view: string | null;
@@ -411,6 +415,7 @@ export const api = {
   settingsSet: (target: SettingTarget, value: boolean | string) => invoke<void>('settings_set', { target, value }),
   settingsReset: () => invoke<void>('settings_reset'),
   desktopPrefs: () => invoke<DesktopPrefs>('desktop_prefs'),
+  desktopSetCollapsed: (keys: string[]) => invoke<void>('desktop_set_collapsed', { keys }),
   /** Why config.json can't be written (it can't be parsed); null: fine. */
   configProblem: () => invoke<string | null>('config_problem'),
   diffFiles: (worktree: string) => invoke<DiffFile[]>('diff_files', { worktree }),

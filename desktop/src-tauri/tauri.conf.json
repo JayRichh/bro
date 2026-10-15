@@ -18,7 +18,7 @@
         "title": "kete",
         "width": 1440,
         "height": 900,
-        "minWidth": 900,
+        "minWidth": 640,
         "minHeight": 560,
         "center": true,
         "dragDropEnabled": false

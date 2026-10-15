@@ -10,6 +10,9 @@
   import AccountsSection from '../accounts/AccountsSection.svelte';
   import VersionPlate from './VersionPlate.svelte';
 
+  /** Icons only, for a narrow window: the repos as their initials. */
+  let { compact = false }: { compact?: boolean } = $props();
+
   const rows = $derived(repoRows(app.model));
   const orch = $derived(orchestratorOf(app.model));
   const orchNeeds = $derived(descendantCounts(orchestratorTree(app.model)).needs ?? 0);
@@ -20,6 +23,8 @@
   let adding = $state(false);
   let addPath = $state('');
 
+  /** Under every repo: its checkouts as one table. */
+  const REPO_VIEWS: { view: View; label: string }[] = [{ view: 'worktrees', label: 'Worktrees' }];
   const ADO_VIEWS: { view: View; label: string }[] = [
     { view: 'tasks', label: 'Tasks' },
     { view: 'branches', label: 'Branches' },
@@ -47,9 +52,106 @@
   const item =
     'flex w-full min-w-0 items-center gap-2 border-0 px-4 py-1.5 text-left text-[14px] hover:bg-surface focus-visible:-outline-offset-2';
   const heading = 'px-4 pt-5 pb-1.5 text-[12px] font-medium text-muted';
+  /** A compact rail's square button. */
+  const tile =
+    'relative mx-auto grid size-9 place-items-center border border-transparent p-0 font-mono text-[12px] hover:border-rule focus-visible:-outline-offset-2';
+  /** A repo's initials for the compact rail: `kete-desktop` reads `KD`. */
+  const initials = (name: string) => {
+    const words = name.split(/[^A-Za-z0-9]+/).filter(Boolean);
+    return (words.length > 1 ? words[0][0] + words[1][0] : name.slice(0, 2)).toUpperCase();
+  };
 </script>
 
 <aside class="flex min-h-0 flex-col border-r border-rule bg-bg">
+  {#if compact}
+    <div class="flex h-10 flex-none items-center justify-center border-b border-rule" title={app.model.connected ? `kete: daemon pid ${app.model.daemon_pid}` : 'kete: not connected to the daemon'}>
+      <svg class="flex-none text-ink" width="20" height="20" viewBox="0 0 64 64" aria-hidden="true">
+        <path d="M11 31h42l-6.5 26h-29z" fill="currentColor" />
+        <path d="M21 31V22a11 11 0 0 1 22 0a5.5 5.5 0 0 1 -11 0" fill="none" stroke="currentColor" stroke-width="6" />
+        <circle class={app.model.connected ? 'fill-ember' : 'fill-fail'} cx="32" cy="22" r="3.2" />
+      </svg>
+    </div>
+    <nav class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto py-2" aria-label="Repos">
+      <button
+        class="{tile} {nav.current.view === 'orchestrator' ? 'bg-surface text-ink' : 'bg-transparent text-ink'}"
+        onclick={() => (orch || canProvision(app.model) ? openOrchestrator() : askStartOrchestrator())}
+        title={orch ? `The orchestrator, ${orch.name}${orchNeeds ? `: ${orchNeeds} need you` : ''} (0 or F10)` : 'Start an orchestrator (0 or F10)'}
+        aria-label="Orchestrator"
+        aria-current={nav.current.view === 'orchestrator' ? 'page' : undefined}
+      >
+        <span aria-hidden="true">{orch ? '\u25c6' : '\u25c7'}</span>
+        {#if orchNeeds}<span class="absolute top-1 right-1 size-1.5 bg-ember" aria-hidden="true"></span>{/if}
+      </button>
+      <span class="mx-3 my-1 h-px flex-none bg-rule" aria-hidden="true"></span>
+      {#each projects as r (r.project.id)}
+        {@const c = tally([r])}
+        {@const needs = c.needs?.length ?? 0}
+        {@const running = c.running?.length ?? 0}
+        {@const on = here === r.project.id}
+        <button
+          class="{tile} {on ? 'bg-surface font-semibold text-ink' : 'bg-transparent text-muted hover:text-ink'}"
+          onclick={() => revealRepo(r.project.id)}
+          title="{r.name}{needs ? `: ${needs} ${needs === 1 ? 'needs' : 'need'} you` : running ? `: ${running} running` : ''}"
+          aria-label={r.name}
+          aria-current={on ? 'true' : undefined}
+        >
+          {initials(r.name)}
+          {#if needs}<span class="absolute top-1 right-1 size-1.5 bg-ember" aria-hidden="true"></span>
+          {:else if running}<span class="absolute top-1 right-1 size-1.5 bg-running" aria-hidden="true"></span>{/if}
+        </button>
+        {#if on}
+          <!-- The repo's views, under the repo in view: Worktrees, and the
+               Azure DevOps ones where it has that remote. -->
+          {#each [...REPO_VIEWS, ...(app.adoCtx[r.project.id] ? ADO_VIEWS : [])] as v (v.view)}
+            {@const cur = nav.current.view === v.view}
+            <button
+              class="{tile} text-[11px] {cur ? 'bg-surface text-ink' : 'bg-transparent text-muted hover:text-ink'}"
+              onclick={() => nav.go({ view: v.view, repo: r.project.id })}
+              title="{r.name}: {v.label}"
+              aria-label="{r.name} {v.label}"
+              aria-current={cur ? 'page' : undefined}
+            >
+              <span aria-hidden="true">{v.view === 'worktrees' ? '\u21b3' : v.view === 'prs' ? 'PR' : v.label.slice(0, 2)}</span>
+            </button>
+          {/each}
+        {/if}
+      {/each}
+    </nav>
+    <div class="flex flex-none flex-col gap-1 border-t border-rule py-2">
+      <button
+        class="{tile} {inSettings ? 'bg-surface text-ink' : 'bg-transparent text-muted hover:text-ink'}"
+        onclick={() => openSettings()}
+        title="Settings (Ctrl+,)"
+        aria-label="Settings"
+        aria-current={inSettings ? 'page' : undefined}
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+          <path
+            d="M6.7 1.5h2.6l.4 1.9 1.3.6 1.7-1 1.8 1.8-1 1.7.6 1.3 1.9.4v2.6l-1.9.4-.6 1.3 1 1.7-1.8 1.8-1.7-1-1.3.6-.4 1.9H6.7l-.4-1.9-1.3-.6-1.7 1-1.8-1.8 1-1.7-.6-1.3-1.9-.4V6.7l1.9-.4.6-1.3-1-1.7 1.8-1.8 1.7 1 1.3-.6z"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.2"
+          />
+          <rect x="6" y="6" width="4" height="4" fill="none" stroke="currentColor" stroke-width="1.2" />
+        </svg>
+      </button>
+      <button
+        class="{tile} bg-transparent text-muted hover:text-ink"
+        onclick={cycleTheme}
+        title="Theme: {THEME_WORD[app.themePref]}. Press to cycle system, light, dark (Ctrl+Shift+L)"
+        aria-label="Theme: {THEME_WORD[app.themePref]}"
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+          <rect x="2.5" y="2.5" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.3" />
+          {#if app.themePref === 'system'}
+            <path d="M8 2.5v11h5.5v-11z" fill="currentColor" />
+          {:else if app.themePref === 'dark'}
+            <rect x="2.5" y="2.5" width="11" height="11" fill="currentColor" />
+          {/if}
+        </svg>
+      </button>
+    </div>
+  {:else}
   <div class="flex h-10 flex-none items-center gap-2 border-b border-rule px-4">
     <svg class="flex-none text-ink" width="20" height="20" viewBox="0 0 64 64" aria-hidden="true">
       <path d="M11 31h42l-6.5 26h-29z" fill="currentColor" />
@@ -121,20 +223,19 @@
           >
         {/if}
       </button>
-      {#if ctx}
-        <ul class="m-0 list-none p-0" aria-label="{r.name} on Azure DevOps">
-          {#each ADO_VIEWS as v (v.view)}
-            {@const cur = nav.current.view === v.view && here === r.project.id}
-            <li>
-              <button
-                class="{item} pl-8 text-[13px] {cur ? 'bg-surface text-ink' : 'bg-transparent text-muted hover:text-ink'}"
-                onclick={() => nav.go({ view: v.view, repo: r.project.id })}
-                aria-current={cur ? 'page' : undefined}>{v.label}</button
-              >
-            </li>
-          {/each}
-        </ul>
-      {/if}
+      <ul class="m-0 list-none p-0" aria-label="{r.name} views">
+        {#each [...REPO_VIEWS, ...(ctx ? ADO_VIEWS : [])] as v (v.view)}
+          {@const cur = nav.current.view === v.view && here === r.project.id}
+          <li>
+            <button
+              class="{item} pl-8 text-[13px] {cur ? 'bg-surface text-ink' : 'bg-transparent text-muted hover:text-ink'}"
+              onclick={() => nav.go({ view: v.view, repo: r.project.id })}
+              title={v.view === 'worktrees' ? `${r.name}: every checkout, its git state and sessions` : undefined}
+              aria-current={cur ? 'page' : undefined}>{v.label}</button
+            >
+          </li>
+        {/each}
+      </ul>
     {/each}
     {#if !projects.length}
       <p class="m-0 px-4 py-1.5 text-[13px] text-muted">No repos yet.</p>
@@ -204,4 +305,5 @@
       Theme: {THEME_WORD[app.themePref]}
     </button>
   </div>
+  {/if}
 </aside>

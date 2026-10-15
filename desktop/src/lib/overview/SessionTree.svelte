@@ -2,7 +2,7 @@
   import { retract } from '../motion';
   import { app, openSession, sessionKey } from '../store.svelte';
   import { nav } from '../shell/history.svelte';
-  import { age, harnessLabel, lastPrompt, placeOf } from '../status';
+  import { age, harnessLabel, lastPrompt } from '../status';
   import type { TerminalTab } from '../api';
   import Status from '../Status.svelte';
   import RunButton from './RunButton.svelte';
@@ -12,6 +12,7 @@
   import { openMenu } from '../ui/ui.svelte';
   import OrchBadge from '../orchestrator/OrchBadge.svelte';
   import { openOrchestrator } from '../orch.svelte';
+  import { DRAG_SESSION } from './drag';
 
   let { repo, forest, terminals }: { repo: string; forest: Node[]; terminals: TerminalTab[] } = $props();
 
@@ -85,7 +86,6 @@
     {@const needs = n.status === 'needs'}
     {@const sel = !!n.agent && current === `a:${n.agent.id}`}
     {@const prompt = n.agent ? lastPrompt(n.agent) : null}
-    {@const where = n.agent ? placeOf(app.model, n.agent.worktree_id) : null}
     <div
       role="treeitem"
       aria-level={n.depth + 1}
@@ -95,6 +95,8 @@
       data-row
       data-target={n.agent ? `agent:${n.agent.id}` : n.sub ? `subagent:${n.sub.parent_agent}` : undefined}
       class="{ROW} {sel ? 'bg-surface' : 'hover:bg-surface'} {n.agent?.archived ? 'opacity-60' : ''}"
+      draggable={!!n.agent}
+      ondragstart={(e) => n.agent && e.dataTransfer && (e.dataTransfer.setData(DRAG_SESSION, n.agent.id), (e.dataTransfer.effectAllowed = 'move'))}
       onclick={() => openNode(n)}
       oncontextmenu={(e) => menu(e, { kind: 'agent', id: n.agent?.id ?? n.sub?.parent_agent ?? '', viaSub: !n.agent && !!n.sub })}
       onkeydown={(e) => onRowKey(e, n, expanded, hasKids)}
@@ -138,7 +140,7 @@
           {@const from = n.from}
           <button
             class="ml-2 inline-flex max-w-[45%] flex-none items-center gap-1 truncate border border-rule bg-transparent px-1 font-mono text-[11px] leading-4 text-muted hover:border-rule-strong hover:text-ink"
-            title="Started by {from.name}, in another repo. Open it."
+            title="Started by {from.name}, in another worktree or repo. Open it."
             onclick={(e) => {
               e.stopPropagation();
               if (from.role === 'orchestrator') openOrchestrator();
@@ -167,7 +169,7 @@
         ><span class="min-w-0 truncate">{meta(n)}</span></span
       >
       <span class="truncate pl-3 text-[13px] text-muted @max-[760px]:hidden">
-        {#if where && !where.isMain && n.depth === 0}<span class="mr-2 font-mono text-[12px]">{where.branch}</span>{/if}{prompt ?? ''}
+        {prompt ?? ''}
       </span>
       <span class="text-right font-mono text-[12px] text-muted">{age(when(n), app.now)}</span>
     </div>

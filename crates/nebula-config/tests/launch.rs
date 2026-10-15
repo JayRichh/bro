@@ -63,6 +63,7 @@ fn the_rows_the_window_now_honours_are_not_terminal_only() {
         SettingKind::QuickPromptNewWorktree,
         SettingKind::DeleteEmptyWorktree,
         SettingKind::AutoCleanupMerged,
+        SettingKind::ShowAllWorktrees,
     ] {
         assert!(!TERMINAL_ONLY.contains(&kind), "{kind:?}");
     }
