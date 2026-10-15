@@ -441,6 +441,7 @@ const HELP_LEFT: &[HelpSection] = &[
                 "next/prev session needing you",
             ),
             (Act(&[NavBack, NavForward]), "back / forward a place"),
+            (Act(&[ReorderUp, ReorderDown]), "move card / band / tab"),
             (Act(&[FindFile, Grep]), "find file / in files (git grep)"),
             (Act(&[TreeBrowser]), "file tree browser"),
         ],

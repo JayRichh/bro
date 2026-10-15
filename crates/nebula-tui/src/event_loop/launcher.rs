@@ -403,6 +403,52 @@ pub(super) fn empty_band(app: &App) -> Option<WorktreeId> {
     band.cards.is_empty().then(|| band.worktree.clone())
 }
 
+/// `⌥↑` / `⌥↓` (`dir` -1 / 1): what is under the cursor one place along
+/// its order — the PROJECT TAB under the header's cursor, a band with no
+/// card to be on (empty, or folded in the NESTED layout), else the
+/// session card; in the panels, the row of the focused column. A terminal
+/// keeps its place: only sessions carry an order.
+pub(super) fn reorder_focused(app: &mut App, dir: i64, out: &mut Vec<ClientRequest>) {
+    use crate::order::OrderTarget;
+    let target = if let Some(id) = app.launcher.launcher_tab_cursor.clone() {
+        Some(OrderTarget::Project(id))
+    } else {
+        match app.nav.focus {
+            Focus::Projects => app
+                .selected_project()
+                .map(|p| OrderTarget::Project(p.id.clone())),
+            Focus::Worktrees => app
+                .selected_worktree()
+                .map(|w| OrderTarget::Worktree(w.id.clone())),
+            Focus::Sessions | Focus::Terminal => {
+                match empty_band(app).or_else(|| folded_band(app)) {
+                    Some(w) => Some(OrderTarget::Worktree(w)),
+                    None => match app.selected_session_row() {
+                        Some(crate::app::SessionRow::Agent(a)) => Some(OrderTarget::Agent(a.id)),
+                        Some(_) => {
+                            app.chrome.flash = Some(
+                                "only sessions are reordered: a terminal keeps its place".into(),
+                            );
+                            None
+                        }
+                        None => None,
+                    },
+                }
+            }
+        }
+    };
+    match target {
+        Some(target) => {
+            crate::order::step(app, &target, dir, out);
+        }
+        None if app.chrome.flash.is_none() => {
+            app.chrome.flash = Some(nothing_here(app).into());
+        }
+        None => {}
+    }
+    app.chrome.dirty = true;
+}
+
 /// The cursor onto `worktree`'s BAND: the checkout under the panels'
 /// cursor through the jump the `/` PALETTE takes for a worktree, its
 /// remembered card — the session it was last left on, else its first
@@ -1286,6 +1332,11 @@ fn project_menu(app: &mut App, at: (u16, u16)) {
     items.push(MenuItem::new(
         "Rename",
         MenuAction::RenameProject(project.clone()),
+    ));
+    // The tab's place in the header, as dragging it does.
+    items.extend(super::move_items(
+        crate::order::OrderTarget::Project(project.clone()),
+        "",
     ));
     items.push(MenuItem::destructive(
         "Remove from list",

@@ -407,6 +407,10 @@ pub enum MenuAction {
         id: AgentId,
         worktree: WorktreeId,
     },
+    /// **Move up** / **Move down** on a card's, a band's or a tab's menu:
+    /// the row one place earlier (-1) or later (1) in the user's order,
+    /// what `⌥↑` / `⌥↓` do (`crate::order::step`).
+    Reorder(crate::order::OrderTarget, i64),
     EditLink(LinkId),
     DeleteLink(LinkId),
     DeleteWorktree(WorktreeId),

@@ -399,6 +399,9 @@ fn handle_global_action(
         // The views ported from the desktop window.
         // ⇧B: the AZURE DEVOPS OVERLAY.
         Action::Ado => ado::open(app),
+        // ⌥↑ / ⌥↓: the card, band or tab under the cursor along its order.
+        Action::ReorderUp => launcher::reorder_focused(app, -1, out),
+        Action::ReorderDown => launcher::reorder_focused(app, 1, out),
         Action::CommandPalette | Action::NavBack | Action::NavForward | Action::Subagents => {
             desk::handle_action(app, action, out)
         }

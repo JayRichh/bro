@@ -279,6 +279,237 @@ pub fn reorder(
     true
 }
 
+/// A row the user can put elsewhere in its order: a PROJECT TAB, a BAND's
+/// checkout, a session card.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OrderTarget {
+    Project(ProjectId),
+    Worktree(WorktreeId),
+    Agent(AgentId),
+}
+
+/// What a step or a drop of the root checkout says: the daemon refuses an
+/// order that puts it after a linked worktree.
+pub const ROOT_STAYS_FIRST: &str = "the root checkout stays first";
+
+/// The open PROJECT TABS, in the order the header draws them.
+fn tab_ids(app: &App) -> Vec<ProjectId> {
+    crate::launcher::project_tabs(app)
+        .into_iter()
+        .map(|t| t.id)
+        .collect()
+}
+
+/// `worktree`'s sessions as the BAND shows them, first card to last.
+pub fn band_shown(app: &App, worktree: &WorktreeId) -> Vec<AgentId> {
+    crate::launcher::bands(app)
+        .into_iter()
+        .filter(|b| &b.worktree == worktree)
+        .flat_map(|b| b.cards)
+        .filter_map(|c| match c {
+            crate::launcher::Card::Session(row) => Some(row.agent.id),
+            crate::launcher::Card::Terminal(_) => None,
+        })
+        .collect()
+}
+
+/// `worktree`'s cards on the KANBAN, lane by lane, and the ones beside
+/// `id` in its lane: what a step there walks past.
+fn board_shown(app: &App, worktree: &WorktreeId, id: &AgentId) -> (Vec<AgentId>, Vec<AgentId>) {
+    let lanes = crate::launcher::kanban(app, app.launcher.kanban_all);
+    let mine = |lane: &Vec<LauncherRow>| -> Vec<AgentId> {
+        lane.iter()
+            .filter(|r| &r.agent.worktree_id == worktree)
+            .map(|r| r.agent.id.clone())
+            .collect()
+    };
+    let shown = lanes.iter().flat_map(mine).collect();
+    let peers = lanes
+        .iter()
+        .find(|l| l.iter().any(|r| &r.agent.id == id))
+        .map(mine)
+        .unwrap_or_default();
+    (shown, peers)
+}
+
+/// An id as the `Reorder` request carries it.
+trait RawId {
+    fn raw(self) -> String;
+}
+impl RawId for ProjectId {
+    fn raw(self) -> String {
+        self.0
+    }
+}
+impl RawId for WorktreeId {
+    fn raw(self) -> String {
+        self.0
+    }
+}
+impl RawId for AgentId {
+    fn raw(self) -> String {
+        self.0
+    }
+}
+
+fn raw<T: RawId>(ids: Vec<T>) -> Vec<String> {
+    ids.into_iter().map(RawId::raw).collect()
+}
+
+fn is_root(app: &App, id: &WorktreeId) -> bool {
+    app.tree.worktrees.iter().any(|w| &w.id == id && w.is_main)
+}
+
+/// `⌥↑` / `⌥↓`, and the menus' **Move up** / **Move down**: `target` one
+/// place earlier (`dir` < 0) or later among the rows shown beside it — the
+/// open tabs, the project's other linked worktrees, the band's cards or on
+/// the KANBAN the cards of its checkout in its lane. True when a
+/// `Reorder` went out; otherwise the flash says why not.
+pub fn step(app: &mut App, target: &OrderTarget, dir: i64, out: &mut Vec<ClientRequest>) -> bool {
+    let (scope, ids) = match target {
+        OrderTarget::Project(id) => {
+            let all = project_ids(app);
+            let tabs = tab_ids(app);
+            let peers = if tabs.contains(id) { tabs } else { all.clone() };
+            (
+                ReorderScope::Projects,
+                step_id(&all, &peers, id, dir).map(raw),
+            )
+        }
+        OrderTarget::Worktree(id) => {
+            let Some(project) = app
+                .tree
+                .worktrees
+                .iter()
+                .find(|w| &w.id == id)
+                .map(|w| w.project_id.clone())
+            else {
+                return false;
+            };
+            if is_root(app, id) {
+                app.chrome.flash = Some(ROOT_STAYS_FIRST.into());
+                return false;
+            }
+            let all = worktree_ids(app, &project);
+            let peers: Vec<WorktreeId> = all.iter().filter(|w| !is_root(app, w)).cloned().collect();
+            let ids = step_id(&all, &peers, id, dir).map(|ids| raw(root_first(app, ids)));
+            (ReorderScope::Worktrees(project), ids)
+        }
+        OrderTarget::Agent(id) => {
+            let Some(worktree) = app
+                .tree
+                .agents
+                .iter()
+                .find(|a| &a.id == id)
+                .map(|a| a.worktree_id.clone())
+            else {
+                return false;
+            };
+            let (shown, peers) = if app.launcher.launcher_kanban {
+                board_shown(app, &worktree, id)
+            } else {
+                let shown = band_shown(app, &worktree);
+                (shown.clone(), shown)
+            };
+            let all = agent_ids(app, &worktree, &shown);
+            (
+                ReorderScope::Agents(worktree),
+                step_id(&all, &peers, id, dir).map(raw),
+            )
+        }
+    };
+    let Some(ids) = ids else {
+        app.chrome.flash = Some(
+            if dir < 0 {
+                "already first"
+            } else {
+                "already last"
+            }
+            .into(),
+        );
+        app.chrome.dirty = true;
+        return false;
+    };
+    reorder(app, scope, ids, out)
+}
+
+/// A PROJECT TAB dropped before or after another.
+pub fn drop_project(
+    app: &mut App,
+    id: &ProjectId,
+    target: &ProjectId,
+    place: Place,
+    out: &mut Vec<ClientRequest>,
+) -> bool {
+    match place_id(&project_ids(app), id, target, place) {
+        Some(ids) => reorder(app, ReorderScope::Projects, raw(ids), out),
+        None => false,
+    }
+}
+
+/// A BAND dropped before or after another of its project's: never the
+/// root, and never above it.
+pub fn drop_worktree(
+    app: &mut App,
+    id: &WorktreeId,
+    target: &WorktreeId,
+    place: Place,
+    out: &mut Vec<ClientRequest>,
+) -> bool {
+    let Some(project) = app
+        .tree
+        .worktrees
+        .iter()
+        .find(|w| &w.id == id)
+        .map(|w| w.project_id.clone())
+    else {
+        return false;
+    };
+    if is_root(app, id) {
+        app.chrome.flash = Some(ROOT_STAYS_FIRST.into());
+        return false;
+    }
+    match place_id(&worktree_ids(app, &project), id, target, place) {
+        Some(ids) => {
+            let ids = raw(root_first(app, ids));
+            reorder(app, ReorderScope::Worktrees(project), ids, out)
+        }
+        None => false,
+    }
+}
+
+/// A session card dropped before or after another of its checkout's:
+/// `shown` is the order the view showed them in (the band's cards, the
+/// board's).
+pub fn drop_agent(
+    app: &mut App,
+    id: &AgentId,
+    target: &AgentId,
+    place: Place,
+    shown: &[AgentId],
+    out: &mut Vec<ClientRequest>,
+) -> bool {
+    let Some(worktree) = app
+        .tree
+        .agents
+        .iter()
+        .find(|a| &a.id == id)
+        .map(|a| a.worktree_id.clone())
+    else {
+        return false;
+    };
+    match place_id(&agent_ids(app, &worktree, shown), id, target, place) {
+        Some(ids) => reorder(app, ReorderScope::Agents(worktree), raw(ids), out),
+        None => false,
+    }
+}
+
+/// The KANBAN's cards of `worktree`, lane by lane: what a board drop
+/// reorders from.
+pub fn board_order(app: &App, worktree: &WorktreeId) -> Vec<AgentId> {
+    board_shown(app, worktree, &AgentId(String::new())).0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

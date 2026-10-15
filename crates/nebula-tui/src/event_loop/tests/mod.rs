@@ -10229,10 +10229,11 @@ fn renaming_a_project_to_nothing_undoes_the_rename() {
     );
 }
 
-/// The shifted keys used to reorder projects; the column orders itself
-/// now, so they neither send a request nor move anything.
+/// The shifted letters used to reorder projects and no longer do; the
+/// move keys are `⌥↓` / `⇧↓` (and their up twins), which ask the daemon
+/// for the new order rather than moving anything here first.
 #[test]
-fn shifted_keys_no_longer_reorder_projects() {
+fn shifted_letters_do_not_reorder_projects_the_move_keys_do() {
     // `Shift+K` is the KANBAN now, a toggle saved to the config.
     with_default_config(|| {
         let mut app = App::new();
@@ -10246,7 +10247,6 @@ fn shifted_keys_no_longer_reorder_projects() {
         let mut out = Vec::new();
         app.nav.focus = Focus::Projects;
         for key in [
-            KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT),
             KeyEvent::new(KeyCode::Char('J'), KeyModifiers::SHIFT),
             KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT),
         ] {
@@ -10259,6 +10259,17 @@ fn shifted_keys_no_longer_reorder_projects() {
             .map(|i| app.tree.projects[i].name.as_str())
             .collect();
         assert_eq!(order, ["demo", "two"], "nothing moved");
+        app.nav.focus = Focus::Projects;
+        app.nav.sel_project = 0;
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Down, KeyModifiers::ALT),
+            &mut out,
+        );
+        assert!(
+            matches!(out.as_slice(), [ClientRequest::Reorder { scope: nebula_core::ReorderScope::Projects, ids, .. }] if ids == &["p2", "p1"]),
+            "{out:?}"
+        );
     });
 }
 
