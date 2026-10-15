@@ -26,6 +26,10 @@ pub const TESTS: &[(&str, Test)] = &[
         archive_offers_the_worktree_delete,
     ),
     (
+        "dragging_a_done_card_onto_archived_offers_the_delete",
+        dragging_a_done_card_onto_archived_offers_the_delete,
+    ),
+    (
         "a_20_kb_paste_reaches_the_agent_as_one_paste",
         a_20_kb_paste_reaches_the_agent_as_one_paste,
     ),
@@ -210,6 +214,30 @@ fn archive_offers_the_worktree_delete() {
     }
 }
 
+/// The same archive by mouse: a Done card held, the Archived zone comes
+/// up along the board's foot, and letting go over it archives the card
+/// with the worktree delete offered.
+fn dragging_a_done_card_onto_archived_offers_the_delete() {
+    let tui = Tui::spawn(Options::default());
+    let repo = tui.make_repo("drag-proj");
+    tui.wait_for_text("create your first project");
+    tui.add_project(&repo, "drag-proj");
+    tui.send(b"K");
+    launch(&tui, "tidy the docs");
+    tui.wait_for_text("● 1 Done");
+
+    let (row, col) = tui.find("› tidy the").expect("the Done card");
+    tui.send(&sgr_mouse(0, col, row, false));
+    tui.send(&sgr_mouse(32, col, row + 1, false));
+    tui.wait_for_text("let go here to archive");
+    let (zone_row, zone_col) = tui.find("let go here to archive").unwrap();
+    tui.send(&sgr_mouse(32, zone_col, zone_row, false));
+    tui.send(&sgr_mouse(0, zone_col, zone_row, true));
+    tui.wait_for_text("delete it from disk too?");
+    tui.send(ENTER);
+    tui.wait_for_text("● 0 Done");
+}
+
 /// A 20 KB paste into a live session arrives at the agent as one
 /// bracketed paste, its line breaks inside it and nothing submitted early.
 fn a_20_kb_paste_reaches_the_agent_as_one_paste() {
@@ -294,7 +322,11 @@ fn session_worktree(repo: &Path) -> PathBuf {
     assert_eq!(paths.len(), 1, "one linked worktree: {paths:?}");
     let wt = paths[0].clone();
     let branch = git(&wt, &["rev-parse", "--abbrev-ref", "HEAD"]);
-    assert_ne!(branch.trim(), "main", "the session runs off the base branch");
+    assert_ne!(
+        branch.trim(),
+        "main",
+        "the session runs off the base branch"
+    );
     wt
 }
 

@@ -1405,10 +1405,8 @@ impl PromptDialog {
             return;
         };
         let bytes = rest.as_bytes();
-        let drive = cfg!(windows)
-            && bytes.len() >= 2
-            && bytes[0].is_ascii_alphabetic()
-            && bytes[1] == b':';
+        let drive =
+            cfg!(windows) && bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
         if drive || rest.starts_with(['/', '\\', '~']) {
             let rest = rest.to_string();
             self.input.set_text(rest);

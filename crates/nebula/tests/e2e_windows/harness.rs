@@ -22,7 +22,6 @@ const POLL_STEP: Duration = Duration::from_millis(50);
 pub const ENTER: &[u8] = b"\r";
 pub const ESC: &[u8] = &[0x1b];
 pub const SHIFT_RIGHT: &[u8] = b"\x1b[1;2C";
-pub const SHIFT_LEFT: &[u8] = b"\x1b[1;2D";
 
 type Writer = Arc<Mutex<Box<dyn Write + Send>>>;
 
@@ -60,7 +59,10 @@ impl Default for Options {
 
 impl Tui {
     pub fn spawn(options: Options) -> Self {
-        let root = tempfile::Builder::new().prefix("kete-e2e-").tempdir().unwrap();
+        let root = tempfile::Builder::new()
+            .prefix("kete-e2e-")
+            .tempdir()
+            .unwrap();
         let base = root.path().canonicalize().unwrap();
         let base = PathBuf::from(
             base.display()
@@ -124,7 +126,10 @@ impl Tui {
         std::fs::create_dir_all(&gates).unwrap();
         cmd.env(agent::GATES, &gates);
         for (word, script) in &options.scripts {
-            cmd.env(format!("{}_{}", agent::SCRIPT, word.to_ascii_uppercase()), script);
+            cmd.env(
+                format!("{}_{}", agent::SCRIPT, word.to_ascii_uppercase()),
+                script,
+            );
         }
         if !options.strip_path.is_empty() {
             let path = std::env::var("PATH").unwrap_or_default();
@@ -214,7 +219,17 @@ impl Tui {
         let repo = self.repos.join(name);
         let bare = self.repos.join(format!("{name}-origin.git"));
         std::fs::create_dir_all(&repo).unwrap();
-        git(&self.repos, &["init", "-q", "--bare", "-b", "main", &bare.display().to_string()]);
+        git(
+            &self.repos,
+            &[
+                "init",
+                "-q",
+                "--bare",
+                "-b",
+                "main",
+                &bare.display().to_string(),
+            ],
+        );
         git(&repo, &["init", "-q", "-b", "main"]);
         git(&repo, &["config", "user.email", "e2e@kete.dev"]);
         git(&repo, &["config", "user.name", "kete-e2e"]);
@@ -226,7 +241,10 @@ impl Tui {
         if github {
             let url = format!("https://github.com/kete-e2e/{name}.git");
             git(&repo, &["remote", "add", "origin", &url]);
-            git(&repo, &["config", &format!("url.{bare}.pushInsteadOf"), &url]);
+            git(
+                &repo,
+                &["config", &format!("url.{bare}.pushInsteadOf"), &url],
+            );
         } else {
             git(&repo, &["remote", "add", "origin", &bare]);
         }
@@ -272,7 +290,8 @@ impl Tui {
         }
     }
 
-    /// Print the screen, for working out what a step shows.
+    /// Print the screen, for working out what a new flow shows.
+    #[allow(dead_code)]
     pub fn dump(&self, label: &str) {
         println!("--- {label} ---\n{}", self.screen_text());
     }
@@ -318,15 +337,6 @@ impl Tui {
                 let at = line.find(needle)?;
                 Some((row as u16, line[..at].chars().count() as u16))
             })
-    }
-
-    /// A left click on the first place `needle` shows.
-    pub fn click(&self, needle: &str) {
-        let (row, col) = self
-            .find(needle)
-            .unwrap_or_else(|| panic!("no {needle:?} to click:\n{}", self.screen_text()));
-        self.send(&sgr_mouse(0, col, row, false));
-        self.send(&sgr_mouse(0, col, row, true));
     }
 
     /// Open the project at `path` with `o`, and wait for its name.

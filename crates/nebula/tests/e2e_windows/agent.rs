@@ -138,7 +138,6 @@ pub fn run() {
     while matches!(agent.input.read(&mut buf), Ok(n) if n > 0) {}
 }
 
-
 /// The prompt: the last argument that is neither a flag nor a flag's
 /// value.
 fn prompt_of(args: &[String]) -> Option<String> {
@@ -331,7 +330,10 @@ fn raw_console() {
     };
     // SAFETY: the standard handles of this process, and plain mode flags.
     unsafe {
-        SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), ENABLE_VIRTUAL_TERMINAL_INPUT);
+        SetConsoleMode(
+            GetStdHandle(STD_INPUT_HANDLE),
+            ENABLE_VIRTUAL_TERMINAL_INPUT,
+        );
         SetConsoleMode(
             GetStdHandle(STD_OUTPUT_HANDLE),
             ENABLE_PROCESSED_OUTPUT

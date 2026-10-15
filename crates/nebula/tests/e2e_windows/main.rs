@@ -30,6 +30,14 @@ fn main() {
     run_suite();
 }
 
+/// Set to anything: the suite runs nothing (CI's workspace-wide test step,
+/// which leaves the suite to a step of its own).
+#[cfg(windows)]
+const SKIP: &str = "KETE_E2E_SKIP";
+/// The longest one test may run before the whole run is failed.
+#[cfg(windows)]
+const TEST_LIMIT: std::time::Duration = std::time::Duration::from_secs(180);
+
 /// libtest's job, done small: run every test whose name holds the filter
 /// (the first argument that is not a flag), one at a time — each brings up
 /// a TUI, a daemon and agents of its own — and fail the run if any fails.
@@ -43,10 +51,29 @@ fn run_suite() {
         return;
     }
     // Every test here is an end-to-end run; none is ignored, so a
-    // workspace-wide `-- --ignored` runs none of them.
-    if args.iter().any(|a| a == "--ignored") {
+    // workspace-wide `-- --ignored` runs none of them. CI runs the suite
+    // in a step of its own and sets SKIP on the workspace-wide one.
+    if args.iter().any(|a| a == "--ignored") || std::env::var_os(SKIP).is_some() {
         println!("\nrunning 0 tests");
         return;
+    }
+    // A test that hangs somewhere no screen wait covers (a child that
+    // never exits, a pipe that never closes) fails the run instead of
+    // holding a CI job to its timeout.
+    let current = std::sync::Arc::new(std::sync::Mutex::new((
+        "",
+        std::time::Instant::now(),
+    )));
+    {
+        let current = current.clone();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            let (name, since) = *current.lock().unwrap();
+            if since.elapsed() > TEST_LIMIT {
+                println!("test {name} ... FAILED (hung past {TEST_LIMIT:?})");
+                std::process::exit(101);
+            }
+        });
     }
     let filter = args.iter().find(|a| !a.starts_with('-')).cloned();
     let exact = args.iter().any(|a| a == "--exact");
@@ -63,6 +90,7 @@ fn run_suite() {
     let mut failed = Vec::new();
     for (name, test) in chosen.iter().copied() {
         let start = std::time::Instant::now();
+        *current.lock().unwrap() = (name, start);
         let outcome = std::panic::catch_unwind(*test);
         let took = start.elapsed().as_secs_f64();
         match outcome {
