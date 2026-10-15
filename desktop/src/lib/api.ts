@@ -174,6 +174,14 @@ export interface Model {
 /** `SessionRef` exactly as serde spells it: externally tagged. */
 export type SessionRef = { Agent: string } | { Terminal: string };
 
+/** What `reorder` reorders: every project, one project's worktrees, or
+ *  one worktree's sessions. Rows lay out by `sort_order`, then the view's
+ *  tiebreak, a project's main checkout first; the daemon keeps that rule. */
+export type ReorderScope =
+  | { kind: 'projects' }
+  | { kind: 'worktrees'; project: string }
+  | { kind: 'agents'; worktree: string };
+
 export type PtyEvent =
   | { kind: 'scrollback'; data: string }
   | { kind: 'output'; data: string }
@@ -372,6 +380,10 @@ export const api = {
   deleteAgent: (agent: string) => invoke<void>('delete_agent', { agent }),
   restartAgent: (agent: string) => invoke<void>('restart_agent', { agent }),
   moveAgent: (agent: string, worktree: string) => invoke<void>('move_agent', { agent, worktree }),
+  /** The scope's new order, first to last; ids left out keep their old
+   *  order after it. Refused (with what to run) by a daemon older than
+   *  protocol 56. */
+  reorder: (scope: ReorderScope, ids: string[]) => invoke<void>('reorder', { scope, ids }),
   renameTerminal: (terminal: string, name: string) => invoke<void>('rename_terminal', { terminal, name }),
   closeTerminal: (terminal: string) => invoke<void>('close_terminal', { terminal }),
   followUp: (agent: string, text: string) => invoke<void>('follow_up', { agent, text }),

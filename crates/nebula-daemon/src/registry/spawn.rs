@@ -93,11 +93,13 @@ impl Daemon {
             pr_url.is_some() || issue_url.is_some(),
         ) && cloud_prompt.is_none();
         let worktree_lookup = worktree_id.clone();
-        let worktree = self
+        // The new row's slot: last in a checkout the user has ordered.
+        let (worktree, sort_order) = self
             .store_blocking(move |store| {
-                store
+                let worktree = store
                     .get_worktree(&worktree_lookup)?
-                    .context("worktree not found")
+                    .context("worktree not found")?;
+                Ok((worktree, store.next_agent_sort_order(&worktree_lookup)?))
             })
             .await?;
         // A warm session for this (worktree, kind) hands over its PTY and
@@ -159,7 +161,7 @@ impl Daemon {
             effort,
             session_id: None,
             cloud_session_id: None,
-            sort_order: 0,
+            sort_order,
             status_changed_at: nebula_core::clock::now_ms(),
             alive: false,
             issue_url: issue_url.clone(),

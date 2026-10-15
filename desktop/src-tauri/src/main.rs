@@ -14,6 +14,7 @@ mod files;
 mod git;
 mod launch;
 mod orchestrator;
+mod order;
 mod pr_poll;
 mod presets;
 mod profiles;
@@ -774,6 +775,7 @@ fn main() {
             sessions::delete_agent,
             sessions::restart_agent,
             sessions::move_agent,
+            order::reorder,
             sessions::rename_terminal,
             sessions::close_terminal,
             sessions::follow_up,
