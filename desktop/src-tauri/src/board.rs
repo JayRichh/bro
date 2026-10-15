@@ -214,6 +214,13 @@ mod tests {
         };
         fill(&mut m);
         assert_eq!(lane(&m, Lane::Done), ["a2", "b1", "a3", "a1"]);
+        // The window gets it as JSON: lane ids as keys, every lane present.
+        let v = serde_json::to_value(&m).unwrap();
+        assert_eq!(
+            v["lanes"]["done"],
+            serde_json::json!(["a2", "b1", "a3", "a1"])
+        );
+        assert_eq!(v["lanes"]["pr"], serde_json::json!([]));
         assert!(lane(&m, Lane::Running).is_empty());
         assert!(m.cards.contains_key("gone"), "the palette still reads it");
         // Unordered, it is newest first, ties in the model's order.
