@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.53.0
+
+No new features. Upgrading from 0.47/0.48 is tested on a real old data folder, the desktop has end-to-end tests, and the bugs these tests found are fixed.
+
+- **Upgrading from 0.47 or 0.48.** A data folder made by 0.48 now opens in 0.53 with your projects, worktrees, sessions, order, accounts, rebound keys and review marks intact. Fixes from that testing:
+  - The What's new page shows once per release instead of again on every later release.
+  - Files you marked reviewed in 0.48 stay marked in the diff against the base, as long as their diff hasn't changed. Unmarking one sticks.
+  - The terminal app says when it is talking to an older, still-running daemon, and what to run. `install.ps1` replaces the files but not the running daemon, and `kete reload` doesn't work on Windows.
+- **Committed Claude settings.** Before 0.52, an agent's `git add -A` could commit `.claude/settings.local.json`, the file Kete writes for Claude's hooks, which holds local paths. Once per checkout, the terminal app now names each one that tracks it and gives the command to untrack it (`git rm --cached .claude/settings.local.json`, then commit). It never untracks the file itself.
+- **Desktop: a finished session's commits show at once.** The window re-reads a worktree's git state when a session there changes status. Before, it re-read every 30 seconds, so for up to 30 seconds a new Review card showed no commits and Ship refused it.
+- **Tested end to end on both apps.**
+  - The desktop now has tests that drive the real window against a real daemon. They cover the board, drag to Ship and to Archived, the review split, the scope chip, rebinding a key, and the `?` menu, and they run in CI.
+  - The Windows terminal-app tests now also cover the 0.48 upgrade and check that every line an agent prints reaches the pane.
+- **More reliable CI.** Three tests that failed under load are fixed without being disabled. One of them was a real race: a test changed the process-wide PATH while other tests started git.
+
 ## 0.52.0
 
 The new board, review and keys are now taught in the app, attribution is exact per turn, and the flows are tested end to end on Windows.
