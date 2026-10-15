@@ -186,6 +186,17 @@ fn handle_menu_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) {
                     .expect("the guard checked the hovered row");
                 open_harness_settings(app, kind, custom);
             }
+            // `?` again puts the VERBS MENU away, as it does the help: back
+            // to the overlay it was opened over, or to the grid.
+            KeyCode::Char('?')
+                if menu
+                    .items
+                    .iter()
+                    .any(|i| matches!(i.action, MenuAction::AllKeys)) =>
+            {
+                let under = app.modals.verbs_under.take();
+                app.modals.overlay = under.filter(|_| menu.is_over_overlay()).map(|o| *o);
+            }
             // Type-ahead in the MODEL / EFFORT submenus: letters narrow the
             // rows (so ↑/↓ move there, not j/k), Backspace widens, and Esc
             // clears the text before it backs out. A letter no row matches
@@ -217,8 +228,11 @@ fn handle_menu_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) {
                         crate::quick_prompt::reopen(app, back.launch, &back.text);
                     }
                     // A verbs menu `?` opened over an overlay goes back
-                    // to it.
-                    _ => app.modals.overlay = app.modals.verbs_under.take().map(|o| *o),
+                    // to it; any other menu leaves nothing behind.
+                    _ => {
+                        let under = app.modals.verbs_under.take();
+                        app.modals.overlay = under.filter(|_| menu.is_over_overlay()).map(|o| *o);
+                    }
                 },
             },
             KeyCode::Char('j') | KeyCode::Down => {

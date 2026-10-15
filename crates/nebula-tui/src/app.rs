@@ -712,6 +712,15 @@ impl ContextMenu {
         !self.filter_query().is_empty()
     }
 
+    /// Is this a VERBS MENU `?` opened over another overlay (the diff's,
+    /// the accounts')? Its rows press that overlay's keys, and closing it
+    /// puts that overlay back (`ModalState::verbs_under`).
+    pub fn is_over_overlay(&self) -> bool {
+        self.items
+            .iter()
+            .any(|i| matches!(i.action, MenuAction::OverlayKey(..)))
+    }
+
     /// Is this the LAUNCHER VIEW's PROJECT DROPDOWN? Its rows are
     /// OpenProject, and it gates its footer hint.
     pub fn is_project_picker(&self) -> bool {

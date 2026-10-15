@@ -142,6 +142,11 @@ pub(crate) fn force_close(app: &mut App) -> bool {
     // parked as a DRAFT for the next box (`quick_prompt::open_box`) — from
     // the box itself and from a picker still holding it.
     let parked = quick_draft(overlay);
+    // The unlock lands on the grid: nothing comes back from under a menu.
+    app.modals.verbs_under = None;
+    let Some(overlay) = &app.modals.overlay else {
+        return false;
+    };
     match overlay {
         Overlay::Settings(_) => crate::event_loop::close_settings(app),
         _ => app.modals.overlay = None,
@@ -175,7 +180,13 @@ fn close_menu(app: &mut App) {
         *menu = *parent;
     }
     let back = crate::event_loop::menu_quick_return(menu).filter(|back| back.from_box);
-    app.modals.overlay = None;
+    // A verbs menu `?` opened over an overlay goes back to it, as on Esc.
+    let under = app
+        .modals
+        .verbs_under
+        .take()
+        .filter(|_| menu.is_over_overlay());
+    app.modals.overlay = under.map(|o| *o);
     if let Some(back) = back {
         crate::quick_prompt::reopen(app, back.launch, &back.text);
     }

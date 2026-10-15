@@ -496,20 +496,31 @@ pub(crate) fn open_delete_all_confirm(app: &mut App) {
 /// and — unless it's the pull request nebula found in git — edit or delete
 /// it.
 pub(crate) fn menu_items_for_link(row: &LinkRow) -> Vec<MenuItem> {
+    // Each row shows the key that does the same on the selected link.
     let mut items = vec![MenuItem::new(
         "Open in browser",
         MenuAction::OpenLink(row.url().to_string()),
-    )];
+    )
+    .keyed(crate::keymap::Action::Activate)];
     if row.pull_request().is_some() {
-        items.push(MenuItem::new("View diff", MenuAction::ViewPrDiff));
-        items.push(MenuItem::new("Comment…", MenuAction::CommentPullRequest));
+        items.push(
+            MenuItem::new("View diff", MenuAction::ViewPrDiff)
+                .keyed(crate::keymap::Action::GitDiff),
+        );
+        items.push(
+            MenuItem::new("Comment…", MenuAction::CommentPullRequest)
+                .keyed(crate::keymap::Action::CommentPullRequest),
+        );
     }
     if let Some(id) = row.id() {
-        items.push(MenuItem::new("Edit URL", MenuAction::EditLink(id.clone())));
-        items.push(MenuItem::destructive(
-            "Delete",
-            MenuAction::DeleteLink(id.clone()),
-        ));
+        items.push(
+            MenuItem::new("Edit URL", MenuAction::EditLink(id.clone()))
+                .keyed(crate::keymap::Action::Rename),
+        );
+        items.push(
+            MenuItem::destructive("Delete", MenuAction::DeleteLink(id.clone()))
+                .keyed(crate::keymap::Action::Delete),
+        );
     }
     items
 }
@@ -529,6 +540,8 @@ pub(crate) fn open_menu(app: &mut App, items: Vec<MenuItem>, at: (u16, u16)) {
     if items.is_empty() {
         return;
     }
+    // A menu of the grid's own: no overlay waits under it.
+    app.modals.verbs_under = None;
     app.modals.overlay = Some(Overlay::Menu(ContextMenu {
         title: None,
         items,
@@ -586,10 +599,10 @@ pub(crate) fn open_pr_agent_picker(app: &mut App) {
 /// The CONTEXT MENU for a PROJECT ISSUES GROUP row: the browser. The
 /// launches are the row's keys (`p`, `e`), as the footer says.
 pub(crate) fn issue_row_menu_items(issue: &crate::issues::Issue) -> Vec<MenuItem> {
-    vec![MenuItem::new(
-        "Open in browser",
-        MenuAction::OpenLink(issue.url.clone()),
-    )]
+    vec![
+        MenuItem::new("Open in browser", MenuAction::OpenLink(issue.url.clone()))
+            .keyed(crate::keymap::Action::Activate),
+    ]
 }
 
 /// The CONTEXT MENU for a PROJECT OPEN PRS GROUP row: a PR SESSION row per
@@ -601,9 +614,11 @@ pub(crate) fn pr_row_menu_items(app: &App, pr: &crate::pull_request::OpenPr) -> 
         None => Vec::new(),
     };
     items.extend([
-        MenuItem::new("Open in browser", MenuAction::OpenLink(pr.url.clone())),
-        MenuItem::new("View diff", MenuAction::ViewPrDiff),
-        MenuItem::new("Comment…", MenuAction::CommentPullRequest),
+        MenuItem::new("Open in browser", MenuAction::OpenLink(pr.url.clone()))
+            .keyed(crate::keymap::Action::Activate),
+        MenuItem::new("View diff", MenuAction::ViewPrDiff).keyed(crate::keymap::Action::GitDiff),
+        MenuItem::new("Comment…", MenuAction::CommentPullRequest)
+            .keyed(crate::keymap::Action::CommentPullRequest),
     ]);
     items
 }
@@ -776,14 +791,16 @@ pub(crate) fn context_menu_items(app: &App, focus: Focus) -> Option<Vec<MenuItem
 /// verbs by its own key (`n`, `A`, the OPEN PRS fold, the draft toggle).
 pub(crate) fn panel_menu_items(app: &App, focus: Focus) -> Vec<MenuItem> {
     match focus {
-        Focus::Projects => vec![MenuItem::new("Add project", MenuAction::AddProject)],
+        Focus::Projects => vec![MenuItem::new("Add project", MenuAction::AddProject)
+            .keyed(crate::keymap::Action::AddProject)],
         Focus::Worktrees => app
             .selected_project()
             .map(|p| {
-                let mut items = vec![MenuItem::new(
-                    "New worktree",
-                    MenuAction::NewWorktree(p.id.clone()),
-                )];
+                let mut items =
+                    vec![
+                        MenuItem::new("New worktree", MenuAction::NewWorktree(p.id.clone()))
+                            .keyed(crate::keymap::Action::NewWorktree),
+                    ];
                 // Only once there is a group to fold.
                 if !app.listed_open_prs().is_empty() {
                     items.push(MenuItem::new(
@@ -811,8 +828,10 @@ pub(crate) fn panel_menu_items(app: &App, focus: Focus) -> Vec<MenuItem> {
             .selected_worktree()
             .map(|w| {
                 vec![
-                    MenuItem::new("New agent", MenuAction::NewAgent(w.id.clone())),
-                    MenuItem::new("Show/hide archived", MenuAction::ToggleArchived),
+                    MenuItem::new("New agent", MenuAction::NewAgent(w.id.clone()))
+                        .keyed(crate::keymap::Action::New),
+                    MenuItem::new("Show/hide archived", MenuAction::ToggleArchived)
+                        .keyed(crate::keymap::Action::ToggleArchived),
                 ]
             })
             .unwrap_or_default(),

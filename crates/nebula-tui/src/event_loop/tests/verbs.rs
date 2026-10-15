@@ -576,3 +576,49 @@ fn the_grid_footer_shows_more_and_the_cards_verbs() {
     assert!(footer.contains("?: more"), "{footer}");
     assert!(footer.contains("reply"), "{footer}");
 }
+
+/// A verbs menu over the accounts put away some other way (a click off
+/// it, the unlock) leaves nothing waiting: a later menu's Esc closes to
+/// the grid, never back into the accounts.
+#[test]
+fn the_overlay_under_a_verbs_menu_never_comes_back_late() {
+    let mut app = bench();
+    let mut out = Vec::new();
+    let q = || KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE);
+    let esc = || KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+    // The unlock: onto the grid, nothing kept.
+    accounts::open(&mut app);
+    handle_overlay_key(&mut app, q(), &mut out);
+    assert!(crate::overlay_close::force_close(&mut app));
+    assert!(app.modals.overlay.is_none());
+    assert!(app.modals.verbs_under.is_none());
+    // A click off it: back to the accounts, as Esc goes.
+    accounts::open(&mut app);
+    handle_overlay_key(&mut app, q(), &mut out);
+    crate::overlay_close::click_outside(&mut app, &mut out);
+    assert!(matches!(app.modals.overlay, Some(Overlay::Accounts(_))));
+    // `?` again: put away, the same way.
+    handle_overlay_key(&mut app, q(), &mut out);
+    handle_overlay_key(&mut app, q(), &mut out);
+    assert!(matches!(app.modals.overlay, Some(Overlay::Accounts(_))));
+    // Left waiting by hand: a card's menu Esc still closes to the grid.
+    app.modals.overlay = None;
+    app.modals.verbs_under = Some(Box::new(Overlay::Help(HelpView::default())));
+    let items = verbs::menu_for(&app, &Target::Session(AgentId("a1".into())));
+    open_menu(&mut app, items, (2, 2));
+    handle_overlay_key(&mut app, esc(), &mut out);
+    assert!(app.modals.overlay.is_none(), "{:?}", app.modals.overlay);
+    // A link's menu shows its keys too.
+    let row = LinkRow::Saved {
+        link: nebula_core::Link {
+            id: nebula_core::LinkId("l1".into()),
+            worktree_id: WorktreeId("w1".into()),
+            url: "https://example.dev".into(),
+            sort_order: 0,
+        },
+        pr: None,
+    };
+    let link = menu_items_for_link(&row);
+    assert_eq!(link[0].verb, Some(Action::Activate));
+    assert!(link.iter().any(|i| i.verb == Some(Action::Delete)));
+}
