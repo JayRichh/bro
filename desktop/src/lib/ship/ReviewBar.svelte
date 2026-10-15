@@ -91,13 +91,14 @@
   tabindex="-1"
   aria-label="Review {agent.name}"
 >
-  <span class="flex min-w-0 flex-1 items-baseline gap-2">
+  <!-- The name and its chips keep their width: the buttons wrap below them. -->
+  <span class="flex min-w-[min(100%,max-content)] flex-1 items-baseline gap-2">
     <span class="truncate text-[13px] font-medium text-ink">{agent.name}</span>
     {#if lane}<span class="flex-none font-mono text-[11px] text-muted">{lane}</span>{/if}
     {#if commits}<span class="flex-none font-mono text-[11px] text-muted" title="Commits on {where.branch} since its base">{commits}</span>{/if}
     {#if pr}<span class="flex-none font-mono text-[11px] {pr.state === 'merged' ? 'text-merged' : 'text-ink'}" title={pr.title}>{prChip(pr).word}</span>{/if}
   </span>
-  <span class="flex flex-none flex-wrap items-center gap-1.5">
+  <span class="flex min-w-0 flex-initial flex-wrap items-center gap-1.5">
     {#if !agent.archived}
       <button class={btn} title={withKey('Reply: the follow-up prompt', 'follow_up')} onclick={() => followUp(agent.id)}>
         Reply<kbd class={cap}>Space</kbd>

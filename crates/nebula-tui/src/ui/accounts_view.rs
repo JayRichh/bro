@@ -516,6 +516,30 @@ fn draw_use_for(l: &mut Layout, view: &AccountsView, cursor: usize, th: Theme) {
     );
 }
 
+/// `line` cut to `width` columns with an ellipsis, so a long one (the
+/// spread's words, a row's sessions) ends on `…` rather than at the frame.
+fn fit_line(line: Line<'static>, width: u16) -> Line<'static> {
+    let width = usize::from(width);
+    if line.width() <= width || width == 0 {
+        return line;
+    }
+    let mut room = width - 1;
+    let mut spans = Vec::new();
+    for span in line.spans {
+        let w = span.width();
+        if w <= room {
+            room -= w;
+            spans.push(span);
+            continue;
+        }
+        let cut: String = span.content.chars().take(room).collect();
+        spans.push(Span::styled(cut, span.style));
+        break;
+    }
+    spans.push(Span::raw("…"));
+    Line::from(spans).style(line.style)
+}
+
 pub(super) fn draw(f: &mut Frame, app: &mut App, mut view: AccountsView) {
     let th = app.chrome.theme;
     let now = nebula_core::clock::now_ms();
@@ -542,7 +566,12 @@ pub(super) fn draw(f: &mut Frame, app: &mut App, mut view: AccountsView) {
         Mode::Remove { message, home, .. } => draw_remove(&mut l, message, home.is_some(), th),
         Mode::UseFor { cursor } => draw_use_for(&mut l, &view, *cursor, th),
     }
-    f.render_widget(Paragraph::new(l.lines), inner);
+    let lines: Vec<Line> = l
+        .lines
+        .into_iter()
+        .map(|line| fit_line(line, inner.width))
+        .collect();
+    f.render_widget(Paragraph::new(lines), inner);
     view.area = area;
     view.hits = l.hits;
     if let Some(Overlay::Accounts(v)) = &mut app.modals.overlay {

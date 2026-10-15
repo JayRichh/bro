@@ -37,6 +37,12 @@ fn lane_color(lane: Lane, th: Theme) -> Color {
     }
 }
 
+/// The narrowest the lanes go beside a docked review: five of 14 columns
+/// and their gaps, so a card still shows its name.
+const DOCKED_LANES_W: u16 = Lane::ALL.len() as u16 * 15 - 1;
+/// The narrowest docked review: its file list and the diff beside it.
+const DOCK_MIN_W: u16 = 72;
+
 /// The board, in `body`: the header, then the five lanes side by side.
 pub(super) fn draw(f: &mut Frame, app: &mut App, body: Rect) {
     let th = app.chrome.theme;
@@ -55,12 +61,13 @@ pub(super) fn draw(f: &mut Frame, app: &mut App, body: Rect) {
     let g = crate::launcher::bands_layout(body);
     let mut area = g.area;
     // The REVIEW UNIT docks its diff on the board's right: the lanes keep
-    // the left, where they still fit five abreast; a board too narrow for
-    // both gives the diff the whole of it.
+    // the left, where they still fit five abreast with a card's name
+    // legible; a board too narrow for both (lanes and a diff of its two
+    // panes) gives the diff the whole of it.
     app.launcher.review_dock = Rect::default();
     if review_docked(app) {
-        let lanes_w = (area.width * 2 / 5).max(Lane::ALL.len() as u16 * 8);
-        if area.width >= lanes_w + 40 {
+        let lanes_w = (area.width * 2 / 5).max(DOCKED_LANES_W);
+        if area.width >= lanes_w + 1 + DOCK_MIN_W {
             app.launcher.review_dock = Rect {
                 x: area.x + lanes_w + 1,
                 width: area.width - lanes_w - 1,
@@ -141,14 +148,15 @@ pub(super) fn draw(f: &mut Frame, app: &mut App, body: Rect) {
             if let Some(line) = row_rect(r, r.height.saturating_sub(1) as usize)
                 .filter(|_| r.height > LANE_HEAD_H + 1)
             {
+                // The count whole: a narrow lane says it shorter.
+                let long = format!("{outside} more outside scope");
+                let said = if long.chars().count() <= line.width as usize {
+                    long
+                } else {
+                    truncate(&format!("+{outside} outside"), line.width as usize)
+                };
                 f.render_widget(
-                    Paragraph::new(Span::styled(
-                        truncate(
-                            &format!("{outside} more outside scope"),
-                            line.width as usize,
-                        ),
-                        Style::default().fg(th.dim),
-                    )),
+                    Paragraph::new(Span::styled(said, Style::default().fg(th.dim))),
                     line,
                 );
             }

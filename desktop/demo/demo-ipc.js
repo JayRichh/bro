@@ -16,7 +16,11 @@
 // sheet; tab=terminal|diff|history|pr), view=overview-cue (sessions the
 // orchestrator started, in their repos), view=accounts (the rail's accounts,
 // a needs-login row's command open), view=context (a session open: context
-// bars in the tree and the session header). The settings rows are the real
+// bars in the tree and the session header); the board: view=board,
+// board-review (a card's review, its diff against the base with the
+// commits strip), board-ship (the PR form; ship_error=1 sends it into the
+// sign-in error), board-merge (the merge confirm), board-verbs (the verbs
+// menu), board-palette, board-scope. The settings rows are the real
 // schema, exported
 // by `cargo test -- --ignored write_demo_settings` in src-tauri.
 
@@ -62,7 +66,7 @@ const ORCH_VIEWS = ['orchestrator', 'start-orchestrator', 'review', 'overview-cu
 const ORCH = ORCH_VIEWS.includes(q.get('view'));
 // The board shots (view=board, board-review, board-ship, board-scope):
 // every lane, a PR in Ship, commits past the base, the ship sheet, a scope.
-const BOARD = ['board', 'board-review', 'board-ship', 'board-scope'].includes(q.get('view'));
+const BOARD = ['board', 'board-review', 'board-ship', 'board-scope', 'board-merge', 'board-verbs', 'board-palette'].includes(q.get('view'));
 const W2 = ['menu', 'palette', 'help', 'quick', 'selftest', 'accounts', 'context', 'worktrees', 'wt-overview'].includes(q.get('view')) || ORCH || BOARD;
 if (W2) {
   const a = (id, worktree_id, name, status, extra = {}) => ({
@@ -385,6 +389,24 @@ const handlers = {
     file.status === 'A'
       ? { original: '', modified: "import { render } from '@testing-library/react';\n\ntest('caps at 99+', () => {\n  // ...\n});\n", note: null }
       : { original: 'export function CartIcon() {\n  return <Icon name="cart" />;\n}\n', modified: 'export function CartIcon({ count }: { count: number }) {\n  const label = count > 99 ? "99+" : String(count);\n  return (\n    <span aria-label={`Cart, ${count} items`}>\n      <Icon name="cart" />\n      {count > 0 && <b>{label}</b>}\n    </span>\n  );\n}\n', note: null },
+  // The review diff: against the base by default, with the commits since it.
+  diff_review: ({ against }) => ({
+    against: against ?? 'base',
+    base: { sha: '3f9c2a1d0b7e4c5a8d6f1e2b3c4d5e6f7a8b9c0d', short: '3f9c2a1', branch: 'main' },
+    commits: [
+      { sha: 'c3', short: 'a17e5b9', subject: 'Announce the count to screen readers' },
+      { sha: 'c2', short: '6d0c4e2', subject: 'Cap the cart badge at 99+ and test the edges' },
+      { sha: 'c1', short: '9b81f07', subject: 'Show the item count on the cart icon' },
+    ],
+    files: handlers.diff_files(),
+  }),
+  diff_blob: ({ side, path }) => {
+    const f = handlers.diff_files().find((x) => x.path === path);
+    const pair = handlers.diff_pair({ file: f ?? { status: 'M' } });
+    const text = side.kind === 'worktree' ? pair.modified : pair.original;
+    return text ? { state: 'text', value: text } : { state: 'missing' };
+  },
+  diff_hunks: () => [],
   'plugin:event|unlisten': () => null,
   'plugin:window|set_theme': () => null,
   launchables: () => ({
@@ -600,10 +622,33 @@ window.addEventListener('load', async () => {
   }
   if (view === 'overview-cue' || view === 'wt-overview') return;
   if (BOARD) {
+    // A review bar button by its word (its key cap follows the word).
+    const reviewBtn = (word) => () => [...document.querySelectorAll('[data-review-bar] button')].find((b) => b.textContent.trim().startsWith(word));
     if (view === 'board-review') (await until(() => document.querySelector('[data-target="agent:a3"] button'))).click();
     if (view === 'board-ship') {
       (await until(() => document.querySelector('[data-target="agent:a3"] button'))).click();
-      (await until(byText('[data-review-bar] button', 'Open PR\u2026'))).click();
+      (await until(reviewBtn('Open PR'))).click();
+      // ship_error=1: create it, and show the sign-in error under the form.
+      if (q.get('ship_error')) {
+        await wait(400);
+        (await until(() => [...document.querySelectorAll('[role="dialog"] button, form button')].find((b) => /^(Create|Open) (draft )?(pull request|PR)/i.test(b.textContent.trim()))))?.click();
+      }
+    }
+    if (view === 'board-merge') {
+      (await until(() => document.querySelector('[data-target="agent:a6"] button'))).click();
+      (await until(reviewBtn('Merge'))).click();
+    }
+    if (view === 'board-verbs') {
+      // The card's own button takes the focus (its wrapper cannot), and
+      // `?` goes to it, so the menu is the card's.
+      const card = await until(() => document.querySelector('[data-target="agent:a3"] button'));
+      card.focus();
+      await wait(100);
+      card.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true }));
+    }
+    if (view === 'board-palette') {
+      await until(() => document.querySelector('[data-target="agent:a3"]'));
+      key('k', { ctrlKey: true });
     }
     return;
   }
