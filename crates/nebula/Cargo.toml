@@ -38,6 +38,17 @@ httpmock = "0.7"
 portable-pty = { workspace = true }
 vt100 = { workspace = true }
 
+# The Windows end-to-end suite reads its fake agent's console raw.
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }
+
+# The Windows end-to-end suite runs its own main: the same binary is the
+# fake agent the daemon launches in a session (see tests/e2e_windows).
+[[test]]
+name = "e2e_windows"
+path = "tests/e2e_windows/main.rs"
+harness = false
+
 # The app icon in kete.exe's (and bro.exe's) resources, so Explorer, the
 # taskbar and Windows Terminal profiles show the kete mark.
 [target.'cfg(windows)'.build-dependencies]

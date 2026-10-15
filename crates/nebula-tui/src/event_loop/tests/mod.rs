@@ -5704,6 +5704,46 @@ fn add_project_prefill_yields_to_absolute_paths() {
     assert_eq!(p.input, "/", "leading '/' replaces the untouched prefill");
 }
 
+/// A pasted absolute path replaces the untouched "~/" prefill too: the
+/// Windows console types a paste out, so it never meets the typed-`/`
+/// rule, and a drive path starts with a letter that rule leaves alone.
+/// Found by the Windows end-to-end suite, where the field read
+/// `~/C:\Users\…` and listed no directories.
+#[test]
+fn add_project_prefill_yields_to_a_pasted_absolute_path() {
+    use crate::app::{Overlay, PromptDialog, PromptKind};
+    let pasted = if cfg!(windows) {
+        r"C:\Code\app"
+    } else {
+        "/srv/app"
+    };
+    let mut app = App::new();
+    app.modals.overlay = Some(Overlay::Prompt(PromptDialog::new(
+        "Add project",
+        "path",
+        "~/",
+        PromptKind::AddProject,
+    )));
+    assert!(super::text_entry::paste_into_overlay(&mut app, pasted));
+    let Some(Overlay::Prompt(p)) = &app.modals.overlay else {
+        panic!("prompt closed")
+    };
+    assert_eq!(p.input, pasted);
+    // A relative path still goes under home.
+    let mut app = App::new();
+    app.modals.overlay = Some(Overlay::Prompt(PromptDialog::new(
+        "Add project",
+        "path",
+        "~/",
+        PromptKind::AddProject,
+    )));
+    assert!(super::text_entry::paste_into_overlay(&mut app, "code/app"));
+    let Some(Overlay::Prompt(p)) = &app.modals.overlay else {
+        panic!("prompt closed")
+    };
+    assert_eq!(p.input, "~/code/app");
+}
+
 #[test]
 fn tab_in_name_prompt_does_not_complete() {
     use crate::app::{Overlay, PromptDialog, PromptKind};

@@ -87,7 +87,19 @@ jobs:
         run: cargo build --workspace --locked
 
       - name: Test workspace
+        # The Windows end-to-end suite runs in the step below, with a
+        # timeout of its own; it is a no-op on the other runners.
+        env:
+          KETE_E2E_SKIP: "1"
         run: cargo test --workspace --locked
+
+      # The real kete in a ConPTY with its own daemon, temp git repos and a
+      # scripted fake agent: the board, review, ship and paste flows end to
+      # end (crates/nebula/tests/e2e_windows).
+      - name: Windows end-to-end
+        if: runner.os == 'Windows'
+        timeout-minutes: 20
+        run: cargo test -p nebula --locked --test e2e_windows
 
   windows-arm64:
     name: cargo build (aarch64-pc-windows-msvc)
