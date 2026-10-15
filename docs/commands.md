@@ -79,13 +79,17 @@ kete worktree [name] [--base <ref>]  # move the current session into a worktree 
                           # but is ignored when the branch already exists; without it the
                           # worktree_base_branch setting applies, else origin's default)
 kete spawn <task> [--kind <claude|codex|cursor|pi|muse|grok|opencode|copilot>] [--worktree <branch> [--base <ref>]]
+           [--profile <name>]
                           # start a new agent session beside the current one, in the same worktree,
                           # opening on <task> (agents run this when you ask for a new kete session;
                           # --kind defaults to this session's harness; custom harnesses launch from
                           # the TUI picker and presets, not --kind); --worktree starts it in the
                           # project's worktree on <branch> instead, creating it when the branch has
                           # none (--base picks a new branch's start point and is refused when the
-                          # branch already exists), and leaves this session where it is
+                          # branch already exists), and leaves this session where it is;
+                          # --profile runs it on that account (one for its harness; default:
+                          # this session's account on this harness, else the harness's default;
+                          # needs daemon protocol 58, an older daemon is asked to update)
 kete open <file>…       # show the files in this kete's FILE TABS, a modal with one tab per
                           # file, the focused one previewed, Enter editing it (agents run this only
                           # when you ask to see a file, image, mockup or diagram; text files,
@@ -152,6 +156,32 @@ kete ado pr create [--title T] [--summary S] [--testing T] [--target B] [--sourc
                           # reviewer unless waived, an existing PR reported, not doubled
 kete ado vote <id> approve|approve-with-suggestions|wait|reject|reset
 kete ado reply <id> <thread> <text>
+```
+
+## Shipping a worktree
+
+`kete ship` takes a worktree's branch to a pull request and on to merged, on
+whichever forge its remote is: GitHub through `gh`, Azure DevOps through its
+API. Sign-in is never interactive. A missing one says to run `gh auth login`
+(or `az login`, or sign in from the desktop app). It runs in the checkout you
+are in. `--project <kete project>` acts in that project's main checkout from
+anywhere, and `--worktree <branch>` picks one of its worktrees (without
+`--project`, one of the current checkout's project).
+
+```sh
+kete ship status [--json]  # forge and remote, branch and base, unpushed commits, the branch's PR
+                           # (open first, else its newest); a sign-in it needs is said, not asked
+kete ship pr [--title T] [--body B | --body -] [--draft] [--base B] [--json]
+                           # clean co-author lines from unpushed commits, push with upstream,
+                           # open the PR into the review base (worktree_base_branch, else the
+                           # default branch); no --title: suggested from the session's name or
+                           # prompt and the commits since the base; an open PR is updated by the
+                           # push, never opened twice
+kete ship merge [--method squash|merge|rebase] [--delete-branch] [--json]
+                           # merge the open PR (GitHub pinned to the head it read; Azure DevOps
+                           # completed through its API, or the PR page when its policies hold it);
+                           # --delete-branch deletes it on the remote only, the worktree stays
+kete ship --project ledger-api --worktree jr/fix-gst pr --draft
 ```
 
 ## Settings

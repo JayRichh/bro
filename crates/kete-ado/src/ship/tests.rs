@@ -620,3 +620,63 @@ async fn status_without_a_forge_still_reads_the_checkout() {
     assert_eq!(s.title, "Fix the thing");
     assert_eq!(s.body, "## Changes\n- Fix the thing");
 }
+
+fn agent(id: &str, worktree: &str, at: i64, prompts: &[&str]) -> Agent {
+    use nebula_core::{AgentKind, AgentRole, AgentStatus, PromptEntry};
+    Agent {
+        id: AgentId(id.into()),
+        worktree_id: WorktreeId(worktree.into()),
+        name: format!("name-{id}"),
+        status: AgentStatus::Finished,
+        archived: false,
+        archived_at: 0,
+        unseen: false,
+        status_changed_at: at,
+        kind: AgentKind::Claude,
+        custom_harness: None,
+        model: None,
+        effort: None,
+        session_id: None,
+        cloud_session_id: None,
+        issue_url: None,
+        role: AgentRole::Worker,
+        sort_order: 0,
+        alive: true,
+        recent_prompts: prompts
+            .iter()
+            .map(|t| PromptEntry {
+                text: t.to_string(),
+                submitted_at: 0,
+            })
+            .collect(),
+        profile: None,
+        parent: None,
+    }
+}
+
+#[test]
+fn the_suggestion_reads_the_named_session_else_the_worktrees_latest() {
+    let mut gone = agent("c", "w1", 99, &["old"]);
+    gone.archived = true;
+    let agents = vec![
+        agent("a", "w1", 5, &["first", "fix the login"]),
+        agent("b", "w1", 9, &[]),
+        agent("d", "w2", 50, &["elsewhere"]),
+        gone,
+    ];
+    let w = |id: &str| WorktreeId(id.into());
+    assert_eq!(
+        session_words(&agents, &w("w1"), Some(&AgentId("a".into()))),
+        (Some("name-a".into()), Some("fix the login".into()))
+    );
+    assert_eq!(
+        session_words(&agents, &w("w1"), None),
+        (Some("name-b".into()), None)
+    );
+    // A session id nobody has falls back to the worktree's latest.
+    assert_eq!(
+        session_words(&agents, &w("w2"), Some(&AgentId("zz".into()))).0,
+        Some("name-d".into())
+    );
+    assert_eq!(session_words(&agents, &w("w3"), None), (None, None));
+}

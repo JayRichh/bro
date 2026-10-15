@@ -19,6 +19,7 @@ use crate::remote::{parse_remote, AdoRemote};
 use crate::{AdoContext, AdoState};
 use async_trait::async_trait;
 use nebula_core::review_base::{self, CommitLine};
+use nebula_core::{Agent, AgentId, WorktreeId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
@@ -685,6 +686,30 @@ pub fn number_from_url(url: &str) -> Option<u64> {
         .next()?
         .parse()
         .ok()
+}
+
+/// The session a suggestion is written from: `session` when named and
+/// known, else the worktree's most recently active unarchived row. Its
+/// name and last prompt, for [`Place::suggest`].
+pub fn session_words(
+    agents: &[Agent],
+    worktree: &WorktreeId,
+    session: Option<&AgentId>,
+) -> (Option<String>, Option<String>) {
+    let named = session.and_then(|id| agents.iter().find(|a| &a.id == id));
+    let pick = named.or_else(|| {
+        agents
+            .iter()
+            .filter(|a| &a.worktree_id == worktree && !a.archived)
+            .max_by_key(|a| a.status_changed_at)
+    });
+    match pick {
+        Some(a) => (
+            Some(a.name.clone()),
+            a.recent_prompts.last().map(|p| p.text.clone()),
+        ),
+        None => (None, None),
+    }
 }
 
 // ---------------------------------------------------------------------------

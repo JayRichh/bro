@@ -222,11 +222,13 @@ pub fn resolve_checkout(tree: &Tree, project: &str, branch: Option<&str>) -> Res
 
 /// The project whose worktree is checked out at `path`.
 pub fn project_for_checkout(tree: &Tree, path: &Path) -> Option<ProjectId> {
+    worktree_at(tree, path).map(|w| w.project_id.clone())
+}
+
+/// The worktree checked out at `path`.
+pub fn worktree_at<'t>(tree: &'t Tree, path: &Path) -> Option<&'t Worktree> {
     let want = normal(path);
-    tree.worktrees
-        .iter()
-        .find(|w| normal(&w.path) == want)
-        .map(|w| w.project_id.clone())
+    tree.worktrees.iter().find(|w| normal(&w.path) == want)
 }
 
 /// A path for comparing: canonical when it exists, separators and (on
@@ -331,7 +333,7 @@ pub fn next_agent_name(agents: &[Agent]) -> String {
     format!("agent-{}", n + 1)
 }
 
-async fn fetch_tree() -> Result<(Tree, u32)> {
+pub(crate) async fn fetch_tree() -> Result<(Tree, u32)> {
     let mut conn = connect_or_spawn().await?;
     write_frame(&mut conn.stream, &ClientRequest::Subscribe).await?;
     loop {

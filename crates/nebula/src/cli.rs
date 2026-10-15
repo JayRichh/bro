@@ -301,6 +301,24 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: OrchestratorCommand,
     },
+    /// Ship a worktree's branch: its pull request, opened and merged.
+    ///
+    /// GitHub through `gh`, Azure DevOps through its API, whichever the
+    /// checkout's remote is. Sign-in is never interactive: run `gh auth
+    /// login` or `az login` (or sign in from the desktop app) when asked.
+    #[command(after_help = SHIP_EXAMPLES)]
+    Ship {
+        /// Act on this kete project (name or id) instead of the checkout
+        /// you are in.
+        #[arg(long, global = true, value_name = "PROJECT")]
+        project: Option<String>,
+        /// The worktree on this branch: in --project, else in the project
+        /// of the checkout you are in (default: that checkout).
+        #[arg(long, global = true, value_name = "BRANCH")]
+        worktree: Option<String>,
+        #[command(subcommand)]
+        command: ShipCommand,
+    },
     /// Azure DevOps for this repo: sprint tasks, task worktrees, pull requests.
     ///
     /// Org, project and repo come from the current checkout's Azure DevOps
@@ -640,6 +658,57 @@ pub(crate) enum OrchestratorCommand {
 }
 
 #[derive(Subcommand)]
+pub(crate) enum ShipCommand {
+    /// The forge, branch, base, unpushed commits and the branch's pull request.
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Push the branch and open its pull request.
+    ///
+    /// Co-author and attribution lines are cleaned from unpushed commits
+    /// and the body first. An open PR from the branch is not opened twice:
+    /// the push updates it. Without --title, the title and body are
+    /// suggested from the session and the commits since the base.
+    Pr {
+        #[arg(long)]
+        title: Option<String>,
+        /// The description; `-` reads it from stdin.
+        #[arg(long)]
+        body: Option<String>,
+        /// Open it as a draft.
+        #[arg(long)]
+        draft: bool,
+        /// The branch it merges into (default: the review base, the
+        /// `worktree_base_branch` setting, else the default branch).
+        #[arg(long, value_name = "BRANCH")]
+        base: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Merge the branch's open pull request.
+    ///
+    /// GitHub: `gh pr merge`, pinned to the head commit it was read at.
+    /// Azure DevOps: the PR is completed through its API; one its policies
+    /// hold says so with its page. The local branch and worktree stay.
+    Merge {
+        /// squash, merge or rebase.
+        #[arg(long, default_value = "squash", value_parser = parse_merge_method)]
+        method: kete_ado::ship::MergeMethod,
+        /// Delete the branch on the remote once merged.
+        #[arg(long)]
+        delete_branch: bool,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+fn parse_merge_method(s: &str) -> Result<kete_ado::ship::MergeMethod, String> {
+    kete_ado::ship::MergeMethod::parse(s)
+        .ok_or_else(|| format!("unknown merge method `{s}`: expected squash, merge or rebase"))
+}
+
+#[derive(Subcommand)]
 pub(crate) enum AdoCommand {
     /// Your tasks in the team's current sprint, grouped by parent.
     ///
@@ -815,6 +884,14 @@ Examples:
   kete ado vote 812 approve
   kete ado reply 812 3 \"fixed in the latest push\"";
 
+const SHIP_EXAMPLES: &str = "\
+Examples:
+  kete ship status                               this checkout's branch and its PR
+  kete ship pr --draft                           push and open a draft, title suggested
+  kete ship pr --title \"Fix the login redirect\" --body - < notes.md
+  kete ship --project ledger-api --worktree jr/fix-gst status --json
+  kete ship merge --method squash --delete-branch";
+
 const ADD_EXAMPLES: &str = "\
 Examples:
   kete add .                     add the repo you are standing in
@@ -855,7 +932,8 @@ Examples:
   kete spawn --kind codex \"review the diff on this branch\"
   kete spawn --worktree fix-login \"fix the login redirect\"
                                    start it in that branch's worktree, made if new
-  kete spawn --worktree hotfix --base v0.21.0 \"backport the fix\"";
+  kete spawn --worktree hotfix --base v0.21.0 \"backport the fix\"
+  kete spawn --profile work \"triage the failing CI run\"";
 
 const OPEN_EXAMPLES: &str = "\
 Examples:

@@ -9,7 +9,7 @@
 //! are set for every git this process runs (the push included). A missing
 //! credential is an error that says how to sign in, never a prompt.
 
-mod daemon;
+pub(crate) mod daemon;
 
 use crate::cli::{AdoCommand, AdoPrAction};
 use anyhow::{anyhow, bail, Result};

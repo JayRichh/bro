@@ -5,6 +5,7 @@ mod desktop;
 mod hook;
 mod profile;
 mod setup;
+mod ship;
 mod ssh;
 mod statusline;
 mod tunnel;
@@ -209,6 +210,11 @@ fn main() -> Result<()> {
                 nebula_tui::run_orchestrator_review(&sessions, tabs)
             }
         },
+        Some(Command::Ship {
+            project,
+            worktree,
+            command,
+        }) => ship::run_ship(command, ado::Target { project, worktree }),
         Some(Command::Ado {
             project,
             worktree,
