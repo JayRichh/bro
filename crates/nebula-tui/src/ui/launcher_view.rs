@@ -4524,7 +4524,6 @@ mod tests {
                 name: format!("session {i}"),
                 status: AgentStatus::Finished,
                 kind: AgentKind::Claude,
-                sort_order: i as i64,
                 ..one.clone()
             })
             .collect();
@@ -5081,7 +5080,6 @@ mod tests {
                 name: format!("session {i}"),
                 status: AgentStatus::Finished,
                 kind: AgentKind::Claude,
-                sort_order: i as i64,
                 ..one.clone()
             })
             .collect();

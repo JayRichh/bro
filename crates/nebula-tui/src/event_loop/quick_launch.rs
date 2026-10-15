@@ -725,7 +725,7 @@ mod tests {
                         id: ProjectId("p2".into()),
                         name: "web".into(),
                         repo_path: "/tmp/web".into(),
-                        sort_order: 1,
+                        sort_order: 0,
                     }),
                 },
             );

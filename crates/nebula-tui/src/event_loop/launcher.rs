@@ -3282,7 +3282,7 @@ mod tests {
                     path: feat_path,
                     branch: "feat".into(),
                     is_main: false,
-                    sort_order: 1,
+                    sort_order: 0,
                 }),
             },
         );
@@ -3367,7 +3367,7 @@ mod tests {
                     id: ProjectId("p2".into()),
                     name: "web".into(),
                     repo_path: "/tmp/web".into(),
-                    sort_order: 1,
+                    sort_order: 0,
                 }),
             },
         );
@@ -4296,7 +4296,7 @@ mod tests {
                     path: "/tmp/demo-idle".into(),
                     branch: "idle".into(),
                     is_main: false,
-                    sort_order: 2,
+                    sort_order: 0,
                 }),
             },
         );
@@ -6149,7 +6149,7 @@ mod tests {
                             path: "/tmp/docs-feat".into(),
                             branch: "feat".into(),
                             is_main: false,
-                            sort_order: 1,
+                            sort_order: 0,
                         }),
                     },
                 );
@@ -7582,7 +7582,7 @@ mod tests {
                     id: ProjectId("p3".into()),
                     name: "docs".into(),
                     repo_path: "/tmp/docs".into(),
-                    sort_order: 2,
+                    sort_order: 0,
                 }),
             },
         );
@@ -8906,7 +8906,7 @@ mod tests {
                 id: ProjectId("p3".into()),
                 name: "away".into(),
                 repo_path: "/tmp/away".into(),
-                sort_order: 2,
+                sort_order: 0,
             });
             draw(&mut app);
             let tabs = app.launcher.launcher_tabs.clone();

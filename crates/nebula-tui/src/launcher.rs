@@ -264,8 +264,9 @@ pub fn lane_of(row: &LauncherRow) -> Lane {
 }
 
 /// The KANBAN's cards, lane by lane in [`Lane::ALL`] order, each lane in
-/// the grid's own recency order: the project on screen's sessions, or with
-/// `all` every project's.
+/// the grid's own recency order — but a checkout the user has ordered
+/// keeps that order among its own cards ([`crate::order::refill`]): the
+/// project on screen's sessions, or with `all` every project's.
 pub fn kanban(app: &App, all: bool) -> Vec<Vec<LauncherRow>> {
     let scope = app.selected_project().map(|p| p.id.clone());
     let rows = rows_in(app, if all { None } else { scope.as_ref() });
@@ -273,7 +274,14 @@ pub fn kanban(app: &App, all: bool) -> Vec<Vec<LauncherRow>> {
     for row in rows {
         lanes[lane_of(&row).index()].push(row);
     }
+    let ordered = crate::order::ordered_worktrees(app);
+    if ordered.is_empty() {
+        return lanes;
+    }
     lanes
+        .into_iter()
+        .map(|lane| crate::order::refill(lane, &ordered))
+        .collect()
 }
 
 /// Where session `id` sits on `lanes`: its lane and its place in it.
@@ -409,14 +417,20 @@ pub fn bands(app: &App) -> Vec<Band> {
         return Vec::new();
     };
     let rows = rows(app);
+    let ordered = crate::order::ordered_worktrees(app);
     let mut out = Vec::new();
     for w in app.visible_worktrees() {
-        let mut cards: Vec<Card> = rows
+        let mut sessions: Vec<LauncherRow> = rows
             .iter()
             .filter(|r| r.agent.worktree_id == w.id)
             .cloned()
-            .map(Card::Session)
             .collect();
+        // A checkout the user has ordered lays its cards out in that
+        // order (stable, so the recency still breaks a tie).
+        if ordered.contains(&w.id) {
+            sessions.sort_by_key(|r| r.agent.sort_order);
+        }
+        let mut cards: Vec<Card> = sessions.into_iter().map(Card::Session).collect();
         if !app.launcher.show_archived {
             cards.extend(
                 app.tree
@@ -456,7 +470,13 @@ pub fn bands(app: &App) -> Vec<Band> {
     }
     // The NESTED layout is a list of threads, the one that moved last on
     // top. Stable, so threads that never moved keep the checkouts' order.
-    if app.launcher.launcher_nested {
+    // Once the user has ordered the checkouts, or the root's own threads,
+    // that order stands instead: the root's threads first, as its band is.
+    let user_ordered = crate::order::worktrees_ordered(app, &project.id)
+        || out
+            .iter()
+            .any(|band| band.solo && ordered.contains(&band.worktree));
+    if app.launcher.launcher_nested && !user_ordered {
         out.sort_by_key(|band| std::cmp::Reverse(thread_activity(band)));
     }
     out
@@ -1863,12 +1883,26 @@ pub struct ProjectTab {
 /// that holds still under them.
 ///
 /// A project gone from the tree drops out here, before the settle next
-/// prunes it.
+/// prunes it. Once the projects carry a user order — which with two or
+/// more they always do — that order is the row's instead, and a tab moves
+/// only when it is dragged or stepped (`crate::order`).
 pub fn project_tabs(app: &App) -> Vec<ProjectTab> {
     let active = app.selected_project().map(|p| p.id.clone());
-    app.launcher
-        .launcher_tabs
-        .iter()
+    let mut open: Vec<&ProjectId> = app.launcher.launcher_tabs.iter().collect();
+    // Once the projects have a user order (two or more always do), the
+    // tabs stand in it: the open ones, in the order a tab drag or a move
+    // up / down wrote. Working in a project no longer moves its tab.
+    if crate::order::projects_ordered(app) {
+        let slot = |id: &ProjectId| {
+            app.tree
+                .projects
+                .iter()
+                .find(|p| &p.id == id)
+                .map_or(i64::MAX, |p| p.sort_order)
+        };
+        open.sort_by_key(|id| slot(id));
+    }
+    open.into_iter()
         .filter_map(|id| {
             let p = app.tree.projects.iter().find(|p| &p.id == id)?;
             Some(ProjectTab {
