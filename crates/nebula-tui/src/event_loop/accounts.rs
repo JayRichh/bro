@@ -1311,7 +1311,7 @@ mod tests {
         );
     }
 
-    /// On a daemon whose sessions follow a rename (protocol 59), a session
+    /// On a daemon whose sessions follow a rename (protocol 60), a session
     /// on the account no longer refuses it: the rename goes through and
     /// the daemon is asked to move the sessions' stored name.
     #[test]

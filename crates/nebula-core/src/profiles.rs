@@ -819,7 +819,7 @@ pub fn rename(
 }
 
 /// [`rename`] where the daemon rewrites the sessions' stored name
-/// (`ClientRequest::RenameProfileSessions`, protocol 59): no session
+/// (`ClientRequest::RenameProfileSessions`, protocol 60): no session
 /// refuses it, and none is left naming the old one, archived ones
 /// included. The caller sends that request once this returns Ok, so a
 /// refused rename never leaves sessions naming a profile that is not

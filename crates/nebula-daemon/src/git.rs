@@ -196,7 +196,25 @@ pub fn worktree_dir(repo: &Path, branch: &str) -> PathBuf {
 /// git's own default — the checkout's HEAD; a base that is a
 /// remote-tracking branch becomes the new branch's upstream, as git does.
 pub async fn add_worktree(repo: &Path, branch: &str, base: Option<&str>) -> Result<PathBuf> {
-    add_worktree_inner(repo, branch, base, true).await
+    Ok(add_worktree_inner(repo, branch, base, true).await?.path)
+}
+
+/// A checkout git just made, and the ref its new branch was cut from: what
+/// the daemon records as the worktree's base (`worktree_bases`). None when
+/// git was given no ref (HEAD, offline with no origin) or the branch already
+/// existed and was only checked out, so nothing was cut from anything.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cut {
+    pub path: PathBuf,
+    pub base: Option<String>,
+}
+
+/// The merge-base of the new checkout's HEAD with `base`: the recorded
+/// base's commit. None when git can't say.
+pub async fn cut_point(checkout: &Path, base: &str) -> Option<String> {
+    let sha = git(checkout, &["merge-base", "HEAD", base]).await.ok()?;
+    let sha = sha.trim().to_string();
+    (!sha.is_empty()).then_some(sha)
 }
 
 /// `add_worktree` for a branch nobody named a base for: it starts at the
@@ -207,7 +225,7 @@ pub async fn add_worktree(repo: &Path, branch: &str, base: Option<&str>) -> Resu
 /// aims its first `git push` at main (`push.default=simple` refuses it,
 /// `upstream` sends it). Falls back to HEAD when there is no `origin` or
 /// the fetch fails (offline).
-pub async fn add_worktree_off_default(repo: &Path, branch: &str) -> Result<PathBuf> {
+pub async fn add_worktree_off_default(repo: &Path, branch: &str) -> Result<Cut> {
     let base = default_base(repo).await;
     add_worktree_inner(repo, branch, base.as_deref(), false).await
 }
@@ -224,7 +242,7 @@ pub async fn add_worktree_off_default(repo: &Path, branch: &str) -> Result<PathB
 /// `origin/main` as last fetched is still never behind the local branch's
 /// last pull, and the daemon log says the fetch failed.
 ///
-pub async fn add_worktree_off_ref(repo: &Path, branch: &str, base: &str) -> Result<PathBuf> {
+pub async fn add_worktree_off_ref(repo: &Path, branch: &str, base: &str) -> Result<Cut> {
     fetch_origin_if_any(repo).await;
     match origin_branch(repo, base).await {
         Some(remote) => add_worktree_inner(repo, branch, Some(&remote), false).await,
@@ -248,7 +266,7 @@ pub async fn add_worktree_off_configured(
     repo: &Path,
     branch: &str,
     configured: &str,
-) -> Result<PathBuf> {
+) -> Result<Cut> {
     let fetched = fetch_origin_if_any(repo).await;
     if let Some(remote) = origin_branch(repo, configured).await {
         return add_worktree_inner(repo, branch, Some(&remote), false).await;
@@ -274,7 +292,7 @@ async fn add_worktree_inner(
     branch: &str,
     base: Option<&str>,
     track: bool,
-) -> Result<PathBuf> {
+) -> Result<Cut> {
     let path = worktree_dir(repo, branch);
     if path.exists() {
         bail!("worktree path already exists: {}", path.display());
@@ -292,11 +310,14 @@ async fn add_worktree_inner(
         args.push(base);
     }
     match git(repo, &args).await {
-        Ok(_) => Ok(path),
+        Ok(_) => Ok(Cut {
+            path,
+            base: base.map(str::to_string),
+        }),
         Err(e) if e.to_string().contains("already exists") => {
             // Branch exists: check it out instead of creating.
             git(repo, &["worktree", "add", &path_str, branch]).await?;
-            Ok(path)
+            Ok(Cut { path, base: None })
         }
         Err(e) => Err(e),
     }
@@ -995,7 +1016,7 @@ mod tests {
         std::fs::create_dir(&repo).unwrap();
         init_repo(&repo).await;
         assert_eq!(default_base(&repo).await, None);
-        let wt = add_worktree_off_default(&repo, "feat").await.unwrap();
+        let wt = add_worktree_off_default(&repo, "feat").await.unwrap().path;
         let head = git(&wt, &["rev-parse", "HEAD"]).await.unwrap();
         let root = git(&repo, &["rev-parse", "HEAD"]).await.unwrap();
         assert_eq!(head, root);
@@ -1014,7 +1035,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(default_base(&repo).await, None);
-        let wt = add_worktree_off_default(&repo, "feat").await.unwrap();
+        let wt = add_worktree_off_default(&repo, "feat").await.unwrap().path;
         let head = git(&wt, &["rev-parse", "HEAD"]).await.unwrap();
         let root = git(&repo, &["rev-parse", "HEAD"]).await.unwrap();
         assert_eq!(head, root);
@@ -1042,7 +1063,7 @@ mod tests {
         );
 
         assert_eq!(default_base(&repo).await.as_deref(), Some("origin/main"));
-        let wt = add_worktree_off_default(&repo, "feat").await.unwrap();
+        let wt = add_worktree_off_default(&repo, "feat").await.unwrap().path;
         let head = git(&wt, &["rev-parse", "HEAD"]).await.unwrap();
         assert_eq!(head, landed, "starts at origin's main, not the checkout's");
         assert!(
@@ -1067,7 +1088,10 @@ mod tests {
         let local_main = git(&repo, &["rev-parse", "main"]).await.unwrap();
         assert_ne!(landed, local_main, "the local main is behind origin's");
 
-        let wt = add_worktree_off_ref(&repo, "feat", "main").await.unwrap();
+        let wt = add_worktree_off_ref(&repo, "feat", "main")
+            .await
+            .unwrap()
+            .path;
         let head = git(&wt, &["rev-parse", "HEAD"]).await.unwrap();
         assert_eq!(
             head, landed,
@@ -1106,11 +1130,17 @@ mod tests {
         let local_head = git(&repo, &["rev-parse", "HEAD"]).await.unwrap();
         let landed = land_on_origin(tmp.path(), &origin).await;
 
-        let wt = add_worktree_off_ref(&repo, "hotfix", "v1").await.unwrap();
+        let wt = add_worktree_off_ref(&repo, "hotfix", "v1")
+            .await
+            .unwrap()
+            .path;
         let head = git(&wt, &["rev-parse", "HEAD"]).await.unwrap();
         assert_eq!(head, tagged, "a tag is used as named");
 
-        let wt = add_worktree_off_ref(&repo, "spike", "HEAD").await.unwrap();
+        let wt = add_worktree_off_ref(&repo, "spike", "HEAD")
+            .await
+            .unwrap()
+            .path;
         let head = git(&wt, &["rev-parse", "HEAD"]).await.unwrap();
         assert_eq!(head, local_head, "HEAD is this checkout's, not origin's");
         assert_ne!(head, landed);
@@ -1132,7 +1162,10 @@ mod tests {
         let hotfix_head = git(&repo, &["rev-parse", "HEAD"]).await.unwrap();
         git(&repo, &["branch", "hotfix"]).await.unwrap();
 
-        let wt = add_worktree_off_ref(&repo, "hotfix", "v1").await.unwrap();
+        let wt = add_worktree_off_ref(&repo, "hotfix", "v1")
+            .await
+            .unwrap()
+            .path;
         let head = git(&wt, &["rev-parse", "HEAD"]).await.unwrap();
         let base = git(&repo, &["rev-parse", "v1"]).await.unwrap();
         assert_eq!(head, hotfix_head, "the existing branch is checked out");
@@ -1153,9 +1186,17 @@ mod tests {
         let local_main = git(&repo, &["rev-parse", "main"]).await.unwrap();
         assert_ne!(landed, local_main, "the local main is behind origin's");
 
-        let wt = add_worktree_off_configured(&repo, "feat", "main")
+        let cut = add_worktree_off_configured(&repo, "feat", "main")
             .await
             .unwrap();
+        // The base recorded for it is the ref it was cut from, and the cut
+        // point is where that ref was.
+        assert_eq!(cut.base.as_deref(), Some("origin/main"));
+        assert_eq!(
+            cut_point(&cut.path, "origin/main").await.as_deref(),
+            Some(landed.trim())
+        );
+        let wt = cut.path;
         let head = git(&wt, &["rev-parse", "HEAD"]).await.unwrap();
         assert_eq!(head, landed, "starts at origin's main");
         assert!(
@@ -1186,7 +1227,8 @@ mod tests {
 
         let wt = add_worktree_off_configured(&repo, "feat", "master")
             .await
-            .unwrap();
+            .unwrap()
+            .path;
         let head = git(&wt, &["rev-parse", "HEAD"]).await.unwrap();
         assert_eq!(head, master, "starts at the local master, not HEAD");
     }
@@ -1207,7 +1249,8 @@ mod tests {
 
         let wt = add_worktree_off_configured(&repo, "feat", "master")
             .await
-            .unwrap();
+            .unwrap()
+            .path;
         let head = git(&wt, &["rev-parse", "HEAD"]).await.unwrap();
         assert_eq!(head, landed, "origin's default branch, freshly fetched");
         assert!(
@@ -1220,7 +1263,8 @@ mod tests {
         git(&repo, &["tag", "release"]).await.unwrap();
         let wt = add_worktree_off_configured(&repo, "feat2", "release")
             .await
-            .unwrap();
+            .unwrap()
+            .path;
         let head = git(&wt, &["rev-parse", "HEAD"]).await.unwrap();
         assert_eq!(head, landed, "a tag sharing the name is not the branch");
     }

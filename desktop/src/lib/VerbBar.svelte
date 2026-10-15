@@ -3,7 +3,8 @@
   // Worktrees view: the focused row's leading verbs (the registry's, as
   // the terminal app's footer shows them) as buttons with their keys, and
   // `? more` for the rest. A click runs what the key runs. Too narrow for
-  // the buttons, it folds to one `... verbs` that opens the verbs menu.
+  // the buttons beside the row's name, it folds to one `... verbs` that
+  // opens the verbs menu (measured: the verbs differ in number and length).
   import { app } from './store.svelte';
   import { selection } from './selection.svelte';
   import { runVerb, verbTable } from './actions';
@@ -42,18 +43,31 @@
     }
   }
 
+  // The bar's width and the buttons' own: the buttons stay laid out (out of
+  // flow when folded) so their width is known either way.
+  let barW = $state(0);
+  let verbsW = $state(0);
+  const NAME_ROOM = 120;
+  const folded = $derived(barW > 0 && verbsW + NAME_ROOM + 24 > barW);
+
   const btn =
     'inline-flex h-6 flex-none items-center gap-1.5 border border-rule bg-transparent px-2 text-[12px] text-ink hover:border-rule-strong focus-visible:border-ink';
 </script>
 
 <div
-  class="@container flex h-9 flex-none items-center gap-1.5 border-t border-rule bg-bg px-3"
+  class="relative flex h-9 flex-none items-center gap-1.5 overflow-hidden border-t border-rule bg-bg px-3"
+  bind:clientWidth={barW}
   data-verb-bar
   role="toolbar"
   aria-label="Verbs for {what}"
 >
   <span class="min-w-0 flex-1 truncate font-mono text-[11px] text-muted" title={what}>{what}</span>
-  <div class="hidden flex-none items-center gap-1.5 @min-[520px]:flex">
+  <div
+    class="flex flex-none items-center gap-1.5 {folded ? 'invisible absolute top-0 left-0 w-max' : ''}"
+    bind:clientWidth={verbsW}
+    inert={folded}
+    aria-hidden={folded}
+  >
     {#each verbs as v (v.id)}
       <button
         class="{btn} {v.danger ? 'text-fail hover:border-fail' : ''}"
@@ -69,10 +83,9 @@
       <span>more</span>
     </button>
   </div>
-  <button
-    class="{btn} @min-[520px]:hidden"
-    title={withKey('Verbs for this, searchable, and every key', 'verbs')}
-    aria-label="Verbs"
-    onclick={openVerbs}>&hellip; verbs</button
-  >
+  {#if folded}
+    <button class={btn} title={withKey('Verbs for this, searchable, and every key', 'verbs')} aria-label="Verbs" onclick={openVerbs}
+      >&hellip; verbs</button
+    >
+  {/if}
 </div>

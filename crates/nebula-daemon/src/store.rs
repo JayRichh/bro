@@ -5,6 +5,8 @@
 use crate::session_title::TitleState;
 use anyhow::{Context, Result};
 use nebula_core::clock::now_ms;
+use nebula_core::review_base::RecordedBase;
+use nebula_core::session_snapshot::SnapshotPoint;
 use nebula_core::{
     Agent, AgentId, AgentKind, AgentStatus, Link, LinkId, PrSeen, Project, ProjectId, PromptEntry,
     ReorderScope, TerminalId, TerminalTab, Worktree, WorktreeId, RECENT_PROMPTS_KEPT,
@@ -365,10 +367,40 @@ const MIGRATIONS: &[&str] = &[
     CREATE UNIQUE INDEX agents_one_orchestrator ON agents(role)
       WHERE role = 'orchestrator';
     ",
+    // 34: the base a worktree was cut from, recorded at the cut
+    // (`nebula_core::review_base::RecordedBase`), and each session's
+    // checkout snapshots (`nebula_core::session_snapshot`): a NULL tree
+    // with its `_at` set is one that could not be taken. Worktrees and
+    // sessions from before have no row, and nothing is backfilled.
+    "
+    CREATE TABLE worktree_bases (
+      worktree_id TEXT PRIMARY KEY REFERENCES worktrees(id) ON DELETE CASCADE,
+      refname     TEXT NOT NULL,
+      sha         TEXT NOT NULL
+    );
+    CREATE TABLE session_snapshots (
+      agent_id    TEXT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
+      worktree_id TEXT NOT NULL,
+      start_head  TEXT,
+      start_tree  TEXT,
+      start_at    INTEGER NOT NULL,
+      last_head   TEXT,
+      last_tree   TEXT,
+      last_at     INTEGER
+    );
+    ",
 ];
 
 pub struct Store {
     conn: Mutex<Connection>,
+}
+
+/// A session's snapshots as the store keeps them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionSnapshots {
+    pub worktree: WorktreeId,
+    pub start: SnapshotPoint,
+    pub last: Option<SnapshotPoint>,
 }
 
 pub type TreeRows = (Vec<Project>, Vec<Worktree>, Vec<Agent>, Vec<TerminalTab>);
@@ -1190,6 +1222,140 @@ impl Store {
         let rows = stmt.query_map([], |r| {
             Ok((WorktreeId(r.get(0)?), r.get::<_, i64>(1)? as u32))
         })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    // ---- recorded worktree bases ----
+
+    /// Record the base `worktree` was cut from.
+    pub fn set_worktree_base(&self, worktree: &WorktreeId, refname: &str, sha: &str) -> Result<()> {
+        self.conn.lock().execute(
+            "INSERT OR REPLACE INTO worktree_bases (worktree_id, refname, sha) VALUES (?1, ?2, ?3)",
+            params![worktree.as_str(), refname, sha],
+        )?;
+        Ok(())
+    }
+
+    /// Every recorded base (`ServerEvent::WorktreeBases`).
+    pub fn worktree_bases(&self) -> Result<Vec<RecordedBase>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare("SELECT worktree_id, refname, sha FROM worktree_bases ORDER BY worktree_id")?;
+        let rows = stmt.query_map([], |r| {
+            Ok(RecordedBase {
+                worktree: WorktreeId(r.get(0)?),
+                refname: r.get(1)?,
+                sha: r.get(2)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    // ---- session snapshots ----
+
+    /// `agent`'s snapshots: the worktree they were taken in, its start and
+    /// its last. None before the first.
+    pub fn session_snapshots(&self, agent: &AgentId) -> Result<Option<SessionSnapshots>> {
+        let conn = self.conn.lock();
+        Ok(conn
+            .query_row(
+                "SELECT worktree_id, start_head, start_tree, start_at, last_head, last_tree, last_at
+                 FROM session_snapshots WHERE agent_id = ?1",
+                params![agent.as_str()],
+                |r| {
+                    let last_at: Option<i64> = r.get(6)?;
+                    Ok(SessionSnapshots {
+                        worktree: WorktreeId(r.get(0)?),
+                        start: SnapshotPoint {
+                            head: r.get(1)?,
+                            tree: r.get(2)?,
+                            at: r.get(3)?,
+                        },
+                        last: match last_at {
+                            Some(at) => Some(SnapshotPoint {
+                                head: r.get(4)?,
+                                tree: r.get(5)?,
+                                at,
+                            }),
+                            None => None,
+                        },
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    /// `agent`'s start snapshot, taken in `worktree`: a new row, or one
+    /// that replaces snapshots taken in another worktree (the session moved),
+    /// its last one dropped with it.
+    pub fn set_snapshot_start(
+        &self,
+        agent: &AgentId,
+        worktree: &WorktreeId,
+        point: &SnapshotPoint,
+    ) -> Result<()> {
+        self.conn.lock().execute(
+            "INSERT OR REPLACE INTO session_snapshots
+               (agent_id, worktree_id, start_head, start_tree, start_at, last_head, last_tree, last_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, NULL)",
+            params![
+                agent.as_str(),
+                worktree.as_str(),
+                point.head,
+                point.tree,
+                point.at
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// `agent`'s snapshot at its latest turn end. False when it has no
+    /// start yet (nothing written).
+    pub fn set_snapshot_last(&self, agent: &AgentId, point: &SnapshotPoint) -> Result<bool> {
+        let n = self.conn.lock().execute(
+            "UPDATE session_snapshots SET last_head = ?2, last_tree = ?3, last_at = ?4
+             WHERE agent_id = ?1",
+            params![agent.as_str(), point.head, point.tree, point.at],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Sessions with snapshots taken in `worktree`.
+    pub fn snapshot_sessions_in(&self, worktree: &WorktreeId) -> Result<u32> {
+        Ok(self.conn.lock().query_row(
+            "SELECT COUNT(*) FROM session_snapshots WHERE worktree_id = ?1",
+            params![worktree.as_str()],
+            |r| r.get::<_, i64>(0),
+        )? as u32)
+    }
+
+    /// Every session that has snapshots, by id.
+    #[cfg(test)]
+    pub fn snapshot_agents(&self) -> Result<Vec<String>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare("SELECT agent_id FROM session_snapshots")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// The sessions under `worktree` (Some) or `project` (None for the
+    /// worktree) that have snapshots: what a delete of either takes with it.
+    pub fn snapshot_agents_under(
+        &self,
+        project: Option<&ProjectId>,
+        worktree: Option<&WorktreeId>,
+    ) -> Result<Vec<String>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT s.agent_id FROM session_snapshots s
+               JOIN agents a ON a.id = s.agent_id
+               JOIN worktrees w ON w.id = a.worktree_id
+             WHERE (?1 IS NULL OR w.project_id = ?1) AND (?2 IS NULL OR w.id = ?2)",
+        )?;
+        let rows = stmt.query_map(
+            params![project.map(|p| p.as_str()), worktree.map(|w| w.as_str())],
+            |r| r.get::<_, String>(0),
+        )?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
@@ -2300,8 +2466,10 @@ mod tests {
             "links",
             "pr_seen",
             "projects",
+            "session_snapshots",
             "terminals",
             "ui_state",
+            "worktree_bases",
             "worktree_ports",
             "worktrees",
         ]
@@ -3202,5 +3370,70 @@ mod tests {
             .set_agent_worktree(&b, &WorktreeId("feat".into()))
             .unwrap();
         assert_eq!(store.get_agent(&b).unwrap().unwrap().sort_order, 2);
+    }
+
+    /// Migration 34: a recorded base per worktree, snapshots per session,
+    /// both gone with their row.
+    #[test]
+    fn recorded_bases_and_session_snapshots_round_trip_and_cascade() {
+        let store = store_with_worktree();
+        let w = WorktreeId("w".into());
+        assert!(store.worktree_bases().unwrap().is_empty());
+        store.set_worktree_base(&w, "origin/main", "abc").unwrap();
+        store.set_worktree_base(&w, "origin/dev", "def").unwrap();
+        assert_eq!(
+            store.worktree_bases().unwrap(),
+            vec![RecordedBase {
+                worktree: w.clone(),
+                refname: "origin/dev".into(),
+                sha: "def".into(),
+            }]
+        );
+
+        let a = AgentId("a".into());
+        store
+            .insert_agent(&role_agent("a", nebula_core::AgentRole::Worker))
+            .unwrap();
+        store
+            .insert_agent(&role_agent("b", nebula_core::AgentRole::Worker))
+            .unwrap();
+        let point = |tree: Option<&str>, at| SnapshotPoint {
+            head: Some("h".into()),
+            tree: tree.map(str::to_string),
+            at,
+        };
+        assert_eq!(store.session_snapshots(&a).unwrap(), None);
+        assert!(!store.set_snapshot_last(&a, &point(Some("t2"), 2)).unwrap());
+        store
+            .set_snapshot_start(&a, &w, &point(Some("t1"), 1))
+            .unwrap();
+        store.set_snapshot_last(&a, &point(None, 2)).unwrap();
+        let got = store.session_snapshots(&a).unwrap().unwrap();
+        assert_eq!(got.start.tree.as_deref(), Some("t1"));
+        assert_eq!(got.last, Some(point(None, 2)), "unavailable kept as such");
+        // A new start (the session moved) drops the last one.
+        store
+            .set_snapshot_start(&a, &w, &point(Some("t3"), 3))
+            .unwrap();
+        assert_eq!(store.session_snapshots(&a).unwrap().unwrap().last, None);
+        store
+            .set_snapshot_start(&AgentId("b".into()), &w, &point(Some("t1"), 1))
+            .unwrap();
+        assert_eq!(store.snapshot_sessions_in(&w).unwrap(), 2);
+        let mut under = store
+            .snapshot_agents_under(Some(&ProjectId("p".into())), None)
+            .unwrap();
+        under.sort();
+        assert_eq!(under, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(
+            store.snapshot_agents_under(None, Some(&w)).unwrap().len(),
+            2
+        );
+
+        store.delete_agent(&a).unwrap();
+        assert_eq!(store.snapshot_agents().unwrap(), vec!["b".to_string()]);
+        store.delete_worktree(&w).unwrap();
+        assert!(store.snapshot_agents().unwrap().is_empty());
+        assert!(store.worktree_bases().unwrap().is_empty());
     }
 }

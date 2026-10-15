@@ -544,9 +544,20 @@ pub fn read_listing(
     root: &Path,
     asked: Option<nebula_core::review_base::Against>,
 ) -> Result<crate::view_jobs::DiffListing, String> {
+    read_listing_with(root, asked, None)
+}
+
+/// [`read_listing`], with the base Kete `recorded` when it cut the
+/// checkout read in preference to the derived one
+/// (`review_base::resolve_with`).
+pub fn read_listing_with(
+    root: &Path,
+    asked: Option<nebula_core::review_base::Against>,
+    recorded: Option<&nebula_core::review_base::RecordedBase>,
+) -> Result<crate::view_jobs::DiffListing, String> {
     use nebula_core::review_base::{self as rb, Against};
     let setting = crate::config::Config::load().worktree_base_branch;
-    let base = rb::resolve(root, &setting);
+    let base = rb::resolve_with(root, &setting, recorded);
     let against = rb::default_against(base.as_ref(), asked);
     let since = base
         .as_ref()
@@ -585,7 +596,143 @@ pub fn read_listing(
         against,
         base,
         commits,
+        session: false,
     })
+}
+
+/// One session's own changes as the list's files: what differs between
+/// its start snapshot `from` and its last `to`
+/// (`nebula_core::session_snapshot`). Read with the base and commits the
+/// view already has, which the header keeps showing; no reviewed marks,
+/// as those are scoped to the base or HEAD.
+pub fn read_session_listing(
+    root: &Path,
+    from: &str,
+    to: &str,
+    against: nebula_core::review_base::Against,
+    base: Option<nebula_core::review_base::ReviewBase>,
+    commits: Vec<nebula_core::review_base::CommitLine>,
+) -> Result<crate::view_jobs::DiffListing, String> {
+    let files = nebula_core::session_snapshot::files_between(root, from, to)?
+        .into_iter()
+        .map(base_file)
+        .collect();
+    Ok(crate::view_jobs::DiffListing {
+        files,
+        head: head_oid(root),
+        reviewed: std::collections::HashMap::new(),
+        against,
+        base,
+        commits,
+        session: true,
+    })
+}
+
+/// One file's diff between two trees: a session's snapshots.
+pub fn diff_between(root: &Path, file: &DiffFile, from: &str, to: &str) -> String {
+    let mut args = vec![
+        "diff",
+        "--no-color",
+        "--no-ext-diff",
+        "-M",
+        from,
+        to,
+        "--",
+        &file.path,
+    ];
+    if let Some(orig) = &file.orig_path {
+        args.push(orig);
+    }
+    let output = match run_git(root, &args) {
+        Ok(o) => o,
+        Err(e) => return e,
+    };
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return format!("git diff failed: {}", stderr.trim());
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    if text.trim().is_empty() {
+        return "(no textual changes)".to_string();
+    }
+    cap_lines(&text, MAX_DIFF_LINES, false)
+}
+
+/// `Ctrl+l`, or a click on the header's session chip, in the REVIEW UNIT:
+/// read the list again as the reviewed session's changes alone, or as
+/// everything in the worktree. Says what it did, or why it could not.
+pub fn toggle_session(view: &mut DiffView) -> String {
+    let Some(filter) = view.attribution.session.as_ref() else {
+        return "no session to narrow to: this diff is not a session's review".into();
+    };
+    if !filter.offered() {
+        return "one session has worked here: all of it is this session's".into();
+    }
+    let only = !view.attribution.listed;
+    let trees = filter
+        .changes
+        .trees()
+        .map(|(a, b)| (a.to_string(), b.to_string()));
+    if only && trees.is_none() {
+        return match (&filter.changes.start, &filter.changes.last) {
+            (Some(_), Some(_)) => "this session's snapshot was too big to take: showing all".into(),
+            _ => "no turn of this session has ended yet".into(),
+        };
+    }
+    if let Some(filter) = view.attribution.session.as_mut() {
+        filter.only = only;
+    }
+    view.keep_open = true;
+    let root = view.root.clone();
+    let (against, base, commits) = (
+        view.against,
+        view.base.as_deref().cloned(),
+        view.commits.clone(),
+    );
+    let recorded = view.attribution.recorded.clone();
+    let read = move || match &trees {
+        Some((from, to)) if only => read_session_listing(&root, from, to, against, base, commits),
+        _ => read_listing_with(&root, Some(against), recorded.as_ref()),
+    };
+    match view.jobs.clone() {
+        Some(jobs) => {
+            let ticket = crate::view_jobs::ticket();
+            view.listing = Some(ticket);
+            jobs.run(move || {
+                Some(crate::view_jobs::Answer::DiffListing {
+                    ticket,
+                    result: read(),
+                })
+            });
+        }
+        None => match read() {
+            Ok(listing) => fill_view(view, listing),
+            Err(e) => return e,
+        },
+    }
+    if only {
+        "this session's changes: from its start to its last turn".into()
+    } else {
+        "all changes in this worktree".into()
+    }
+}
+
+/// The daemon's answer to `ClientRequest::SessionChanges`: kept on the
+/// REVIEW UNIT it was asked for, if that is still the diff up.
+pub fn land_session_changes(
+    view: &mut DiffView,
+    changes: nebula_core::session_snapshot::SessionChanges,
+) {
+    let asked = view
+        .review
+        .as_ref()
+        .map(|r| &r.agent)
+        .or(view.from_card.as_ref());
+    if asked != Some(&changes.agent) {
+        return;
+    }
+    let only = view.attribution.session.as_ref().is_some_and(|s| s.only);
+    view.attribution.session = Some(crate::app::SessionFilter { changes, only });
 }
 
 /// The working tree's changes since commit `base` as the list's files:
@@ -623,6 +770,11 @@ pub fn toggle_against(view: &mut DiffView) -> Option<nebula_core::review_base::A
     let want = view.against.other();
     view.keep_open = true;
     let root = view.root.clone();
+    let recorded = view.attribution.recorded.clone();
+    // Against the base or HEAD is the worktree's whole list again.
+    if let Some(filter) = view.attribution.session.as_mut() {
+        filter.only = false;
+    }
     match view.jobs.clone() {
         Some(jobs) => {
             let ticket = crate::view_jobs::ticket();
@@ -630,12 +782,12 @@ pub fn toggle_against(view: &mut DiffView) -> Option<nebula_core::review_base::A
             jobs.run(move || {
                 Some(crate::view_jobs::Answer::DiffListing {
                     ticket,
-                    result: read_listing(&root, Some(want)),
+                    result: read_listing_with(&root, Some(want), recorded.as_ref()),
                 })
             });
         }
         None => {
-            let listing = read_listing(&root, Some(want)).ok()?;
+            let listing = read_listing_with(&root, Some(want), recorded.as_ref()).ok()?;
             fill_view(view, listing);
         }
     }
@@ -659,7 +811,9 @@ pub fn fill_view(view: &mut DiffView, listing: crate::view_jobs::DiffListing) {
     let head_changed = !view.files.is_empty() && view.head_ok != head_ok;
     // Read against something else now: every diff in hand is the other's.
     let base_changed = view.against != listing.against
-        || view.base.as_ref().map(|b| &b.sha) != listing.base.as_ref().map(|b| &b.sha);
+        || view.base.as_ref().map(|b| &b.sha) != listing.base.as_ref().map(|b| &b.sha)
+        || view.attribution.listed != listing.session;
+    view.attribution.listed = listing.session;
     let head_changed = head_changed || base_changed;
     view.against = listing.against;
     view.base = listing.base.map(Box::new);
@@ -735,7 +889,10 @@ pub fn load_selected_diff(view: &mut DiffView) {
         return;
     }
     let Some(jobs) = view.jobs.clone() else {
-        let diff = diff_since(&view.root, &file, view.head_ok, view.diff_base());
+        let diff = match view.session_range() {
+            Some((from, to)) => diff_between(&view.root, &file, from, to),
+            None => diff_since(&view.root, &file, view.head_ok, view.diff_base()),
+        };
         view.show_diff(Some(&file.path), diff, false);
         request_aux(view);
         return;
@@ -757,11 +914,18 @@ fn request_diff(
 ) {
     let (root, head_ok, id) = (view.root.clone(), view.head_ok, view.id);
     let base = view.diff_base().map(str::to_string);
+    let range = view
+        .session_range()
+        .map(|(a, b)| (a.to_string(), b.to_string()));
     let work = move || {
+        let diff = match &range {
+            Some((from, to)) => diff_between(&root, &file, from, to),
+            None => diff_since(&root, &file, head_ok, base.as_deref()),
+        };
         Some(crate::view_jobs::Answer::DiffText {
             view: id,
             ticket,
-            diff: diff_since(&root, &file, head_ok, base.as_deref()),
+            diff,
             path: file.path,
             prefetch,
         })
@@ -884,6 +1048,7 @@ mod tests {
             against: nebula_core::review_base::Against::Head,
             base: None,
             commits: Vec::new(),
+            session: false,
         }
     }
 
@@ -1514,5 +1679,104 @@ mod tests {
             fill_view(&mut view, listing);
             assert_eq!(toggle_against(&mut view), None, "nothing to switch to");
         });
+    }
+
+    fn session_changes(
+        agent: &str,
+        start: Option<String>,
+        last: Option<String>,
+        sessions: u32,
+    ) -> nebula_core::session_snapshot::SessionChanges {
+        use nebula_core::session_snapshot::SnapshotPoint;
+        let point = |tree: Option<String>| SnapshotPoint {
+            head: None,
+            tree,
+            at: 1,
+        };
+        nebula_core::session_snapshot::SessionChanges {
+            agent: nebula_core::AgentId(agent.into()),
+            worktree: None,
+            start: Some(point(start)),
+            last: last.map(|t| point(Some(t))),
+            sessions,
+        }
+    }
+
+    fn reviewing(view: &mut DiffView, agent: &str) {
+        view.review = Some(Box::new(crate::app::ReviewDock {
+            agent: nebula_core::AgentId(agent.into()),
+            worktree: nebula_core::WorktreeId("w".into()),
+            verbs: Vec::new(),
+            dock: ratatui::layout::Rect::default(),
+        }));
+    }
+
+    /// The REVIEW UNIT narrows to one session's changes between its
+    /// snapshots — another session's edit and the branch's commit drop out,
+    /// staging and marks go quiet — and widens back to the worktree.
+    #[test]
+    fn a_review_narrows_to_its_sessions_changes_and_back() {
+        use nebula_core::session_snapshot::take;
+        let _env = crate::test_env::spawning();
+        let dir = tempfile::tempdir().unwrap();
+        let (repo, _) = branch_with_a_commit(&dir);
+        crate::review::with_store_path(dir.path().join("reviewed.json"), || {
+            let start = take(&repo).tree.unwrap();
+            std::fs::write(repo.join("mine.txt"), "this session\n").unwrap();
+            let last = take(&repo).tree.unwrap();
+            std::fs::write(repo.join("theirs.txt"), "another session\n").unwrap();
+
+            let mut view = DiffView::new(repo.clone(), "feat".into(), Vec::new(), true);
+            fill_view(&mut view, read_listing(&repo, None).unwrap());
+            reviewing(&mut view, "a1");
+            let all: Vec<String> = view.files.iter().map(|f| f.path.clone()).collect();
+            assert_eq!(all, vec!["b.txt", "mine.txt", "theirs.txt", "tracked.txt"]);
+
+            // Another session's answer is not this review's.
+            land_session_changes(
+                &mut view,
+                session_changes("other", Some(start.clone()), Some(last.clone()), 2),
+            );
+            assert!(view.attribution.session.is_none());
+            land_session_changes(
+                &mut view,
+                session_changes("a1", Some(start.clone()), Some(last.clone()), 2),
+            );
+            assert!(view.attribution.session.as_ref().unwrap().offered());
+
+            let said = toggle_session(&mut view);
+            assert!(said.contains("this session"), "{said}");
+            assert!(view.attribution.listed);
+            let paths: Vec<&str> = view.files.iter().map(|f| f.path.as_str()).collect();
+            assert_eq!(paths, vec!["mine.txt"]);
+            assert_eq!(view.session_range(), Some((start.as_str(), last.as_str())));
+            load_selected_diff(&mut view);
+            assert!(view.diff.contains("+this session"), "{}", view.diff);
+            assert!(
+                view.stageable().is_none(),
+                "a session's list stages nothing"
+            );
+
+            let said = toggle_session(&mut view);
+            assert!(said.contains("all changes"), "{said}");
+            assert!(!view.attribution.listed);
+            let back: Vec<String> = view.files.iter().map(|f| f.path.clone()).collect();
+            assert_eq!(back, all);
+        });
+    }
+
+    #[test]
+    fn the_session_filter_says_why_it_cannot_narrow() {
+        let mut view = DiffView::new("/no-such".into(), "feat".into(), Vec::new(), true);
+        assert!(toggle_session(&mut view).contains("not a session's review"));
+        reviewing(&mut view, "a1");
+        land_session_changes(&mut view, session_changes("a1", Some("t".into()), None, 1));
+        assert!(!view.attribution.session.as_ref().unwrap().offered());
+        assert!(toggle_session(&mut view).contains("one session"));
+        land_session_changes(&mut view, session_changes("a1", Some("t".into()), None, 2));
+        assert!(toggle_session(&mut view).contains("no turn"));
+        land_session_changes(&mut view, session_changes("a1", None, Some("t".into()), 2));
+        assert!(toggle_session(&mut view).contains("too big"));
+        assert!(!view.attribution.listed);
     }
 }

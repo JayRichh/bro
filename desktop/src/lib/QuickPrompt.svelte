@@ -340,21 +340,21 @@
     </div>
   {/if}
   <div class="flex min-h-11 items-stretch">
-    <span class="relative flex max-w-40 min-w-0 border-r border-rule">
+    <span class="relative flex max-w-28 min-w-0 border-r border-rule md:max-w-40">
       <select class={pick} bind:value={project} onchange={() => (picked = true)} aria-label="Repo">
         {#if orch}<option value={ORCH}>&#9670; Orchestrator</option>{/if}
         {#each app.model.projects as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
       </select>
       {@render chevron()}
     </span>
-    <span class="relative flex max-w-44 min-w-0 border-r border-rule">
+    <span class="relative flex max-w-32 min-w-0 border-r border-rule md:max-w-44">
       <select class="{pick} font-mono text-[12px]" bind:value={worktree} aria-label="Worktree" disabled={toOrch}>
         {#each worktrees as w (w.id)}<option value={w.id}>{w.branch}</option>{/each}
         <option value={NEW_WT}>+ new worktree</option>
       </select>
       {@render chevron()}
     </span>
-    <span class="relative flex max-w-32 min-w-0 border-r border-rule">
+    <span class="relative flex max-w-28 min-w-0 border-r border-rule md:max-w-32">
       <select class={pick} bind:value={harness} aria-label="Harness" disabled={toOrch}>
         {#each harnesses as h (h.id)}<option value={h.id}>{h.label}</option>{/each}
         <option value={TERMINAL}>Terminal</option>
@@ -362,7 +362,7 @@
       {@render chevron()}
     </span>
     <textarea
-      class="min-w-0 flex-1 resize-none self-center border-0 bg-transparent px-3 py-2.5 text-[14px] leading-5 text-ink outline-none placeholder:text-faint disabled:text-faint"
+      class="min-w-0 flex-1 resize-none self-center border-0 bg-transparent px-3 py-2.5 text-[14px] leading-5 text-ink outline-none placeholder:overflow-hidden placeholder:text-ellipsis placeholder:whitespace-nowrap placeholder:text-faint disabled:text-faint"
       rows="1"
       bind:this={box}
       bind:value={prompt}

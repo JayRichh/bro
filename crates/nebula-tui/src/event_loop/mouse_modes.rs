@@ -394,6 +394,12 @@ fn handle_diff_mouse(
                     view.files_drag = Some(bx as i32 - mouse.column as i32);
                     return true;
                 }
+                // The header's session chip: this session, or all.
+                if view.attribution.area.contains(mouse_pos) {
+                    app.chrome.flash = Some(crate::git_diff::toggle_session(view));
+                    app.chrome.dirty = true;
+                    return true;
+                }
                 // The header's against toggle: the base, or HEAD.
                 if view.against_area.contains(mouse_pos) {
                     app.chrome.flash = Some(super::overlays::diff_toggle_against(

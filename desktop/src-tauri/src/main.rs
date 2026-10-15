@@ -317,9 +317,10 @@ async fn diff_review(
 ) -> Res<ReviewDiff> {
     use nebula_core::review_base::{self as rb, Against};
     let root = worktree_path(&client, &worktree)?;
+    let recorded = client.recorded_base(&worktree);
     tauri::async_runtime::spawn_blocking(move || {
         let setting = nebula_config::Config::load().worktree_base_branch;
-        let base = rb::resolve(&root, &setting);
+        let base = rb::resolve_with(&root, &setting, recorded.as_ref());
         let asked = against.as_deref().and_then(Against::parse);
         let against = rb::default_against(base.as_ref(), asked);
         let files = match (&base, against) {
@@ -347,6 +348,60 @@ async fn diff_review(
             commits,
             files,
         })
+    })
+    .await
+    .map_err(err)?
+}
+
+/// A session's own changes in its worktree: what differs between the
+/// snapshot taken when it started and the one at its last turn end
+/// (`nebula_core::session_snapshot`), as the review's "this session"
+/// filter reads them. `sessions` is how many sessions in the worktree have
+/// snapshots: the filter is offered only past one. `start`/`last` are the
+/// tree SHAs the files were read between, and the blobs are read from;
+/// both None (and no files) when either snapshot is missing or could not
+/// be taken.
+#[derive(Serialize)]
+struct SessionDiff {
+    sessions: u32,
+    start: Option<String>,
+    last: Option<String>,
+    /// Why there is no pair to read: no turn ended yet, or too big.
+    note: Option<&'static str>,
+    files: Vec<git::DiffFile>,
+}
+
+/// None: the daemon is older than the snapshots, and says nothing of them.
+#[tauri::command]
+async fn diff_session(
+    client: State<'_, Arc<Client>>,
+    worktree: String,
+    agent: String,
+) -> Res<Option<SessionDiff>> {
+    let root = worktree_path(&client, &worktree)?;
+    let Some(changes) = client.session_changes(&agent).await.map_err(err)? else {
+        return Ok(None);
+    };
+    let trees = changes.trees().map(|(a, b)| (a.to_string(), b.to_string()));
+    let note = match (&trees, &changes.last) {
+        (Some(_), _) => None,
+        (None, None) => Some("No turn of this session has ended yet."),
+        (None, Some(_)) => Some("This session's snapshot was too big to take."),
+    };
+    let sessions = changes.sessions;
+    tauri::async_runtime::spawn_blocking(move || {
+        let files = match &trees {
+            Some((a, b)) => git::diff_files_between(&root, a, b)?,
+            None => Vec::new(),
+        };
+        let (start, last) = trees.unzip();
+        Ok(Some(SessionDiff {
+            sessions,
+            start,
+            last,
+            note,
+            files,
+        }))
     })
     .await
     .map_err(err)?
@@ -910,6 +965,7 @@ fn main() {
             settings::run_commands,
             diff_files,
             diff_review,
+            diff_session,
             diff_pair,
             diff_range,
             diff_blob,

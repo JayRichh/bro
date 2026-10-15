@@ -54,7 +54,6 @@ pub(super) fn on_review_card(app: &App) -> bool {
 
 /// Enter on a Review card: its worktree's diff against the base, docked.
 pub(crate) fn open(app: &mut App, out: &mut Vec<ClientRequest>) {
-    let _ = &mut *out;
     let Some(a) = app.selected_session() else {
         return;
     };
@@ -73,13 +72,25 @@ pub(crate) fn open(app: &mut App, out: &mut Vec<ClientRequest>) {
                 verbs: Vec::new(),
                 dock: ratatui::layout::Rect::default(),
             }));
-            view.from_card = Some(agent);
+            view.from_card = Some(agent.clone());
         }
         _ => {
             if app.chrome.flash.is_none() {
                 app.chrome.flash = Some("nothing to review in this worktree".into());
             }
+            app.chrome.dirty = true;
+            return;
         }
+    }
+    // Its snapshots, for the "this session" filter: only a 59+ daemon
+    // takes the request (None, no handshake yet, is a test).
+    if app
+        .orch
+        .daemon_protocol
+        .is_none_or(|v| v >= nebula_core::SESSION_CHANGES_PROTOCOL)
+    {
+        let req_id = app.alloc_req_id(crate::app::PendingIntent::None);
+        out.push(ClientRequest::SessionChanges { req_id, agent });
     }
     app.chrome.dirty = true;
 }

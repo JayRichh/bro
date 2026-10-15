@@ -168,8 +168,8 @@ describe('renameBlocker', () => {
     // A daemon whose sessions follow a rename takes it anyway.
     expect(renameBlocker('work', [a('fix', 'work', true)], true)).toBeNull();
     expect(sessionsFollow({ connected: true, protocol_version: RENAME_PROFILE_PROTOCOL })).toBe(true);
-    expect(sessionsFollow({ connected: true, protocol_version: 58 })).toBe(false);
+    expect(sessionsFollow({ connected: true, protocol_version: 59 })).toBe(false);
     expect(sessionsFollow({ connected: false, protocol_version: 99 })).toBe(false);
-    expect(RENAME_PROFILE_PROTOCOL).toBe(59);
+    expect(RENAME_PROFILE_PROTOCOL).toBe(60);
   });
 });

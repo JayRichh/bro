@@ -22593,6 +22593,7 @@ mod buttons;
 mod dispatch;
 mod orch_view;
 mod verbs;
+mod visual;
 
 /// The DELETE CHECK's two steps: `d` on a worktree asks, `Enter` sends
 /// the delete UNFORCED; a check that found changes makes `Enter` open the

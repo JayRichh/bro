@@ -596,6 +596,12 @@ fn handle_diff_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) {
                     app.chrome.flash =
                         Some(diff_toggle_against(view, &mut app.modals.diff_against));
                 }
+                // Ctrl+l narrows a review to the reviewed session's own
+                // changes, or widens it back to the whole worktree (the
+                // header's session chip).
+                KeyCode::Char('l') if ctrl => {
+                    app.chrome.flash = Some(crate::git_diff::toggle_session(view));
+                }
                 // Ctrl+t flips the file list between flat paths and the
                 // directory tree (`diff_tree`), the cursor staying on its
                 // file; remembered for the next open, like the list's width.

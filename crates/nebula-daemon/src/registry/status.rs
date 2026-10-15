@@ -104,6 +104,10 @@ impl Daemon {
                         changed_at,
                         unseen,
                     });
+                    // A turn ended: what the checkout looks like now.
+                    if matches!(status, AgentStatus::Finished | AgentStatus::NeedsFeedback) {
+                        self.snapshot_turn_end(agent_id);
+                    }
                 }
                 Effect::SaveSessionId(sid) => {
                     if let Err(e) = self.store.set_agent_session_id(agent_id, Some(&sid)) {

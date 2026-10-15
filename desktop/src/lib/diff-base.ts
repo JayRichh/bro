@@ -43,6 +43,37 @@ export function againstTitle(against: Against, base: ReviewBase | null): string 
     : `Compare with ${base.branch} instead: everything this branch changed since it forked at ${base.short}, committed or not`;
 }
 
+/** `diff_session`: one session's own changes in its worktree, between the
+ *  snapshot taken when it started and the one at its last turn end. */
+export interface SessionDiff {
+  /** Sessions in the worktree with snapshots, this one included. */
+  sessions: number;
+  /** The tree SHAs read between; null when there is no pair to read. */
+  start: string | null;
+  last: string | null;
+  /** Why there is no pair: no turn ended yet, or too big to take. */
+  note: string | null;
+  files: DiffFile[];
+}
+
+/** The "This session / All in this worktree" filter is worth showing:
+ *  more than one session has worked in the worktree. */
+export function sessionOffered(d: SessionDiff | null): boolean {
+  return !!d && d.sessions > 1;
+}
+
+/** The session's own pair can be read. */
+export function sessionReadable(d: SessionDiff | null): boolean {
+  return !!d && !!d.start && !!d.last;
+}
+
+/** The filter's tooltips, naming its key. */
+export function sessionTitle(which: 'all' | 'session', d: SessionDiff | null): string {
+  if (which === 'all') return 'All in this worktree: what every session here changed (L)';
+  if (!sessionReadable(d)) return `This session: ${d?.note ?? 'no snapshot of it yet'} (L)`;
+  return 'This session: only what changed between its start and its last turn (L)';
+}
+
 /** Staging reads the index against HEAD: in a base diff it has nothing to act on. */
 export function canStage(range: boolean, against: Against): boolean {
   return !range && against === 'head';

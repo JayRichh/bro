@@ -127,6 +127,14 @@ fn overlay_footer_hint(app: &App, overlay: &Overlay, th: Theme) -> FooterHint {
             ),
             th,
         ),
+        Overlay::Diff(view) if view.attribution.session.as_ref().is_some_and(|s| s.offered()) => dim_hint(
+            if view.tree.is_some() {
+                "type: filter  ↑/↓: move  ←/→: fold  ⇧↑/↓: scroll  Ctrl+n/p: change  Ctrl+s: layout  Ctrl+o: context  Ctrl+y: stage  Ctrl+x: discard  Ctrl+g: vs base/HEAD  Ctrl+l: this session/all  Ctrl+t: flat list  Esc: clear/close"
+            } else {
+                "type: filter  ↑/↓: file  ⇧↑/↓: scroll  Ctrl+n/p: change  Ctrl+s: layout  Ctrl+o: context  Ctrl+y: stage  Ctrl+x: discard  Ctrl+g: vs base/HEAD  Ctrl+l: this session/all  Ctrl+t: tree  Esc: clear/close"
+            },
+            th,
+        ),
         Overlay::Diff(view) => dim_hint(
             if view.tree.is_some() {
                 "type: filter  ↑/↓: move  ←/→: fold  ⇧↑/↓: scroll  Ctrl+n/p: change  Ctrl+s: layout  Ctrl+o: context  Ctrl+y: stage  Ctrl+x: discard  Ctrl+g: vs base/HEAD  Ctrl+t: flat list  Esc: clear/close"
@@ -695,6 +703,42 @@ fn render_footer_left(
     };
     prepend_version_plate(app, &mut spans, left.width, th);
     let end = usize::from(left.x) + usize::from(left.width);
+    // An entry the bar has no room for goes whole, with the gap before it,
+    // rather than cut to a dangling `Enter:`.
+    let mut x = usize::from(left.x);
+    let mut entry: Option<(usize, usize)> = None;
+    for (k, (span, tag)) in spans.iter().enumerate() {
+        if let Some(i) = *tag {
+            if entry.is_none_or(|(at, _)| at != i) {
+                entry = Some((i, k));
+            }
+        }
+        x += span.width();
+        if tag.is_some() && x > end {
+            if let Some((_, k)) = entry {
+                spans.truncate(k);
+                while matches!(spans.last(), Some((s, None)) if s.content.trim().is_empty()) {
+                    spans.pop();
+                }
+            }
+            break;
+        }
+    }
+    // The line of prose hints (`a: add  Enter: edit`): cut at the last
+    // whole hint, two spaces apart, that fits.
+    let before: usize = spans.iter().rev().skip(1).map(|(s, _)| s.width()).sum();
+    if let Some((last, None)) = spans.last_mut() {
+        let room = end.saturating_sub(usize::from(left.x) + before);
+        if last.width() > room && last.content.contains("  ") {
+            let text: String = last.content.chars().take(room).collect();
+            let keep = text
+                .rfind("  ")
+                .map_or("", |at| &text[..at])
+                .trim_end()
+                .to_string();
+            last.content = keep.into();
+        }
+    }
     let mut x = usize::from(left.x);
     let mut runs: Vec<(usize, usize, usize)> = Vec::new();
     for (span, tag) in &spans {

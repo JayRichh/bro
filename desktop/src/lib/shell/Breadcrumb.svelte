@@ -62,7 +62,7 @@
     'grid size-7 flex-none place-items-center border-0 bg-transparent text-ink enabled:hover:bg-surface disabled:text-faint';
 </script>
 
-<nav class="flex min-w-0 items-center gap-1" aria-label="Where you are">
+<nav class="flex min-w-16 items-center gap-1" aria-label="Where you are">
   <button class={btn} onclick={() => nav.back()} disabled={!nav.canBack} title={withKey('Back', 'back')} aria-label="Back">
     <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"
       ><path d="M13 8H3.5M7.5 3.5L3 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" /></svg
@@ -76,15 +76,18 @@
   <ol class="m-0 ml-2 flex min-w-0 list-none items-center gap-2 p-0">
     {#each crumbs as c, i (i)}
       {@const last = i === crumbs.length - 1}
-      {#if i}<li class="flex-none text-faint" aria-hidden="true">/</li>{/if}
-      <li class="min-w-0 truncate">
+      <!-- Earlier crumbs give way first, so the place you are keeps its name;
+           in a narrow header the middle ones go (Back still walks them). -->
+      {@const middle = i > 0 && !last ? '@max-[640px]:hidden' : ''}
+      {#if i}<li class="flex-none text-faint {middle}" aria-hidden="true">/</li>{/if}
+      <li class="flex {last ? 'min-w-0' : 'min-w-4 shrink-[4]'} {middle}">
         {#if c.go && !last}
           <button
-            class="border-0 bg-transparent p-0 text-[14px] text-muted hover:text-ink hover:underline hover:underline-offset-4 {c.mono ? 'font-mono text-[13px]' : ''}"
+            class="min-w-0 truncate border-0 bg-transparent p-0 text-[14px] text-muted hover:text-ink hover:underline hover:underline-offset-4 {c.mono ? 'font-mono text-[13px]' : ''}"
             onclick={c.go}>{c.label}</button
           >
         {:else}
-          <span class="text-[14px] font-semibold text-ink {c.mono ? 'font-mono text-[13px] font-medium' : ''}" aria-current={last ? 'page' : undefined}
+          <span class="min-w-0 truncate text-[14px] font-semibold text-ink {c.mono ? 'font-mono text-[13px] font-medium' : ''}" aria-current={last ? 'page' : undefined}
             >{c.label}</span
           >
         {/if}

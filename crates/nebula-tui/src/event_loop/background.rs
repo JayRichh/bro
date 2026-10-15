@@ -55,24 +55,32 @@ pub(crate) type Based = Option<(
 
 /// What a poll's thread needs to read `worktree`'s base: its branch, and
 /// the base ref kept for it while still good.
-pub(crate) type BaseJob = Option<(String, Option<nebula_core::review_base::BaseRef>)>;
+/// With it, the base Kete recorded when it cut the checkout, read before
+/// any derivation.
+pub(crate) type BaseJob = Option<(
+    String,
+    Option<nebula_core::review_base::BaseRef>,
+    Option<nebula_core::review_base::RecordedBase>,
+)>;
 
 pub(crate) fn base_job(app: &App, worktree: &WorktreeId) -> BaseJob {
     let w = app.tree.worktrees.iter().find(|w| &w.id == worktree)?;
     Some((
         w.branch.clone(),
         app.jobs.base_refs.cached(&w.path, &w.branch),
+        app.tree.bases.get(worktree).cloned(),
     ))
 }
 
 /// Off the loop: the kept base ref, or one resolved now (the setting read
 /// only then), and one `rev-list --count` for the standing.
 pub(crate) fn read_base(path: &std::path::Path, job: BaseJob) -> Based {
-    let (branch, kept) = job?;
+    let (branch, kept, recorded) = job?;
     let base = kept.unwrap_or_else(|| {
-        nebula_core::review_base::base_ref(
+        nebula_core::review_base::base_ref_with(
             path,
             &crate::config::Config::load().worktree_base_branch,
+            recorded.as_ref(),
         )
     });
     let standing = base.standing(path);

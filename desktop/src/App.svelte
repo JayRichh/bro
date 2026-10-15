@@ -247,7 +247,7 @@
         >
       {/if}
       <ScopeChip compact={narrow} />
-      {#if !narrow}<AttentionStrip />{/if}
+      {#if !narrow}<AttentionStrip tight={split} />{/if}
       {#if app.home === 'overview' && !adoView && view !== 'settings' && view !== 'worktrees' && view !== 'accounts' && !orchView}
         <button
           class="h-6 flex-none border px-2 text-[12px] {app.showArchived ? 'border-ink bg-ink text-bg' : 'border-rule bg-transparent text-muted hover:text-ink'}"

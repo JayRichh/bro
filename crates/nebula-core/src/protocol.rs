@@ -10,7 +10,7 @@ use std::path::PathBuf;
 ///
 /// Bump on every protocol change. Additive changes keep
 /// [`MIN_COMPATIBLE_PROTOCOL`] where it is; breaking changes bump both.
-pub const PROTOCOL_VERSION: u32 = 59;
+pub const PROTOCOL_VERSION: u32 = 60;
 
 /// Oldest IPC protocol this build can safely talk to.
 ///
@@ -57,6 +57,8 @@ impl ServerEvent {
             ServerEvent::AccountUsage { .. } | ServerEvent::SessionContexts { .. } => {
                 peer_version >= USAGE_EVENTS_PROTOCOL
             }
+            ServerEvent::WorktreeBases { .. } => peer_version >= RECORDED_BASE_PROTOCOL,
+            ServerEvent::SessionChanges { .. } => peer_version >= SESSION_CHANGES_PROTOCOL,
             _ => true,
         }
     }
@@ -74,13 +76,27 @@ pub const SWITCH_ACCOUNT_PROTOCOL: u32 = 57;
 /// would refuse the longer frame and drop the connection).
 pub const SPAWN_PROFILE_PROTOCOL: u32 = 58;
 
+/// The first protocol whose peers decode [`ServerEvent::WorktreeBases`],
+/// the base each worktree was cut from. Pushed unasked, after the Snapshot
+/// and whenever a worktree is cut, so the daemon sends it only to a peer
+/// that said this or later at Hello (`ServerEvent::decodable_by`). A
+/// client of an older daemon never hears it, and derives every base as
+/// before.
+pub const RECORDED_BASE_PROTOCOL: u32 = 59;
+
+/// The first protocol whose daemon takes [`ClientRequest::SessionChanges`]
+/// (and whose clients decode its `ServerEvent::SessionChanges` reply). A
+/// client checks the version the daemon said at Hello before it sends one:
+/// an older daemon drops the connection on the unknown variant.
+pub const SESSION_CHANGES_PROTOCOL: u32 = 59;
+
 /// The first protocol whose daemon takes
 /// [`ClientRequest::RenameProfileSessions`]. A client renames a profile
 /// that sessions use only against a daemon that said this or later at
 /// Hello (`profiles::rename_following`); an older one cannot decode the
 /// request and would drop the connection, so the rename keeps refusing
 /// while a session names the profile (`profiles::rename`).
-pub const RENAME_PROFILE_PROTOCOL: u32 = 59;
+pub const RENAME_PROFILE_PROTOCOL: u32 = 60;
 
 /// Max IPC frame size (length prefix sanity bound).
 pub const MAX_FRAME_LEN: u32 = 4 * 1024 * 1024;
@@ -704,13 +720,24 @@ pub enum ClientRequest {
         profile: Option<String>,
     },
 
-    // -- protocol 59, appended after 58's. --
+    // -- protocol 59, appended after 57's. --
+    /// A session's snapshots (`nebula_core::session_snapshot`): the trees
+    /// its checkout was in when it started and at its latest turn end, for
+    /// the review's "this session" filter. Answered by
+    /// `ServerEvent::SessionChanges`. Sent only to a 59+ daemon
+    /// (`SESSION_CHANGES_PROTOCOL`).
+    SessionChanges {
+        req_id: u64,
+        agent: AgentId,
+    },
+
+    // -- protocol 60, appended after 59's. --
     /// A PROFILE was renamed from `old` to `new` (`profiles::
     /// rename_following`, which moved its home and rewrote the settings):
     /// every session row naming `old`, archived ones included, names
     /// `new` from now on, so a stopped one resumes under it. A live
     /// session keeps the home it started in until it restarts. Answered
-    /// with `Ack`. Sent only to a 59+ daemon (`RENAME_PROFILE_PROTOCOL`).
+    /// with `Ack`. Sent only to a 60+ daemon (`RENAME_PROFILE_PROTOCOL`).
     RenameProfileSessions {
         req_id: u64,
         old: String,
@@ -1044,6 +1071,21 @@ pub enum ServerEvent {
     SessionContexts {
         contexts: Vec<crate::usage::SessionContext>,
     },
+
+    // -- protocol 59, appended; sent only to 59+ peers
+    // (`ServerEvent::decodable_by`). --
+    /// The base each worktree Kete cut was cut from
+    /// (`review_base::RecordedBase`): the whole list, after the Snapshot
+    /// and again whenever a worktree is cut. A worktree missing
+    /// from it has no record, and its base is derived.
+    WorktreeBases {
+        bases: Vec<crate::review_base::RecordedBase>,
+    },
+    /// Reply to `ClientRequest::SessionChanges`.
+    SessionChanges {
+        req_id: u64,
+        changes: crate::session_snapshot::SessionChanges,
+    },
 }
 
 /// One row of `ServerEvent::OrchestratorSessions`: the `kete sessions`
@@ -1274,11 +1316,11 @@ mod tests {
         }
     }
 
-    /// 59 appends `RenameProfileSessions`, sent only to a 59 daemon: older
+    /// 60 appends `RenameProfileSessions`, sent only to a 60 daemon: older
     /// peers stay in range and the request round-trips.
     #[test]
-    fn protocol_59_rename_profile_sessions_round_trips() {
-        assert!(protocol_compatible_with(58));
+    fn protocol_60_rename_profile_sessions_round_trips() {
+        assert!(protocol_compatible_with(59));
         const { assert!(RENAME_PROFILE_PROTOCOL <= PROTOCOL_VERSION) };
         let req = ClientRequest::RenameProfileSessions {
             req_id: 4,
@@ -1517,6 +1559,92 @@ mod tests {
 
     fn encode<T: Serialize>(msg: &T) -> Vec<u8> {
         rmp_serde::to_vec(msg).unwrap()
+    }
+
+    /// 59 appends `SessionChanges` (request and reply) and `WorktreeBases`:
+    /// older peers stay in range, a 58 peer is never pushed the new event,
+    /// and both round-trip. A 58 daemon's decoder (the enum as it ended at
+    /// `SwitchAgentAccount`) refuses the request, which is why clients gate it.
+    #[test]
+    fn protocol_59_is_additive_and_its_messages_round_trip() {
+        use crate::review_base::RecordedBase;
+        use crate::session_snapshot::{SessionChanges, SnapshotPoint};
+        const { assert!(RECORDED_BASE_PROTOCOL <= PROTOCOL_VERSION) };
+        const { assert!(SESSION_CHANGES_PROTOCOL <= PROTOCOL_VERSION) };
+        assert_eq!(MIN_COMPATIBLE_PROTOCOL, 53, "59 is additive");
+        assert!(protocol_compatible_with(58));
+        assert!(protocol_ranges_overlap(
+            MIN_COMPATIBLE_PROTOCOL,
+            PROTOCOL_VERSION,
+            53,
+            58
+        ));
+
+        let bases = ServerEvent::WorktreeBases {
+            bases: vec![RecordedBase {
+                worktree: WorktreeId("w".into()),
+                refname: "origin/main".into(),
+                sha: "abc".into(),
+            }],
+        };
+        assert!(bases.decodable_by(59));
+        assert!(
+            !bases.decodable_by(58),
+            "a 58 peer would drop the connection"
+        );
+        let back: ServerEvent = rmp_serde::from_slice(&encode(&bases)).unwrap();
+        let ServerEvent::WorktreeBases { bases: got } = back else {
+            panic!("not WorktreeBases");
+        };
+        assert_eq!(got[0].refname, "origin/main");
+
+        let req = ClientRequest::SessionChanges {
+            req_id: 7,
+            agent: AgentId("a1".into()),
+        };
+        let back: ClientRequest = rmp_serde::from_slice(&encode(&req)).unwrap();
+        let ClientRequest::SessionChanges { req_id, agent } = back else {
+            panic!("not SessionChanges");
+        };
+        assert_eq!((req_id, agent.0.as_str()), (7, "a1"));
+
+        /// `ClientRequest` as a 58 daemon knows its tail: the variant
+        /// before 59's, at the same position.
+        #[derive(Debug, Deserialize)]
+        #[allow(dead_code)]
+        enum V58Tail {
+            SwitchAgentAccount {
+                req_id: u64,
+                id: AgentId,
+                profile: Option<String>,
+            },
+        }
+        assert!(rmp_serde::from_slice::<V58Tail>(&encode(&req)).is_err());
+
+        let point = |tree: Option<&str>| SnapshotPoint {
+            head: Some("h".into()),
+            tree: tree.map(str::to_string),
+            at: 5,
+        };
+        let reply = ServerEvent::SessionChanges {
+            req_id: 7,
+            changes: SessionChanges {
+                agent: AgentId("a1".into()),
+                worktree: Some(WorktreeId("w".into())),
+                start: Some(point(Some("t1"))),
+                last: Some(point(None)),
+                sessions: 2,
+            },
+        };
+        assert!(!reply.decodable_by(58));
+        let back: ServerEvent = rmp_serde::from_slice(&encode(&reply)).unwrap();
+        let ServerEvent::SessionChanges { req_id, changes } = back else {
+            panic!("not SessionChanges");
+        };
+        assert_eq!(req_id, 7);
+        assert_eq!(changes.sessions, 2);
+        assert_eq!(changes.last.as_ref().unwrap().tree, None, "unavailable");
+        assert_eq!(changes.trees(), None);
     }
 
     #[test]

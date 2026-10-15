@@ -244,7 +244,7 @@ pub struct ProfileRenamed {
     pub projects: Vec<String>,
     /// Archived sessions that still name the old one.
     pub archived: Vec<String>,
-    /// Sessions the daemon moved onto the new name (protocol 59).
+    /// Sessions the daemon moved onto the new name (protocol 60).
     #[serde(default)]
     pub followed: usize,
 }
@@ -577,7 +577,7 @@ mod tests {
         }
     }
 
-    /// A session on the profile refuses the rename on a 58 daemon; a 59
+    /// A session on the profile refuses the rename on a 59 daemon; a 60
     /// one takes it and is asked to move the session onto the new name.
     #[tokio::test]
     async fn a_new_daemon_moves_the_sessions_on_a_renamed_profile() {
@@ -586,7 +586,7 @@ mod tests {
         add_at(&config, &root, &registry, form("work", "claude")).unwrap();
         let (client, mut rx) = crate::daemon::Client::connected_for_test();
         client.set_model(|m| {
-            m.protocol_version = 58;
+            m.protocol_version = 59;
             m.agents.push(agent_on("work"));
         });
         let err = rename_on(&client, &config, &local, &root, "work", "max2")

@@ -4,7 +4,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import type { DiffFile } from './api';
-import type { Against, ReviewDiff } from './diff-base';
+import type { Against, ReviewDiff, SessionDiff } from './diff-base';
 
 export type { DiffFile };
 
@@ -58,6 +58,9 @@ export const diffApi = {
    *  when there is one. Also the base and the commits since it. */
   review: (worktree: string, against: Against | null) =>
     invoke<ReviewDiff>('diff_review', { worktree, against }),
+  /** A session's own changes (its snapshots); null from a daemon older
+   *  than the snapshots. */
+  session: (worktree: string, agent: string) => invoke<SessionDiff | null>('diff_session', { worktree, agent }),
   range: (worktree: string, base: string, tip: string, pr?: number) =>
     invoke<RangeDiff>('diff_range', { worktree, base, tip, pr: pr ?? null }),
   blob: (worktree: string, side: DiffSide, path: string) =>

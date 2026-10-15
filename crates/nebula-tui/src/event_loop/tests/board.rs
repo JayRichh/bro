@@ -18,7 +18,7 @@ use ratatui::layout::Rect;
 /// `demo` with its root `main` (agent-1, read and done) and a linked
 /// worktree `feat` at `feat_path` with `polish-nav` in it, finished and
 /// unread: a Review card. On the board, every project.
-fn bench_at(feat_path: std::path::PathBuf) -> App {
+pub(super) fn bench_at(feat_path: std::path::PathBuf) -> App {
     let mut app = App::new();
     seed_tree(&mut app);
     hse(
@@ -49,11 +49,11 @@ fn bench_at(feat_path: std::path::PathBuf) -> App {
     app
 }
 
-fn bench() -> App {
+pub(super) fn bench() -> App {
     bench_at("/tmp/demo-feat".into())
 }
 
-fn agent<'a>(app: &'a mut App, id: &str) -> &'a mut nebula_core::Agent {
+pub(super) fn agent<'a>(app: &'a mut App, id: &str) -> &'a mut nebula_core::Agent {
     app.tree
         .agents
         .iter_mut()
@@ -106,7 +106,7 @@ fn card(app: &App, id: &str) -> Rect {
 }
 
 /// The cursor onto board card `id`, as a step there lands it.
-fn select_card(app: &mut App, id: &str) {
+pub(super) fn select_card(app: &mut App, id: &str) {
     let mut out = Vec::new();
     super::super::launcher::select(app, AgentId(id.into()), &mut out);
 }
@@ -162,7 +162,7 @@ fn pr_info(number: u64, state: &str) -> PrInfo {
 }
 
 /// `feat` carrying an open pull request, #12.
-fn with_open_pr(app: &mut App) {
+pub(super) fn with_open_pr(app: &mut App) {
     app.github.pull_requests.insert(
         WorktreeId("w2".into()),
         Some(crate::pull_request::PullRequest {
@@ -684,7 +684,7 @@ fn the_ship_verbs_are_on_the_cards_menus() {
 // ---- the REVIEW UNIT ----
 
 /// A git checkout on `feat`, one commit past `main`, with an edit on top.
-fn feat_repo(dir: &tempfile::TempDir) -> std::path::PathBuf {
+pub(super) fn feat_repo(dir: &tempfile::TempDir) -> std::path::PathBuf {
     let repo = test_repo(dir);
     let git = |args: &[&str]| {
         let out = std::process::Command::new("git")
@@ -786,6 +786,97 @@ fn enter_on_a_review_card_docks_its_diff_beside_the_board() {
         mouse_at(&mut app, MouseEventKind::Down(MouseButton::Left), 2, 20);
         assert!(app.modals.overlay.is_none());
         assert_eq!(app.selected_session().map(|a| a.id.0), Some("a2".into()));
+    });
+}
+
+/// The REVIEW UNIT asks a 59+ daemon (never an older one) for its
+/// session's snapshots; with two sessions' in the worktree the header
+/// carries the session chip, and a click on it narrows the list to the
+/// session's own changes.
+#[test]
+fn a_review_offers_its_session_filter_when_the_daemon_answers() {
+    with_default_config(|| {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = feat_repo(&dir);
+        let start = nebula_core::session_snapshot::take(&repo).tree.unwrap();
+        std::fs::write(repo.join("mine.txt"), "a2 wrote this\n").unwrap();
+        let last = nebula_core::session_snapshot::take(&repo).tree.unwrap();
+        let mut app = bench_at(repo);
+        note_worktree_changes(&mut app, WorktreeId("w2".into()), Some(3));
+        draw_at(&mut app, 200, 50);
+        select_card(&mut app, "a2");
+        let asked = |out: &[ClientRequest]| {
+            out.iter().find_map(|r| match r {
+                ClientRequest::SessionChanges { req_id, agent } if agent.0 == "a2" => Some(*req_id),
+                _ => None,
+            })
+        };
+
+        app.orch.daemon_protocol = Some(nebula_core::SESSION_CHANGES_PROTOCOL - 1);
+        let mut out = Vec::new();
+        press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
+        assert!(app.modals.overlay.is_some());
+        assert_eq!(asked(&out), None, "a 58 daemon would drop the connection");
+        press(&mut app, KeyCode::Esc, KeyModifiers::NONE, &mut out);
+
+        app.orch.daemon_protocol = Some(nebula_core::SESSION_CHANGES_PROTOCOL);
+        out.clear();
+        press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
+        let req_id = asked(&out).expect("the review asks for its snapshots");
+        let text = draw_at(&mut app, 200, 50);
+        assert!(!text.contains("this session"), "no chip before the answer");
+        let point = |tree: &str| nebula_core::session_snapshot::SnapshotPoint {
+            head: None,
+            tree: Some(tree.into()),
+            at: 1,
+        };
+        hse(
+            &mut app,
+            ServerEvent::SessionChanges {
+                req_id,
+                changes: nebula_core::session_snapshot::SessionChanges {
+                    agent: nebula_core::AgentId("a2".into()),
+                    worktree: Some(WorktreeId("w2".into())),
+                    start: Some(point(&start)),
+                    last: Some(point(&last)),
+                    sessions: 2,
+                },
+            },
+        );
+        let text = draw_at(&mut app, 200, 50);
+        assert!(
+            text.contains(" all in worktree  this session  ^l"),
+            "{text}"
+        );
+        let Some(Overlay::Diff(view)) = &app.modals.overlay else {
+            unreachable!()
+        };
+        let chip = view.attribution.area;
+        assert!(chip.width > 0, "the chip can be clicked");
+        mouse_at(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            chip.x + 1,
+            chip.y,
+        );
+        let Some(Overlay::Diff(view)) = &app.modals.overlay else {
+            panic!("the review stays up");
+        };
+        assert!(view.attribution.listed);
+        let paths: Vec<&str> = view.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, vec!["mine.txt"]);
+        // Ctrl+l: the whole worktree again.
+        press(
+            &mut app,
+            KeyCode::Char('l'),
+            KeyModifiers::CONTROL,
+            &mut out,
+        );
+        let Some(Overlay::Diff(view)) = &app.modals.overlay else {
+            unreachable!()
+        };
+        assert!(!view.attribution.listed);
+        assert!(view.files.len() > 1);
     });
 }
 

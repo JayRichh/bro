@@ -1066,7 +1066,7 @@ pub(crate) enum ProfileCommand {
     ///
     /// The sessions on it follow the new name too, archived ones included;
     /// a running one picks up the moved home when it restarts. Against a
-    /// daemon too old to move them (before protocol 59) it is refused while
+    /// daemon too old to move them (before protocol 60) it is refused while
     /// a session (running, or stopped and able to resume) runs on it.
     Rename {
         /// The profile's name now.

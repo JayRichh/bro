@@ -13,7 +13,7 @@ export const SWITCH_ACCOUNT_PROTOCOL = 57;
 
 /** The first daemon protocol whose sessions follow a profile rename
  *  (`nebula_core::RENAME_PROFILE_PROTOCOL`). */
-export const RENAME_PROFILE_PROTOCOL = 59;
+export const RENAME_PROFILE_PROTOCOL = 60;
 
 /** Does the connected daemon move the sessions on a renamed profile? */
 export function sessionsFollow(m: Pick<Model, 'connected' | 'protocol_version'>): boolean {

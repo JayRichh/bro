@@ -80,6 +80,7 @@ pub async fn worktree_git(
             Some((id, w.path.clone(), w.branch.clone()))
         })
         .collect();
+    let recorded = snap.bases.clone();
     let mut bases = client.base_refs();
     let (out, bases) = tauri::async_runtime::spawn_blocking(move || {
         // Each checkout's base ref, kept between polls: resolved (two git
@@ -88,11 +89,18 @@ pub async fn worktree_git(
         let roots: Vec<_> = roots
             .into_iter()
             .map(|(id, root, branch)| {
-                let base = bases.get(&root, &branch, || {
-                    setting
-                        .get_or_insert_with(|| nebula_config::Config::load().worktree_base_branch)
-                        .clone()
-                });
+                let base = bases.get_with(
+                    &root,
+                    &branch,
+                    || {
+                        setting
+                            .get_or_insert_with(|| {
+                                nebula_config::Config::load().worktree_base_branch
+                            })
+                            .clone()
+                    },
+                    recorded.get(&id),
+                );
                 (id, root, base)
             })
             .collect();

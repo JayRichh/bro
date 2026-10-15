@@ -233,9 +233,9 @@
   <header class="flex-none border-b border-rule px-6 pt-6 pb-4">
     <div class="flex flex-wrap items-baseline gap-x-4 gap-y-2">
       <h1 id="settings-title" class="m-0 text-[28px] leading-tight font-semibold tracking-tight text-ink">Settings</h1>
-      <span class={label}>shared with the terminal app</span>
+      <span class="{label} whitespace-nowrap">shared with the terminal app</span>
       <span class="flex-1"></span>
-      <label class="flex h-7 w-64 items-center border border-rule focus-within:border-rule-strong {local ? 'invisible' : ''}">
+      <label class="flex h-7 w-64 min-w-0 shrink items-center border border-rule focus-within:border-rule-strong {local ? 'invisible' : ''}">
         <span class="sr-only">Filter settings</span>
         <input
           class="h-full min-w-0 flex-1 border-0 bg-transparent px-2.5 font-mono text-[12px] text-ink outline-none placeholder:text-faint"
@@ -246,19 +246,19 @@
         />
       </label>
       <button
-        class="h-7 border border-rule bg-transparent px-2.5 text-[13px] text-ink enabled:hover:border-rule-strong disabled:text-faint"
+        class="h-7 flex-none border border-rule bg-transparent px-2.5 text-[13px] whitespace-nowrap text-ink enabled:hover:border-rule-strong disabled:text-faint"
         title="Write config.json, the agent presets and the ssh hosts to one file, as kete config export does"
         disabled={!!blocked}
         onclick={exportSettings}>Export&hellip;</button
       >
       <button
-        class="h-7 border border-rule bg-transparent px-2.5 text-[13px] text-ink enabled:hover:border-rule-strong disabled:text-faint"
+        class="h-7 flex-none border border-rule bg-transparent px-2.5 text-[13px] whitespace-nowrap text-ink enabled:hover:border-rule-strong disabled:text-faint"
         title="Merge a settings file in, as kete config import does: what it changes is shown first"
         disabled={!!blocked}
         onclick={async () => (await importSettings()) && (await load())}>Import&hellip;</button
       >
       <button
-        class="h-7 border border-rule bg-transparent px-2.5 text-[13px] text-ink enabled:hover:border-rule-strong disabled:text-faint"
+        class="h-7 flex-none border border-rule bg-transparent px-2.5 text-[13px] whitespace-nowrap text-ink enabled:hover:border-rule-strong disabled:text-faint"
         disabled={!schema || resetting || !!blocked}
         onclick={() => (confirmReset = true)}>Reset to defaults</button
       >
