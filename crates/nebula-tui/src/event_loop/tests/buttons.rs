@@ -59,6 +59,7 @@ fn is_button(h: &HitTarget) -> bool {
             | HitTarget::CardMenu(_)
             | HitTarget::LauncherBandNew(_)
             | HitTarget::LauncherPaneMenu
+            | HitTarget::AccountChip(_)
     )
 }
 
