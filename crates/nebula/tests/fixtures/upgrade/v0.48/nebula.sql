@@ -1,0 +1,80 @@
+PRAGMA foreign_keys=OFF;
+BEGIN;
+CREATE TABLE worktrees (
+      id          TEXT PRIMARY KEY,
+      project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      path        TEXT NOT NULL,
+      branch      TEXT NOT NULL,
+      is_main     INTEGER NOT NULL DEFAULT 0,
+      sort_order  INTEGER NOT NULL DEFAULT 0,
+      created_at  INTEGER NOT NULL, pinned INTEGER NOT NULL DEFAULT 0,
+      UNIQUE (project_id, path)
+    );
+INSERT INTO "worktrees" VALUES('01M50MKFEBGTN97W3CWRP1M16F','01M50MKFEAHR0ZCD5X224TRK9C','@ROOT@/repos/alpha','main',1,0,1792096714187,0);
+INSERT INTO "worktrees" VALUES('01M50MKFGQ4R6B97F4HXAAMVZX','01M50MKFGQJ3SC2HK23HJCRYJR','@ROOT@/repos/beta','main',1,0,1792096714263,0);
+INSERT INTO "worktrees" VALUES('01M50MKFZHTZASNK4S9C0HSH2Z','01M50MKFEAHR0ZCD5X224TRK9C','@ROOT@/repos\alpha-worktrees\feat-login','feat/login',0,2,1792096714738,0);
+INSERT INTO "worktrees" VALUES('01M50MKG928A7X5VXRA44JNCVX','01M50MKFEAHR0ZCD5X224TRK9C','@ROOT@/repos\alpha-worktrees\fix-typo','fix-typo',0,1,1792096715042,0);
+INSERT INTO "worktrees" VALUES('01M50MKGKGSYSYQ0650S9WR9EB','01M50MKFGQJ3SC2HK23HJCRYJR','@ROOT@/repos\beta-worktrees\spike','spike',0,0,1792096715376,0);
+CREATE TABLE agents (
+      id                TEXT PRIMARY KEY,
+      worktree_id       TEXT NOT NULL REFERENCES worktrees(id) ON DELETE CASCADE,
+      name              TEXT NOT NULL,
+      status            TEXT NOT NULL DEFAULT 'fresh',
+      archived          INTEGER NOT NULL DEFAULT 0,
+      claude_session_id TEXT,
+      sort_order        INTEGER NOT NULL DEFAULT 0,
+      created_at        INTEGER NOT NULL,
+      status_changed_at INTEGER NOT NULL DEFAULT 0
+    , kind TEXT NOT NULL DEFAULT 'claude', pinned INTEGER NOT NULL DEFAULT 0, model TEXT, effort TEXT, archived_at INTEGER NOT NULL DEFAULT 0, auto_title_pending INTEGER NOT NULL DEFAULT 0, unseen INTEGER NOT NULL DEFAULT 0, cloud_session_id TEXT, pr_url TEXT, claude_title TEXT, recent_prompts TEXT, issue_url TEXT, custom_harness TEXT, role TEXT NOT NULL DEFAULT 'worker', profile TEXT, parent TEXT);
+INSERT INTO "agents" VALUES('01M50MKGMBKZ3SFHTPYN7AHN7T','01M50MKFEBGTN97W3CWRP1M16F','root chat','fresh',0,NULL,0,1792096715403,1792096715403,'claude',0,NULL,NULL,0,0,0,NULL,NULL,NULL,NULL,NULL,NULL,'worker','work',NULL);
+INSERT INTO "agents" VALUES('01M50MKGNFV8GFBSY1KK4H9W5T','01M50MKFZHTZASNK4S9C0HSH2Z','login form (renamed)','fresh',0,NULL,1,1792096715439,1792096715439,'claude',0,NULL,NULL,0,0,0,NULL,NULL,NULL,NULL,NULL,NULL,'worker','work',NULL);
+INSERT INTO "agents" VALUES('01M50MKGP1W41N48GC9N9BG0F8','01M50MKFZHTZASNK4S9C0HSH2Z','login tests','fresh',0,NULL,0,1792096715457,1792096715457,'claude',0,NULL,NULL,0,0,0,NULL,NULL,NULL,NULL,NULL,NULL,'worker','work',NULL);
+INSERT INTO "agents" VALUES('01M50MKGPKGWFMFY1JSF5FRDJY','01M50MKG928A7X5VXRA44JNCVX','typo','fresh',1,NULL,0,1792096715475,1792096715475,'claude',0,NULL,NULL,1792096718549,0,0,NULL,NULL,NULL,NULL,NULL,NULL,'worker','work',NULL);
+INSERT INTO "agents" VALUES('01M50MKGQ5ZCW9HNEPKJAJ21N0','01M50MKGKGSYSYQ0650S9WR9EB','spike it','fresh',0,NULL,0,1792096715493,1792096715493,'claude',0,NULL,NULL,0,0,0,NULL,NULL,NULL,NULL,NULL,NULL,'worker','spare',NULL);
+INSERT INTO "agents" VALUES('01M50MKGQRQMS0CKB4FS21ASNW','01M50MKFGQ4R6B97F4HXAAMVZX','beta chat','fresh',0,NULL,0,1792096715512,1792096715512,'claude',0,NULL,NULL,0,0,0,NULL,NULL,NULL,NULL,NULL,NULL,'worker','work',NULL);
+CREATE TABLE terminals (
+      id          TEXT PRIMARY KEY,
+      worktree_id TEXT NOT NULL REFERENCES worktrees(id) ON DELETE CASCADE,
+      name        TEXT NOT NULL DEFAULT 'shell',
+      sort_order  INTEGER NOT NULL DEFAULT 0,
+      created_at  INTEGER NOT NULL
+    , run_command TEXT);
+CREATE TABLE ui_state (
+      id    INTEGER PRIMARY KEY CHECK (id = 1),
+      json  TEXT NOT NULL
+    );
+INSERT INTO "ui_state" VALUES(1,'{"collapsed":false,"diff_tree":true,"launcher_tabs":["01M50MKFGQJ3SC2HK23HJCRYJR","01M50MKFEAHR0ZCD5X224TRK9C"],"project":"01M50MKFEAHR0ZCD5X224TRK9C","session_agent":"01M50MKGP1W41N48GC9N9BG0F8","show_archived":true,"worktree":"01M50MKFZHTZASNK4S9C0HSH2Z"}');
+CREATE TABLE links (
+      id          TEXT PRIMARY KEY,
+      worktree_id TEXT NOT NULL REFERENCES worktrees(id) ON DELETE CASCADE,
+      url         TEXT NOT NULL,
+      sort_order  INTEGER NOT NULL DEFAULT 0,
+      created_at  INTEGER NOT NULL
+    );
+CREATE TABLE pr_seen (
+      url      TEXT PRIMARY KEY,
+      marker   TEXT NOT NULL,
+      seen_at  INTEGER NOT NULL
+    );
+CREATE TABLE "projects" (
+      id          TEXT PRIMARY KEY,
+      name        TEXT NOT NULL,
+      repo_path   TEXT NOT NULL UNIQUE,
+      sort_order  INTEGER NOT NULL DEFAULT 0,
+      created_at  INTEGER NOT NULL
+    );
+INSERT INTO "projects" VALUES('01M50MKFEAHR0ZCD5X224TRK9C','alpha','@ROOT@/repos/alpha',1,1792096714186);
+INSERT INTO "projects" VALUES('01M50MKFGQJ3SC2HK23HJCRYJR','beta','@ROOT@/repos/beta',0,1792096714263);
+CREATE TABLE worktree_ports (
+      worktree_id TEXT PRIMARY KEY,
+      slot        INTEGER NOT NULL UNIQUE
+    );
+INSERT INTO "worktree_ports" VALUES('01M50MKFZHTZASNK4S9C0HSH2Z',0);
+INSERT INTO "worktree_ports" VALUES('01M50MKG928A7X5VXRA44JNCVX',1);
+INSERT INTO "worktree_ports" VALUES('01M50MKGKGSYSYQ0650S9WR9EB',2);
+INSERT INTO "worktree_ports" VALUES('01M50MKFEBGTN97W3CWRP1M16F',3);
+INSERT INTO "worktree_ports" VALUES('01M50MKFGQ4R6B97F4HXAAMVZX',4);
+CREATE UNIQUE INDEX agents_one_orchestrator ON agents(role)
+      WHERE role = 'orchestrator';
+PRAGMA user_version=33;
+COMMIT;
