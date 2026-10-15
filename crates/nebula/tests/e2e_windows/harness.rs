@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-pub const COLS: u16 = 160;
-pub const ROWS: u16 = 45;
+pub const COLS: u16 = 200;
+pub const ROWS: u16 = 50;
 /// How long one screen state may take to come up: generous, as a cold
 /// CI runner starts a daemon, git worktrees and agents.
 pub const WAIT: Duration = Duration::from_secs(30);
@@ -21,6 +21,8 @@ const POLL_STEP: Duration = Duration::from_millis(50);
 
 pub const ENTER: &[u8] = b"\r";
 pub const ESC: &[u8] = &[0x1b];
+pub const SHIFT_RIGHT: &[u8] = b"\x1b[1;2C";
+pub const SHIFT_LEFT: &[u8] = b"\x1b[1;2D";
 
 type Writer = Arc<Mutex<Box<dyn Write + Send>>>;
 
@@ -33,12 +35,15 @@ pub struct Tui {
     pub repos: PathBuf,
     pub agent_log: PathBuf,
     pub echo_log: PathBuf,
+    gates: PathBuf,
     _root: tempfile::TempDir,
 }
 
 pub struct Options {
     /// The fake agent's script (see `agent`).
     pub script: String,
+    /// Scripts by the prompt's first word, over `script`.
+    pub scripts: Vec<(&'static str, String)>,
     /// Directories dropped from PATH, for a TUI that must not find a tool.
     pub strip_path: Vec<String>,
 }
@@ -46,7 +51,8 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
-            script: "start;stop;echo".into(),
+            script: "stop;echo".into(),
+            scripts: Vec::new(),
             strip_path: Vec::new(),
         }
     }
@@ -79,6 +85,7 @@ impl Tui {
             serde_json::json!({
                 "theme": "default",
                 "icons": "off",
+                "quick_prompt_new_worktree": true,
                 "harnesses": { "claude": { "program": me.display().to_string() } },
             })
             .to_string(),
@@ -113,6 +120,12 @@ impl Tui {
         cmd.env(agent::SCRIPT, &options.script);
         cmd.env(agent::LOG, &agent_log);
         cmd.env(agent::ECHO_LOG, &echo_log);
+        let gates = base.join("gates");
+        std::fs::create_dir_all(&gates).unwrap();
+        cmd.env(agent::GATES, &gates);
+        for (word, script) in &options.scripts {
+            cmd.env(format!("{}_{}", agent::SCRIPT, word.to_ascii_uppercase()), script);
+        }
         if !options.strip_path.is_empty() {
             let path = std::env::var("PATH").unwrap_or_default();
             let kept: Vec<&str> = path
@@ -178,6 +191,7 @@ impl Tui {
             repos,
             agent_log,
             echo_log,
+            gates,
             _root: root,
         }
     }
@@ -185,6 +199,18 @@ impl Tui {
     /// A committed repo named `name` with a bare repo beside it as its
     /// `origin` (its `main` pushed), so the base is `origin/main`.
     pub fn make_repo(&self, name: &str) -> PathBuf {
+        self.make_repo_with_origin(name, false)
+    }
+
+    /// `make_repo`, with `origin` named as a GitHub URL so Kete takes the
+    /// repo for a GitHub one, while pushes go to the local bare repo
+    /// (`pushInsteadOf`): nothing reaches the network but what asks
+    /// GitHub itself.
+    pub fn make_github_repo(&self, name: &str) -> PathBuf {
+        self.make_repo_with_origin(name, true)
+    }
+
+    fn make_repo_with_origin(&self, name: &str, github: bool) -> PathBuf {
         let repo = self.repos.join(name);
         let bare = self.repos.join(format!("{name}-origin.git"));
         std::fs::create_dir_all(&repo).unwrap();
@@ -196,10 +222,22 @@ impl Tui {
         std::fs::write(repo.join("README.md"), "e2e\n").unwrap();
         git(&repo, &["add", "."]);
         git(&repo, &["commit", "-q", "-m", "init"]);
-        git(&repo, &["remote", "add", "origin", &bare.display().to_string()]);
+        let bare = bare.display().to_string();
+        if github {
+            let url = format!("https://github.com/kete-e2e/{name}.git");
+            git(&repo, &["remote", "add", "origin", &url]);
+            git(&repo, &["config", &format!("url.{bare}.pushInsteadOf"), &url]);
+        } else {
+            git(&repo, &["remote", "add", "origin", &bare]);
+        }
         git(&repo, &["push", "-q", "-u", "origin", "main"]);
         git(&repo, &["remote", "set-head", "origin", "main"]);
         repo
+    }
+
+    /// Let the agents waiting on `gate:<name>` go on.
+    pub fn open_gate(&self, name: &str) {
+        std::fs::write(self.gates.join(name), "").unwrap();
     }
 
     pub fn send(&self, bytes: &[u8]) {
@@ -232,6 +270,11 @@ impl Tui {
             }
             std::thread::sleep(POLL_STEP);
         }
+    }
+
+    /// Print the screen, for working out what a step shows.
+    pub fn dump(&self, label: &str) {
+        println!("--- {label} ---\n{}", self.screen_text());
     }
 
     pub fn wait_for_text(&self, needle: &str) {
@@ -290,7 +333,11 @@ impl Tui {
     pub fn add_project(&self, path: &Path, name: &str) {
         self.send(b"o");
         self.wait_for_text("Open project");
-        self.type_str(&path.display().to_string());
+        // Typed in one write, the path reads as a paste (the TUI's PASTE
+        // BURST): let it land before Enter, or the Enter joins the paste.
+        let typed = path.display().to_string();
+        self.type_str(&typed);
+        self.wait_for_text(&format!("> {typed}"));
         self.send(ENTER);
         self.wait_for_gone("Open project");
         self.wait_for_text(name);

@@ -1,14 +1,18 @@
 //! The fake agent: what the daemon launches as a session's CLI in this
-//! suite. It reads a script from [`SCRIPT`] and reports what it does
-//! through the hooks the daemon installed in the worktree's
-//! `.claude/settings.local.json` — the same `kete _hook claude <event>`
-//! commands Claude Code runs, run the way it runs them (a shell line, the
-//! JSON payload on stdin) — so Running, Needs you and Finished come from
-//! the daemon's real hook path, not from anything test-only.
+//! suite. It reports what it does through the hooks the daemon installed
+//! in the worktree's `.claude/settings.local.json` — the same
+//! `kete _hook claude <event>` commands Claude Code runs, run the way it
+//! runs them (a shell line, the JSON payload on stdin) — so Running, Needs
+//! you and Finished come from the daemon's real hook path, not from
+//! anything test-only.
 //!
-//! Steps, `;`-separated:
-//! - `start` — `SessionStart`, then `UserPromptSubmit` with the prompt the
-//!   daemon passed as the trailing argument; prints `working on: <prompt>`.
+//! Like Claude it fires `SessionStart` as it boots, takes its prompt off
+//! the trailing argument (a warm spare, booted with none, waits for one to
+//! be typed), fires `UserPromptSubmit` and prints `working on: <prompt>`.
+//! Then it runs its script: [`SCRIPT`]`_<FIRST WORD OF THE PROMPT>` when
+//! that is set, else [`SCRIPT`]. Steps, `;`-separated:
+//! - `gate:<name>` — waits until the suite creates `<GATES>/<name>`, so a
+//!   state the suite has to see holds still until it has.
 //! - `ask` — an `AskUserQuestion` (`PreToolUse`): prints the question and
 //!   waits for a reply line, then its `PostToolUse`.
 //! - `edit:<path>:<text>` — writes the file (relative to the worktree).
@@ -17,11 +21,15 @@
 //! - `say:<text>` — prints a line.
 //! - `echo` — the idle prompt: turns bracketed paste on and logs every
 //!   byte it is sent to [`ECHO_LOG`], printing `paste <n> bytes` for each
-//!   bracketed paste and `submit` for each Enter outside one. Never ends.
+//!   bracketed paste and `submit` for each Enter outside one.
+//!
+//! After the script it stays up, as a CLI at its prompt does, until its
+//! console goes away.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 /// Set (to anything) on the TUI, and so on its daemon and the sessions it
 /// spawns: run as the fake agent, not the suite.
@@ -32,6 +40,8 @@ pub const SCRIPT: &str = "KETE_E2E_SCRIPT";
 pub const LOG: &str = "KETE_E2E_AGENT_LOG";
 /// Where the `echo` step writes the raw bytes it is sent.
 pub const ECHO_LOG: &str = "KETE_E2E_ECHO_LOG";
+/// The directory `gate:` steps wait on.
+pub const GATES: &str = "KETE_E2E_GATES";
 
 /// The flags Kete's Claude spawn passes that take a value: everything
 /// else that is not a flag is the prompt.
@@ -49,8 +59,6 @@ const VALUE_FLAGS: &[&str] = &[
 pub fn run() {
     raw_console();
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let prompt = prompt_of(&args);
-    let script = std::env::var(SCRIPT).unwrap_or_else(|_| "start;stop;echo".into());
     let mut agent = Agent {
         session_id: format!("fake-{}", std::process::id()),
         cwd: std::env::current_dir().unwrap_or_default(),
@@ -58,15 +66,34 @@ pub fn run() {
     };
     agent.log(&format!("args {args:?}"));
     print_line("fake agent up");
+    agent.hook("SessionStart", serde_json::json!({ "source": "startup" }));
+    let prompt = match prompt_of(&args) {
+        Some(prompt) => prompt,
+        None => {
+            print_line("> ");
+            agent.read_line()
+        }
+    };
+    agent.log(&format!("prompt {prompt:?}"));
+    agent.hook("UserPromptSubmit", serde_json::json!({ "prompt": prompt }));
+    print_line(&format!("working on: {prompt}"));
+    let word = prompt
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_ascii_uppercase();
+    let script = std::env::var(format!("{SCRIPT}_{word}"))
+        .or_else(|_| std::env::var(SCRIPT))
+        .unwrap_or_else(|_| "stop".into());
     for step in script.split(';').map(str::trim).filter(|s| !s.is_empty()) {
         agent.log(&format!("step {step}"));
         let (verb, rest) = step.split_once(':').unwrap_or((step, ""));
         match verb {
-            "start" => {
-                agent.hook("SessionStart", serde_json::json!({ "source": "startup" }));
-                let prompt = prompt.clone().unwrap_or_default();
-                agent.hook("UserPromptSubmit", serde_json::json!({ "prompt": prompt }));
-                print_line(&format!("working on: {prompt}"));
+            "gate" => {
+                let gate = PathBuf::from(std::env::var_os(GATES).unwrap_or_default()).join(rest);
+                while !gate.exists() {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
             }
             "ask" => {
                 let tool = serde_json::json!({
@@ -103,18 +130,14 @@ pub fn run() {
                 print_line("fake agent finished");
             }
             "say" => print_line(rest),
-            "sleep" => std::thread::sleep(std::time::Duration::from_millis(
-                rest.parse().unwrap_or(500),
-            )),
             "echo" => agent.echo(),
             other => agent.log(&format!("unknown step {other}")),
         }
     }
-    // Stay up like a CLI at its prompt until the session is closed: the
-    // console going away ends the read, and the agent with it.
     let mut buf = [0u8; 1024];
     while matches!(agent.input.read(&mut buf), Ok(n) if n > 0) {}
 }
+
 
 /// The prompt: the last argument that is neither a flag nor a flag's
 /// value.
@@ -151,7 +174,7 @@ impl Agent {
             .append(true)
             .open(path)
         {
-            let _ = writeln!(file, "{line}");
+            let _ = writeln!(file, "[{}] {line}", std::process::id());
         }
     }
 
