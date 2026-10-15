@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.48.0
+
+Pastes land whole, accounts are managed in the app, the two apps trade their best views, and
+everything can be put in your own order by dragging.
+
+- **Pasting into a session on Windows.** A large paste in the terminal app reaches the agent as one
+  bracketed paste (Claude Code shows "[Pasted text +N lines]") instead of thousands of keystrokes with
+  a submit per line. The daemon writes a session's input on its own thread, so a big paste never stalls
+  the session or other requests, and pastes larger than a frame are split. Very large pastes are still
+  slow to arrive through the Windows console.
+- **Accounts, managed in the app.** The desktop's Accounts view (`Shift+U`, the rail's Accounts
+  heading, the palette) and the terminal app's `Shift+U` list every account, including switched-off,
+  broken and own logins, with login state, plan, usage and the sessions and repos using each. Add an
+  account (harness, name, adopt your current login) and its sign-in runs straight away in a terminal;
+  edit, duplicate, remove, set default, switch on or off, sign in again. The account spread (manual,
+  failover, least used) is set at the top.
+- **Accounts for work.** Each repo can have a default account per harness (repo menu, Accounts view,
+  terminal app Settings → Project, `kete profile set-project`); launches take the named account, then the
+  repo's default, then the spread, then the harness default. **Move to account…** on a session (menu, or
+  click its account in the session header) restarts it fresh on another account in the same worktree.
+  New CLI: `kete profile edit`, `kete profile set-project`. Needs a 0.48 daemon (protocol 57).
+- **Drag to order, in both apps.** Repos, worktrees and sessions keep the order you give them, shared by
+  both apps: drag repos in the rail or project tabs, worktree groups or bands (the main checkout stays
+  first), and sessions within a worktree. `Alt+↑/↓` (terminal app also `Shift+↑/↓`) and Move up / Move
+  down menu items do the same from the keyboard. A scope you've never reordered keeps its recency
+  order; once you have two or more repos the overview follows the rail's order. Needs a 0.48 daemon
+  (protocol 56).
+- **The board, anywhere.** Drag a card to Done to mark it seen, onto the Archived zone that appears
+  while dragging to archive it, onto a repo or worktree to move it; drops the agent owns (into Needs you
+  or Running) are refused with the reason. Overview | Board and a Diff button sit in every desktop view
+  and keep an open session or diff; `Shift+K` reaches the board from any terminal app overlay or a full
+  screen session. A diff opened from the board returns to it.
+- **Desktop worktrees.** The overview groups each repo's sessions under its worktrees, as the terminal
+  app's bands do: main or linked, branch, ahead/behind, changes, PR, ports and run, foldable, with a row
+  while git cuts a new one. Worktree buttons (new session or terminal here, diff, switch branch, open in
+  editor or folder, copy path, run, delete). A Worktrees view per repo lists them all with sortable
+  columns and "Delete merged & clean…". Narrow windows: the rail collapses to icons and the split shows
+  one side with a List / Pane switch (minimum width 640).
+- **Buttons for everything.** Desktop: palette, help and a New session button in the header; restart,
+  follow-up, new terminal, open in editor, diff, full pane (`Ctrl+Shift+M`) and the menu on the session
+  header; new session, new worktree, switch branch and editor on repo headers; diff, follow-up, archive
+  and menu on board cards; tooltips name each key; dialogs keep Tab inside and return focus. Terminal
+  app: footer key hints are clickable, settings and help in the header, a `+` on every band, reply / diff
+  / archive / delete / `⋯` on the selected card (board too), diff and menu in the pane header, every help
+  row and dialog answer clickable.
+- **Desktop features in the terminal app.** A subagent tree (`Shift+S`, and a `⑂` chip on cards and the
+  pane header), a command palette over every action (`Ctrl+K`), an attention strip (needs you / failed /
+  running / unread, click to jump), Azure DevOps tasks, pull requests and branches (`Shift+B`, ADO repos
+  only), and back / forward between places (`Alt+←/→` or `<` `>`).
+- **Delete confirm wording.** The terminal app's forced-delete confirm reads `[Enter/y/Esc/n] keep it
+  [f] delete anyway`.
+
 ## 0.47.0
 
 The desktop diff closes properly, worktree deletes stop losing work, and both apps say which account
