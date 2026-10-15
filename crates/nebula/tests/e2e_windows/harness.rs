@@ -367,7 +367,12 @@ impl Tui {
         // BURST): let it land before Enter, or the Enter joins the paste.
         let typed = path.display().to_string();
         self.type_str(&typed);
-        self.wait_for_text(&format!("> {typed}"));
+        // A long path shows as `> …` plus its tail, so wait on the tail.
+        let tail: String = {
+            let chars: Vec<char> = typed.chars().collect();
+            chars[chars.len().saturating_sub(40)..].iter().collect()
+        };
+        self.wait_for_text(&tail);
         self.send(ENTER);
         self.wait_for_gone("Open project");
         self.wait_for_text(name);
