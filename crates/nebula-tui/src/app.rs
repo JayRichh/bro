@@ -1384,11 +1384,35 @@ impl PromptDialog {
     /// the input row. Non-path prompts keep an empty listing.
     pub fn refresh_dirs(&mut self) {
         self.hover = None;
+        self.yield_prefill();
         self.dirs = if self.completes_paths() {
             crate::completion::list_dirs(&self.input, Self::home().as_deref())
         } else {
             Vec::new()
         };
+    }
+
+    /// The "~/" prefill gives way to an absolute path put after it: a
+    /// pasted `/srv/app` or `C:\Code\app` (the console types a paste out,
+    /// so it never meets the typed-`/` rule in the key handler), or a
+    /// Windows drive typed over it, which starts with a letter that rule
+    /// cannot tell from a dir under home until the `:` comes.
+    fn yield_prefill(&mut self) {
+        if !self.completes_paths() {
+            return;
+        }
+        let Some(rest) = self.input.as_str().strip_prefix("~/") else {
+            return;
+        };
+        let bytes = rest.as_bytes();
+        let drive = cfg!(windows)
+            && bytes.len() >= 2
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':';
+        if drive || rest.starts_with(['/', '\\', '~']) {
+            let rest = rest.to_string();
+            self.input.set_text(rest);
+        }
     }
 
     /// Full path of the hovered listing row (typed parent + entry name).
