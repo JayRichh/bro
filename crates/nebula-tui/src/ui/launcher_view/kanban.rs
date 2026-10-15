@@ -192,12 +192,18 @@ pub(super) fn draw(f: &mut Frame, app: &mut App, body: Rect) {
                 ..r
             };
             if copy.height > 0 {
+                // The key hint on a row of its own, so a narrow lane never
+                // splits `p:` from what it does.
+                let (text, hint) = crate::learn::empty_parts(app, lane_empty_id(lane));
+                let mut lines = vec![Line::from(Span::styled(text, Style::default().fg(th.dim)))];
+                if let Some(hint) = hint {
+                    lines.push(Line::from(Span::styled(
+                        truncate(&hint, copy.width as usize),
+                        Style::default().fg(th.accent),
+                    )));
+                }
                 f.render_widget(
-                    Paragraph::new(Span::styled(
-                        crate::learn::empty_line(app, lane_empty_id(lane)),
-                        Style::default().fg(th.dim),
-                    ))
-                    .wrap(ratatui::widgets::Wrap { trim: true }),
+                    Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: true }),
                     copy,
                 );
             }

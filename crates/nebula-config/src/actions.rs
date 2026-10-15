@@ -2721,14 +2721,15 @@ fn render_learn_ts() -> String {
         "];\n\n/** What an empty lane, list or view says, and the verb that fills it. */\n",
     );
     out.push_str(
-        "export const EMPTY: readonly { id: string; text: string; verb: ActionId | null }[] = [\n",
+        "export const EMPTY: readonly { id: string; text: string; verb: ActionId | null; does: string }[] = [\n",
     );
     for e in EMPTY {
         let verb = e.verb.map(ts_str).unwrap_or_else(|| "null".into());
         out.push_str(&format!(
-            "  {{ id: {}, text: {}, verb: {verb} }},\n",
+            "  {{ id: {}, text: {}, verb: {verb}, does: {} }},\n",
             ts_str(e.id),
-            ts_str(e.text)
+            ts_str(e.text),
+            ts_str(e.does)
         ));
     }
     out.push_str("];\n");

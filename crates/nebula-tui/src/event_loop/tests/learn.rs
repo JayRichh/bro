@@ -255,3 +255,39 @@ fn the_footer_holds_at_most_seven_entries() {
         assert!(shown <= crate::ui::footer::FOOTER_MAX, "{shown}");
     });
 }
+
+/// The page opens before the daemon's first snapshot lands, and is
+/// already recorded as shown: the snapshot (its remembered selection and
+/// pane) must not close it, or the user never sees it.
+#[test]
+fn whats_new_survives_the_first_snapshot() {
+    with_config_json(r#"{"whats_new_seen": "0.48"}"#, || {
+        let mut seeded = App::new();
+        seed_tree(&mut seeded);
+        let tree = seeded.tree.clone();
+        let mut app = App::new();
+        let cfg = crate::config::Config::load();
+        assert!(crate::learn::arm(&mut app, &cfg, false, true));
+        crate::learn::open_whats_new(&mut app);
+        hse(
+            &mut app,
+            ServerEvent::Snapshot {
+                projects: tree.projects,
+                worktrees: tree.worktrees,
+                agents: tree.agents,
+                terminals: tree.terminals,
+                links: tree.links,
+                pr_seen: Vec::new(),
+                ui_state: None,
+                subagents: Vec::new(),
+            },
+        );
+        draw_80x24(&mut app);
+        assert!(
+            matches!(&app.modals.overlay, Some(Overlay::Help(h)) if h.whats_new),
+            "{:?}",
+            app.modals.overlay.as_ref().map(|_| "another overlay")
+        );
+        assert!(app.learn.tip.is_none(), "no tip over the page");
+    });
+}

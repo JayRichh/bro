@@ -122,7 +122,7 @@ pub const WHATS_NEW: &[Release] = &[
         items: &[
             "A one-line tip the first time you meet the ? menu, the scope chip, the Review and Ship lanes, drag, or the review. Settings, General, Show tips turns them off.",
             "Every empty lane and list says what goes there and the one thing to do.",
-            "The footer and verb bar show the selection's top verbs and ? more; Help (F1) is grouped by task.",
+            "The footer and the verb bar show the selection's top verbs and ? more. The desktop's Help (F1) groups keys by task.",
             "A session's changes are counted per turn, so two sessions in one worktree no longer mix.",
         ],
     },
@@ -248,9 +248,19 @@ pub fn whats_new_due(seen: &str, current: &str, fresh: bool) -> bool {
     newer && covered
 }
 
-/// Whether no settings file exists yet: a first run, not an upgrade.
-pub fn first_run(path: &std::path::Path, local: &std::path::Path) -> bool {
-    !path.exists() && !local.exists()
+/// Whether none of `marks` exists: a first run, not an upgrade. See
+/// [`fresh_install`] for the marks an earlier run leaves.
+pub fn first_run(marks: &[&std::path::Path]) -> bool {
+    marks.iter().all(|p| !p.exists())
+}
+
+/// Whether this machine has never run kete: no settings file in either
+/// layer and no daemon database. A user who never changed a setting has
+/// no config.json, but every earlier run left the database; checked
+/// before the daemon is reached, so its first start doesn't count.
+pub fn fresh_install() -> bool {
+    let (path, local) = Config::layer_paths();
+    first_run(&[&path, &local, &nebula_core::paths::db_path()])
 }
 
 // ---- Empty states ----
@@ -264,6 +274,9 @@ pub struct Empty {
     pub text: &'static str,
     /// The registry verb that fills it, by id.
     pub verb: Option<&'static str>,
+    /// What that verb does here, in a word or two, for its button or key
+    /// hint (`p: new session`). Empty with no verb.
+    pub does: &'static str,
 }
 
 pub const EMPTY: &[Empty] = &[
@@ -271,56 +284,67 @@ pub const EMPTY: &[Empty] = &[
         id: "lane_running",
         text: "Agents at work show here.",
         verb: Some("quick_prompt"),
+        does: "new session",
     },
     Empty {
         id: "lane_needs",
         text: "Nothing needs you.",
         verb: None,
+        does: "",
     },
     Empty {
         id: "lane_review",
         text: "Finished work to read lands here.",
         verb: None,
+        does: "",
     },
     Empty {
         id: "lane_ship",
         text: "Cards with an open PR. Drag one in from Review.",
         verb: None,
+        does: "",
     },
     Empty {
         id: "lane_done",
         text: "Merged and read work rests here.",
         verb: None,
+        does: "",
     },
     Empty {
         id: "board",
         text: "No sessions yet: start one and it shows on the board.",
         verb: Some("quick_prompt"),
+        does: "new session",
     },
     Empty {
         id: "no_repos",
         text: "Add a repo to start: its worktrees and sessions show here.",
         verb: Some("add_project"),
+        does: "add a repo",
     },
     Empty {
         id: "no_sessions",
         text: "No sessions in this worktree yet.",
         verb: Some("quick_prompt"),
+        does: "new session",
     },
     Empty {
         id: "overview",
         text: "Every session you start shows here under its repo, the ones waiting on you first.",
         verb: Some("quick_prompt"),
+        does: "new session",
     },
     Empty {
         id: "accounts",
         text: "No accounts yet: add one to run sessions on another login.",
         verb: Some("accounts"),
+        does: "accounts",
     },
     Empty {
         id: "search",
         text: "Nothing matches. Try fewer letters.",
         verb: None,
+        does: "",
     },
 ];
 
@@ -399,6 +423,7 @@ mod tests {
             }
         }
         for e in EMPTY {
+            assert_eq!(e.verb.is_some(), !e.does.is_empty(), "{}", e.id);
             if let Some(v) = e.verb {
                 assert!(
                     crate::actions::verbs().iter().any(|x| x.id == v),
@@ -475,13 +500,17 @@ mod tests {
     }
 
     #[test]
-    fn first_run_is_no_file_in_either_layer() {
+    fn first_run_is_no_settings_file_and_no_database() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.json");
         let local = dir.path().join("config.local.json");
-        assert!(first_run(&path, &local));
+        let db = dir.path().join("nebula.db");
+        assert!(first_run(&[&path, &local, &db]));
         std::fs::write(&local, "{}").unwrap();
-        assert!(!first_run(&path, &local));
+        assert!(!first_run(&[&path, &local, &db]));
+        std::fs::remove_file(&local).unwrap();
+        std::fs::write(&db, "").unwrap();
+        assert!(!first_run(&[&path, &local, &db]), "a database: an upgrade");
     }
 
     #[test]

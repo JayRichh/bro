@@ -25,6 +25,20 @@ use crate::app::{App, Focus, Overlay};
 /// that card brought up.
 pub const DWELL: Duration = Duration::from_secs(3);
 
+/// Whether this run is a first install ([`nebula_config::learn::fresh_install`]),
+/// noted by [`note_startup`] before the daemon is reached.
+static FRESH: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+/// Note whether this is a first install. Called first thing in `run_app`.
+pub fn note_startup() {
+    let _ = FRESH.set(learn::fresh_install());
+}
+
+/// What [`note_startup`] found; false when it never ran.
+pub fn fresh() -> bool {
+    FRESH.get().copied().unwrap_or(false)
+}
+
 /// The two buttons on a tip's line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TipButton {
@@ -66,9 +80,9 @@ impl Learn {
 }
 
 /// Arm the tips from `cfg` and say whether the WHAT'S NEW page is due:
-/// `fresh` is no settings file before this run (a first install, which
-/// records this release as seen instead). A due page is recorded as seen
-/// here; the caller opens it.
+/// `fresh` is a first install ([`fresh`]: no settings file and no database
+/// before this run), which records this release as seen instead. A due
+/// page is recorded as seen here; the caller opens it.
 pub fn arm(app: &mut App, cfg: &crate::config::Config, fresh: bool, persist: bool) -> bool {
     app.learn.armed = true;
     app.learn.persist = persist;
@@ -198,18 +212,26 @@ pub fn text(app: &App, id: &str) -> String {
     })
 }
 
-/// An empty state's line with its verb's key: `No sessions here yet. p:
-/// new session`. An unbound verb names no key.
-pub fn empty_line(app: &App, id: &str) -> String {
+/// An empty state's line and, apart, its verb's key hint (`p: new
+/// session`), so a narrow lane can keep the hint whole on a row of its
+/// own. An unbound verb names no key.
+pub fn empty_parts(app: &App, id: &str) -> (String, Option<String>) {
     let Some(e) = learn::empty(id) else {
-        return String::new();
+        return (String::new(), None);
     };
-    let Some(spec) = e.verb.and_then(nebula_config::actions::spec_by_id) else {
-        return e.text.to_string();
-    };
-    match app.chrome.keymap.shown_first(spec.action) {
-        Some(c) => format!("{}  {}: {}", e.text, c.display(), spec.word),
-        None => e.text.to_string(),
+    let hint = e
+        .verb
+        .and_then(nebula_config::actions::spec_by_id)
+        .and_then(|spec| app.chrome.keymap.shown_first(spec.action))
+        .map(|c| format!("{}: {}", c.display(), e.does));
+    (e.text.to_string(), hint)
+}
+
+/// [`empty_parts`] on one line: `No sessions yet: ...  p: new session`.
+pub fn empty_line(app: &App, id: &str) -> String {
+    match empty_parts(app, id) {
+        (text, Some(hint)) => format!("{text}  {hint}"),
+        (text, None) => text,
     }
 }
 

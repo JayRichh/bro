@@ -1714,7 +1714,7 @@ export const TIPS: readonly { id: string; text: string }[] = [
 
 /** The What's new page, newest release first. */
 export const WHATS_NEW: readonly { version: string; title: string; items: readonly string[] }[] = [
-  { version: "0.52", title: "Learn in place", items: ["A one-line tip the first time you meet the ? menu, the scope chip, the Review and Ship lanes, drag, or the review. Settings, General, Show tips turns them off.", "Every empty lane and list says what goes there and the one thing to do.", "The footer and verb bar show the selection's top verbs and ? more; Help (F1) is grouped by task.", "A session's changes are counted per turn, so two sessions in one worktree no longer mix."] },
+  { version: "0.52", title: "Learn in place", items: ["A one-line tip the first time you meet the ? menu, the scope chip, the Review and Ship lanes, drag, or the review. Settings, General, Show tips turns them off.", "Every empty lane and list says what goes there and the one thing to do.", "The footer and the verb bar show the selection's top verbs and ? more. The desktop's Help (F1) groups keys by task.", "A session's changes are counted per turn, so two sessions in one worktree no longer mix."] },
   { version: "0.51", title: "Which session made a change", items: ["The review switches between This session and All in this worktree.", "A worktree remembers the branch it was cut from; the review and the lanes use it.", "Large pastes on Windows arrive in seconds, with pasting... N KB meanwhile.", "Export and import settings, delete merged worktrees, and vote on ADO PRs from the apps."] },
   { version: "0.50", title: "The board follows the work", items: ["Lanes: Running, Needs you, Review, Ship, Done. Review is finished work no PR carries; Ship has an open PR.", "Drops do what the lane means: Review to Ship opens the PR form, Ship to Done merges after a confirm.", "The scope chip (all, repo, worktree) narrows the board, attention and quick prompt.", "Open a Review or Ship card to dock its diff beside the board, with Reply, PR, Merge, Archive."] },
   { version: "0.49", title: "One list of verbs", items: ["? on anything shows its verbs with their keys; type to filter, Enter to run. F1 is every key.", "The footer and the desktop's verb bar follow the selection.", "Rebind the desktop's keys in Settings, Hotkeys.", "The diff keeps an agent's committed work: it compares against the base branch."] },
@@ -1733,16 +1733,16 @@ export const KEYS_CHANGED: readonly { verb: string; tui: string; desktop: string
 ];
 
 /** What an empty lane, list or view says, and the verb that fills it. */
-export const EMPTY: readonly { id: string; text: string; verb: ActionId | null }[] = [
-  { id: "lane_running", text: "Agents at work show here.", verb: "quick_prompt" },
-  { id: "lane_needs", text: "Nothing needs you.", verb: null },
-  { id: "lane_review", text: "Finished work to read lands here.", verb: null },
-  { id: "lane_ship", text: "Cards with an open PR. Drag one in from Review.", verb: null },
-  { id: "lane_done", text: "Merged and read work rests here.", verb: null },
-  { id: "board", text: "No sessions yet: start one and it shows on the board.", verb: "quick_prompt" },
-  { id: "no_repos", text: "Add a repo to start: its worktrees and sessions show here.", verb: "add_project" },
-  { id: "no_sessions", text: "No sessions in this worktree yet.", verb: "quick_prompt" },
-  { id: "overview", text: "Every session you start shows here under its repo, the ones waiting on you first.", verb: "quick_prompt" },
-  { id: "accounts", text: "No accounts yet: add one to run sessions on another login.", verb: "accounts" },
-  { id: "search", text: "Nothing matches. Try fewer letters.", verb: null },
+export const EMPTY: readonly { id: string; text: string; verb: ActionId | null; does: string }[] = [
+  { id: "lane_running", text: "Agents at work show here.", verb: "quick_prompt", does: "new session" },
+  { id: "lane_needs", text: "Nothing needs you.", verb: null, does: "" },
+  { id: "lane_review", text: "Finished work to read lands here.", verb: null, does: "" },
+  { id: "lane_ship", text: "Cards with an open PR. Drag one in from Review.", verb: null, does: "" },
+  { id: "lane_done", text: "Merged and read work rests here.", verb: null, does: "" },
+  { id: "board", text: "No sessions yet: start one and it shows on the board.", verb: "quick_prompt", does: "new session" },
+  { id: "no_repos", text: "Add a repo to start: its worktrees and sessions show here.", verb: "add_project", does: "add a repo" },
+  { id: "no_sessions", text: "No sessions in this worktree yet.", verb: "quick_prompt", does: "new session" },
+  { id: "overview", text: "Every session you start shows here under its repo, the ones waiting on you first.", verb: "quick_prompt", does: "new session" },
+  { id: "accounts", text: "No accounts yet: add one to run sessions on another login.", verb: "accounts", does: "accounts" },
+  { id: "search", text: "Nothing matches. Try fewer letters.", verb: null, does: "" },
 ];

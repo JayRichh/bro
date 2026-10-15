@@ -13,15 +13,14 @@ use serde::Serialize;
 
 type Res<T> = Result<T, String>;
 
-/// Whether this run started with no settings file: a first install, not
-/// an upgrade. Read once, at startup, before anything writes one.
+/// Whether this run is a first install, not an upgrade: no settings file
+/// and no daemon database (`learn::fresh_install`). Read once, at startup,
+/// before the daemon is reached.
 static FRESH: OnceLock<bool> = OnceLock::new();
 
-/// Note whether the settings file was there at startup. Called first
-/// thing in `main`.
+/// Note whether this is a first install. Called first thing in `main`.
 pub fn note_startup() {
-    let (path, local) = Config::layer_paths();
-    let _ = FRESH.set(learn::first_run(&path, &local));
+    let _ = FRESH.set(learn::fresh_install());
 }
 
 #[derive(Debug, Serialize, PartialEq)]
