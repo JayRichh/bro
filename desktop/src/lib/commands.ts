@@ -75,6 +75,21 @@ export function currentTarget(): Target | null {
 
 const split = () => nav.current.view === 'session' || nav.current.view === 'diff' || nav.current.view === 'orchestrator';
 
+/** Ctrl+Shift+M and the panes' Full pane button: the split's right side
+ *  takes the window, or comes back down. Nothing to do with no split up. */
+export function toggleMaximize(): boolean {
+  if (!split()) return false;
+  app.paneMax = !app.paneMax;
+  return true;
+}
+
+/** P, N, Ctrl+Shift+N: the quick prompt, on the focused row's repo when a
+ *  row, card or repo header has the focus. */
+function quickPrompt() {
+  const repo = focusedRepo();
+  focusQuickPrompt(repo ? { project: repo } : undefined);
+}
+
 /** Run the action a shortcut names. False when it does nothing here. */
 export function runShortcut(id: ShortcutId): boolean {
   const go: Partial<Record<ShortcutId, () => unknown>> = {
@@ -90,8 +105,8 @@ export function runShortcut(id: ShortcutId): boolean {
     toggle_home: toggleHome,
     open_session: () => app.session && openSession(app.session),
     open_diff: () => openDiff(app.diffWorktree ?? sessionWorktree(app.session)),
-    quick_prompt: () => focusQuickPrompt(),
-    quick_prompt_alt: () => focusQuickPrompt(),
+    quick_prompt: quickPrompt,
+    quick_prompt_alt: quickPrompt,
     cycle_theme: cycleTheme,
     go_home: () => goHome(nav.current.repo),
     go_session: () => app.session && openSession(app.session),
@@ -100,10 +115,13 @@ export function runShortcut(id: ShortcutId): boolean {
     orchestrator_f10: orchestratorKey,
     close_split: () => {
       if (!split() && nav.current.view !== 'settings') return false;
+      // A full pane comes back down first; the next Esc closes the split.
+      if (app.paneMax && split()) return void (app.paneMax = false);
       if (nav.current.view === 'diff') return closeDiff();
       goHome(nav.current.repo);
     },
     toggle_archived: toggleArchived,
+    maximize: toggleMaximize,
     next_attention: () => jumpAttention(1),
     prev_attention: () => jumpAttention(-1),
     new_worktree: () => newWorktree(focusedRepo() ?? currentRepo()),
@@ -152,6 +170,7 @@ export function paletteCommands(): Command[] {
     cmd('next-attention', 'Next session needing you', 'Window', () => jumpAttention(1), 'next_attention', 'attention jump feedback'),
     cmd('prev-attention', 'Previous session needing you', 'Window', () => jumpAttention(-1), 'prev_attention', 'attention jump feedback'),
     cmd('diff', 'Diff the worktree', 'Window', () => openDiff(app.diffWorktree ?? sessionWorktree(app.session)), 'open_diff'),
+    ...(split() ? [cmd('maximize', app.paneMax ? 'Bring the pane back down' : 'Full pane', 'Window', toggleMaximize, 'maximize', 'maximize zoom full screen')] : []),
     cmd('theme', `Cycle theme (now ${app.themePref})`, 'Window', cycleTheme, 'cycle_theme', 'dark light system'),
     cmd('settings', 'Settings', 'Window', () => openSettings(), 'settings', 'preferences config'),
     cmd('presets', 'Agent presets', 'Window', () => openSettings('presets'), undefined, 'prefix postfix'),

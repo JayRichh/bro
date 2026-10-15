@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { firstFocus } from './focus';
+import { firstFocus, focusBack } from './focus';
 
 // A stand-in for the dialog box: elements in document order, matched the
 // way the two selectors in FOCUS_ORDER read.
@@ -24,5 +24,20 @@ describe('firstFocus', () => {
   it('takes a text field first', () => {
     const el = firstFocus(box([{ id: 'name', tag: 'input' }, { id: 'ok', tag: 'button', autofocus: true }]));
     expect((el as unknown as { id: string }).id).toBe('name');
+  });
+});
+
+describe('focusBack', () => {
+  const body = { tag: 'body' };
+  const el = (isConnected = true) => ({ isConnected, focus() {} });
+  it('gives the focus back to the opener when it fell to the body', () => {
+    const row = el();
+    expect(focusBack(row, body, body)).toBe(row);
+    expect(focusBack(row, null, body)).toBe(row);
+  });
+  it('leaves it alone when the opener is gone or something else has it', () => {
+    expect(focusBack(el(false), body, body)).toBeNull();
+    expect(focusBack(el(), { tag: 'textarea' }, body)).toBeNull();
+    expect(focusBack(null, body, body)).toBeNull();
   });
 });

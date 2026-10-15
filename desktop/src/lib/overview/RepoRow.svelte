@@ -4,7 +4,10 @@
   import type { RepoRow } from './repos';
   import SessionTree from './SessionTree.svelte';
   import RunButton from './RunButton.svelte';
-  import { projectMenu } from '../actions';
+  import { newWorktree, openEditor, projectMenu } from '../actions';
+  import { canSwitchBranch, openBranchSwitch } from '../worktrees/switcher.svelte';
+  import { withKey } from '../shortcuts';
+  import Icon from '../ui/Icon.svelte';
   import { openMenu } from '../ui/ui.svelte';
   import { prWord } from '../status';
 
@@ -22,11 +25,18 @@
     ),
   );
   const label = 'font-mono text-[12px] text-muted whitespace-nowrap';
+  const verb =
+    'grid size-6 flex-none place-items-center self-center border border-transparent bg-transparent p-0 text-muted hover:border-rule hover:text-ink';
+  const main = $derived(row.worktrees.find((w) => w.is_main) ?? row.worktrees[0]);
+  const switchable = $derived(canSwitchBranch(row.project.id));
 </script>
 
 <section class="pt-6" data-repo={row.project.id} aria-labelledby="repo-{row.project.id}">
   <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <!-- The header is the repo's row: with one of its verbs focused, the row
+       keys (Shift+N, C, Shift+O, P) act on this repo. -->
   <header
+    data-target="project:{row.project.id}"
     class="flex min-w-0 items-baseline gap-4 border-b border-rule-strong pr-4 pb-2 pl-6"
     oncontextmenu={(e) => (e.preventDefault(), openMenu(projectMenu(row.project.id), { x: e.clientX, y: e.clientY }, row.name))}
   >
@@ -64,12 +74,30 @@
         <span class={label}>no PR</span>
       {/if}
     </span>
+    <span class="flex flex-none items-center gap-0.5 self-center" role="toolbar" aria-label="{row.name}">
+      <button class={verb} title={withKey(`New session in ${row.name}`, 'quick_prompt')} aria-label="New session in {row.name}" onclick={() => focusQuickPrompt({ project: row.project.id })}
+        ><Icon name="plus" size={12} /></button
+      >
+      <button class="{verb} @max-[640px]:hidden" title={withKey('New worktree', 'new_worktree')} aria-label="New worktree in {row.name}" onclick={() => newWorktree(row.project.id)}
+        ><Icon name="branch" size={12} /></button
+      >
+      {#if switchable}
+        <button
+          class="{verb} @max-[640px]:hidden"
+          title={withKey(`Switch the root checkout's branch${row.main ? ` (on ${row.main.branch})` : ''}`, 'switch_branch')}
+          aria-label="Switch branch in {row.name}"
+          onclick={() => openBranchSwitch(row.project.id)}><Icon name="switch" size={12} /></button
+        >
+      {/if}
+      <button class="{verb} @max-[640px]:hidden" title={withKey('Open in the editor', 'open_editor')} aria-label="Open {row.name} in the editor" onclick={() => openEditor(main?.id)}
+        ><Icon name="editor" size={12} /></button
+      >
+    </span>
     <button
-      class="grid size-6 flex-none place-items-center self-center border border-transparent bg-transparent p-0 text-muted hover:border-rule hover:text-ink"
-      title="Repo actions: new worktree, switch branch, open, refresh pull requests, rename, locate, remove (or right-click)"
+      class={verb}
+      title="Repo actions: open remote, refresh pull requests, rename, locate, remove, worktrees (Shift+F10, or right-click)"
       aria-label="{row.name} actions"
       aria-haspopup="menu"
-      data-target="project:{row.project.id}"
       onclick={(e) => openMenu(projectMenu(row.project.id), e.currentTarget as HTMLElement, row.name)}
     >
       <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="5" width="2" height="2" fill="currentColor" /><rect x="5" y="5" width="2" height="2" fill="currentColor" /><rect x="9" y="5" width="2" height="2" fill="currentColor" /></svg>

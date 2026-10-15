@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SHORTCUTS, chordOf, helpGroups, inScope, keyLabel, shortcutFor, type KeyContext, type Scope } from './shortcuts';
+import { SHORTCUTS, chordOf, helpGroups, inScope, keyLabel, shortcutFor, withKey, type KeyContext, type Scope } from './shortcuts';
 
 const key = (k: string, m: Partial<{ ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean }> = {}) => ({
   key: k,
@@ -133,5 +133,25 @@ describe('inside the diff editor', () => {
     expect(key('ArrowLeft', { altKey: true })).toBe('back');
     expect(key('ArrowRight', { altKey: true })).toBe('forward');
     expect(shortcutFor({ key: 'k', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false }, field)?.id).toBe('palette');
+  });
+});
+
+describe('withKey, the buttons\' tooltips', () => {
+  it('names the keys from the table', () => {
+    expect(withKey('Restart the agent', 'restart')).toBe('Restart the agent (Shift+R)');
+    expect(withKey('Keyboard shortcuts', ['help', 'help_f1'])).toBe('Keyboard shortcuts (? or F1)');
+    expect(withKey('Full pane', 'maximize')).toBe('Full pane (Ctrl+Shift+M)');
+  });
+  it('drops the brackets for an action with no key', () => {
+    expect(withKey('Nothing', [])).toBe('Nothing');
+  });
+});
+
+describe('the full pane key', () => {
+  it('works from a terminal and a field, and Esc stays the split close', () => {
+    const m = { key: 'M', ctrlKey: true, shiftKey: true, altKey: false, metaKey: false };
+    expect(shortcutFor(m, term)?.id).toBe('maximize');
+    expect(shortcutFor(m, field)?.id).toBe('maximize');
+    expect(shortcutFor(key('Escape'), idle)?.id).toBe('close_split');
   });
 });

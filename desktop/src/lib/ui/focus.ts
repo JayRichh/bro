@@ -12,3 +12,19 @@ export function firstFocus(root: { querySelector(sel: string): Element | null })
   }
   return null;
 }
+
+// Where the focus goes when the last layer (a menu, a dialog, the palette,
+// the help) closes: back to what had it before, the row, card or button
+// that opened it, so the row keys keep working after Esc. Not when that
+// is gone from the page, nor when something else took the focus since.
+
+/** A layer: its focus never counts as "where the user was". */
+export const LAYER_SEL = '[aria-modal="true"], [role="menu"]';
+
+type Focusable = { isConnected: boolean; focus(): void };
+
+export function focusBack<T extends Focusable>(last: T | null, active: unknown, body: unknown): T | null {
+  if (!last || !last.isConnected) return null;
+  if (active && active !== body) return null;
+  return last;
+}
