@@ -584,6 +584,12 @@ fn flash_nothing(app: &mut App, action: Action) {
 /// overlay reads them. Enter puts the overlay back and presses the key.
 const DIFF_VERBS: &[(&str, KeyCode, KeyModifiers, bool)] = &[
     (
+        "Compare with the base or HEAD",
+        KeyCode::Char('g'),
+        KeyModifiers::CONTROL,
+        false,
+    ),
+    (
         "Next change",
         KeyCode::Char('n'),
         KeyModifiers::CONTROL,
