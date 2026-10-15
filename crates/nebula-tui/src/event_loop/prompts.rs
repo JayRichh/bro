@@ -315,6 +315,7 @@ pub(crate) fn opens_from_closed_splash(action: crate::keymap::Action) -> bool {
             | Action::Quit
             | Action::Verbs
             | Action::Help
+            | Action::WhatsNew
             | Action::Settings
             | Action::Metrics
             | Action::Hosts

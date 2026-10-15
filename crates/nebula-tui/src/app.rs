@@ -89,6 +89,8 @@ pub enum HitTarget {
     /// The ARCHIVED zone along the board's foot, drawn only while a card
     /// is held: let go there, the session is archived.
     KanbanArchive,
+    /// A button on the FIRST-USE TIP's line (`learn.rs`).
+    Tip(crate::learn::TipButton),
     /// A CARD BUTTON on the board card under the cursor, by its session
     /// and action: the cursor onto the card, then the action as its key.
     KanbanButton(nebula_core::AgentId, crate::keymap::Action),
@@ -1067,6 +1069,11 @@ pub struct HelpView {
     pub buttons: Vec<(Rect, crate::keymap::Action)>,
     /// The row under the pointer, lit as a menu's hovered row is.
     pub hover: Option<Rect>,
+    /// The WHAT'S NEW page (`learn.rs`) rather than the keys: shown once
+    /// after an upgrade, and from the keys page's `w` or the palette.
+    pub whats_new: bool,
+    /// How far the What's new page is scrolled, in rows.
+    pub scroll: u16,
 }
 
 impl HelpView {
@@ -5150,6 +5157,8 @@ pub struct App {
     /// The views ported from the desktop window: subagents, the attention
     /// strip, back / forward.
     pub desk: crate::desk::DeskState,
+    /// LEARN IN PLACE: the first-use tip on the footer's padding row.
+    pub learn: crate::learn::Learn,
 }
 
 impl Default for App {
@@ -5172,6 +5181,7 @@ impl App {
             github: GithubState::default(),
             orch: crate::orchestrator_view::OrchState::default(),
             desk: crate::desk::DeskState::default(),
+            learn: crate::learn::Learn::default(),
         };
         app.launcher.columns_recent_prompts_count = 3;
         app

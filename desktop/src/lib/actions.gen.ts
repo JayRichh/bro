@@ -90,6 +90,7 @@ export type ActionId =
   | "metrics"
   | "verbs"
   | "help"
+  | "whats_new"
   | "quit"
   | "sweep_worktrees"
   | "export_settings"
@@ -114,6 +115,7 @@ export type DeskKeyId =
   | "verbs"
   | "help"
   | "help_f1"
+  | "whats_new"
   | "settings"
   | "find"
   | "refresh"
@@ -1335,6 +1337,19 @@ export const ACTIONS: readonly ActionRow[] = [
     desktop: ["help", "help_f1"],
   },
   {
+    id: "whats_new",
+    label: "What's new",
+    hint: "What changed in the last few releases, and the keys that moved: shown once after an upgrade, here any time after (Help has it too)",
+    group: "GENERAL",
+    word: "what's new",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board", "pane"],
+    surface: "both",
+    tui: [],
+    desktop: ["whats_new"],
+  },
+  {
     id: "quit",
     label: "Quit kete",
     hint: "Leave the TUI (sessions keep running in the daemon)",
@@ -1564,6 +1579,7 @@ export const DESK_KEYS: readonly DeskKey[] = [
   { id: "verbs", action: "verbs", label: "Verbs for the selection", group: "General", scope: "global", editorOwns: false, chords: ["?"] },
   { id: "help", action: "help", label: "Keyboard shortcuts", group: "General", scope: "global", editorOwns: false, chords: [] },
   { id: "help_f1", action: "help", label: "Keyboard shortcuts", group: "General", scope: "anywhere", editorOwns: false, chords: ["f1"] },
+  { id: "whats_new", action: "whats_new", label: "What's new", group: "General", scope: "global", editorOwns: false, chords: [] },
   { id: "settings", action: "settings", label: "Settings", group: "General", scope: "anywhere", editorOwns: false, chords: ["ctrl+,"] },
   { id: "find", action: "palette", label: "Find: the view's filter, else the palette", group: "General", scope: "global", editorOwns: false, chords: ["f", "/"] },
   { id: "refresh", action: "refresh_pull_requests", label: "Refresh: ask GitHub again for the pull requests (the Branches view fetches)", group: "General", scope: "global", editorOwns: false, chords: ["shift+r"] },

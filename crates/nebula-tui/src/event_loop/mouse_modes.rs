@@ -172,6 +172,13 @@ fn handle_help_mouse(
         }
         MouseEventKind::Down(MouseButton::Left) => {
             if let Some(action) = help.button_at(pos) {
+                // The WHAT'S NEW page's `all keys` turns the page.
+                if help.whats_new && action == crate::keymap::Action::Help {
+                    help.whats_new = false;
+                    help.scroll = 0;
+                    app.chrome.dirty = true;
+                    return true;
+                }
                 app.modals.overlay = None;
                 if action != crate::keymap::Action::Help {
                     run_action(app, action, out);
@@ -893,6 +900,8 @@ fn handle_left_click_target(app: &mut App, mouse: MouseEvent, out: &mut Vec<Clie
             launcher::click_kanban_button(app, &id, action, out)
         }
         Some(HitTarget::KanbanMenu(id)) => launcher::click_kanban_menu(app, &id, out),
+        // The FIRST-USE TIP's `got it` and `no tips`.
+        Some(HitTarget::Tip(button)) => crate::learn::click(app, button),
         // A lane's air and the ARCHIVED zone take only a held card.
         Some(HitTarget::KanbanLane(_) | HitTarget::KanbanArchive) => {
             app.nav.focus = Focus::Sessions;

@@ -296,6 +296,21 @@ fn button_tooltip(app: &App, th: Theme) -> Option<FooterHint> {
                 th,
             ));
         }
+        HitTarget::Tip(crate::learn::TipButton::GotIt) => {
+            return Some(dim_hint(
+                "click: hide this tip, seen now (any key does too once it has been up a moment)",
+                th,
+            ));
+        }
+        HitTarget::Tip(crate::learn::TipButton::Off) => {
+            return Some(dim_hint(
+                format!(
+                    "click: no more tips · {}: Settings, General, Show tips turns them back on",
+                    key_hint(app, Action::Settings)
+                ),
+                th,
+            ));
+        }
         HitTarget::ScopeChip(0) | HitTarget::ScopeClear => {
             return Some(dim_hint(
                 format!(

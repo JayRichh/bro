@@ -40,26 +40,30 @@ pub const TIP_DRAG: &str = "drag";
 /// The review unit, the first time one opens.
 pub const TIP_REVIEW: &str = "review";
 
+/// The longest a tip runs, its keys filled in: what the terminal app's
+/// footer row holds at 80 columns beside its two buttons.
+pub const TIP_MAX: usize = 54;
+
 pub const TIPS: &[Tip] = &[
     Tip {
         id: TIP_VERBS,
-        text: "{verbs|The verbs menu} lists everything you can do with the selection, each with its key.",
+        text: "{verbs|The verbs menu} lists what you can do here, with keys.",
     },
     Tip {
         id: TIP_SCOPE,
-        text: "The scope chip narrows the board, attention and quick prompt to one repo or worktree; clear it to see everything.",
+        text: "The scope chip narrows the board; clear it to see all.",
     },
     Tip {
         id: TIP_LANES,
-        text: "Review holds finished work no PR carries yet; open a card to see its diff, drag it to Ship to open the PR.",
+        text: "Review: finished work. Drag it to Ship to open a PR.",
     },
     Tip {
         id: TIP_DRAG,
-        text: "Drag a card between lanes: to Ship opens a PR, to Done merges it. {verbs|The verbs menu} on a card has the same moves.",
+        text: "Drag cards across lanes: Ship opens a PR, Done merges.",
     },
     Tip {
         id: TIP_REVIEW,
-        text: "The row above the diff replies, opens or merges the PR, archives, or deletes the worktree; each names its key.",
+        text: "The row above the diff: reply, PR, merge, archive.",
     },
 ];
 
@@ -366,8 +370,10 @@ mod tests {
         for t in TIPS {
             let text = fill(t.text, |_| None);
             assert!(!text.contains('{') && !text.contains('|'), "{}", t.id);
-            // A footer row at 80 columns holds it with its buttons beside.
-            assert!(text.chars().count() <= 130, "{} is long", t.id);
+            // The terminal app's footer row at 80 columns holds it beside
+            // its buttons, its keys filled in.
+            let keyed = fill(t.text, |_| Some("?".into()));
+            assert!(keyed.chars().count() <= TIP_MAX, "{} is long", t.id);
         }
     }
 

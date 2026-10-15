@@ -575,6 +575,7 @@ pub(crate) fn update_pointer(app: &mut App, mouse: &MouseEvent) {
                 | HitTarget::KanbanMenu(_)
                 | HitTarget::LauncherBandNew(_)
                 | HitTarget::LauncherPaneMenu
+                | HitTarget::Tip(_)
         )
     });
     // The ISSUES and PULL REQUESTS MODALS' `↗ open in browser` button is

@@ -212,6 +212,9 @@ pub enum Action {
     /// running it; its last row is the full help ([`Action::Help`]).
     Verbs,
     Help,
+    /// The WHAT'S NEW page (`crate::learn::WHATS_NEW`): unbound by default,
+    /// in the palette and on the Help overlay.
+    WhatsNew,
     Quit,
     // The menus' verbs, rebindable but unbound by default: each acts on
     // the selection, as its menu row does on the row it was opened on.
@@ -1684,6 +1687,21 @@ pub const ACTIONS: &[ActionSpec] = &[
         ],
     },
     ActionSpec {
+        action: Action::WhatsNew,
+        id: "whats_new",
+        label: "What's new",
+        hint: "What changed in the last few releases, and the keys that moved: shown once after an upgrade, here any time after (Help has it too)",
+        group: "GENERAL",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "what's new",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Both,
+        desktop: &[dk("whats_new", "What's new", "General", DeskScope::Global, &[])],
+    },
+    ActionSpec {
         action: Action::Quit,
         id: "quit",
         label: "Quit kete",
@@ -1948,6 +1966,7 @@ pub const DESKTOP_ORDER: &[&str] = &[
     "verbs",
     "help",
     "help_f1",
+    "whats_new",
     "settings",
     "find",
     "refresh",
@@ -2784,7 +2803,7 @@ mod tests {
         // jump, the window's Ctrl+K is `command_palette`; `move_up` walks
         // the cursor where the window's reorders, `reorder_up`): the
         // window's key ids are their own namespace.
-        assert_eq!(ACTIONS.len(), 90);
+        assert_eq!(ACTIONS.len(), 91);
         for id in [
             "palette",
             "move_up",

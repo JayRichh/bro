@@ -1923,7 +1923,55 @@ fn editor_name(cmd: &str) -> &str {
 /// with the KEY COMBO DISPLAY on the padding row above it.
 fn draw_footer(f: &mut Frame, app: &mut App, area: Rect) {
     draw_footer_bar(f, app, area);
-    draw_key_combo(f, app, area);
+    if !draw_tip(f, app, area) {
+        draw_key_combo(f, app, area);
+    }
+}
+
+/// The FIRST-USE TIP (`learn.rs`) on the footer's padding row: `tip` in
+/// the accent, the line, then its `[got it]` and `[no tips]` buttons at
+/// the right. It holds the row while it is up, the key combo display
+/// giving way. False when there is no tip (or no row) to draw.
+fn draw_tip(f: &mut Frame, app: &mut App, area: Rect) -> bool {
+    let Some(id) = app.learn.tip.as_ref().map(|t| t.id) else {
+        return false;
+    };
+    if area.height < 2 || area.width < 24 {
+        return false;
+    }
+    let row = Rect {
+        y: area.y,
+        height: 1,
+        ..area
+    };
+    let th = app.chrome.theme;
+    let buttons = crate::learn::button_rects(row);
+    let text_w = (buttons[0].0.x.saturating_sub(row.x) as usize).saturating_sub(7);
+    let text = truncate(&crate::learn::text(app, id), text_w);
+    let line = Line::from(vec![
+        Span::styled(
+            " tip ",
+            Style::default().fg(th.accent).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" "),
+        Span::styled(text, Style::default().fg(th.text)),
+    ]);
+    f.render_widget(Paragraph::new(line), row);
+    for (rect, button) in buttons {
+        let label = match button {
+            crate::learn::TipButton::GotIt => crate::learn::GOT_IT,
+            crate::learn::TipButton::Off => crate::learn::NO_TIPS,
+        };
+        let lit = app.launcher.hover_crumb == Some(HitTarget::Tip(button));
+        let style = if lit {
+            Style::default().fg(th.text).bg(th.sel_bg)
+        } else {
+            Style::default().fg(th.accent)
+        };
+        f.render_widget(Paragraph::new(Span::styled(label, style)), rect);
+        app.chrome.hits.insert(0, (rect, HitTarget::Tip(button)));
+    }
+    true
 }
 
 /// The KEY COMBO DISPLAY: the last key press
