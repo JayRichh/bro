@@ -64,8 +64,21 @@ pub struct Model {
     /// too: nebula-core's rule, filled in by [`Client::snapshot`]
     /// ([`crate::board::fill`]), never by the window.
     pub cards: HashMap<String, crate::board::Card>,
-    /// The board's cards, lane by lane, each in the order it shows them.
+    /// The board's cards, lane by lane, each in the order it shows them:
+    /// those [`Model::scope`] admits.
     pub lanes: HashMap<nebula_core::board::Lane, Vec<String>>,
+    /// How many more cards each lane would hold but the scope leaves out
+    /// ("2 more outside scope"); every lane present, 0 when none.
+    pub hidden: HashMap<nebula_core::board::Lane, usize>,
+    /// What the window is looking at (`board_scope`): narrows `lanes`,
+    /// and each card's `in_scope`. The window's to set; it survives a
+    /// reconnect.
+    pub scope: nebula_core::scope::Scope,
+    /// Whether each worktree (by id) has work no push carries, as its last
+    /// `worktree_git` read found it: the board's `has_changes`. Filled by
+    /// those reads, never by a read of its own.
+    #[serde(skip)]
+    pub worktree_changes: HashMap<String, bool>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -409,6 +422,30 @@ impl Client {
         if model.prs != prs {
             model.prs = prs;
             drop(model);
+            self.touch();
+        }
+    }
+
+    /// Narrow the board to `scope` (the default: everything).
+    pub fn set_scope(&self, scope: nebula_core::scope::Scope) {
+        let mut model = self.model.lock().expect("model lock");
+        if model.scope != scope {
+            model.scope = scope;
+            drop(model);
+            self.touch();
+        }
+    }
+
+    /// Take in what a `worktree_git` read found, worktree by worktree;
+    /// the rest keep what they had.
+    pub fn set_worktree_changes(&self, changes: impl IntoIterator<Item = (String, bool)>) {
+        let mut model = self.model.lock().expect("model lock");
+        let mut changed = false;
+        for (id, has) in changes {
+            changed |= model.worktree_changes.insert(id, has) != Some(has);
+        }
+        drop(model);
+        if changed {
             self.touch();
         }
     }

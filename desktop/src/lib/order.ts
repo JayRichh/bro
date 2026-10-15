@@ -142,12 +142,15 @@ export type LaneDrop =
 const OWNED: Partial<Record<Lane, string>> = {
   needs: 'Needs you is the agent\u2019s: the card leaves it when you answer the session.',
   running: 'Running is the agent\u2019s: the card lands in Done when the turn ends.',
-  pr: 'Its pull request is open: the card leaves PR open when the PR merges or closes.',
+  pr: 'Its pull request is open: the card leaves Ship when the PR merges or closes.',
 };
 
-/** Only moves the user can cause: Unread to Done marks the session seen,
+/** Only moves the user can cause: Review to Done marks the session seen,
  *  the Archived zone archives it, the same lane reorders. A status the
- *  agent (or the pull request) owns is refused with the reason. */
+ *  agent (or the pull request) owns is refused with the reason.
+ *  A subset of core's rule, which the model now carries per card
+ *  (`Card.drops`: opening and merging a pull request, the worktree
+ *  delete offer); the board moves onto that when it gains those verbs. */
 export function laneDrop(from: Lane, to: Lane | 'archived'): LaneDrop {
   if (to === 'archived') return { act: 'archive' };
   if (from === to) return { act: 'reorder' };
@@ -158,8 +161,8 @@ export function laneDrop(from: Lane, to: Lane | 'archived'): LaneDrop {
   const why: Record<Exclude<Lane, 'done'>, string> = {
     needs: 'Only the agent puts a card in Needs you, by asking.',
     running: 'Only the agent puts a card in Running, by starting a turn: send it a follow-up (Space).',
-    unseen: 'Unread comes from a turn finishing while you were away; a card cannot be marked unread.',
-    pr: 'PR open follows the worktree\u2019s pull request: open one and the card moves.',
+    unseen: 'Review comes from a turn finishing or from new changes; a card cannot be sent back to it.',
+    pr: 'Ship follows the worktree\u2019s pull request: open one and the card moves.',
   };
   return { act: 'refuse', reason: why[to] };
 }

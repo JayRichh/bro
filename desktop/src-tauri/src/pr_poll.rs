@@ -1,5 +1,5 @@
 //! Each checkout's pull request, now and then, for the repo rows' chips
-//! and the board's PR open lane: Azure DevOps for ADO remotes, `gh` for
+//! and the board's Ship lane: Azure DevOps for ADO remotes, `gh` for
 //! the rest. Every checkout is asked, the main one too, and a `gh` PR is
 //! reported in any state (open, merged, closed), so the window can say a
 //! branch landed. A manual refresh wakes the poll early.

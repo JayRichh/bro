@@ -80,7 +80,7 @@ pub async fn worktree_git(
             Some((id, path))
         })
         .collect();
-    tauri::async_runtime::spawn_blocking(move || {
+    let out = tauri::async_runtime::spawn_blocking(move || {
         let mut out = std::collections::BTreeMap::new();
         for chunk in roots.chunks(GIT_READERS) {
             std::thread::scope(|s| {
@@ -98,7 +98,11 @@ pub async fn worktree_git(
         out
     })
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+    // The board's Review lane reads these too, so it costs no git of its
+    // own.
+    client.set_worktree_changes(out.iter().map(|(id, g)| (id.clone(), g.has_changes())));
+    Ok(out)
 }
 
 /// Open a worktree's folder in the system's file manager.

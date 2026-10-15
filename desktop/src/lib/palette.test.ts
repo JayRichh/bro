@@ -24,7 +24,7 @@ const agent = (id: string, worktree: string, status: Agent['status'], extra: Par
 
 /** The model's tiers, as the Tauri side fills them (nebula-core's rule). */
 const cards = (tiers: Record<string, number>): Record<string, Card> =>
-  Object.fromEntries(Object.entries(tiers).map(([id, tier]) => [id, { lane: 'done', tier }]));
+  Object.fromEntries(Object.entries(tiers).map(([id, tier]) => [id, { lane: 'done', tier } as Card]));
 
 const model: Model = {
   connected: true,
@@ -54,7 +54,7 @@ const model: Model = {
   prs: { w2: { number: 42, url: 'https://x/pr/42', title: 'Round GST per invoice', draft: false } },
   subagents: [],
   cards: cards({ 'old-done': 3, 'new-done': 3, busy: 1, asks: 0, unread: 2, gone: 3 }),
-  lanes: { needs: [], running: [], unseen: [], done: [], pr: [] },
+  lanes: { needs: [], running: [], unseen: [], done: [], pr: [] }, hidden: { needs: 0, running: 0, unseen: 0, done: 0, pr: 0 }, scope: {},
 };
 
 const commands = [

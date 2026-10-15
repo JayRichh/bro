@@ -774,7 +774,7 @@ pub const SETTINGS_TABS: &[SettingsTab] = &[
             SettingSpec {
                 kind: SettingKind::Kanban,
                 label: "Kanban",
-                hint: "Lay the grid out as lanes by status (Needs input, Running, Unseen, Done, PR open) instead of a band per worktree (⇧K)",
+                hint: "Lay the grid out as lanes by status (Running, Needs you, Review, Ship, Done) instead of a band per worktree (⇧K)",
                 group: "",
             },
             SettingSpec {
@@ -1244,8 +1244,8 @@ pub struct Config {
     /// [`Config::worktree_layout_word`], so a word off the list is the
     /// cards.
     pub worktree_layout: String,
-    /// KANBAN: the grid laid out as five lanes by status — Needs input,
-    /// Running, Unseen, Done, PR open — instead of a band per worktree.
+    /// KANBAN: the grid laid out as five lanes by status — Running,
+    /// Needs you, Review, Ship, Done — instead of a band per worktree.
     /// `⇧K` flips it and writes it back. Off by default.
     pub kanban: bool,
     /// KANBAN SCOPE: `project` (the project on screen's sessions, the

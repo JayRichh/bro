@@ -1976,6 +1976,7 @@ dependencies = [
  "crossterm",
  "futures",
  "image",
+ "kete-ado",
  "nebula-config",
  "nebula-core",
  "nebula-fuzzy",

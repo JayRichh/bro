@@ -417,6 +417,28 @@ pub async fn rename_current_agent(title: &str, mode: RenameMode) -> Result<()> {
 /// happened and that this session carries on. A daemon-side refusal (a
 /// blank task, a missing CLI, a worktree git could not create) is a
 /// nonzero exit the model reports.
+/// What `kete spawn --profile` says to a daemon older than
+/// [`nebula_core::SPAWN_PROFILE_PROTOCOL`]. The model in the session reads
+/// it, so the way out must be one the platform has: on unix `kete reload`
+/// moves to the new daemon and keeps every session (its own too). Windows
+/// has no reload, and `kete kill` stops every session, this one included,
+/// so there spawning without --profile is the way on and the restart is
+/// the user's to choose.
+fn spawn_profile_too_old(daemon: u32, windows: bool) -> String {
+    let need = nebula_core::SPAWN_PROFILE_PROTOCOL;
+    let way_out = if windows {
+        "On Windows the daemon is only replaced by `kete kill`, which stops every session, \
+         this one included: spawn without --profile, or tell the user the profile needs a \
+         daemon restart (`kete kill`, then reopen kete) when they are ready"
+    } else {
+        "Ask the user to run `kete reload` (it keeps every session), or spawn without --profile"
+    };
+    format!(
+        "`kete spawn --profile` needs daemon protocol v{need}, but the running daemon speaks \
+         v{daemon}: no session started. {way_out}"
+    )
+}
+
 pub async fn spawn_sibling_for_current_agent(
     task: &str,
     kind: Option<AgentKind>,
@@ -455,17 +477,9 @@ pub async fn spawn_sibling_for_current_agent(
     let mut conn = handshake(stream).await?;
     // Without a profile the frame is 57's, which every daemon in range
     // reads; one naming a profile would make an older daemon drop the
-    // connection, so it is refused here with the way out. The model in the
-    // session reads this: `kete reload` keeps every session (its own too),
-    // where `require_protocol`'s `kete kill` would stop them all.
+    // connection, so it is refused here with the way out.
     if profile.is_some() && conn.protocol_version < nebula_core::SPAWN_PROFILE_PROTOCOL {
-        bail!(
-            "`kete spawn --profile` needs daemon protocol v{}, but the running daemon speaks v{}: \
-             no session started. Ask the user to run `kete reload` (it keeps every session), \
-             or spawn without --profile",
-            nebula_core::SPAWN_PROFILE_PROTOCOL,
-            conn.protocol_version
-        );
+        bail!(spawn_profile_too_old(conn.protocol_version, cfg!(windows)));
     }
     let req_id = ONE_SHOT_REQ_ID;
     write_frame(
@@ -1839,6 +1853,19 @@ fn send_signal(pid: i32, sig: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The refusal names a way out the platform has: Windows has no
+    /// `kete reload`, and its `kete kill` stops the asking session too.
+    #[test]
+    fn spawn_profile_on_an_old_daemon_names_the_platforms_way_out() {
+        let unix = spawn_profile_too_old(57, false);
+        assert!(unix.contains("v57") && unix.contains("no session started"));
+        assert!(unix.contains("`kete reload`") && !unix.contains("kete kill"));
+        let windows = spawn_profile_too_old(57, true);
+        assert!(!windows.contains("kete reload"), "{windows}");
+        assert!(windows.contains("`kete kill`") && windows.contains("stops every session"));
+        assert!(windows.contains("without --profile"));
+    }
 
     #[test]
     fn a_move_names_one_agent_session_or_refuses() {

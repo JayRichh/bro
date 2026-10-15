@@ -152,15 +152,38 @@ export interface AutoPick {
   profile: string | null;
   line: string;
 }
-/** A board lane (`nebula_core::board::Lane`): needs you, running, unread,
- *  done, PR open, left to right. */
+/** A board lane (`nebula_core::board::Lane`), by its kept id: running,
+ *  needs you, review (`unseen`), ship (`pr`), done, left to right. */
 export type Lane = 'needs' | 'running' | 'unseen' | 'done' | 'pr';
+/** Where a card can be let go: a lane, or the Archived zone. */
+export type DropTarget = Lane | 'archived';
+/** What letting a card go there does (`nebula_core::board::DropVerb`). */
+export type DropVerb =
+  | { act: 'reorder' }
+  | { act: 'mark_seen' }
+  | { act: 'open_pr' }
+  | { act: 'merge_pr' }
+  | { act: 'archive' }
+  | { act: 'archive_and_offer_worktree_delete' }
+  | { act: 'refuse'; reason: string };
+/** What the window is looking at (`nebula_core::scope::Scope`); a
+ *  missing field matches anything. Set with `board_scope`. */
+export interface Scope {
+  repo?: string | null;
+  worktree?: string | null;
+  session?: string | null;
+  account?: string | null;
+}
 /** A session's place on the board and in the attention order, worked out
  *  by the Tauri side with nebula-core's rule (src-tauri `board.rs`). */
 export interface Card {
   lane: Lane;
   /** 0 needs you, 1 running, 2 unread (finished, unseen), 3 the rest. */
   tier: number;
+  /** The scope admits it: what the attention strip counts. */
+  in_scope: boolean;
+  /** Core's verdict for letting the card go on each target. */
+  drops: Record<DropTarget, DropVerb>;
 }
 export interface Model {
   connected: boolean;
@@ -184,6 +207,10 @@ export interface Model {
   /** The board's cards by lane, in the order it shows them: live
    *  sessions only, the orchestrator left out. */
   lanes: Record<Lane, string[]>;
+  /** Cards each lane would hold but the scope leaves out. */
+  hidden: Record<Lane, number>;
+  /** The scope the lanes are narrowed to. */
+  scope: Scope;
 }
 
 /** `SessionRef` exactly as serde spells it: externally tagged. */

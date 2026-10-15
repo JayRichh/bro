@@ -4249,12 +4249,16 @@ pub struct LauncherState {
     pub launcher_columns: bool,
     /// The KANBAN (`⇧K`; Settings → Appearance → **Kanban**): the grid
     /// laid out as five lanes by what each session wants from you —
-    /// Needs input, Running, Unseen, Done, PR open (`launcher::Lane`) —
+    /// Running, Needs you, Review, Ship, Done (`launcher::Lane`) —
     /// in place of the bands, whatever the worktree layout says.
     pub launcher_kanban: bool,
     /// The KANBAN shows every project's sessions rather than the one on
     /// screen's (`Tab` on the board; **Kanban scope**).
     pub kanban_all: bool,
+    /// What the bench is looking at: narrows the KANBAN (on top of
+    /// `kanban_all`) and the ATTENTION STRIP's counts. The default is
+    /// everything.
+    pub scope: nebula_core::scope::Scope,
     pub columns_hide_projects: bool,
     pub columns_hide_worktrees: bool,
     pub columns_hide_sessions: bool,

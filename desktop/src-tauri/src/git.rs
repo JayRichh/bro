@@ -1,5 +1,5 @@
 //! A worktree's changes, for the diff view, and its pull request, for the
-//! kanban's PR open lane. Both shell out (`git`, `gh`) with no console
+//! kanban's Ship lane. Both shell out (`git`, `gh`) with no console
 //! window, as the daemon's own helpers do.
 //!
 //! Diffs are pinned to commits: a range diff runs from the merge-base of
@@ -941,6 +941,14 @@ pub struct WorktreeGit {
     pub committed: i64,
 }
 
+impl WorktreeGit {
+    /// Work no push carries: changed or untracked files, or commits ahead
+    /// of the upstream. A branch with no upstream counts its files only.
+    pub fn has_changes(&self) -> bool {
+        self.changed + self.untracked > 0 || self.ahead.is_some_and(|n| n > 0)
+    }
+}
+
 /// The checkout's [`WorktreeGit`]: one `git status --porcelain=v2
 /// --branch` (counts and ahead/behind in one go) and one `git log -1`.
 pub fn worktree_git(root: &Path) -> Result<WorktreeGit, String> {
@@ -1747,6 +1755,22 @@ pub(crate) mod tests {
                 unpushed: Some(1)
             }
         );
+    }
+
+    /// The board's `has_changes`: files, or commits the upstream lacks.
+    #[test]
+    fn changes_are_files_or_unpushed_commits() {
+        let g = |changed, untracked, ahead| WorktreeGit {
+            changed,
+            untracked,
+            ahead,
+            ..WorktreeGit::default()
+        };
+        assert!(!g(0, 0, None).has_changes());
+        assert!(!g(0, 0, Some(0)).has_changes());
+        assert!(g(1, 0, None).has_changes());
+        assert!(g(0, 2, Some(0)).has_changes());
+        assert!(g(0, 0, Some(3)).has_changes());
     }
 
     #[test]

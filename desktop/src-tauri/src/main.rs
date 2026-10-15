@@ -837,6 +837,7 @@ fn main() {
             branches::worktree_settings,
             branches::checkout_state,
             branches::worktree_git,
+            board::board_scope,
             branches::worktree_reveal,
             branches::branch_list,
             branches::branch_fetch,

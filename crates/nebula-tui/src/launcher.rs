@@ -200,29 +200,37 @@ fn row_pr(app: &App, worktree: &WorktreeId, project: &ProjectId, branch: &str) -
 /// laid out as one. The rule is nebula-core's, shared with the desktop.
 pub use nebula_core::board::Lane;
 
-/// The lane `row`'s card goes in: [`nebula_core::board::lane_of`], with
-/// the row's pull request open while it is open or a draft.
-pub fn lane_of(row: &LauncherRow) -> Lane {
-    let pr_open = row.pr.as_ref().is_some_and(|pr| {
-        matches!(
-            pr.standing,
-            crate::pull_request::Standing::Open | crate::pull_request::Standing::Draft
-        )
-    });
-    nebula_core::board::lane_of(&row.agent, &nebula_core::board::CardFacts { pr_open })
+/// What the board knows about `row`'s card beyond the row: its pull
+/// request, and whether its checkout has changes as the last read of its
+/// changed-file count found them (none read yet: no changes). No git here.
+pub fn card_facts(app: &App, row: &LauncherRow) -> nebula_core::board::CardFacts {
+    use nebula_core::board::PrState;
+    nebula_core::board::CardFacts {
+        has_changes: app
+            .worktree_changes(&row.agent.worktree_id)
+            .is_some_and(|n| n > 0),
+        pr: row.pr.as_ref().map(|pr| match pr.standing {
+            Standing::Open => PrState::Open,
+            Standing::Draft => PrState::Draft,
+            Standing::Merged => PrState::Merged,
+            Standing::Closed => PrState::Closed,
+        }),
+    }
+}
+
+/// The lane `row`'s card goes in: [`nebula_core::board::lane_of`] over
+/// its [`card_facts`].
+pub fn lane_of(app: &App, row: &LauncherRow) -> Lane {
+    nebula_core::board::lane_of(&row.agent, &card_facts(app, row))
 }
 
 /// The KANBAN's cards, lane by lane in [`Lane::ALL`] order, each lane in
 /// the grid's own recency order — but a checkout the user has ordered
 /// keeps that order among its own cards ([`crate::order::refill`]): the
-/// project on screen's sessions, or with `all` every project's.
+/// project on screen's sessions, or with `all` every project's, narrowed
+/// to the bench's scope. [`kanban_hidden`] counts the rest.
 pub fn kanban(app: &App, all: bool) -> Vec<Vec<LauncherRow>> {
-    let scope = app.selected_project().map(|p| p.id.clone());
-    let rows = rows_in(app, if all { None } else { scope.as_ref() });
-    let mut lanes: Vec<Vec<LauncherRow>> = vec![Vec::new(); Lane::ALL.len()];
-    for row in rows {
-        lanes[lane_of(&row).index()].push(row);
-    }
+    let lanes = kanban_scoped(app, all).lanes;
     let ordered = crate::order::ordered_worktrees(app);
     if ordered.is_empty() {
         return lanes;
@@ -231,6 +239,42 @@ pub fn kanban(app: &App, all: bool) -> Vec<Vec<LauncherRow>> {
         .into_iter()
         .map(|lane| crate::order::refill(lane, &ordered))
         .collect()
+}
+
+/// How many cards each lane (in [`Lane::ALL`] order) would hold but the
+/// board leaves out: another project's with `all` off, or outside the
+/// bench's scope ("2 more outside scope").
+pub fn kanban_hidden(app: &App, all: bool) -> [usize; Lane::ALL.len()] {
+    kanban_scoped(app, all).hidden
+}
+
+/// Every project's cards split into the board's (`all`, the project on
+/// screen, the bench's scope) and the count of the rest, lane by lane.
+fn kanban_scoped(app: &App, all: bool) -> nebula_core::board::Scoped<LauncherRow> {
+    let on_screen = app.selected_project().map(|p| p.id.clone());
+    let scope = &app.launcher.scope;
+    let project_of = |row: &LauncherRow| {
+        app.tree
+            .worktrees
+            .iter()
+            .find(|w| w.id == row.agent.worktree_id)
+            .map(|w| w.project_id.clone())
+    };
+    let rows = rows_in(app, None).into_iter().map(|row| {
+        let project = project_of(&row);
+        let admitted = (all || on_screen.is_none() || project == on_screen)
+            && scope.admits(&row.agent, project.as_ref());
+        (lane_of(app, &row), admitted, row)
+    });
+    let split = nebula_core::board::split_by_scope(rows, |r| r.0, |r| r.1);
+    nebula_core::board::Scoped {
+        lanes: split
+            .lanes
+            .into_iter()
+            .map(|lane| lane.into_iter().map(|r| r.2).collect())
+            .collect(),
+        hidden: split.hidden,
+    }
 }
 
 /// Where session `id` sits on `lanes`: its lane and its place in it.
@@ -2270,25 +2314,56 @@ mod tests {
         };
         let open = Some(pr(Standing::Open));
         use AgentStatus::*;
+        let mut app = app();
+        let lane_of = |app: &App, r: &LauncherRow| lane_of(app, r);
         assert_eq!(
-            lane_of(&row(NeedsFeedback, true, open.clone())),
+            lane_of(&app, &row(NeedsFeedback, true, open.clone())),
             Lane::NeedsInput
         );
-        assert_eq!(lane_of(&row(Running, true, open.clone())), Lane::Running);
-        assert_eq!(lane_of(&row(Finished, true, open.clone())), Lane::Unseen);
-        assert_eq!(lane_of(&row(Finished, false, open.clone())), Lane::PrOpen);
         assert_eq!(
-            lane_of(&row(Finished, false, Some(pr(Standing::Draft)))),
-            Lane::PrOpen,
+            lane_of(&app, &row(Running, true, open.clone())),
+            Lane::Running
+        );
+        assert_eq!(
+            lane_of(&app, &row(Finished, true, open.clone())),
+            Lane::Review
+        );
+        assert_eq!(
+            lane_of(&app, &row(Finished, false, open.clone())),
+            Lane::Ship
+        );
+        assert_eq!(
+            lane_of(&app, &row(Finished, false, Some(pr(Standing::Draft)))),
+            Lane::Ship,
             "a draft is still open"
         );
         assert_eq!(
-            lane_of(&row(Finished, false, Some(pr(Standing::Merged)))),
+            lane_of(&app, &row(Finished, false, Some(pr(Standing::Merged)))),
             Lane::Done,
             "a merged one is done"
         );
-        assert_eq!(lane_of(&row(Finished, false, None)), Lane::Done);
-        assert_eq!(lane_of(&row(Fresh, false, None)), Lane::Done);
+        assert_eq!(lane_of(&app, &row(Finished, false, None)), Lane::Done);
+        assert_eq!(lane_of(&app, &row(Fresh, false, None)), Lane::Done);
+        // The checkout's last changed-file count: changes and no pull
+        // request is Review; none read, or none there, is no changes.
+        let now = std::time::Instant::now();
+        app.jobs
+            .worktree_changes
+            .insert(WorktreeId("w".into()), (Some(3), now));
+        assert_eq!(lane_of(&app, &row(Finished, false, None)), Lane::Review);
+        assert_eq!(lane_of(&app, &row(Fresh, false, None)), Lane::Done);
+        assert_eq!(
+            lane_of(&app, &row(Finished, false, open.clone())),
+            Lane::Ship
+        );
+        app.jobs
+            .worktree_changes
+            .insert(WorktreeId("w".into()), (Some(0), now));
+        assert_eq!(lane_of(&app, &row(Finished, false, None)), Lane::Done);
+        app.jobs
+            .worktree_changes
+            .insert(WorktreeId("w".into()), (None, now));
+        assert_eq!(lane_of(&app, &row(Finished, false, None)), Lane::Done);
     }
 
     /// The board holds the project on screen's sessions, or every
@@ -2308,10 +2383,55 @@ mod tests {
         let one = kanban(&app, false);
         assert_eq!(names(&one, Lane::NeedsInput), ["fix-login"]);
         assert_eq!(names(&one, Lane::Running), ["add-search"]);
-        assert!(one[Lane::Unseen.index()].is_empty(), "tidy-css is web's");
+        assert!(one[Lane::Review.index()].is_empty(), "tidy-css is web's");
+        assert_eq!(kanban_hidden(&app, false), [1, 0, 1, 0, 0]);
         let all = kanban(&app, true);
-        assert_eq!(names(&all, Lane::Unseen), ["tidy-css"]);
+        assert_eq!(names(&all, Lane::Review), ["tidy-css"]);
         assert_eq!(all.iter().map(Vec::len).sum::<usize>(), 4);
+        assert_eq!(kanban_hidden(&app, true), [0; 5]);
+    }
+
+    /// The bench's scope narrows the board on top of its project, and
+    /// what it leaves out is counted lane by lane.
+    #[test]
+    fn the_scope_narrows_the_kanban_and_counts_the_rest() {
+        let mut app = app();
+        app.tree.agents[2].status = AgentStatus::Finished;
+        app.tree.agents[2].unseen = true;
+        let count = |lanes: &[Vec<LauncherRow>]| lanes.iter().map(Vec::len).sum::<usize>();
+        app.launcher.scope.worktree = Some(WorktreeId("w2".into()));
+        let all = kanban(&app, true);
+        assert_eq!(names(&all[Lane::Running.index()]), ["add-search"]);
+        assert_eq!(count(&all), 1);
+        assert_eq!(kanban_hidden(&app, true), [2, 0, 1, 0, 0]);
+        app.launcher.scope = nebula_core::scope::Scope {
+            repo: Some(ProjectId("p2".into())),
+            ..Default::default()
+        };
+        assert_eq!(
+            names(&kanban(&app, true)[Lane::Review.index()]),
+            ["tidy-css"]
+        );
+        assert_eq!(kanban_hidden(&app, true), [3, 0, 0, 0, 0]);
+        app.launcher.scope = nebula_core::scope::Scope::default();
+        assert_eq!(count(&kanban(&app, true)), 4);
+    }
+
+    /// The ATTENTION STRIP counts what the scope admits, across projects.
+    #[test]
+    fn the_attention_strip_follows_the_scope() {
+        use crate::subagents::Tone;
+        let mut app = app();
+        let running = |app: &App| {
+            crate::attention::tally(app)
+                .get(&Tone::Running)
+                .map_or(0, Vec::len)
+        };
+        assert_eq!(running(&app), 4);
+        app.launcher.scope.repo = Some(ProjectId("p1".into()));
+        assert_eq!(running(&app), 2);
+        app.launcher.scope.session = Some(AgentId("a2".into()));
+        assert_eq!(running(&app), 1);
     }
 
     /// A step across skips empty lanes and keeps the row as near as the
