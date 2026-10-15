@@ -197,7 +197,7 @@
 <div class="grid h-full grid-cols-[220px_minmax(0,1fr)]">
   <Rail />
   <main class="relative flex min-h-0 min-w-0 flex-col">
-    <header class="@container flex h-10 flex-none items-center gap-4 border-b border-rule pr-4 pl-2">
+    <header class="@container flex h-10 flex-none items-center gap-3 border-b border-rule pr-4 pl-2">
       <Breadcrumb />
       <span class="flex-1"></span>
       <AttentionStrip />
@@ -222,8 +222,9 @@
         {/each}
       </div>
       <div class="flex flex-none items-center gap-1">
+        <!-- The palette's button gives way first in a narrow window (Ctrl+K stays). -->
         <button
-          class="grid size-7 place-items-center border-0 bg-transparent text-muted hover:bg-surface hover:text-ink"
+          class="hidden size-7 place-items-center border-0 bg-transparent text-muted hover:bg-surface hover:text-ink @min-[760px]:grid"
           title={withKey('Command palette: jump anywhere, run any action', ['palette', 'palette_alt'])}
           aria-label="Command palette"
           onclick={() => ((ui.help = false), (ui.palette = true))}><Icon name="palette" /></button

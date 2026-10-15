@@ -39,7 +39,9 @@
     // typing targets), unless a Monaco widget (find, hover) wants it first.
     if (e.key === 'Escape' && !e.defaultPrevented && t.closest('.monaco-editor') && !t.closest('.find-widget, .monaco-hover, .suggest-widget')) {
       e.preventDefault();
-      closeDiff();
+      // A full pane comes back down first, as the window's own Esc does.
+      if (app.paneMax) app.paneMax = false;
+      else closeDiff();
       return;
     }
     if (t.closest('input, textarea, select, .monaco-editor, .xterm')) return;

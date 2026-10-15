@@ -42,7 +42,7 @@
   >
     <header class="flex flex-none items-baseline gap-4 border-b border-rule-strong px-5 py-3">
       <h2 id="help-title" class="m-0 text-[17px] font-semibold">Keyboard shortcuts</h2>
-      <span class="min-w-0 truncate font-mono text-[12px] text-muted">every key has a button too: the headers, a card's hover strip, or right-click</span>
+      <span class="min-w-0 truncate font-mono text-[12px] text-muted">most verbs have a button too: the headers, a card's hover strip, or right-click</span>
       <span class="flex-1"></span>
       <button
         class="flex-none border border-rule bg-transparent px-1.5 font-mono text-[11px] leading-5 text-muted hover:border-rule-strong hover:text-ink"
