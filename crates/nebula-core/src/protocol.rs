@@ -1117,7 +1117,7 @@ mod tests {
             53,
             55
         ));
-        assert!(SWITCH_ACCOUNT_PROTOCOL <= PROTOCOL_VERSION);
+        const { assert!(SWITCH_ACCOUNT_PROTOCOL <= PROTOCOL_VERSION) };
         for profile in [Some("work".to_string()), None] {
             let req = ClientRequest::SwitchAgentAccount {
                 req_id: 9,
