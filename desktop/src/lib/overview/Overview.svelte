@@ -4,7 +4,7 @@
   import Empty from '../Empty.svelte';
   import RepoRow from './RepoRow.svelte';
   import { repoRows } from './repos';
-  import { refreshGit, watchGit } from '../worktrees/rows.svelte';
+  import { refreshGit, shownIds, watchGit } from '../worktrees/rows.svelte';
   import { gitSignal } from '../worktrees/groups';
 
   let { active = true }: { active?: boolean } = $props();
@@ -17,7 +17,7 @@
   onMount(watchGit);
   const gitSig = $derived(gitSignal(app.model));
   $effect(() => {
-    if (gitSig) untrack(() => refreshGit(app.model.worktrees.map((w) => w.id)));
+    if (gitSig) untrack(() => refreshGit(shownIds()));
   });
 
   // Only a repo picked in the rail scrolls the overview (`revealRepo`, which

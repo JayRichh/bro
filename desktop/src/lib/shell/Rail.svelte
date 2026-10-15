@@ -100,15 +100,20 @@
           {:else if running}<span class="absolute top-1 right-1 size-1.5 bg-running" aria-hidden="true"></span>{/if}
         </button>
         {#if on}
-          <button
-            class="{tile} {nav.current.view === 'worktrees' ? 'bg-surface text-ink' : 'bg-transparent text-muted hover:text-ink'}"
-            onclick={() => nav.go({ view: 'worktrees', repo: r.project.id })}
-            title="{r.name}: worktrees"
-            aria-label="{r.name} worktrees"
-            aria-current={nav.current.view === 'worktrees' ? 'page' : undefined}
-          >
-            <span aria-hidden="true">&#8627;</span>
-          </button>
+          <!-- The repo's views, under the repo in view: Worktrees, and the
+               Azure DevOps ones where it has that remote. -->
+          {#each [...REPO_VIEWS, ...(app.adoCtx[r.project.id] ? ADO_VIEWS : [])] as v (v.view)}
+            {@const cur = nav.current.view === v.view}
+            <button
+              class="{tile} text-[11px] {cur ? 'bg-surface text-ink' : 'bg-transparent text-muted hover:text-ink'}"
+              onclick={() => nav.go({ view: v.view, repo: r.project.id })}
+              title="{r.name}: {v.label}"
+              aria-label="{r.name} {v.label}"
+              aria-current={cur ? 'page' : undefined}
+            >
+              <span aria-hidden="true">{v.view === 'worktrees' ? '↳' : v.view === 'prs' ? 'PR' : v.label.slice(0, 2)}</span>
+            </button>
+          {/each}
         {/if}
       {/each}
     </nav>

@@ -7,7 +7,7 @@
   // terminals follow it, folded away with it.
   import { app, toast } from '../store.svelte';
   import { api } from '../api';
-  import { openMenu } from '../ui/ui.svelte';
+  import { ask, openMenu } from '../ui/ui.svelte';
   import { age } from '../status';
   import RunButton from './RunButton.svelte';
   import SessionTree from './SessionTree.svelte';
@@ -71,6 +71,12 @@
     e.preventDefault();
     const a = app.model.agents.find((x) => x.id === id);
     if (!a || a.worktree_id === w.id) return;
+    const ok = await ask.confirm({
+      title: 'Move session',
+      message: `Move "${a.name}" to ${w.branch}? It carries on in that checkout.`,
+      confirm: 'Move',
+    });
+    if (!ok.ok) return;
     try {
       await api.moveAgent(id, w.id);
       toast(`Moved ${a.name} to ${w.branch}.`);

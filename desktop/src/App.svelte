@@ -201,7 +201,7 @@
           onclick={() => (listShown = !listShown)}>{listShown ? 'Pane' : 'List'}</button
         >
       {/if}
-      <span class="contents max-[1100px]:hidden"><AttentionStrip /></span>
+      {#if !narrow}<AttentionStrip />{/if}
       {#if app.home === 'overview' && !adoView && view !== 'settings' && view !== 'worktrees' && !orchView}
         <button
           class="h-6 flex-none border px-2 text-[12px] {app.showArchived ? 'border-ink bg-ink text-bg' : 'border-rule bg-transparent text-muted hover:text-ink'}"

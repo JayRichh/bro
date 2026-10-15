@@ -8,7 +8,7 @@
 import { api } from '../api';
 import { app, toast } from '../store.svelte';
 import { worktreeApi, type WorktreeGit } from './api';
-import { pruneKeys, setKey } from './groups';
+import { pruneKeys, repoKey, setKey } from './groups';
 
 export const rows = $state({
   /** Folded groups: `repo:<id>`, `wt:<id>`. */
@@ -28,6 +28,8 @@ export function isCollapsed(key: string): boolean {
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 export function setCollapsed(key: string, on: boolean) {
   rows.collapsed = setKey(rows.collapsed, key, on);
+  // A repo opened again reads its checkouts now, not at the next poll.
+  if (!on) refreshGit(shownIds());
   clearTimeout(saveTimer);
   // Folding a few in a row writes config.json once.
   saveTimer = setTimeout(() => {
@@ -76,8 +78,11 @@ export async function refreshGit(ids: string[], force = false) {
 
 let watchers = 0;
 let timer: ReturnType<typeof setInterval> | undefined;
-const allIds = () => app.model.worktrees.map((w) => w.id);
-const onFocus = () => refreshGit(allIds(), true);
+/** Checkouts in repos the overview has open: a folded repo's are not read. */
+export function shownIds(): string[] {
+  return app.model.worktrees.filter((w) => !rows.collapsed.includes(repoKey(w.project_id))).map((w) => w.id);
+}
+const onFocus = () => refreshGit(shownIds(), true);
 
 /** Keep the git state fresh while a view that shows it is mounted: at
  *  once, on window focus, and every half minute. Returns the stop. */
@@ -86,10 +91,10 @@ export function watchGit(): () => void {
   if (watchers === 1) {
     window.addEventListener('focus', onFocus);
     timer = setInterval(() => {
-      if (document.hasFocus()) refreshGit(allIds());
+      if (document.hasFocus()) refreshGit(shownIds());
     }, POLL_MS);
   }
-  refreshGit(allIds());
+  refreshGit(shownIds());
   return () => {
     watchers -= 1;
     if (watchers === 0) {

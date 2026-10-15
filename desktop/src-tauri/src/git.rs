@@ -916,7 +916,10 @@ pub struct WorktreeGit {
 /// --branch` (counts and ahead/behind in one go) and one `git log -1`.
 pub fn worktree_git(root: &Path) -> Result<WorktreeGit, String> {
     let raw = git(root, &["status", "--porcelain=v2", "--branch", "-z"])?;
-    let mut out = parse_status_v2(&raw);
+    // An untracked folder that is a repository of its own (a worktree
+    // nested in the root, like `.claude/worktrees/x`) is not a change, as
+    // the branch switcher's `changes` reads it.
+    let mut out = parse_status_v2(&raw, |dir| root.join(dir).join(".git").exists());
     out.committed = git_text(root, &["log", "-1", "--format=%ct"])
         .ok()
         .and_then(|t| t.parse().ok())
@@ -926,8 +929,9 @@ pub fn worktree_git(root: &Path) -> Result<WorktreeGit, String> {
 
 /// `git status --porcelain=v2 --branch -z` output as a [`WorktreeGit`]
 /// (all but `committed`). A rename or copy (`2`) carries its old path as
-/// one more entry.
-pub fn parse_status_v2(raw: &[u8]) -> WorktreeGit {
+/// one more entry; an untracked folder `nested` says is a repository is
+/// skipped.
+pub fn parse_status_v2(raw: &[u8], nested: impl Fn(&str) -> bool) -> WorktreeGit {
     let mut out = WorktreeGit::default();
     let mut entries = raw.split(|b| *b == 0);
     while let Some(e) = entries.next() {
@@ -942,8 +946,10 @@ pub fn parse_status_v2(raw: &[u8]) -> WorktreeGit {
             out.behind = it
                 .next()
                 .and_then(|b| b.trim_start_matches('-').parse().ok());
-        } else if line.starts_with("? ") {
-            out.untracked += 1;
+        } else if let Some(path) = line.strip_prefix("? ") {
+            if !(path.ends_with('/') && nested(path)) {
+                out.untracked += 1;
+            }
         } else if line.starts_with(['1', '2', 'u']) {
             out.changed += 1;
             if line.starts_with("2 ") {
@@ -1690,7 +1696,7 @@ pub(crate) mod tests {
 u UU N... 100644 100644 100644 100644 a a a c.txt\0\
 ? n.txt\0? m.txt\0! ignored.txt\0";
         assert_eq!(
-            parse_status_v2(raw),
+            parse_status_v2(raw, |_| false),
             WorktreeGit {
                 changed: 3,
                 untracked: 2,
@@ -1700,7 +1706,12 @@ u UU N... 100644 100644 100644 100644 a a a c.txt\0\
                 committed: 0,
             }
         );
-        let none = parse_status_v2(b"# branch.oid (initial)\0# branch.head main\0");
+        let none = parse_status_v2(b"# branch.oid (initial)\0# branch.head main\0", |_| false);
+        assert_eq!(
+            parse_status_v2(b"? sub/\0? dir/\0", |d| d == "sub/").untracked,
+            1,
+            "a nested repository is not an untracked change"
+        );
         assert_eq!(none, WorktreeGit::default());
     }
 
