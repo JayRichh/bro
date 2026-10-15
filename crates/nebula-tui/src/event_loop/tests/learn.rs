@@ -256,6 +256,45 @@ fn the_footer_holds_at_most_seven_entries() {
     });
 }
 
+/// A TUI attached to a daemon an older install left running says so on
+/// its first snapshot, with how to move onto this build; on a daemon of
+/// its own protocol it says nothing.
+#[test]
+fn an_older_daemon_is_named_on_the_first_snapshot() {
+    for (theirs, said) in [
+        (nebula_core::PROTOCOL_VERSION - 3, true),
+        (nebula_core::PROTOCOL_VERSION, false),
+    ] {
+        let mut seeded = App::new();
+        seed_tree(&mut seeded);
+        let tree = seeded.tree.clone();
+        let mut app = App::new();
+        app.orch.daemon_protocol = Some(theirs);
+        hse(
+            &mut app,
+            ServerEvent::Snapshot {
+                projects: tree.projects,
+                worktrees: tree.worktrees,
+                agents: tree.agents,
+                terminals: tree.terminals,
+                links: tree.links,
+                pr_seen: Vec::new(),
+                ui_state: None,
+                subagents: Vec::new(),
+            },
+        );
+        let flash = app.chrome.flash.clone().unwrap_or_default();
+        assert_eq!(flash.contains("older build"), said, "{theirs}: {flash:?}");
+        if said {
+            assert!(flash.contains(if cfg!(windows) {
+                "kete kill"
+            } else {
+                "kete reload"
+            }));
+        }
+    }
+}
+
 /// The page opens before the daemon's first snapshot lands, and is
 /// already recorded as shown: the snapshot (its remembered selection and
 /// pane) must not close it, or the user never sees it.

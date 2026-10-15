@@ -1514,6 +1514,32 @@ pub(crate) fn land_client_rss(app: &mut App, bytes: u64) {
     }
 }
 
+/// What an OLDER DAEMON note says: how to move the daemon onto this build.
+#[cfg(windows)]
+pub(crate) const OLDER_DAEMON: &str =
+    "Kete's daemon is still the older build: run kete kill, then relaunch (sessions stop)";
+#[cfg(unix)]
+pub(crate) const OLDER_DAEMON: &str =
+    "Kete's daemon is still the older build: run kete reload to move it onto this one";
+
+/// An OLDER DAEMON: this TUI attached to a daemon an earlier install left
+/// running (installing swaps the binary, not the daemon running it). It
+/// works, but on the old code: what this release added to the daemon is
+/// missing and its database not yet migrated. Said on the first snapshot,
+/// in place of the TRACKED SETTINGS check, which waits for the restart.
+/// True when said.
+pub(crate) fn note_older_daemon(app: &mut App) -> bool {
+    let older = app
+        .orch
+        .daemon_protocol
+        .is_some_and(|theirs| theirs < nebula_core::PROTOCOL_VERSION);
+    if older {
+        app.chrome.flash = Some(OLDER_DAEMON.into());
+        app.chrome.dirty = true;
+    }
+    older
+}
+
 /// TRACKED SETTINGS (`nebula_core::tracked_settings`): once the tree is
 /// in, ask git off the loop whether a checkout not told before tracks a
 /// file Kete writes for an agent's hooks (an agent's `git add -A` before
