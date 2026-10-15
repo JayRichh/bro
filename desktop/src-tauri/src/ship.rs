@@ -38,7 +38,8 @@ fn place(client: &Client, worktree: &str) -> ShipRes<Place> {
 }
 
 /// Where `worktree` stands for shipping, with a suggested title and body
-/// while its branch has no open PR.
+/// while its branch has no open PR. Silent, as the board asks it unprompted:
+/// ADO never opens a sign-in window here, a missing sign-in is `error`.
 #[tauri::command]
 pub async fn ship_status(
     client: State<'_, Arc<Client>>,
@@ -47,7 +48,7 @@ pub async fn ship_status(
     session: Option<String>,
 ) -> ShipRes<ShipView> {
     let place = place(&client, &worktree)?;
-    let status = Ship::new(&ado, false).status(&place).await;
+    let status = Ship::new(&ado, true).status(&place).await;
     let open = status.pr.as_ref().is_some_and(ship::PrInfo::is_open);
     let suggestion = if open || status.branch.is_none() {
         None

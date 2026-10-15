@@ -501,9 +501,11 @@ async fn merge_pins_the_head_and_deletes_only_the_remote_branch() {
     let r = Repo::new();
     git(&r.dir.path().join("work"), &["push", "-q", "origin", "fix"]);
     let list = serde_json::json!([gh_pr(5, "fix", "OPEN", false, false)]).to_string();
+    let done = serde_json::json!([gh_pr(5, "fix", "MERGED", false, false)]).to_string();
     let script = Arc::new(
         Script::default()
             .on("gh pr list", true, &list, "")
+            .on("gh pr list", true, &done, "")
             .on("gh pr merge", true, "", "")
             .on("git push origin", true, "", ""),
     );
@@ -679,4 +681,75 @@ fn the_suggestion_reads_the_named_session_else_the_worktrees_latest() {
         Some("name-d".into())
     );
     assert_eq!(session_words(&agents, &w("w3"), None), (None, None));
+}
+
+/// gh exits 0 having only queued the merge (a merge queue, auto-merge
+/// behind checks): reported as queued, and the branch the PR needs stays.
+#[tokio::test]
+async fn a_merge_gh_only_queued_keeps_the_branch() {
+    let r = Repo::new();
+    let open = serde_json::json!([gh_pr(5, "fix", "OPEN", false, false)]).to_string();
+    let script = Arc::new(Script::default().on("gh pr list", true, &open, "").on(
+        "gh pr merge",
+        true,
+        "",
+        "",
+    ));
+    let ado = state();
+    let ship = Ship::new(&ado, true).with_runner(script.clone());
+    let opts = MergeOpts {
+        method: MergeMethod::Squash,
+        delete_branch: true,
+    };
+    let m = ship
+        .merge_on(&r.place(), "origin", &github(), opts)
+        .await
+        .unwrap();
+    assert_eq!((m.state.as_str(), m.branch_deleted), ("queued", false));
+    assert!(script.calls_of("git push origin").is_empty());
+}
+
+/// Nothing is rewritten or pushed until gh has answered: without it, or
+/// signed out, the branch stays where it was.
+#[tokio::test]
+async fn create_asks_gh_before_it_pushes() {
+    let r = Repo::new();
+    let ado = state();
+    let script = Arc::new(Script::default().missing("gh pr list"));
+    let ship = Ship::new(&ado, true).with_runner(script);
+    let new = NewPr {
+        title: "t".into(),
+        ..NewPr::default()
+    };
+    let e = ship
+        .create_on(&r.place(), "origin", &github(), new)
+        .await
+        .unwrap_err();
+    assert_eq!(e.kind, ShipErrorKind::NoTool);
+    assert!(!r.remote_has("fix"), "nothing was pushed");
+}
+
+/// A checkout left on the remote's default branch is not shipped onto
+/// another base: that would push it and open main into develop.
+#[tokio::test]
+async fn the_default_branch_is_not_shipped() {
+    let r = Repo::new();
+    let work = r.dir.path().join("work");
+    git(&work, &["remote", "set-head", "origin", "main"]);
+    git(&work, &["checkout", "-q", "main"]);
+    let ado = state();
+    let script = Arc::new(Script::default());
+    let ship = Ship::new(&ado, true).with_runner(script.clone());
+    let new = NewPr {
+        title: "t".into(),
+        base: Some("develop".into()),
+        ..NewPr::default()
+    };
+    let e = ship
+        .create_on(&r.place(), "origin", &github(), new)
+        .await
+        .unwrap_err();
+    assert_eq!(e.kind, ShipErrorKind::NoBranch);
+    assert!(e.message.contains("default branch"), "{e}");
+    assert!(script.calls.lock().unwrap().is_empty());
 }

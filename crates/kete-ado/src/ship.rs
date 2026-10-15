@@ -990,6 +990,9 @@ impl<'a> Ship<'a> {
         let branch = Self::branch(place, forge.kind()).await?;
         let base = self.base_for(place, forge.kind(), None).await?;
         refuse_base_branch(&branch, &base, forge.kind())?;
+        if let Forge::GitHub(_) = forge {
+            refuse_default_branch(&place.path, &remote, &branch).await?;
+        }
         prs::clean_and_push(&place.path, &remote, &branch, &base)
             .await
             .map_err(|e| ShipError::from_ado(e).with_forge(forge.kind()))
@@ -1024,14 +1027,17 @@ impl<'a> Ship<'a> {
             .to_string();
         match forge {
             Forge::GitHub(repo) => {
+                refuse_default_branch(&place.path, remote, &branch).await?;
+                // Asked before anything is rewritten or pushed: a missing
+                // `gh` or sign-in fails here with the branch untouched.
+                let open = self
+                    .pr_for(&place.path, forge, &branch)
+                    .await?
+                    .filter(PrInfo::is_open);
                 let note = prs::clean_and_push(&place.path, remote, &branch, &base)
                     .await
                     .map_err(|e| ShipError::from_ado(e).with_forge(kind))?;
-                if let Some(open) = self
-                    .pr_for(&place.path, forge, &branch)
-                    .await?
-                    .filter(PrInfo::is_open)
-                {
+                if let Some(open) = open {
                     return Ok(Created {
                         pr: open,
                         existing: true,
@@ -1152,6 +1158,29 @@ impl<'a> Ship<'a> {
                 if !out.ok {
                     return Err(gh_error(&out, "gh pr merge").with_url(&pr.url));
                 }
+                // gh also exits 0 when it only queued the PR (a merge queue,
+                // auto-merge behind checks): its branch must stay until it
+                // is merged, or deleting it would close the PR.
+                let now = self
+                    .pr_for(&place.path, forge, &branch)
+                    .await
+                    .ok()
+                    .flatten();
+                let merged = now
+                    .as_ref()
+                    .filter(|p| p.number == pr.number)
+                    .is_some_and(|p| p.state == "merged");
+                if !merged {
+                    return Ok(Merged {
+                        pr,
+                        state: "queued".into(),
+                        branch_deleted: false,
+                        note: Some(
+                            "GitHub queued the merge behind its checks; the branch stays until it lands."
+                                .into(),
+                        ),
+                    });
+                }
                 let (branch_deleted, note) = if opts.delete_branch {
                     self.delete_remote_branch(&place.path, remote, &branch)
                         .await
@@ -1159,7 +1188,7 @@ impl<'a> Ship<'a> {
                     (false, None)
                 };
                 Ok(Merged {
-                    pr,
+                    pr: now.unwrap_or(pr),
                     state: "merged".into(),
                     branch_deleted,
                     note,
@@ -1209,6 +1238,8 @@ impl<'a> Ship<'a> {
         let args = strings(&["push", remote, "--delete", branch]);
         match self.runner.run("git", &args, path, None).await {
             Ok(out) if out.ok => (true, None),
+            // The forge deletes merged branches itself: gone either way.
+            Ok(out) if out.stderr.contains("remote ref does not exist") => (true, None),
             Ok(out) => (
                 false,
                 Some(format!(
@@ -1239,6 +1270,29 @@ fn refuse_base_branch(branch: &str, base: &str, forge: ForgeKind) -> Result<(), 
             ShipErrorKind::NoBranch,
             Some(forge),
             format!("{branch} is the base branch: ship from a work branch."),
+        ));
+    }
+    Ok(())
+}
+
+/// Shipping cleans and pushes the branch, so the remote's default branch
+/// (a checkout left on `main` with another review base) is refused, as
+/// Azure DevOps' create refuses it. Read from `<remote>/HEAD` as the clone
+/// last saw it; none known refuses nothing.
+async fn refuse_default_branch(path: &Path, remote: &str, branch: &str) -> Result<(), ShipError> {
+    let head = format!("refs/remotes/{remote}/HEAD");
+    let Ok(default) = crate::git_out(path, &["symbolic-ref", "--short", "-q", &head]).await else {
+        return Ok(());
+    };
+    let default = default.trim();
+    let default = default
+        .strip_prefix(&format!("{remote}/"))
+        .unwrap_or(default);
+    if !default.is_empty() && branch.eq_ignore_ascii_case(default) {
+        return Err(ShipError::new(
+            ShipErrorKind::NoBranch,
+            Some(ForgeKind::GitHub),
+            format!("{branch} is the repo's default branch: ship from a work branch."),
         ));
     }
     Ok(())

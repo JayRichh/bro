@@ -455,13 +455,17 @@ pub async fn spawn_sibling_for_current_agent(
     let mut conn = handshake(stream).await?;
     // Without a profile the frame is 57's, which every daemon in range
     // reads; one naming a profile would make an older daemon drop the
-    // connection, so it is refused here with the way out.
-    if profile.is_some() {
-        require_protocol(
-            &conn,
+    // connection, so it is refused here with the way out. The model in the
+    // session reads this: `kete reload` keeps every session (its own too),
+    // where `require_protocol`'s `kete kill` would stop them all.
+    if profile.is_some() && conn.protocol_version < nebula_core::SPAWN_PROFILE_PROTOCOL {
+        bail!(
+            "`kete spawn --profile` needs daemon protocol v{}, but the running daemon speaks v{}: \
+             no session started. Ask the user to run `kete reload` (it keeps every session), \
+             or spawn without --profile",
             nebula_core::SPAWN_PROFILE_PROTOCOL,
-            "spawn --profile",
-        )?;
+            conn.protocol_version
+        );
     }
     let req_id = ONE_SHOT_REQ_ID;
     write_frame(
