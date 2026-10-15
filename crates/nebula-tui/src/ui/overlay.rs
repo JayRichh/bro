@@ -2843,3 +2843,32 @@ fn draw_tree_overlay(f: &mut Frame, app: &mut App, mut view: crate::tree_browser
         v.files_width = files_w;
     }
 }
+
+#[cfg(test)]
+mod help_tests {
+    use super::{HelpKeys, HELP_LEFT, HELP_RIGHT};
+
+    /// The HELP lists every action a key can be bound to — but the PROJECT
+    /// TAB slots, which share the one `1-9` row — so nothing is reachable
+    /// only by a key nobody was told about, and every row is a button.
+    #[test]
+    fn help_lists_every_action() {
+        let listed: Vec<crate::keymap::Action> = HELP_LEFT
+            .iter()
+            .chain(HELP_RIGHT)
+            .flat_map(|(_, rows)| rows.iter())
+            .filter_map(|(keys, _)| match keys {
+                HelpKeys::Act(actions) => Some(actions.iter().copied()),
+                HelpKeys::Lit(_) => None,
+            })
+            .flatten()
+            .collect();
+        let missing: Vec<&str> = crate::keymap::ACTIONS
+            .iter()
+            .filter(|spec| !matches!(spec.action, crate::keymap::Action::SelectProjectTab(_)))
+            .filter(|spec| !listed.contains(&spec.action))
+            .map(|spec| spec.id)
+            .collect();
+        assert!(missing.is_empty(), "not in the help: {missing:?}");
+    }
+}

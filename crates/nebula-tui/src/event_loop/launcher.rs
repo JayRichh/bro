@@ -2323,7 +2323,7 @@ pub(super) fn click_band_more(app: &mut App, index: usize, out: &mut Vec<ClientR
 /// PANE lets go of them (`leave_terminal_lock`), and the grid takes FOCUS,
 /// since `a` and `d` act on the card only from there.
 fn keys_to_cards(app: &mut App) {
-    if app.nav.focus == Focus::Terminal {
+    if app.nav.focus == Focus::Terminal || app.pane.term_locked {
         super::leave_terminal_lock(app);
     }
     app.nav.focus = Focus::Sessions;
