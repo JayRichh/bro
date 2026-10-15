@@ -380,12 +380,17 @@ pub const UNBOUND: &str = "-";
 #[derive(Debug, Clone)]
 pub struct Keymap {
     binds: Vec<Vec<KeyChord>>,
+    /// Rows the user set (in the config or the Hotkeys tab), as against
+    /// rows on their defaults, which may have given a chord up to one of
+    /// theirs: only these are written back.
+    mine: Vec<bool>,
 }
 
 impl Default for Keymap {
     fn default() -> Self {
         Self {
             binds: ACTIONS.iter().map(|s| parse_list(s.defaults)).collect(),
+            mine: vec![false; ACTIONS.len()],
         }
     }
 }
@@ -397,6 +402,7 @@ impl Keymap {
     /// An empty string is a deliberate unbind.
     pub fn from_overrides(overrides: &BTreeMap<String, String>) -> Self {
         let mut map = Self::default();
+        let mut mine = vec![false; ACTIONS.len()];
         for (id, spec) in overrides {
             // The desktop window's keys, beside these in the same map.
             if id.starts_with(nebula_config::actions::DESKTOP_PREFIX) {
@@ -406,13 +412,15 @@ impl Keymap {
                 tracing::warn!("ignoring keybinding for unknown action {id:?}");
                 continue;
             };
+            mine[index] = true;
             if spec.trim().is_empty() {
                 map.binds[index].clear();
                 continue;
             }
             let mut chords = Vec::new();
-            for part in spec.split(',') {
-                match KeyChord::parse(part) {
+            // `ctrl+,` and a lone `,` are chords, not separators.
+            for part in nebula_config::actions::split_chords(spec) {
+                match KeyChord::parse(&part) {
                     Some(chord) if !chords.contains(&chord) => chords.push(chord),
                     Some(_) => {}
                     None => tracing::warn!("ignoring unparseable keybinding {part:?} for {id}"),
@@ -420,14 +428,34 @@ impl Keymap {
             }
             map.binds[index] = chords;
         }
+        // A chord the user gave a row is theirs: a row still on its
+        // defaults gives it up, so a default added in a later release
+        // (`d` on the diff, `z` on full screen) never shadows a binding
+        // saved before it.
+        for (index, spec) in ACTIONS.iter().enumerate() {
+            if mine[index] {
+                continue;
+            }
+            let taken: Vec<KeyChord> = ACTIONS
+                .iter()
+                .enumerate()
+                .filter(|(i, s)| mine[*i] && s.scope == spec.scope)
+                .flat_map(|(i, _)| map.binds[i].clone())
+                .collect();
+            map.binds[index].retain(|c| !taken.contains(c));
+        }
+        map.mine = mine;
         map
     }
 
-    /// Only what differs from the defaults, for writing back to the config.
+    /// Only what the user set and differs from the defaults, for writing
+    /// back to the config. A default row that gave a chord up to one of
+    /// theirs stays out: it gives it up again on the next load, and gets
+    /// it back once theirs lets it go.
     pub fn overrides(&self) -> BTreeMap<String, String> {
         let mut out = BTreeMap::new();
         for (index, spec) in ACTIONS.iter().enumerate() {
-            if self.binds[index] != parse_list(spec.defaults) {
+            if self.mine[index] && self.binds[index] != parse_list(spec.defaults) {
                 out.insert(spec.id.to_string(), self.spec_list(index));
             }
         }
@@ -543,6 +571,7 @@ impl Keymap {
         for other in self.conflicts(index, &chord) {
             self.binds[other].retain(|c| *c != chord);
         }
+        self.mine[index] = true;
         let slot = &mut self.binds[index];
         if add {
             if !slot.contains(&chord) {
@@ -557,12 +586,14 @@ impl Keymap {
     pub fn reset(&mut self, index: usize) {
         if let Some(spec) = ACTIONS.get(index) {
             self.binds[index] = parse_list(spec.defaults);
+            self.mine[index] = false;
         }
     }
 
     pub fn clear(&mut self, index: usize) {
         if let Some(slot) = self.binds.get_mut(index) {
             slot.clear();
+            self.mine[index] = true;
         }
     }
 
@@ -853,6 +884,87 @@ mod tests {
     }
 
     #[test]
+    fn a_saved_binding_outranks_a_default_added_later() {
+        // Saved before `d` was the diff's and `z` full screen's: the
+        // user's rows keep them, the default rows give them up.
+        let map = Keymap::from_overrides(&BTreeMap::from([
+            ("delete".into(), "d, delete".into()),
+            ("tree_browser".into(), "z".into()),
+        ]));
+        let d = KeyChord::parse("d").unwrap();
+        let z = KeyChord::parse("z").unwrap();
+        assert_eq!(map.lookup(Scope::Global, &d), Some(Action::Delete));
+        assert_eq!(map.lookup(Scope::Global, &z), Some(Action::TreeBrowser));
+        assert_eq!(
+            map.chords(Action::GitDiff),
+            &[KeyChord::parse("g").unwrap()]
+        );
+        assert_eq!(
+            map.chords(Action::ToggleFullScreen),
+            &[KeyChord::parse("ctrl+f").unwrap()]
+        );
+        // Nothing else moves.
+        assert!(!map.is_ambiguous(index_of(Action::Delete).unwrap()));
+        assert_eq!(
+            map.lookup(Scope::Global, &KeyChord::parse("?").unwrap()),
+            Some(Action::Help)
+        );
+    }
+
+    #[test]
+    fn a_default_row_that_gave_a_chord_up_is_never_saved() {
+        let mut map =
+            Keymap::from_overrides(&BTreeMap::from([("delete".into(), "d, delete".into())]));
+        map.bind(
+            index_of(Action::Help).unwrap(),
+            KeyChord::parse("f1").unwrap(),
+            false,
+        );
+        let saved = map.overrides();
+        assert!(!saved.contains_key("git_diff"), "{saved:?}");
+        assert_eq!(saved["delete"], "d, delete");
+        // Once the user's row lets `d` go, the diff has it back.
+        let map = Keymap::from_overrides(&BTreeMap::from([("delete".into(), "delete".into())]));
+        assert_eq!(
+            map.chords(Action::GitDiff),
+            parse_list(&["d", "g"]).as_slice()
+        );
+        // A steal is the stealer's: the row it came from is not saved.
+        let mut map = Keymap::default();
+        map.bind(
+            index_of(Action::Help).unwrap(),
+            KeyChord::parse("g").unwrap(),
+            false,
+        );
+        assert_eq!(map.overrides().keys().collect::<Vec<_>>(), ["help"]);
+        let loaded = Keymap::from_overrides(&map.overrides());
+        assert_eq!(loaded.chords(Action::GitDiff), map.chords(Action::GitDiff));
+    }
+
+    #[test]
+    fn comma_chords_survive_the_config_shape() {
+        let mut map = Keymap::default();
+        let settings = index_of(Action::Settings).unwrap();
+        let prev = index_of(Action::PrevAttention).unwrap();
+        map.bind(settings, KeyChord::parse("f2").unwrap(), true);
+        map.bind(prev, KeyChord::parse(";").unwrap(), true);
+        let saved = map.overrides();
+        assert_eq!(saved["settings"], "s, ctrl+,, f2");
+        let loaded = Keymap::from_overrides(&saved);
+        assert_eq!(
+            loaded.chords(Action::Settings),
+            map.chords(Action::Settings)
+        );
+        assert_eq!(
+            loaded.chords(Action::PrevAttention),
+            map.chords(Action::PrevAttention)
+        );
+        assert!(loaded
+            .chords(Action::PrevAttention)
+            .contains(&KeyChord::parse(",").unwrap()));
+    }
+
+    #[test]
     fn an_empty_override_means_unbound() {
         let map = Keymap::from_overrides(&BTreeMap::from([("help".into(), String::new())]));
         assert!(map.chords(Action::Help).is_empty());
@@ -875,8 +987,12 @@ mod tests {
 
     #[test]
     fn a_hand_edited_duplicate_is_flagged_on_both_rows() {
-        // Nothing in the overlay can produce this; a text editor can.
-        let map = Keymap::from_overrides(&BTreeMap::from([("open_repo".into(), "g".into())]));
+        // Nothing in the overlay can produce this; a text editor can. (One
+        // override alone takes the chord off a row on its defaults.)
+        let map = Keymap::from_overrides(&BTreeMap::from([
+            ("open_repo".into(), "g".into()),
+            ("git_diff".into(), "d, g".into()),
+        ]));
         let open_repo = index_of(Action::OpenRepo).unwrap();
         let diff = index_of(Action::GitDiff).unwrap();
         assert!(map.is_ambiguous(open_repo));

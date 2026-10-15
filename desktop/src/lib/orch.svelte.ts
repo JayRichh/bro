@@ -159,7 +159,7 @@ type Command = PaletteCommand & { run: () => unknown };
 /** Palette rows: open, start (or replace), unpin. */
 export function orchestratorCommands(): Command[] {
   const o = orchestratorOf(app.model);
-  const keys = keysOf('orchestrator');
+  const keys = [...keysOf('orchestrator'), ...keysOf('orchestrator_f10')];
   const pending: Command[] = notices.list.map((n) => ({
     id: `orch-review-${n.id}`,
     label: noticeText(n.sessions).replace('Orchestrator wants you to review', 'Open the review of'),

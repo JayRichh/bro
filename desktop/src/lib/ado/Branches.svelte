@@ -115,7 +115,8 @@
       return;
     }
     if (ownsKey(t, e.key)) return;
-    if (e.key === '/') {
+    // F and / filter, Shift+R fetches: the window's find and refresh keys.
+    if (e.key === '/' || e.key === 'f') {
       e.preventDefault();
       filterBox?.focus();
     } else if (e.key === 'ArrowDown' || e.key === 'j') {
@@ -124,7 +125,7 @@
     } else if (e.key === 'ArrowUp' || e.key === 'k') {
       e.preventDefault();
       move(-1);
-    } else if (e.key === 'f') {
+    } else if (e.key === 'R' && e.shiftKey) {
       e.preventDefault();
       fetchAll();
     }
@@ -216,7 +217,7 @@
         class="h-7 border border-rule bg-transparent px-2.5 text-[13px] text-ink enabled:hover:border-rule-strong disabled:text-faint"
         onclick={fetchAll}
         disabled={fetching || !worktree}
-        title="Fetch all remotes, with prune (F)">{fetching ? 'Fetching' : 'Fetch'}</button
+        title="Fetch all remotes, with prune (Shift+R)">{fetching ? 'Fetching' : 'Fetch'}</button
       >
       {#if fetchError}
         <span class="flex min-w-0 items-center gap-1.5 text-[13px] text-ink" role="alert">
@@ -234,7 +235,7 @@
           value={query}
           oninput={(e) => (ui.q = (e.currentTarget as HTMLInputElement).value)}
         />
-        <kbd class="mr-1.5 border border-rule px-1 font-mono text-[11px] leading-4 text-muted">/</kbd>
+        <kbd class="mr-1.5 border border-rule px-1 font-mono text-[11px] leading-4 text-muted" title="F or / filters">F</kbd>
       </label>
     </div>
   </header>

@@ -40,6 +40,8 @@ export interface Shortcut {
   /** The diff editor (Monaco) binds this chord itself: it stands down
    *  while the focus is in one. */
   editorOwns?: boolean;
+  /** The user set this row's keys (a `desktop.*` entry in keybindings). */
+  mine?: boolean;
 }
 
 // The live table, kept in a rune module so a tooltip drawn from it
@@ -64,11 +66,21 @@ export function isFixed(scope: Scope): boolean {
 /** Lay the user's bindings (key id to chords; an empty list unbinds) over
  *  the defaults. An id this build doesn't know is ignored. */
 export function applyOverrides(over: Partial<Record<string, string[]>>, table: Shortcut[] = SHORTCUTS) {
+  const theirs = new Set<string>();
   for (const s of table) {
     const k = DESK_KEYS.find((d) => d.id === s.id);
     if (!k) continue;
     const mine = isFixed(k.scope) ? undefined : over[s.id];
+    if (mine) theirs.add(s.id);
+    s.mine = !!mine;
     s.keys = [...(mine ?? k.chords)];
+  }
+  // A chord the user gave a row is theirs: a row still on its defaults
+  // gives it up where their scopes meet, so a default added in a later
+  // release (D, Z, Space, the digits) never shadows a binding saved before.
+  for (const s of table) {
+    if (theirs.has(s.id) || isFixed(s.scope)) continue;
+    s.keys = s.keys.filter((c) => !table.some((o) => theirs.has(o.id) && o.keys.includes(c) && overlaps(s.scope, o.scope)));
   }
 }
 

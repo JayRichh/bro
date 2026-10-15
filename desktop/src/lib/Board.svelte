@@ -126,13 +126,11 @@
       if (t.closest('[data-card-tools]')) return;
       const a = selectedAgent();
       if (a) openSession({ Agent: a.id });
-    } else if (e.key === 'd' && !e.ctrlKey) {
-      const a = selectedAgent();
-      if (a) diffCard(a);
     }
   }
 
-  /** D, or a card's Diff: the card becomes the session, its worktree diffed. */
+  /** A card's Diff (D is the window's, which does the same for the
+   *  focused card): the card becomes the session, its worktree diffed. */
   function diffCard(a: Agent) {
     app.session = { Agent: a.id };
     markSeen(app.session);
@@ -180,8 +178,8 @@
             {@const pr = app.model.prs[a.worktree_id]}
             {@const sel = isSel(lane.id, ri)}
             {@const alert = lane.id === 'needs'}
-            <!-- The card's verbs show on hover or focus; the card keys (F, A, D,
-                 Shift+F10) do the same from the card. -->
+            <!-- The card's verbs show on hover or focus; the card keys (Space, A,
+                 D, Shift+F10) do the same from the card. -->
             {@const mark = dragged && target?.card?.id === a.id ? target.card.place : null}
             <div
               class="group relative {dragged?.id === a.id ? 'opacity-60' : ''}"
@@ -232,7 +230,7 @@
               role="toolbar"
               aria-label="{a.name} actions"
             >
-              <button class={tool} title={withKey('Diff its worktree', 'board_diff')} aria-label="Diff {a.name}" onclick={() => diffCard(a)}><Icon name="diff" size={12} /></button>
+              <button class={tool} title={withKey('Diff its worktree', ['diff', 'open_diff'])} aria-label="Diff {a.name}" onclick={() => diffCard(a)}><Icon name="diff" size={12} /></button>
               {#if a.archived}
                 <button class={tool} title={withKey('Unarchive', 'unarchive')} aria-label="Unarchive {a.name}" onclick={() => unarchiveAgent(a.id)}><Icon name="unarchive" size={12} /></button>
               {:else}

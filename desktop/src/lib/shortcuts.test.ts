@@ -32,23 +32,44 @@ describe('the shortcut table', () => {
     expect(clashes).toEqual([]);
   });
 
-  it('never lets a window key take a home view walking key (Board d, j/k, h/l, Enter)', () => {
+  it('never lets a window key take a home view walking key (j/k, h/l, arrows, Enter)', () => {
     const home = SHORTCUTS.filter((s) => s.scope === 'overview' || s.scope === 'board').flatMap((s) => s.keys);
     const window = SHORTCUTS.filter((s) => s.scope !== 'overview' && s.scope !== 'board').flatMap((s) => s.keys);
-    expect(home).toContain('d');
+    expect(home).toContain('enter');
+    expect(home).not.toContain('space');
     expect(window.filter((k) => home.includes(k))).toEqual([]);
-    expect(shortcutFor(key('d'), row)).toBeUndefined();
   });
 
-  it('has unique ids and every action a key', () => {
+  it('has unique ids and every action a key but the few left unbound', () => {
+    // The digits are repos and Shift+R is refresh: these keep their rows
+    // for a user's own key, with none by default.
+    const unbound = ['go_home', 'go_session', 'go_diff', 'orchestrator', 'restart'];
     const ids = SHORTCUTS.map((s) => s.id);
     expect(new Set(ids).size).toBe(ids.length);
-    for (const s of SHORTCUTS) expect(s.keys.length, s.id).toBeGreaterThan(0);
+    for (const s of SHORTCUTS) {
+      if (unbound.includes(s.id)) expect(s.keys, s.id).toEqual([]);
+      else expect(s.keys.length, s.id).toBeGreaterThan(0);
+    }
   });
 
-  it('keeps Board d as diff and the terminal app row letters', () => {
+  it('shares the terminal app key table', () => {
     const keys = (id: string) => SHORTCUTS.find((s) => s.id === id)!.keys;
-    expect(SHORTCUTS.filter((s) => s.keys.includes('d')).map((s) => s.id)).toEqual(['board_diff']);
+    expect(SHORTCUTS.filter((s) => s.keys.includes('d')).map((s) => s.id)).toEqual(['diff']);
+    expect(shortcutFor(key('d'), row)?.id).toBe('diff');
+    expect(shortcutFor(key('d'), idle)?.id).toBe('diff');
+    expect(shortcutFor(key('d'), field)).toBeUndefined();
+    expect(keys('delete')).toEqual(['delete']);
+    expect(shortcutFor(key('Delete'), row)?.id).toBe('delete');
+    expect(shortcutFor(key(' '), row)?.id).toBe('follow_up');
+    expect(shortcutFor(key('f'), row)?.id).toBe('find');
+    expect(shortcutFor(key('/'), idle)?.id).toBe('find');
+    expect(shortcutFor(key('R', { shiftKey: true }), row)?.id).toBe('refresh');
+    expect(shortcutFor(key('z'), idle)?.id).toBe('maximize_z');
+    expect(shortcutFor(key('z'), term)).toBeUndefined();
+    expect(shortcutFor(key('1'), idle)?.id).toBe('repo_1');
+    expect(shortcutFor(key('9'), row)?.id).toBe('repo_9');
+    expect(shortcutFor(key('0'), idle)).toBeUndefined();
+    expect(keys('list_open')).toEqual(['enter']);
     expect(keys('rename')).toEqual(['r']);
     expect(keys('archive')).toEqual(['a']);
     expect(keys('unarchive')).toEqual(['u']);
@@ -58,9 +79,8 @@ describe('the shortcut table', () => {
 });
 
 describe('the orchestrator keys', () => {
-  it('0 when not typing, F10 in fields, neither inside a shell', () => {
-    expect(shortcutFor(key('0'), idle)?.id).toBe('orchestrator');
-    expect(shortcutFor(key('0'), field)).toBeUndefined();
+  it('F10 when not typing and in fields, never inside a shell', () => {
+    expect(shortcutFor(key('F10'), idle)?.id).toBe('orchestrator_f10');
     expect(shortcutFor(key('F10'), field)?.id).toBe('orchestrator_f10');
     expect(shortcutFor(key('F10'), term)).toBeUndefined();
     // Shift+F10 stays the row menu.
@@ -138,7 +158,8 @@ describe('inside the diff editor', () => {
 
 describe('withKey, the buttons\' tooltips', () => {
   it('names the keys from the table', () => {
-    expect(withKey('Restart the agent', 'restart')).toBe('Restart the agent (Shift+R)');
+    expect(withKey('Restart the agent', 'restart')).toBe('Restart the agent');
+    expect(withKey('Diff', ['diff', 'open_diff'])).toBe('Diff (D or Ctrl+Shift+D)');
     expect(withKey('Keyboard shortcuts', ['help', 'help_f1'])).toBe('Keyboard shortcuts (? or F1)');
     expect(withKey('Full pane', 'maximize')).toBe('Full pane (Ctrl+Shift+M)');
   });

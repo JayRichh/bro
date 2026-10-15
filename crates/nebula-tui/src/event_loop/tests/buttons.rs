@@ -415,7 +415,7 @@ fn a_confirms_answers_are_buttons() {
             let mut app = grid(160);
             press(
                 &mut app,
-                KeyCode::Char('d'),
+                KeyCode::Delete,
                 KeyModifiers::NONE,
                 &mut Vec::new(),
             );

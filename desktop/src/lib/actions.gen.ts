@@ -91,8 +91,7 @@ export type ActionId =
   | "list_move"
   | "list_open"
   | "overview_fold"
-  | "board_lanes"
-  | "board_diff";
+  | "board_lanes";
 
 export type DeskKeyId =
   | "palette"
@@ -100,6 +99,8 @@ export type DeskKeyId =
   | "help"
   | "help_f1"
   | "settings"
+  | "find"
+  | "refresh"
   | "quick_prompt"
   | "quick_prompt_alt"
   | "cycle_theme"
@@ -111,6 +112,16 @@ export type DeskKeyId =
   | "toggle_home"
   | "open_session"
   | "open_diff"
+  | "diff"
+  | "repo_1"
+  | "repo_2"
+  | "repo_3"
+  | "repo_4"
+  | "repo_5"
+  | "repo_6"
+  | "repo_7"
+  | "repo_8"
+  | "repo_9"
   | "go_home"
   | "go_session"
   | "go_diff"
@@ -118,6 +129,7 @@ export type DeskKeyId =
   | "orchestrator_f10"
   | "close_split"
   | "maximize"
+  | "maximize_z"
   | "toggle_archived"
   | "next_attention"
   | "prev_attention"
@@ -140,8 +152,7 @@ export type DeskKeyId =
   | "list_move"
   | "list_open"
   | "overview_fold"
-  | "board_lanes"
-  | "board_diff";
+  | "board_lanes";
 
 export type DeskGroup =
   | "General"
@@ -296,9 +307,9 @@ export const ACTIONS: readonly ActionRow[] = [
     destructive: false,
     appliesTo: ["global"],
     worksIn: ["grid", "board", "pane"],
-    surface: "tui",
+    surface: "both",
     tui: ["/"],
-    desktop: [],
+    desktop: ["find"],
   },
   {
     id: "command_palette",
@@ -400,9 +411,9 @@ export const ACTIONS: readonly ActionRow[] = [
     destructive: false,
     appliesTo: ["repo"],
     worksIn: ["grid", "board"],
-    surface: "tui",
+    surface: "both",
     tui: ["1", "cmd+1"],
-    desktop: [],
+    desktop: ["repo_1"],
   },
   {
     id: "project_tab_2",
@@ -413,9 +424,9 @@ export const ACTIONS: readonly ActionRow[] = [
     destructive: false,
     appliesTo: ["repo"],
     worksIn: ["grid", "board"],
-    surface: "tui",
+    surface: "both",
     tui: ["2", "cmd+2"],
-    desktop: [],
+    desktop: ["repo_2"],
   },
   {
     id: "project_tab_3",
@@ -426,9 +437,9 @@ export const ACTIONS: readonly ActionRow[] = [
     destructive: false,
     appliesTo: ["repo"],
     worksIn: ["grid", "board"],
-    surface: "tui",
+    surface: "both",
     tui: ["3", "cmd+3"],
-    desktop: [],
+    desktop: ["repo_3"],
   },
   {
     id: "project_tab_4",
@@ -439,9 +450,9 @@ export const ACTIONS: readonly ActionRow[] = [
     destructive: false,
     appliesTo: ["repo"],
     worksIn: ["grid", "board"],
-    surface: "tui",
+    surface: "both",
     tui: ["4", "cmd+4"],
-    desktop: [],
+    desktop: ["repo_4"],
   },
   {
     id: "project_tab_5",
@@ -452,9 +463,9 @@ export const ACTIONS: readonly ActionRow[] = [
     destructive: false,
     appliesTo: ["repo"],
     worksIn: ["grid", "board"],
-    surface: "tui",
+    surface: "both",
     tui: ["5", "cmd+5"],
-    desktop: [],
+    desktop: ["repo_5"],
   },
   {
     id: "project_tab_6",
@@ -465,9 +476,9 @@ export const ACTIONS: readonly ActionRow[] = [
     destructive: false,
     appliesTo: ["repo"],
     worksIn: ["grid", "board"],
-    surface: "tui",
+    surface: "both",
     tui: ["6", "cmd+6"],
-    desktop: [],
+    desktop: ["repo_6"],
   },
   {
     id: "project_tab_7",
@@ -478,9 +489,9 @@ export const ACTIONS: readonly ActionRow[] = [
     destructive: false,
     appliesTo: ["repo"],
     worksIn: ["grid", "board"],
-    surface: "tui",
+    surface: "both",
     tui: ["7", "cmd+7"],
-    desktop: [],
+    desktop: ["repo_7"],
   },
   {
     id: "project_tab_8",
@@ -491,9 +502,9 @@ export const ACTIONS: readonly ActionRow[] = [
     destructive: false,
     appliesTo: ["repo"],
     worksIn: ["grid", "board"],
-    surface: "tui",
+    surface: "both",
     tui: ["8", "cmd+8"],
-    desktop: [],
+    desktop: ["repo_8"],
   },
   {
     id: "project_tab_9",
@@ -504,9 +515,9 @@ export const ACTIONS: readonly ActionRow[] = [
     destructive: false,
     appliesTo: ["repo"],
     worksIn: ["grid", "board"],
-    surface: "tui",
+    surface: "both",
     tui: ["9", "cmd+9"],
-    desktop: [],
+    desktop: ["repo_9"],
   },
   {
     id: "close_project_tab",
@@ -570,8 +581,8 @@ export const ACTIONS: readonly ActionRow[] = [
     appliesTo: ["worktree", "session"],
     worksIn: ["grid", "board", "pane", "diff"],
     surface: "both",
-    tui: ["g"],
-    desktop: ["open_diff"],
+    tui: ["d", "g"],
+    desktop: ["open_diff", "diff"],
   },
   {
     id: "open_repo",
@@ -621,9 +632,9 @@ export const ACTIONS: readonly ActionRow[] = [
     destructive: false,
     appliesTo: ["repo"],
     worksIn: ["grid", "board", "pane"],
-    surface: "tui",
+    surface: "both",
     tui: ["shift+r"],
-    desktop: [],
+    desktop: ["refresh"],
   },
   {
     id: "comment_pull_request",
@@ -810,14 +821,14 @@ export const ACTIONS: readonly ActionRow[] = [
   {
     id: "delete",
     label: "Delete selected",
-    hint: "Remove the selected row, behind a confirmation. With the PROJECT TABS holding the keys, close the tab under their cursor, behind the same kind of confirmation: x closes it outright",
+    hint: "Remove the selected row, behind a confirmation. With the PROJECT TABS holding the keys, close the tab under their cursor, behind the same kind of confirmation: x closes it outright. On a Mac keyboard Del is fn+\u232b",
     group: "SESSIONS",
     word: "delete",
     destructive: true,
     appliesTo: ["session", "terminal"],
     worksIn: ["grid", "board"],
     surface: "both",
-    tui: ["d", "delete", "backspace"],
+    tui: ["delete"],
     desktop: ["delete"],
   },
   {
@@ -1044,15 +1055,15 @@ export const ACTIONS: readonly ActionRow[] = [
   {
     id: "toggle_full_screen",
     label: "Full-screen session",
-    hint: "Give the session in the pane the whole screen, or bring it back down beside the cards, from inside the pane too, where it is never forwarded to the agent. From the cards it full-screens the one under the cursor. ^q and ^` also bring a full-screen session back down",
+    hint: "Give the session in the pane the whole screen, or bring it back down beside the cards. From the cards it full-screens the one under the cursor. z is typed into a locked pane like any letter; ^f works from inside it too, where it is never forwarded to the agent. ^q and ^` also bring a full-screen session back down",
     group: "GENERAL",
     word: "full",
     destructive: false,
     appliesTo: ["session"],
     worksIn: ["grid", "board", "pane", "diff"],
     surface: "both",
-    tui: ["ctrl+f"],
-    desktop: ["maximize"],
+    tui: ["z", "ctrl+f"],
+    desktop: ["maximize", "maximize_z"],
   },
   {
     id: "pane_tabs",
@@ -1083,14 +1094,14 @@ export const ACTIONS: readonly ActionRow[] = [
   {
     id: "settings",
     label: "Settings",
-    hint: "Open this settings overlay",
+    hint: "Open this settings overlay (^, needs the kitty protocol; s arrives everywhere)",
     group: "GENERAL",
     word: "settings",
     destructive: false,
     appliesTo: ["global"],
     worksIn: ["grid", "board", "pane", "diff"],
     surface: "both",
-    tui: ["s"],
+    tui: ["s", "ctrl+,"],
     desktop: ["settings"],
   },
   {
@@ -1327,19 +1338,6 @@ export const ACTIONS: readonly ActionRow[] = [
     tui: [],
     desktop: ["board_lanes"],
   },
-  {
-    id: "board_diff",
-    label: "Diff the card",
-    hint: "Diff the selected card's worktree",
-    group: "OVERVIEW AND BOARD",
-    word: "diff",
-    destructive: false,
-    appliesTo: ["session"],
-    worksIn: ["board"],
-    surface: "desktop",
-    tui: [],
-    desktop: ["board_diff"],
-  },
 ];
 
 /** The window's key rows, in its help's order. */
@@ -1349,6 +1347,8 @@ export const DESK_KEYS: readonly DeskKey[] = [
   { id: "help", action: "help", label: "Keyboard shortcuts", group: "General", scope: "global", editorOwns: false, chords: ["?"] },
   { id: "help_f1", action: "help", label: "Keyboard shortcuts", group: "General", scope: "anywhere", editorOwns: false, chords: ["f1"] },
   { id: "settings", action: "settings", label: "Settings", group: "General", scope: "anywhere", editorOwns: false, chords: ["ctrl+,"] },
+  { id: "find", action: "palette", label: "Find: the view's filter, else the palette", group: "General", scope: "global", editorOwns: false, chords: ["f", "/"] },
+  { id: "refresh", action: "refresh_pull_requests", label: "Refresh: ask GitHub again for the pull requests (the Branches view fetches)", group: "General", scope: "global", editorOwns: false, chords: ["shift+r"] },
   { id: "quick_prompt", action: "quick_prompt", label: "Quick prompt", group: "General", scope: "global", editorOwns: false, chords: ["p", "n"] },
   { id: "quick_prompt_alt", action: "quick_prompt", label: "Quick prompt", group: "General", scope: "anywhere", editorOwns: false, chords: ["ctrl+shift+n"] },
   { id: "cycle_theme", action: "cycle_theme", label: "Cycle theme: system, light, dark", group: "General", scope: "anywhere", editorOwns: false, chords: ["ctrl+shift+l"] },
@@ -1360,13 +1360,24 @@ export const DESK_KEYS: readonly DeskKey[] = [
   { id: "toggle_home", action: "toggle_kanban", label: "Switch overview and board", group: "Views", scope: "global", editorOwns: false, chords: ["shift+k"] },
   { id: "open_session", action: "open_session", label: "Show the session", group: "Views", scope: "anywhere", editorOwns: false, chords: ["ctrl+shift+t"] },
   { id: "open_diff", action: "git_diff", label: "Diff the checkout in context: the focused row, the session, the repo (again: back from the diff)", group: "Views", scope: "anywhere", editorOwns: false, chords: ["ctrl+shift+d"] },
-  { id: "go_home", action: "go_home", label: "Home", group: "Views", scope: "global", editorOwns: false, chords: ["1"] },
-  { id: "go_session", action: "go_session", label: "Session", group: "Views", scope: "global", editorOwns: false, chords: ["2"] },
-  { id: "go_diff", action: "go_diff", label: "Diff", group: "Views", scope: "global", editorOwns: false, chords: ["3"] },
-  { id: "orchestrator", action: "toggle_orchestrator_view", label: "Orchestrator (start one when there is none)", group: "Views", scope: "global", editorOwns: false, chords: ["0"] },
+  { id: "diff", action: "git_diff", label: "Diff the checkout in context: the focused row, the session, the repo (again: back from the diff)", group: "Views", scope: "global", editorOwns: false, chords: ["d"] },
+  { id: "repo_1", action: "project_tab_1", label: "Repo 1 on the rail", group: "Views", scope: "global", editorOwns: false, chords: ["1"] },
+  { id: "repo_2", action: "project_tab_2", label: "Repo 2 on the rail", group: "Views", scope: "global", editorOwns: false, chords: ["2"] },
+  { id: "repo_3", action: "project_tab_3", label: "Repo 3 on the rail", group: "Views", scope: "global", editorOwns: false, chords: ["3"] },
+  { id: "repo_4", action: "project_tab_4", label: "Repo 4 on the rail", group: "Views", scope: "global", editorOwns: false, chords: ["4"] },
+  { id: "repo_5", action: "project_tab_5", label: "Repo 5 on the rail", group: "Views", scope: "global", editorOwns: false, chords: ["5"] },
+  { id: "repo_6", action: "project_tab_6", label: "Repo 6 on the rail", group: "Views", scope: "global", editorOwns: false, chords: ["6"] },
+  { id: "repo_7", action: "project_tab_7", label: "Repo 7 on the rail", group: "Views", scope: "global", editorOwns: false, chords: ["7"] },
+  { id: "repo_8", action: "project_tab_8", label: "Repo 8 on the rail", group: "Views", scope: "global", editorOwns: false, chords: ["8"] },
+  { id: "repo_9", action: "project_tab_9", label: "Repo 9 on the rail", group: "Views", scope: "global", editorOwns: false, chords: ["9"] },
+  { id: "go_home", action: "go_home", label: "Home", group: "Views", scope: "global", editorOwns: false, chords: [] },
+  { id: "go_session", action: "go_session", label: "Session", group: "Views", scope: "global", editorOwns: false, chords: [] },
+  { id: "go_diff", action: "go_diff", label: "Diff", group: "Views", scope: "global", editorOwns: false, chords: [] },
+  { id: "orchestrator", action: "toggle_orchestrator_view", label: "Orchestrator (start one when there is none)", group: "Views", scope: "global", editorOwns: false, chords: [] },
   { id: "orchestrator_f10", action: "toggle_orchestrator_view", label: "Orchestrator (start one when there is none)", group: "Views", scope: "fields", editorOwns: false, chords: ["f10"] },
   { id: "close_split", action: "close_split", label: "Close the split or Settings (a full pane comes back down first)", group: "Views", scope: "global", editorOwns: false, chords: ["escape"] },
   { id: "maximize", action: "toggle_full_screen", label: "Full pane: the session or diff takes the window, or comes back down", group: "Views", scope: "anywhere", editorOwns: false, chords: ["ctrl+shift+m"] },
+  { id: "maximize_z", action: "toggle_full_screen", label: "Full pane: the session or diff takes the window, or comes back down", group: "Views", scope: "global", editorOwns: false, chords: ["z"] },
   { id: "toggle_archived", action: "toggle_archived", label: "Show or hide archived sessions", group: "Views", scope: "global", editorOwns: false, chords: ["shift+a"] },
   { id: "next_attention", action: "next_attention", label: "Next session needing you", group: "Views", scope: "global", editorOwns: false, chords: ["."] },
   { id: "prev_attention", action: "prev_attention", label: "Previous session needing you", group: "Views", scope: "global", editorOwns: false, chords: [","] },
@@ -1375,10 +1386,10 @@ export const DESK_KEYS: readonly DeskKey[] = [
   { id: "archive", action: "archive", label: "Archive", group: "Sessions", scope: "row", editorOwns: false, chords: ["a"] },
   { id: "unarchive", action: "unarchive", label: "Unarchive", group: "Sessions", scope: "row", editorOwns: false, chords: ["u"] },
   { id: "delete", action: "delete", label: "Delete (asks first)", group: "Sessions", scope: "row", editorOwns: false, chords: ["delete"] },
-  { id: "restart", action: "restart", label: "Restart the agent", group: "Sessions", scope: "row", editorOwns: false, chords: ["shift+r"] },
+  { id: "restart", action: "restart", label: "Restart the agent", group: "Sessions", scope: "row", editorOwns: false, chords: [] },
   { id: "move", action: "move_session", label: "Move to another worktree", group: "Sessions", scope: "row", editorOwns: false, chords: ["m"] },
   { id: "duplicate", action: "duplicate_session", label: "Duplicate into the quick prompt", group: "Sessions", scope: "row", editorOwns: false, chords: ["shift+p"] },
-  { id: "follow_up", action: "follow_up", label: "Follow-up prompt", group: "Sessions", scope: "row", editorOwns: false, chords: ["f"] },
+  { id: "follow_up", action: "follow_up", label: "Follow-up prompt", group: "Sessions", scope: "row", editorOwns: false, chords: ["space"] },
   { id: "new_terminal", action: "new_terminal", label: "New terminal in its worktree", group: "Sessions", scope: "row", editorOwns: false, chords: ["t"] },
   { id: "open_editor", action: "open_worktree", label: "Open its worktree in the editor", group: "Sessions", scope: "row", editorOwns: false, chords: ["shift+o"] },
   { id: "open_remote", action: "open_repo", label: "Open the repo remote in the browser", group: "Sessions", scope: "row", editorOwns: false, chords: ["shift+g"] },
@@ -1387,8 +1398,7 @@ export const DESK_KEYS: readonly DeskKey[] = [
   { id: "move_up", action: "reorder_up", label: "Move up: the session, worktree or repo (or drag it)", group: "Sessions", scope: "row", editorOwns: false, chords: ["alt+arrowup"] },
   { id: "move_down", action: "reorder_down", label: "Move down: the session, worktree or repo (or drag it)", group: "Sessions", scope: "row", editorOwns: false, chords: ["alt+arrowdown"] },
   { id: "list_move", action: "list_move", label: "Move through the rows (cards on the board)", group: "Overview and board", scope: "overview", editorOwns: false, chords: ["j", "k", "arrowdown", "arrowup"] },
-  { id: "list_open", action: "list_open", label: "Open the session", group: "Overview and board", scope: "overview", editorOwns: false, chords: ["enter", "space"] },
+  { id: "list_open", action: "list_open", label: "Open the session", group: "Overview and board", scope: "overview", editorOwns: false, chords: ["enter"] },
   { id: "overview_fold", action: "overview_fold", label: "Overview: unfold, fold nested sessions", group: "Overview and board", scope: "overview", editorOwns: false, chords: ["arrowright", "arrowleft"] },
   { id: "board_lanes", action: "board_lanes", label: "Board: across lanes (also the side arrows)", group: "Overview and board", scope: "board", editorOwns: false, chords: ["h", "l"] },
-  { id: "board_diff", action: "board_diff", label: "Board: diff the selected card", group: "Overview and board", scope: "board", editorOwns: false, chords: ["d"] },
 ];

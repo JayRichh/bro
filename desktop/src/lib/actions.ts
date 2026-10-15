@@ -401,7 +401,7 @@ function worktreeItems(w: Worktree | undefined): MenuEntry[] {
     );
   out.push(
     item('New terminal', () => newTerminal(w.id), 'new_terminal'),
-    item('Diff', () => openDiff(w.id)),
+    item('Diff', () => openDiff(w.id), 'diff'),
     item('Open in editor', () => openEditor(w.id), 'open_editor'),
     item('Open remote in browser', () => openRemote(w.id), 'open_remote'),
   );
@@ -472,7 +472,7 @@ export function projectMenu(project: string): MenuEntry[] {
     ...(canSwitchBranch(project) ? [item('Switch branch\u2026', () => openBranchSwitch(project), 'switch_branch')] : []),
     item('Open in editor', () => openEditor(main?.id)),
     item('Open remote in browser', () => openRemote(main?.id)),
-    item('Refresh pull requests', refreshPrs),
+    item('Refresh pull requests', refreshPrs, 'refresh'),
     item('Default account\u2026', () => pickProjectAccount(project)),
     'sep',
     item('Rename\u2026', () => renameProject(project)),

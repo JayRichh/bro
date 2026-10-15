@@ -1833,9 +1833,9 @@ fn tabs_action(
         }
         Action::MoveUp => {}
         Action::CloseProjectTab => close_cursor_tab(app, &on, out),
-        // The DELETE keys (`d`, `Delete`, `Backspace`) aimed at the tab
-        // under the cursor rather than the card they left: the same close,
-        // behind the confirm every delete key in nebula puts up first.
+        // The DELETE key (`Del`) aimed at the tab under the cursor rather
+        // than the card it left: the same close, behind the confirm every
+        // delete key in kete puts up first.
         Action::Delete => confirm_close_cursor_tab(app, &on),
         _ => {
             leave_tabs(app);
@@ -4628,7 +4628,7 @@ mod tests {
     /// terminal, and on a session's card it is the card's delete — the
     /// card is never deleted by a key aimed at a shell.
     #[test]
-    fn d_closes_the_terminal_the_strip_is_on_and_the_card_otherwise() {
+    fn del_closes_the_terminal_the_strip_is_on_and_the_card_otherwise() {
         with_default_config(|| {
             let mut app = two_sessions();
             seed_terminal(&mut app, "t1", "w2", "shell-1");
@@ -4636,7 +4636,7 @@ mod tests {
             to_feat(&mut app);
 
             // On the card, `d` is the card's.
-            key(&mut app, KeyCode::Char('d'), KeyModifiers::NONE);
+            key(&mut app, KeyCode::Delete, KeyModifiers::NONE);
             assert!(
                 matches!(&app.modals.overlay, Some(Overlay::Confirm(c))
                     if matches!(c.action, PendingAction::DeleteAgent(_))),
@@ -4647,7 +4647,7 @@ mod tests {
 
             // On the terminal's chip it is the terminal's.
             key(&mut app, KeyCode::Char('`'), KeyModifiers::NONE);
-            key(&mut app, KeyCode::Char('d'), KeyModifiers::NONE);
+            key(&mut app, KeyCode::Delete, KeyModifiers::NONE);
             assert!(
                 matches!(&app.modals.overlay, Some(Overlay::Confirm(c))
                     if matches!(c.action, PendingAction::CloseTerminal(_))),
@@ -4725,7 +4725,7 @@ mod tests {
             assert!(screen.contains("↳ idle"), "{screen}");
             assert!(
                 screen.contains(
-                    "nothing running · p: new session · t: terminal · d: delete worktree"
+                    "nothing running · p: new session · t: terminal · Del: delete worktree"
                 ),
                 "{screen}"
             );
@@ -4759,7 +4759,7 @@ mod tests {
     /// same `activate::delete_worktree` asks — and nothing is deleted
     /// before it is answered.
     #[test]
-    fn d_and_the_menu_on_an_empty_band_ask_to_delete_the_worktree() {
+    fn del_and_the_menu_on_an_empty_band_ask_to_delete_the_worktree() {
         with_default_config(|| {
             let is_worktree_confirm = |app: &App| {
                 matches!(&app.modals.overlay, Some(Overlay::Confirm(c))
@@ -4769,7 +4769,7 @@ mod tests {
             let mut by_key = with_empty_band();
             draw_tall(&mut by_key);
             keys(&mut by_key, &[KeyCode::Char('j'), KeyCode::Char('j')]);
-            let sent = key(&mut by_key, KeyCode::Char('d'), KeyModifiers::NONE);
+            let sent = key(&mut by_key, KeyCode::Delete, KeyModifiers::NONE);
             assert!(is_worktree_confirm(&by_key), "{:?}", by_key.modals.overlay);
             assert!(sent.is_empty(), "asked first: {sent:?}");
 
@@ -4830,7 +4830,7 @@ mod tests {
 
             let mut by_key = with_empty_band_on_a_pull_request();
             let screen = screen_text(&draw_tall(&mut by_key));
-            assert!(screen.contains("d: delete worktree"), "{screen}");
+            assert!(screen.contains("Del: delete worktree"), "{screen}");
             keys(&mut by_key, &[KeyCode::Char('j'), KeyCode::Char('j')]);
             assert_eq!(
                 by_key.selected_worktree().map(|w| w.id.clone()),
@@ -4844,7 +4844,7 @@ mod tests {
                 "the pull request's link row is under the cursor: {:?}",
                 by_key.selected_session_row()
             );
-            let sent = key(&mut by_key, KeyCode::Char('d'), KeyModifiers::NONE);
+            let sent = key(&mut by_key, KeyCode::Delete, KeyModifiers::NONE);
             assert!(
                 is_worktree_confirm(&by_key),
                 "{:?} / {:?}",
@@ -4905,7 +4905,7 @@ mod tests {
             let mut app = with_empty_band();
             draw_tall(&mut app);
             to_feat(&mut app);
-            key(&mut app, KeyCode::Char('d'), KeyModifiers::NONE);
+            key(&mut app, KeyCode::Delete, KeyModifiers::NONE);
             match &app.modals.overlay {
                 Some(Overlay::Confirm(c)) => {
                     assert!(
@@ -4953,7 +4953,7 @@ mod tests {
             let mut app = with_empty_band();
             draw_tall(&mut app);
             to_feat(&mut app);
-            key(&mut app, KeyCode::Char('d'), KeyModifiers::NONE);
+            key(&mut app, KeyCode::Delete, KeyModifiers::NONE);
             match &app.modals.overlay {
                 Some(Overlay::Confirm(c)) => assert!(
                     matches!(
@@ -7826,7 +7826,30 @@ mod tests {
             key(&mut by_x, KeyCode::Char('x'), KeyModifiers::NONE);
             assert_eq!(by_x.launcher.launcher_tabs, [ProjectId("p1".into())]);
 
-            for code in [KeyCode::Backspace, KeyCode::Delete, KeyCode::Char('d')] {
+            // Backspace and `d` are no longer delete keys: neither asks
+            // about anything, on the tabs or on the cards.
+            for code in [KeyCode::Backspace, KeyCode::Char('d')] {
+                let mut app = two_tabs();
+                keys(&mut app, &up);
+                key(&mut app, code, KeyModifiers::NONE);
+                assert!(
+                    !matches!(&app.modals.overlay, Some(Overlay::Confirm(_))),
+                    "{code:?}: {:?}",
+                    app.modals.overlay
+                );
+                assert_eq!(app.launcher.launcher_tabs.len(), 2, "{code:?}");
+                let mut app = two_tabs();
+                keys(&mut app, &[KeyCode::Char('h'), KeyCode::Char('h')]);
+                key(&mut app, code, KeyModifiers::NONE);
+                assert!(
+                    !matches!(&app.modals.overlay, Some(Overlay::Confirm(_))),
+                    "{code:?} on a card: {:?}",
+                    app.modals.overlay
+                );
+            }
+
+            {
+                let code = KeyCode::Delete;
                 let mut app = two_tabs();
                 keys(&mut app, &up);
                 let before = tab_state(&app);
@@ -7886,7 +7909,7 @@ mod tests {
             // Down on the cards the same key is the card's own delete.
             let mut app = two_tabs();
             keys(&mut app, &[KeyCode::Char('h'), KeyCode::Char('h')]);
-            key(&mut app, KeyCode::Backspace, KeyModifiers::NONE);
+            key(&mut app, KeyCode::Delete, KeyModifiers::NONE);
             assert!(
                 matches!(&app.modals.overlay, Some(Overlay::Confirm(c))
                     if matches!(c.action, PendingAction::DeleteAgent(_))),
@@ -8118,6 +8141,33 @@ mod tests {
             assert_eq!(app.nav.focus, Focus::Terminal);
             assert!(app.pane.term_locked);
             assert_eq!(pane(&app), Some(SessionRef::Agent(AgentId("a2".into()))));
+        });
+    }
+
+    /// `z`, the desktop's full-screen key too, does what `^F` does from
+    /// the cards; inside a locked pane it is a letter, typed to the agent.
+    #[test]
+    fn z_full_screens_a_card_and_is_typed_in_a_locked_pane() {
+        with_default_config(|| {
+            let mut app = two_sessions();
+            draw(&mut app);
+            to_feat(&mut app);
+            key(&mut app, KeyCode::Char('z'), KeyModifiers::NONE);
+            assert!(app.pane.collapsed);
+            assert_eq!(app.nav.focus, Focus::Terminal);
+            assert_eq!(pane(&app), Some(SessionRef::Agent(AgentId("a2".into()))));
+
+            let mut app = two_sessions();
+            draw(&mut app);
+            to_feat(&mut app);
+            key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+            assert!(app.pane.term_locked);
+            let out = key(&mut app, KeyCode::Char('z'), KeyModifiers::NONE);
+            assert!(
+                out.iter().any(|r| matches!(r, ClientRequest::Input { .. })),
+                "z goes to the agent: {out:?}"
+            );
+            assert!(!app.pane.collapsed, "and full-screens nothing");
         });
     }
 
@@ -8481,7 +8531,7 @@ mod tests {
             draw(&mut app);
             assert_eq!(cards(&app), ["a9", "a2", "a1"], "newest first");
             super::select(&mut app, AgentId("a2".into()), &mut Vec::new());
-            key(&mut app, KeyCode::Char('d'), KeyModifiers::NONE);
+            key(&mut app, KeyCode::Delete, KeyModifiers::NONE);
             key(&mut app, KeyCode::Char('y'), KeyModifiers::NONE);
             assert_eq!(cards(&app), ["a9", "a1"], "the delete went through");
             assert!(
@@ -8498,7 +8548,7 @@ mod tests {
             let mut app = three_sessions();
             draw(&mut app);
             super::select(&mut app, AgentId("a1".into()), &mut Vec::new());
-            key(&mut app, KeyCode::Char('d'), KeyModifiers::NONE);
+            key(&mut app, KeyCode::Delete, KeyModifiers::NONE);
             key(&mut app, KeyCode::Char('y'), KeyModifiers::NONE);
             assert_eq!(cards(&app), ["a9", "a2"], "the delete went through");
             assert_eq!(selected(&app).as_deref(), Some("a9"), "the card before it");
@@ -8658,7 +8708,10 @@ mod tests {
     #[test]
     fn the_last_card_leaving_folds_the_pane_away() {
         with_default_config(|| {
-            for keys in [&['a', 'y'][..], &['d', 'y'][..]] {
+            for keys in [
+                &[KeyCode::Char('a'), KeyCode::Char('y')][..],
+                &[KeyCode::Delete, KeyCode::Char('y')][..],
+            ] {
                 let mut app = two_sessions();
                 super::open_project(&mut app, &ProjectId("p2".into()), &mut Vec::new());
                 draw(&mut app);
@@ -8666,7 +8719,7 @@ mod tests {
                 assert!(super::has_pane(&app), "{keys:?}: the pane reads it");
 
                 for c in keys {
-                    key(&mut app, KeyCode::Char(*c), KeyModifiers::NONE);
+                    key(&mut app, *c, KeyModifiers::NONE);
                 }
                 assert!(cards(&app).is_empty(), "{keys:?}: the card left");
                 assert!(
@@ -12553,7 +12606,7 @@ mod tests {
             let (head, text) = band_header(&app, &term, 2);
             assert_eq!(head.height, 1);
             assert!(text.contains("nothing running"), "{text:?}");
-            assert!(text.contains("d: delete worktree"), "{text:?}");
+            assert!(text.contains("Del: delete worktree"), "{text:?}");
             let above = drawn_entries(&app, 1)[0].1;
             assert_eq!(head.y, above.bottom(), "no blank row above it");
 
@@ -12612,11 +12665,11 @@ mod tests {
     /// and offers the worktree it empties. On a child it is that child's
     /// own delete.
     #[test]
-    fn d_on_a_threads_root_deletes_everything_nested_under_it() {
+    fn del_on_a_threads_root_deletes_everything_nested_under_it() {
         with_default_config(|| {
             let mut app = nested_with_children();
             key(&mut app, KeyCode::Char('j'), KeyModifiers::NONE);
-            key(&mut app, KeyCode::Char('d'), KeyModifiers::NONE);
+            key(&mut app, KeyCode::Delete, KeyModifiers::NONE);
             assert!(
                 matches!(&app.modals.overlay, Some(Overlay::Confirm(c))
                     if c.action == PendingAction::DeleteAgent(AgentId("a5".into()))),
@@ -12626,7 +12679,7 @@ mod tests {
             key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
 
             key(&mut app, KeyCode::Char('k'), KeyModifiers::NONE);
-            key(&mut app, KeyCode::Char('d'), KeyModifiers::NONE);
+            key(&mut app, KeyCode::Delete, KeyModifiers::NONE);
             let Some(Overlay::Confirm(c)) = &app.modals.overlay else {
                 panic!("the root asks: {:?}", app.modals.overlay);
             };
@@ -12686,8 +12739,8 @@ mod tests {
             assert_ne!(main.cards[1].name(), "a5", "recency is another order");
 
             super::select(&mut app, AgentId("a7".into()), &mut Vec::new());
-            for c in ['d', 'y'] {
-                key(&mut app, KeyCode::Char(c), KeyModifiers::NONE);
+            for c in [KeyCode::Delete, KeyCode::Char('y')] {
+                key(&mut app, c, KeyModifiers::NONE);
             }
             assert_eq!(selected(&app).as_deref(), Some("a9"), "the row under it");
 
@@ -12700,8 +12753,8 @@ mod tests {
                 "the last row: up one"
             );
 
-            for c in ['d', 'y'] {
-                key(&mut app, KeyCode::Char(c), KeyModifiers::NONE);
+            for c in [KeyCode::Delete, KeyCode::Char('y')] {
+                key(&mut app, c, KeyModifiers::NONE);
             }
             assert_eq!(selected(&app).as_deref(), Some("a1"), "back up to the root");
         });
@@ -12794,7 +12847,7 @@ mod tests {
                 &mut Vec::new(),
             );
             draw_tall(&mut app);
-            key(&mut app, KeyCode::Char('d'), KeyModifiers::NONE);
+            key(&mut app, KeyCode::Delete, KeyModifiers::NONE);
             key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
             assert!(!app.tree.worktrees.iter().any(|w| w.id.0 == "w2"));
 
@@ -12804,7 +12857,7 @@ mod tests {
                 &mut Vec::new(),
             );
             draw_tall(&mut app);
-            key(&mut app, KeyCode::Char('d'), KeyModifiers::NONE);
+            key(&mut app, KeyCode::Delete, KeyModifiers::NONE);
             key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
             assert!(crate::launcher::bands(&app).is_empty());
             let text = buffer_text(&draw_tall(&mut app));
@@ -13189,7 +13242,7 @@ mod tests {
             key(&mut app, KeyCode::Char('k'), KeyModifiers::NONE);
             assert_eq!(selected(&app).as_deref(), Some("a1"));
 
-            key(&mut app, KeyCode::Char('d'), KeyModifiers::NONE);
+            key(&mut app, KeyCode::Delete, KeyModifiers::NONE);
             assert!(
                 matches!(&app.modals.overlay, Some(Overlay::Confirm(c))
                     if c.action == PendingAction::DeleteAgent(AgentId("a1".into()))),

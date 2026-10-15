@@ -21,17 +21,34 @@ describe('the registry behind the table', () => {
   });
 
   it('lays the user bindings over the defaults, and takes them back off', () => {
-    applyOverrides({ help: ['f2'], settings: [], board_diff: ['x'], gone: ['q'] });
+    applyOverrides({ help: ['f2'], settings: [], list_move: ['x'], gone: ['q'] });
     expect(keysOf('help')).toEqual(['f2']);
     expect(keysOf('settings')).toEqual([]);
     // A home view's walking key is the view's: never overridden.
-    expect(keysOf('board_diff')).toEqual(['d']);
+    expect(keysOf('list_move')).toEqual(defaultKeys('list_move'));
     expect(shortcutFor(press('F2'), idle)?.id).toBe('help');
     expect(shortcutFor(press('?'), idle)).toBeUndefined();
     expect(withKey('Keyboard shortcuts', ['help', 'help_f1'])).toBe('Keyboard shortcuts (F2 or F1)');
     applyOverrides({});
     expect(keysOf('help')).toEqual(defaultKeys('help'));
     expect(keysOf('settings')).toEqual(['ctrl+,']);
+  });
+
+  it('lets a saved binding outrank a default added later', () => {
+    // Saved before D was the diff and Z the full pane: the user's rows
+    // keep them, the default rows give them up.
+    applyOverrides({ rename: ['d'], cycle_theme: ['ctrl+shift+l'], help: ['z'] });
+    expect(keysOf('diff')).toEqual([]);
+    // Only the user's rows count as changed: the diff gave D up, nothing more.
+    expect(SHORTCUTS.filter((s) => s.mine).map((s) => s.id).sort()).toEqual(['cycle_theme', 'help', 'rename']);
+    expect(keysOf('maximize_z')).toEqual([]);
+    expect(shortcutFor(press('d'), { ...idle, onRow: true })?.id).toBe('rename');
+    expect(shortcutFor(press('z'), idle)?.id).toBe('help');
+    // The rest stay as they were.
+    expect(keysOf('open_diff')).toEqual(['ctrl+shift+d']);
+    expect(keysOf('maximize')).toEqual(['ctrl+shift+m']);
+    applyOverrides({});
+    expect(keysOf('diff')).toEqual(['d']);
   });
 
   it('names the rows a chord would clash with where their scopes meet', () => {

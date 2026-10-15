@@ -157,7 +157,7 @@ export function laneDrop(from: Lane, to: Lane | 'archived'): LaneDrop {
   }
   const why: Record<Exclude<Lane, 'done'>, string> = {
     needs: 'Only the agent puts a card in Needs you, by asking.',
-    running: 'Only the agent puts a card in Running, by starting a turn: send it a follow-up (F).',
+    running: 'Only the agent puts a card in Running, by starting a turn: send it a follow-up (Space).',
     unseen: 'Unread comes from a turn finishing while you were away; a card cannot be marked unread.',
     pr: 'PR open follows the worktree\u2019s pull request: open one and the card moves.',
   };

@@ -154,7 +154,8 @@
     }
     // Typing, or Enter/Space on a focused button, link or radio: not ours.
     if (ownsKey(t, e.key)) return;
-    if (e.key === '/') {
+    // F or /, the window's find keys.
+    if (e.key === '/' || e.key === 'f') {
       e.preventDefault();
       filterBox?.focus();
     } else if (e.key === 'ArrowDown' || e.key === 'j') {
@@ -280,7 +281,7 @@
           value={query}
           oninput={(e) => (ui.q = (e.currentTarget as HTMLInputElement).value)}
         />
-        <kbd class="mr-1.5 border border-rule px-1 font-mono text-[11px] leading-4 text-muted">/</kbd>
+        <kbd class="mr-1.5 border border-rule px-1 font-mono text-[11px] leading-4 text-muted" title="F or / filters">F</kbd>
       </label>
     </div>
 

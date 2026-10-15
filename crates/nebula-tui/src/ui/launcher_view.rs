@@ -1292,7 +1292,7 @@ fn draw_bands(
 /// What an EMPTY BAND says under its rule, the root's without the delete
 /// it refuses.
 const EMPTY_BAND_HINT: &str = "nothing running · p: new session · t: terminal";
-const EMPTY_BAND_DELETE: &str = " · d: delete worktree";
+const EMPTY_BAND_DELETE: &str = " · Del: delete worktree";
 
 /// The line under an EMPTY BAND's rule — a checkout with nothing running
 /// in it, drawn only with **Show all worktrees** on — in place of the row

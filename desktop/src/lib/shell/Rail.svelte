@@ -2,7 +2,7 @@
   import { app, openSettings, revealRepo, setThemePref, toast, type ThemePref } from '../store.svelte';
   import { api } from '../api';
   import { nav, type View } from './history.svelte';
-  import { repoRows, tally } from '../overview/repos';
+  import { railOrder, repoRows, tally } from '../overview/repos';
   import { canProvision, descendantCounts, orchestratorOf, orchestratorTree } from '../orchestrator';
   import { askStartOrchestrator, openOrchestrator } from '../orch.svelte';
   import { toneOf } from '../status';
@@ -12,7 +12,7 @@
   import VersionPlate from './VersionPlate.svelte';
   import { drag, dropProject, endDrag, leftFor, moveOnto, offsetIn, rootOf, startDrag } from '../reorder.svelte';
   import { dropZone, type Zone } from '../order';
-  import { withKey } from '../shortcuts';
+  import { withKey, type ShortcutId } from '../shortcuts';
 
   /** Icons only, for a narrow window: the repos as their initials. */
   let { compact = false }: { compact?: boolean } = $props();
@@ -21,7 +21,9 @@
   const orch = $derived(orchestratorOf(app.model));
   const orchNeeds = $derived(descendantCounts(orchestratorTree(app.model)).needs ?? 0);
   /** Projects in the user's own order: the rail is a map, not a ranking. */
-  const projects = $derived([...rows].sort((a, b) => a.project.sort_order - b.project.sort_order));
+  const projects = $derived(railOrder(rows));
+  /** A repo's digit key, for the first nine. */
+  const digit = (i: number): ShortcutId[] => (i < 9 ? [`repo_${i + 1}` as ShortcutId] : []);
   const here = $derived(nav.current.repo);
   const inSettings = $derived(nav.current.view === 'settings');
   let adding = $state(false);
@@ -125,7 +127,7 @@
         {#if orchNeeds}<span class="absolute top-1 right-1 size-1.5 bg-ember" aria-hidden="true"></span>{/if}
       </button>
       <span class="mx-3 my-1 h-px flex-none bg-rule" aria-hidden="true"></span>
-      {#each projects as r (r.project.id)}
+      {#each projects as r, i (r.project.id)}
         {@const c = tally([r])}
         {@const needs = c.needs?.length ?? 0}
         {@const running = c.running?.length ?? 0}
@@ -135,7 +137,7 @@
           data-target="project:{r.project.id}"
           {...dnd(r.project.id)}
           onclick={() => revealRepo(r.project.id)}
-          title="{r.name}{needs ? `: ${needs} ${needs === 1 ? 'needs' : 'need'} you` : running ? `: ${running} running` : ''}. {reorderHint}; drop a session to move it here"
+          title="{withKey(r.name, digit(i))}{needs ? `: ${needs} ${needs === 1 ? 'needs' : 'need'} you` : running ? `: ${running} running` : ''}. {reorderHint}; drop a session to move it here"
           aria-label={r.name}
           aria-current={on ? 'true' : undefined}
         >
@@ -257,7 +259,7 @@
       {/if}
     </div>
     <h2 class="m-0 {heading}">Repos</h2>
-    {#each projects as r (r.project.id)}
+    {#each projects as r, i (r.project.id)}
       {@const c = tally([r])}
       {@const needs = c.needs?.length ?? 0}
       {@const running = c.running?.length ?? 0}
@@ -268,7 +270,7 @@
         data-target="project:{r.project.id}"
         {...dnd(r.project.id)}
         onclick={() => revealRepo(r.project.id)}
-        title="{r.project.repo_path}. {reorderHint}; drop a session to move it to the root checkout"
+        title="{withKey(r.project.repo_path, digit(i))}. {reorderHint}; drop a session to move it to the root checkout"
         aria-current={on ? 'true' : undefined}
       >
         {#if mark?.id === r.project.id && mark.zone !== 'onto' && drag.item}
