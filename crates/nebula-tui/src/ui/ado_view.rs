@@ -87,7 +87,7 @@ fn rows(app: &App, view: &AdoView, width: usize) -> Result<Vec<Vec<Span<'static>
                     let checked_out = app.tree.worktrees.iter().any(|w| {
                         Some(&w.project_id) == view.project.as_ref() && w.branch == br.name
                     });
-                    let place = match (br.local, br.remote) {
+                    let place = match (br.local, br.remote.is_some()) {
                         (true, true) => "local · remote",
                         (true, false) => "local",
                         _ => "remote",

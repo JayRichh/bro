@@ -122,7 +122,15 @@ pub(crate) fn pane_chip(app: &App, id: &AgentId) -> Option<Vec<Span<'static>>> {
     if app.launcher.hover_crumb == Some(HitTarget::SubagentChip(id.clone())) {
         style = style.add_modifier(Modifier::UNDERLINED);
     }
-    Some(vec![Span::raw("  "), Span::styled(text, style)])
+    // Its key beside it, the way the header's buttons carry theirs.
+    Some(vec![
+        Span::raw("  "),
+        Span::styled(text, style),
+        Span::styled(
+            format!(" {}", key_hint(app, Action::Subagents)),
+            Style::default().fg(th.dim),
+        ),
+    ])
 }
 
 /// The column a row at `depth` draws its fold mark at, inside the list

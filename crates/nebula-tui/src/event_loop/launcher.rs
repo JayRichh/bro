@@ -10145,8 +10145,9 @@ mod tests {
     }
 
     /// The header counts what is waiting on a human in the project tab's
-    /// red dot — the count, and not a word beside it. Nothing else on the
-    /// row says it: the dot is the whole announcement.
+    /// red dot — the count, and not a word beside it. The words are the
+    /// ATTENTION STRIP's (`ui::attention_view`), which counts across every
+    /// project and says it once.
     #[test]
     fn the_header_counts_the_sessions_waiting_on_you() {
         with_default_config(|| {

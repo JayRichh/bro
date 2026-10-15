@@ -562,6 +562,22 @@ mod tests {
         });
     }
 
+    /// The header's `commands` button opens what `^K` opens, and says so.
+    #[test]
+    fn the_commands_button_is_the_command_palette() {
+        with_default_config(|| {
+            let mut app = app();
+            let text = buffer_text(&draw(&mut app));
+            assert!(text.contains("commands ^k"), "{text}");
+            let at = cell(&app, &HitTarget::CommandsButton);
+            click(&mut app, at);
+            assert!(matches!(
+                &app.modals.overlay,
+                Some(Overlay::Palette(p)) if p.commands
+            ));
+        });
+    }
+
     /// `⌥←` goes back to the card the grid was on before, `⌥→` forward
     /// again; the header's `‹` does what `⌥←` does.
     #[test]

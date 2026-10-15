@@ -177,7 +177,11 @@ fn activate(app: &mut App, out: &mut Vec<ClientRequest>) {
         return;
     }
     // A remote-only branch is cut from the remote's, so it tracks it.
-    let base = (!branch.local).then(|| format!("origin/{}", branch.name));
+    let base = if branch.local {
+        None
+    } else {
+        branch.remote.clone()
+    };
     let focus = app.nav.focus;
     app.bring_tab_forward(&project);
     let placeholder = placeholder::stage_worktree(app, project.clone(), branch.name.clone(), out);
@@ -321,6 +325,7 @@ mod tests {
 
     fn ado_app() -> App {
         let mut app = App::new();
+        app.launcher.launcher_pane_at = crate::launcher::PaneSide::Bottom;
         seed_tree(&mut app);
         app.desk.ado_remote.insert(ProjectId("p1".into()), true);
         app
@@ -413,7 +418,7 @@ mod tests {
                     result: Ok(vec![AdoBranch {
                         name: "main".into(),
                         local: true,
-                        remote: true,
+                        remote: Some("origin/main".into()),
                     }]),
                 },
             );

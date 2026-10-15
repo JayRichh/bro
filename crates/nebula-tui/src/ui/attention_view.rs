@@ -1,8 +1,10 @@
 //! The LAUNCHER VIEW header's ported pieces, laid in the room the PROJECT
 //! TABS and the counts leave between them: BACK and FORWARD (`‹ ›`, as
-//! `⌥←` / `⌥→`) and the ATTENTION STRIP — `2 need you · 3 running ·
-//! 1 unread` across every project (`crate::attention`), each count a
-//! button that opens the next session in that state.
+//! `⌥←` / `⌥→`), the `commands` button (`^K`), the `ado` button on a
+//! project on Azure DevOps (`⇧B`), and the ATTENTION STRIP — `2 need you
+//! · 3 running · 1 unread` across every project (`crate::attention`),
+//! each count a button that opens the next session in that state. The
+//! TUI has no tooltips: each button carries its key beside it, dim.
 
 use super::*;
 use crate::subagents::Tone;
@@ -15,7 +17,7 @@ fn width(part: &Part) -> usize {
 }
 
 /// `‹ ›`: lit where there is somewhere to go, dim where not, underlined
-/// under the pointer.
+/// under the pointer; then back's key, dim.
 fn nav_part(app: &App, th: Theme) -> Part {
     let button = |glyph: &'static str, can: bool, hit: HitTarget| {
         let mut style = Style::default().fg(if can { th.muted } else { th.dim });
@@ -30,9 +32,34 @@ fn nav_part(app: &App, th: Theme) -> Part {
         button("‹", app.desk.history.can_back(), HitTarget::NavBack),
         (Span::raw(" "), None),
         button("›", app.desk.history.can_forward(), HitTarget::NavForward),
+        (
+            Span::styled(
+                format!(" {}", key_hint(app, Action::NavBack)),
+                Style::default().fg(th.dim),
+            ),
+            None,
+        ),
     ]
 }
 
+/// A labelled header button and its key, dim: `commands ^K`.
+fn button_part(app: &App, th: Theme, label: &'static str, hit: HitTarget, key: Action) -> Part {
+    let mut style = Style::default().fg(th.accent);
+    if app.launcher.hover_crumb.as_ref() == Some(&hit) {
+        style = style.add_modifier(Modifier::UNDERLINED);
+    }
+    vec![
+        (Span::raw("   "), None),
+        (Span::styled(label, style), Some(hit)),
+        (
+            Span::styled(
+                format!(" {}", key_hint(app, key)),
+                Style::default().fg(th.dim),
+            ),
+            None,
+        ),
+    ]
+}
 /// The strip's counts — every one when `zeros`, else only the lit ones.
 /// `failed` only when something failed, as the desktop's does.
 fn strip_part(app: &App, th: Theme, zeros: bool) -> Part {
@@ -70,45 +97,40 @@ fn strip_part(app: &App, th: Theme, zeros: bool) -> Part {
     out
 }
 
-/// `ado ⇧B` on a project whose remote is on Azure DevOps: the AZURE
-/// DEVOPS OVERLAY's button, with its key.
-fn ado_part(app: &App, th: Theme) -> Part {
-    let on = app
-        .selected_project()
-        .is_some_and(|p| app.desk.ado_remote.get(&p.id) == Some(&true));
-    if !on {
-        return Vec::new();
-    }
-    let hit = HitTarget::AdoButton;
-    let mut style = Style::default().fg(th.accent);
-    if app.launcher.hover_crumb.as_ref() == Some(&hit) {
-        style = style.add_modifier(Modifier::UNDERLINED);
-    }
-    vec![
-        (Span::raw("   "), None),
-        (Span::styled("ado", style), Some(hit)),
-        (
-            Span::styled(
-                format!(" {}", key_hint(app, Action::Ado)),
-                Style::default().fg(th.dim),
-            ),
-            None,
-        ),
-    ]
-}
-
-/// What the gap `r` holds: `‹ ›`, the `ado` button where the project has
-/// one, then the strip with its zeros, or without them, or not at all —
-/// the most of it that fits.
+/// What the gap `r` holds, each piece whole or not at all and nothing
+/// after the first that does not fit: `‹ ›`, the `ado` button where the
+/// project is on Azure DevOps, the `commands` button, then the strip with
+/// its zeros, or without them.
 pub(super) fn parts(app: &App, room: usize) -> Part {
     let th = app.chrome.theme;
-    let mut nav = nav_part(app, th);
-    let ado = ado_part(app, th);
-    if width(&nav) + width(&ado) <= room {
-        nav.extend(ado);
+    let on_ado = app
+        .selected_project()
+        .is_some_and(|p| app.desk.ado_remote.get(&p.id) == Some(&true));
+    // The `ado` button ahead of `commands`: it is the one sign the
+    // project is on Azure DevOps at all.
+    let mut pieces = vec![nav_part(app, th)];
+    if on_ado {
+        pieces.push(button_part(
+            app,
+            th,
+            "ado",
+            HitTarget::AdoButton,
+            Action::Ado,
+        ));
     }
-    if width(&nav) > room {
-        return Vec::new();
+    pieces.push(button_part(
+        app,
+        th,
+        "commands",
+        HitTarget::CommandsButton,
+        Action::CommandPalette,
+    ));
+    let mut out: Part = Vec::new();
+    for piece in pieces {
+        if width(&out) + width(&piece) > room {
+            return out;
+        }
+        out.extend(piece);
     }
     let gap: Part = vec![(Span::raw("   "), None)];
     for zeros in [true, false] {
@@ -116,13 +138,14 @@ pub(super) fn parts(app: &App, room: usize) -> Part {
         if strip.is_empty() {
             break;
         }
-        if width(&nav) + width(&gap) + width(&strip) <= room {
-            return nav.into_iter().chain(gap).chain(strip).collect();
+        if width(&out) + width(&gap) + width(&strip) <= room {
+            out.extend(gap);
+            out.extend(strip);
+            return out;
         }
     }
-    nav
+    out
 }
-
 /// Lay [`parts`] into `r`, registering each button's cell.
 pub(super) fn draw(f: &mut Frame, app: &mut App, r: Rect) {
     let parts = parts(app, usize::from(r.width));

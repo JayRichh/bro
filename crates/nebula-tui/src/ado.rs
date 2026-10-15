@@ -110,7 +110,9 @@ pub struct AdoPr {
 pub struct AdoBranch {
     pub name: String,
     pub local: bool,
-    pub remote: bool,
+    /// `<remote>/<name>` when the remote has it: what a checkout of a
+    /// branch only the remote has is cut from, so it tracks it.
+    pub remote: Option<String>,
 }
 
 // ---- the CLI's JSON (`crates/nebula/src/ado.rs`, `kete-ado` shapes) ----
@@ -236,19 +238,20 @@ pub fn parse_branches(refs: &str, remote: &str) -> Vec<AdoBranch> {
                 None => out.push(AdoBranch {
                     name: name.into(),
                     local: true,
-                    remote: false,
+                    remote: None,
                 }),
             }
         } else if let Some(name) = line.strip_prefix(&remote_prefix) {
             if name == "HEAD" {
                 continue;
             }
+            let at = Some(format!("{remote}/{name}"));
             match out.iter_mut().find(|b| b.name == name) {
-                Some(b) => b.remote = true,
+                Some(b) => b.remote = at,
                 None => out.push(AdoBranch {
                     name: name.into(),
                     local: false,
-                    remote: true,
+                    remote: at,
                 }),
             }
         }
@@ -495,17 +498,17 @@ mod tests {
     #[test]
     fn branches_merge_local_and_remote_and_skip_head() {
         let refs = "refs/heads/main\nrefs/heads/jr/fix\nrefs/remotes/origin/HEAD\nrefs/remotes/origin/main\nrefs/remotes/origin/sam/feat\n";
-        let b = parse_branches(refs, "origin");
-        let names: Vec<(&str, bool, bool)> = b
+        let b = parse_branches(&refs.replace("origin", "upstream"), "upstream");
+        let names: Vec<(&str, bool, Option<&str>)> = b
             .iter()
-            .map(|b| (b.name.as_str(), b.local, b.remote))
+            .map(|b| (b.name.as_str(), b.local, b.remote.as_deref()))
             .collect();
         assert_eq!(
             names,
             vec![
-                ("jr/fix", true, false),
-                ("main", true, true),
-                ("sam/feat", false, true)
+                ("jr/fix", true, None),
+                ("main", true, Some("upstream/main")),
+                ("sam/feat", false, Some("upstream/sam/feat"))
             ]
         );
     }

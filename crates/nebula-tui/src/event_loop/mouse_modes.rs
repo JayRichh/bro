@@ -838,6 +838,7 @@ fn handle_left_click_target(app: &mut App, mouse: MouseEvent, out: &mut Vec<Clie
         Some(HitTarget::NavBack) => desk::go(app, -1, out),
         Some(HitTarget::NavForward) => desk::go(app, 1, out),
         Some(HitTarget::AdoButton) => ado::open(app),
+        Some(HitTarget::CommandsButton) => desk::open_command_palette(app),
         Some(
             target @ (HitTarget::ProjectRow(_)
             | HitTarget::WorktreeRow(_)

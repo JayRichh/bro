@@ -211,6 +211,8 @@ pub enum HitTarget {
     /// The header's `ado` button, on a project whose remote is on Azure
     /// DevOps: the AZURE DEVOPS OVERLAY, as `⇧B`.
     AdoButton,
+    /// The header's `commands` button: the COMMAND PALETTE, as `^K`.
+    CommandsButton,
 }
 
 /// Default outer width of the diff modal's file-list panel.
