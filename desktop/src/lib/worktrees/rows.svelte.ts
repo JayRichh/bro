@@ -1,0 +1,114 @@
+// The window-side state behind the overview's worktree groups and the
+// Worktrees view: which groups are folded (saved under `desktop` in
+// config.json), each checkout's git state (read in the background,
+// cached, again on focus and every so often while a view shows it), and
+// the checkouts git is still cutting, drawn as placeholders until the
+// daemon lists them.
+
+import { api } from '../api';
+import { app, toast } from '../store.svelte';
+import { worktreeApi, type WorktreeGit } from './api';
+import { pruneKeys, setKey } from './groups';
+
+export const rows = $state({
+  /** Folded groups: `repo:<id>`, `wt:<id>`. */
+  collapsed: [] as string[],
+  /** Worktree id to its git state, as last read. */
+  git: {} as Record<string, WorktreeGit>,
+  /** Checkouts being made: shown as placeholder rows in their repo. */
+  pending: [] as { key: number; project: string; branch: string }[],
+});
+
+// ---- folding ----
+
+export function isCollapsed(key: string): boolean {
+  return rows.collapsed.includes(key);
+}
+
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+export function setCollapsed(key: string, on: boolean) {
+  rows.collapsed = setKey(rows.collapsed, key, on);
+  clearTimeout(saveTimer);
+  // Folding a few in a row writes config.json once.
+  saveTimer = setTimeout(() => {
+    const keys = app.model.connected ? pruneKeys(rows.collapsed, app.model) : rows.collapsed;
+    api.desktopSetCollapsed(keys).catch((e) => toast(`Could not save the fold: ${e}`));
+  }, 400);
+}
+
+export function toggleCollapsed(key: string) {
+  setCollapsed(key, !isCollapsed(key));
+}
+
+/** The saved folds, at startup. */
+export function loadCollapsed(keys: unknown) {
+  if (Array.isArray(keys)) rows.collapsed = keys.filter((k): k is string => typeof k === 'string');
+}
+
+// ---- git state ----
+
+/** The least time between two reads of one checkout. */
+const MIN_GAP_MS = 4_000;
+/** How often the views read again while one is up. */
+const POLL_MS = 30_000;
+const readAt = new Map<string, number>();
+let reading = false;
+
+/** Read the checkouts' git state, skipping any read in the last few
+ *  seconds unless `force`. One read at a time; a call during one waits
+ *  for the next tick of the poll. */
+export async function refreshGit(ids: string[], force = false) {
+  if (reading || !ids.length) return;
+  const now = Date.now();
+  const due = ids.filter((id) => force || now - (readAt.get(id) ?? 0) >= MIN_GAP_MS);
+  if (!due.length) return;
+  reading = true;
+  for (const id of due) readAt.set(id, now);
+  try {
+    const got = await worktreeApi.git(due);
+    rows.git = { ...rows.git, ...got };
+  } catch {
+    /* the next poll tries again */
+  } finally {
+    reading = false;
+  }
+}
+
+let watchers = 0;
+let timer: ReturnType<typeof setInterval> | undefined;
+const allIds = () => app.model.worktrees.map((w) => w.id);
+const onFocus = () => refreshGit(allIds(), true);
+
+/** Keep the git state fresh while a view that shows it is mounted: at
+ *  once, on window focus, and every half minute. Returns the stop. */
+export function watchGit(): () => void {
+  watchers += 1;
+  if (watchers === 1) {
+    window.addEventListener('focus', onFocus);
+    timer = setInterval(() => {
+      if (document.hasFocus()) refreshGit(allIds());
+    }, POLL_MS);
+  }
+  refreshGit(allIds());
+  return () => {
+    watchers -= 1;
+    if (watchers === 0) {
+      window.removeEventListener('focus', onFocus);
+      clearInterval(timer);
+    }
+  };
+}
+
+// ---- checkouts being made ----
+
+let nextKey = 0;
+/** Show a placeholder for `branch` in `project` while `make` runs. */
+export async function whileCutting<T>(project: string, branch: string, make: () => Promise<T>): Promise<T> {
+  const key = ++nextKey;
+  rows.pending = [...rows.pending, { key, project, branch }];
+  try {
+    return await make();
+  } finally {
+    rows.pending = rows.pending.filter((p) => p.key !== key);
+  }
+}

@@ -685,7 +685,7 @@ pub const SETTINGS_TABS: &[SettingsTab] = &[
             SettingSpec {
                 kind: SettingKind::ShowAllWorktrees,
                 label: "Show all worktrees",
-                hint: "Every worktree gets a band on the grid, even an empty one (d deletes it); deleting a last card keeps the worktree unless Delete emptied worktree is on",
+                hint: "Every worktree gets a band on the grid and a row in the window's overview, even an empty one (d deletes it); deleting a last card keeps the worktree unless Delete emptied worktree is on",
                 group: "",
             },
             SettingSpec {

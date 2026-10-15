@@ -24,7 +24,8 @@ use std::path::{Path, PathBuf};
 /// (Preset text, Confirm on archive, Follow new session, the quick
 /// prompt's New worktree, Delete emptied worktree and Auto-clean merged
 /// worktrees are the window's too: its presets editor, archive, quick
-/// prompt, session delete and PR poll read them; so are the done and
+/// prompt, session delete and PR poll read them; so is Show all
+/// worktrees, which the overview's worktree rows follow; so are the done and
 /// feedback sounds, which ring with its notifications.) The window shows
 /// them under a "Terminal app" group in their tab,
 /// still editable, since they are the same file.
@@ -32,7 +33,6 @@ pub const TERMINAL_ONLY: &[SettingKind] = &[
     SettingKind::PaletteEnterAttaches,
     SettingKind::Editor,
     SettingKind::CloseFinderOnOpen,
-    SettingKind::ShowAllWorktrees,
     SettingKind::ConfirmDragMove,
     SettingKind::Theme,
     SettingKind::Icons,

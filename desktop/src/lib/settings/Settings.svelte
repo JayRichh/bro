@@ -91,7 +91,7 @@
       if (t.key === 'home' && (value === 'overview' || value === 'board')) app.home = value;
       if (t.key === 'diff_mode' && isDiffMode(value)) app.diffMode = value;
     }
-    if (t.scope === 'agent' || (t.scope === 'global' && (t.key === 'quick_prompt_kind' || t.key === 'hide_uninstalled_harnesses')))
+    if (t.scope === 'agent' || (t.scope === 'global' && (t.key === 'quick_prompt_kind' || t.key === 'hide_uninstalled_harnesses' || t.key === 'show_all_worktrees')))
       refreshLaunchables();
     if (t.scope === 'project' && t.field === 'run_command') refreshRunCommands();
   }

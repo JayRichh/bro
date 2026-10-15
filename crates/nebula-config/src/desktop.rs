@@ -32,6 +32,10 @@ pub struct DesktopPrefs {
     pub approved_open: BTreeMap<String, Vec<String>>,
     /// What the window opens on (`home` or `orchestrator`).
     pub startup: String,
+    /// Overview groups the user folded: `repo:<project id>` and
+    /// `wt:<worktree id>`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub collapsed: Vec<String>,
     /// Keys a newer window wrote, kept through a save.
     #[serde(flatten)]
     pub other: BTreeMap<String, serde_json::Value>,
@@ -45,6 +49,7 @@ impl Default for DesktopPrefs {
             home: HOMES[0].into(),
             approved_open: BTreeMap::new(),
             startup: STARTUPS[0].into(),
+            collapsed: Vec::new(),
             other: BTreeMap::new(),
         }
     }
@@ -208,6 +213,31 @@ mod tests {
         assert_eq!(saved["desktop"]["theme"], "dark");
         assert_eq!(saved["desktop"]["future"], 3);
         assert!(DesktopPrefs::update_in(&path, &local, |p| p.set("theme", "neon")).is_err());
+    }
+
+    #[test]
+    fn folded_groups_round_trip_and_an_empty_list_is_not_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let local = dir.path().join("config.local.json");
+        assert!(DesktopPrefs::load_at(&path, &local).collapsed.is_empty());
+        DesktopPrefs::update_in(&path, &local, |p| {
+            p.collapsed = vec!["repo:p1".into(), "wt:w2".into()];
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            DesktopPrefs::load_at(&path, &local).collapsed,
+            vec!["repo:p1".to_string(), "wt:w2".to_string()]
+        );
+        DesktopPrefs::update_in(&path, &local, |p| {
+            p.collapsed.clear();
+            Ok(())
+        })
+        .unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(saved["desktop"].get("collapsed").is_none());
     }
 
     #[test]

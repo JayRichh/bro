@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { app, boot, checkAdoStore, follow, loadDesktopPrefs, openDiff, openSession, sessionWorktree, setHome } from './lib/store.svelte';
   import { shortcutFor } from './lib/shortcuts';
   import { focusedTarget, runShortcut, toggleArchived } from './lib/commands';
@@ -32,6 +32,8 @@
   import { onReviewOpened, openOrchestrator } from './lib/orch.svelte';
   import { opensOnOrchestrator, orchestratorOf, placeKey } from './lib/orchestrator';
   import FileSheet from './lib/files/FileSheet.svelte';
+  import WorktreesView from './lib/worktrees/WorktreesView.svelte';
+  import { loadCollapsed } from './lib/worktrees/rows.svelte';
   import { listenAlerts } from './lib/alerts';
 
   const media = window.matchMedia('(prefers-color-scheme: dark)');
@@ -54,6 +56,19 @@
   $effect(() => follow(nav.current));
 
   const view = $derived(nav.current.view);
+
+  // A narrow window (900px and under): the rail goes to icons, and a split
+  // shows one side at a time, the session or diff pane unless the list is
+  // asked for (the header's List button). Opening anything puts the pane
+  // back.
+  const narrowQuery = window.matchMedia('(max-width: 900px)');
+  let narrow = $state(narrowQuery.matches);
+  narrowQuery.addEventListener('change', (e) => (narrow = e.matches));
+  let listShown = $state(false);
+  $effect(() => {
+    placeKey(nav.current);
+    untrack(() => (listShown = false));
+  });
   const orch = $derived(orchestratorOf(app.model));
   // The orchestrator view is a split too: its tree on the left, its own
   // session in the shared pane on the right (one pane per session, so the
@@ -128,6 +143,7 @@
     // Saved preferences first; the command line overrides them for this
     // run only and is never written back.
     const prefs = await loadDesktopPrefs();
+    loadCollapsed(prefs?.collapsed);
     const s = await api.startup().catch(() => null);
     // Flags that need no daemon apply at once.
     if (s?.theme === 'light' || s?.theme === 'dark' || s?.theme === 'system') app.themePref = s.theme;
@@ -171,14 +187,22 @@
 
 <svelte:window onkeydown={onKey} onmouseup={onMouseUp} />
 
-<div class="grid h-full grid-cols-[220px_minmax(0,1fr)]">
-  <Rail />
+<div class="grid h-full {narrow ? 'grid-cols-[52px_minmax(0,1fr)]' : 'grid-cols-[220px_minmax(0,1fr)]'}">
+  <Rail compact={narrow} />
   <main class="relative flex min-h-0 min-w-0 flex-col">
-    <header class="flex h-10 flex-none items-center gap-6 border-b border-rule pr-4 pl-2">
+    <header class="flex h-10 flex-none items-center border-b border-rule pl-2 {narrow ? 'gap-3 pr-2' : 'gap-6 pr-4'}">
       <Breadcrumb />
       <span class="flex-1"></span>
-      <AttentionStrip />
-      {#if app.home === 'overview' && !adoView && view !== 'settings' && !orchView}
+      {#if narrow && split}
+        <button
+          class="h-6 flex-none border px-2 text-[12px] {listShown ? 'border-ink bg-ink text-bg' : 'border-rule bg-transparent text-muted hover:text-ink'}"
+          aria-pressed={listShown}
+          title={listShown ? 'Back to the open pane' : 'Show the list: the window is too narrow for the list and the pane side by side'}
+          onclick={() => (listShown = !listShown)}>{listShown ? 'Pane' : 'List'}</button
+        >
+      {/if}
+      <span class="contents max-[1100px]:hidden"><AttentionStrip /></span>
+      {#if app.home === 'overview' && !adoView && view !== 'settings' && view !== 'worktrees' && !orchView}
         <button
           class="h-6 flex-none border px-2 text-[12px] {app.showArchived ? 'border-ink bg-ink text-bg' : 'border-rule bg-transparent text-muted hover:text-ink'}"
           aria-pressed={app.showArchived}
@@ -205,6 +229,8 @@
         {#key nav.current.repo}<Tasks repo={nav.current.repo} />{/key}
       {:else if view === 'branches' && nav.current.repo}
         {#key nav.current.repo}<Branches repo={nav.current.repo} />{/key}
+      {:else if view === 'worktrees' && nav.current.repo}
+        {#key nav.current.repo}<WorktreesView repo={nav.current.repo} />{/key}
       {:else if view === 'prs'}
         <Prs />
       {:else if view === 'settings'}
@@ -219,16 +245,16 @@
           </p>
         </section>
       {:else}
-        <div class="relative min-w-0 flex-1">
+        <div class="relative min-w-0 flex-1 {narrow && split && !listShown ? 'hidden' : ''}">
           {#if orchView}
             <OrchestratorPanel />
           {:else if app.home === 'board'}
-            <Board active={!split} />
+            <Board active={!split || (narrow && listShown)} />
           {:else}
-            <Overview active={!split} />
+            <Overview active={!split || (narrow && listShown)} />
           {/if}
         </div>
-        {#if split}
+        {#if split && !narrow}
           <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
           <div class="relative z-10 w-px flex-none bg-rule-strong">
             <div
@@ -243,8 +269,8 @@
           </div>
         {/if}
         <div
-          class="relative min-w-0 flex-none {split ? '' : 'hidden'}"
-          style="width: {rightWidth}"
+          class="relative min-w-0 {split && !(narrow && listShown) ? '' : 'hidden'} {narrow ? 'flex-1' : 'flex-none'}"
+          style={narrow ? undefined : `width: ${rightWidth}`}
         >
           {#if sessionEverOpened}
             <div class="absolute inset-0 {view === 'session' || orchView ? 'z-10' : 'hidden'}"><Session /></div>

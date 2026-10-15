@@ -25,6 +25,19 @@ export interface Branch {
   subject: string;
 }
 
+/** A checkout as the worktree rows show it (src-tauri git.rs `WorktreeGit`). */
+export interface WorktreeGit {
+  changed: number;
+  untracked: number;
+  /** `origin/feature-x`; null for a branch with no upstream. */
+  upstream: string | null;
+  /** Against the upstream; null with none. */
+  ahead: number | null;
+  behind: number | null;
+  /** HEAD's committer date, unix seconds; 0 before the first commit. */
+  committed: number;
+}
+
 export interface Change {
   xy: string;
   path: string;
@@ -47,6 +60,10 @@ export const worktreeApi = {
   /** Read fresh from config.json at delete time. */
   settings: () => invoke<{ delete_empty_worktree: boolean }>('worktree_settings'),
   checkoutState: (worktree: string) => invoke<CheckoutState>('checkout_state', { worktree }),
+  /** Each named checkout's git state; one that can't be read is left out. */
+  git: (worktrees: string[]) => invoke<Record<string, WorktreeGit>>('worktree_git', { worktrees }),
+  /** Open the checkout's folder in the file manager. */
+  reveal: (worktree: string) => invoke<void>('worktree_reveal', { worktree }),
   /** Wake the PR poll now. */
   refreshPrs: () => invoke<void>('refresh_prs'),
   branchList: (worktree: string) => invoke<{ branches: Branch[]; changes: number | null }>('branch_list', { worktree }),
