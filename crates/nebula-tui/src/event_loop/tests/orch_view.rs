@@ -642,7 +642,6 @@ fn the_history_tab_asks_for_the_transcript_and_shows_the_answer() {
 
 #[test]
 fn the_diff_tab_reads_the_sessions_worktree_diff() {
-    let _env = crate::test_env::spawning();
     with_default_config(|| {
         let dir = tempfile::tempdir().unwrap();
         let git = |args: &[&str]| {

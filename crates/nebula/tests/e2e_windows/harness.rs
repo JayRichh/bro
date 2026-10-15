@@ -28,7 +28,13 @@ type Writer = Arc<Mutex<Box<dyn Write + Send>>>;
 pub struct Tui {
     writer: Writer,
     parser: Arc<Mutex<vt100::Parser>>,
+    /// Every byte the TUI's ConPTY sent, for replaying a screen that went
+    /// wrong outside the run.
+    raw: Arc<Mutex<Vec<u8>>>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
+    /// Held, not dropped: dropping it closes the pseudoconsole under the
+    /// TUI. Kept so the host's size can be changed under it.
+    master: Box<dyn portable_pty::MasterPty + Send>,
     /// What [`Tui::restart`] launches the next TUI with.
     launch: Launch,
     pub runtime_dir: PathBuf,
@@ -136,11 +142,19 @@ impl Tui {
             options_env,
             strip_path: options.strip_path.clone(),
         };
-        let (writer, parser, child) = launch.start();
+        let Started {
+            writer,
+            parser,
+            raw,
+            child,
+            master,
+        } = launch.start();
         Self {
             writer,
             parser,
+            raw,
             child,
+            master,
             launch,
             runtime_dir,
             data_dir,
@@ -158,10 +172,12 @@ impl Tui {
     pub fn restart(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
-        let (writer, parser, child) = self.launch.start();
-        self.writer = writer;
-        self.parser = parser;
-        self.child = child;
+        let started = self.launch.start();
+        self.writer = started.writer;
+        self.parser = started.parser;
+        self.raw = started.raw;
+        self.child = started.child;
+        self.master = started.master;
     }
 
     /// A committed repo named `name` with a bare repo beside it as its
@@ -221,6 +237,32 @@ impl Tui {
         std::fs::write(self.gates.join(name), "").unwrap();
     }
 
+    /// Narrow the host by a column and widen it back, as a user dragging
+    /// the window would: the TUI repaints every cell (`on_host_resize`),
+    /// so a screen that heals after this had lost cells on the way to the
+    /// host, not in the TUI's own state.
+    pub fn host_repaint(&self) {
+        for cols in [COLS - 1, COLS] {
+            self.master
+                .resize(PtySize {
+                    rows: ROWS,
+                    cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                })
+                .unwrap();
+            std::thread::sleep(Duration::from_millis(300));
+        }
+    }
+
+    /// Write every byte the host was sent so far to a file that outlives
+    /// the run, and say where.
+    pub fn save_raw(&self, name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("kete-e2e-{name}-{}.vt", std::process::id()));
+        let _ = std::fs::write(&path, &*self.raw.lock().unwrap());
+        path
+    }
+
     pub fn send(&self, bytes: &[u8]) {
         let mut w = self.writer.lock().unwrap();
         w.write_all(bytes).unwrap();
@@ -275,6 +317,20 @@ impl Tui {
         let deadline = Instant::now() + window;
         loop {
             if self.screen_text().contains(needle) {
+                return true;
+            }
+            if Instant::now() > deadline {
+                return false;
+            }
+            std::thread::sleep(POLL_STEP);
+        }
+    }
+
+    /// `wait_for` that gives up after `window`, saying whether it held.
+    pub fn try_wait_for(&self, window: Duration, pred: impl Fn(&vt100::Screen) -> bool) -> bool {
+        let deadline = Instant::now() + window;
+        loop {
+            if pred(self.parser.lock().unwrap().screen()) {
                 return true;
             }
             if Instant::now() > deadline {
@@ -342,14 +398,7 @@ impl Tui {
 impl Launch {
     /// `kete` in a fresh ConPTY over these dirs, and the thread reading it
     /// into a screen.
-    #[allow(clippy::type_complexity)]
-    fn start(
-        &self,
-    ) -> (
-        Writer,
-        Arc<Mutex<vt100::Parser>>,
-        Box<dyn portable_pty::Child + Send + Sync>,
-    ) {
+    fn start(&self) -> Started {
         let pty = native_pty_system()
             .openpty(PtySize {
                 rows: ROWS,
@@ -396,12 +445,13 @@ impl Launch {
 
         let mut reader = pty.master.try_clone_reader().unwrap();
         let writer: Writer = Arc::new(Mutex::new(pty.master.take_writer().unwrap()));
-        // Dropping the master closes the pseudoconsole under the TUI.
-        std::mem::forget(pty.master);
+        let master = pty.master;
 
         let parser = Arc::new(Mutex::new(vt100::Parser::new(ROWS, COLS, 0)));
+        let raw = Arc::new(Mutex::new(Vec::new()));
         {
             let parser = parser.clone();
+            let raw = raw.clone();
             let writer = writer.clone();
             std::thread::spawn(move || {
                 let mut buf = [0u8; 16384];
@@ -410,6 +460,7 @@ impl Launch {
                     if n == 0 {
                         break;
                     }
+                    raw.lock().unwrap().extend_from_slice(&buf[..n]);
                     let mut parser = parser.lock().unwrap();
                     parser.process(&buf[..n]);
                     // ConPTY asks where the cursor is before it draws a
@@ -432,8 +483,23 @@ impl Launch {
                 }
             });
         }
-        (writer, parser, child)
+        Started {
+            writer,
+            parser,
+            raw,
+            child,
+            master,
+        }
     }
+}
+
+/// One launched TUI: what [`Tui::restart`] replaces together.
+struct Started {
+    writer: Writer,
+    parser: Arc<Mutex<vt100::Parser>>,
+    raw: Arc<Mutex<Vec<u8>>>,
+    child: Box<dyn portable_pty::Child + Send + Sync>,
+    master: Box<dyn portable_pty::MasterPty + Send>,
 }
 
 impl Drop for Tui {

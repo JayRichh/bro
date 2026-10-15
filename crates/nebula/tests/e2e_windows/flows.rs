@@ -34,6 +34,14 @@ pub const TESTS: &[(&str, Test)] = &[
         a_20_kb_paste_reaches_the_agent_as_one_paste,
     ),
     (
+        "the_grid_pane_shows_every_line_the_agent_printed",
+        the_grid_pane_shows_every_line_the_agent_printed,
+    ),
+    (
+        "the_pane_keeps_every_line_across_board_and_grid",
+        the_pane_keeps_every_line_across_board_and_grid,
+    ),
+    (
         "a_048_data_dir_upgrades_in_place",
         super::upgrade::a_048_data_dir_upgrades_in_place,
     ),
@@ -91,6 +99,11 @@ fn quick_prompt_session_runs_needs_you_and_lands_in_review() {
     let files = git(&wt, &["show", "--name-only", "--format=", "HEAD"]);
     assert_eq!(files.trim(), "src/feature.txt");
     assert_eq!(git(&wt, &["status", "--porcelain"]).trim(), "");
+
+    // Back on the grid, its pane reads all of it.
+    tui.send(b"K");
+    tui.wait_for_gone("● 1 Review");
+    pane_shows_the_feature(&tui);
 }
 
 /// On a Review card: `?` offers Create pull request and Focus here; `d`
@@ -282,6 +295,101 @@ fn a_20_kb_paste_reaches_the_agent_as_one_paste() {
     assert_eq!((starts, ends), (1, 1), "one bracketed paste");
     let inner = &got[6..got.len() - 6];
     assert_eq!(String::from_utf8_lossy(inner), text);
+}
+
+/// What the agent printed, read in the grid's pane: every line whole, as
+/// the daemon's ring has it — not cut short, not missing.
+fn the_grid_pane_shows_every_line_the_agent_printed() {
+    let tui = Tui::spawn(Options {
+        script: format!("gate:asked;{FEATURE}"),
+        ..Options::default()
+    });
+    let repo = tui.make_repo("pane-proj");
+    tui.wait_for_text("create your first project");
+    tui.add_project(&repo, "pane-proj");
+    launch(&tui, "build the feature");
+    tui.wait_for_agent("step gate:asked");
+    tui.open_gate("asked");
+    tui.wait_for_text("1 needs you");
+    reply(&tui, "yes ship it");
+    tui.wait_for_agent("step echo");
+    pane_shows_the_feature(&tui);
+}
+
+/// The same session followed across the board and the grid as it works:
+/// launched on the board, its question met on the grid, answered on the
+/// board, and read back on the grid, every line whole.
+fn the_pane_keeps_every_line_across_board_and_grid() {
+    let tui = Tui::spawn(Options {
+        script: format!("gate:asked;{FEATURE}"),
+        ..Options::default()
+    });
+    let repo = tui.make_repo("swap-proj");
+    tui.wait_for_text("create your first project");
+    tui.add_project(&repo, "swap-proj");
+    tui.send(b"K");
+    tui.wait_for_text("Needs you");
+    launch(&tui, "build the feature");
+    tui.wait_for_text("● 1 Running");
+    tui.wait_for_agent("step gate:asked");
+    tui.send(b"K");
+    tui.wait_for_gone("● 1 Running");
+    tui.open_gate("asked");
+    tui.wait_for_text("1 needs you");
+    tui.send(b"K");
+    tui.wait_for_text("● 1 Needs you");
+    reply(&tui, "yes ship it");
+    tui.wait_for_agent("step echo");
+    tui.wait_for_text("● 1 Review");
+    tui.send(b"K");
+    tui.wait_for_gone("● 1 Review");
+    pane_shows_the_feature(&tui);
+    // And through a host resize, which repaints every cell.
+    tui.host_repaint();
+    pane_shows_the_feature(&tui);
+}
+
+/// Every line the FEATURE agent printed, whole, in the screen model. On a
+/// miss: the screen's right half (the pane, in rows short enough that no
+/// byte-counting `cut` of the log chops them), what the daemon holds, and
+/// whether a host repaint healed it.
+fn pane_shows_the_feature(tui: &Tui) {
+    let lines = [
+        "fake agent up",
+        "working on: build the feature",
+        "QUESTION: ship it? (reply and Enter)",
+        "got reply: yes ship it",
+        "edited src/feature.txt",
+        "committed: add the feature",
+        "fake agent finished",
+        "echo ready",
+    ];
+    let whole = |s: &vt100::Screen| {
+        let text = screen_to_text(s);
+        lines.iter().all(|l| text.contains(l))
+    };
+    if !tui.try_wait_for(Duration::from_secs(5), whole) {
+        let id = tui.agent_id("build the feature");
+        let (cols, rows, ring) = daemon_tail(&tui.runtime_dir, &id);
+        let pane: String = tui
+            .screen_text()
+            .lines()
+            .map(|row| row.chars().skip(usize::from(COLS / 2)).collect::<String>())
+            .map(|row| format!("{}\n", row.trim_end()))
+            .collect();
+        let raw = tui.save_raw("pane");
+        // A host resize makes the TUI paint every cell again: a screen it
+        // heals lost cells between the TUI and the host; one it leaves
+        // wrong is wrong in the TUI's own emulation of the session.
+        tui.host_repaint();
+        let healed = tui.try_wait_for(Duration::from_secs(5), whole);
+        panic!(
+            "the pane lost a line (healed by a host repaint: {healed}; host bytes in {}):\n--- the screen's right half ---\n{pane}--- ring ({cols}x{rows}) ---\n{:?}\n--- agent.log ---\n{}",
+            raw.display(),
+            String::from_utf8_lossy(&ring),
+            std::fs::read_to_string(&tui.agent_log).unwrap_or_default(),
+        );
+    }
 }
 
 // ---- steps ----

@@ -2302,10 +2302,19 @@ impl Config {
     /// so is anything whose program is missing from PATH. The daemon
     /// stays authoritative at launch.
     pub fn offered_harnesses(&self) -> Vec<(AgentKind, Option<String>)> {
+        self.offered_harnesses_on(&std::env::var_os("PATH").unwrap_or_default())
+    }
+
+    /// [`Self::offered_harnesses`] with programs looked up on `path` in
+    /// place of this process's PATH, which a test must never point
+    /// elsewhere: every test thread spawning git reads it.
+    pub fn offered_harnesses_on(&self, path: &std::ffi::OsStr) -> Vec<(AgentKind, Option<String>)> {
         let all = self.harness_registry();
         nebula_core::harness::usable(&all)
             .into_iter()
-            .filter(|entry| !self.hide_uninstalled_harnesses || program_installed(&entry.program))
+            .filter(|entry| {
+                !self.hide_uninstalled_harnesses || program_installed_in(&entry.program, path)
+            })
             .map(|entry| match AgentKind::parse(&entry.id) {
                 Some(kind) => (kind, None),
                 None => (AgentKind::Custom, Some(entry.id.clone())),
@@ -3215,6 +3224,11 @@ pub fn resolve_editor(env: Option<&str>, configured: &str) -> String {
 /// fast check behind `hide_uninstalled_harnesses`, for built-ins and
 /// customs alike.
 pub fn program_installed(program: &str) -> bool {
+    program_installed_in(program, &std::env::var_os("PATH").unwrap_or_default())
+}
+
+/// [`program_installed`] on `path`, a PATH-style list of directories.
+pub fn program_installed_in(program: &str, path: &std::ffi::OsStr) -> bool {
     let program = program.trim();
     if program.is_empty() {
         return false;
@@ -3223,14 +3237,13 @@ pub fn program_installed(program: &str) -> bool {
     // join never finds it, so look the way a spawn does (PATH + PATHEXT).
     #[cfg(windows)]
     {
-        nebula_core::shell::resolve_program(program).is_some()
+        let pathext =
+            nebula_core::env::non_empty("PATHEXT").unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".into());
+        nebula_core::shell::resolve_program_in(program, path, &pathext).is_some()
     }
     #[cfg(not(windows))]
     {
-        let Some(paths) = std::env::var_os("PATH") else {
-            return false;
-        };
-        for dir in std::env::split_paths(&paths) {
+        for dir in std::env::split_paths(path) {
             let candidate = dir.join(program);
             if candidate.is_file() {
                 return true;

@@ -119,6 +119,11 @@ fn statusline_from(project: Option<&Path>, user_dir: Option<&Path>) -> Option<St
 /// the command itself exits, what it printed within [`DRAIN_AFTER_EXIT`]
 /// is the line. An overrun kills the whole process tree.
 fn run_user_line(command: &str, payload: &[u8]) -> Option<String> {
+    run_user_line_within(command, payload, USER_LINE_TIMEOUT)
+}
+
+/// [`run_user_line`] with its overrun at `timeout`.
+fn run_user_line_within(command: &str, payload: &[u8], timeout: Duration) -> Option<String> {
     let mut cmd = shell_command(command);
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -165,7 +170,7 @@ fn run_user_line(command: &str, payload: &[u8]) -> Option<String> {
             if at.elapsed() >= DRAIN_AFTER_EXIT {
                 break;
             }
-        } else if started.elapsed() >= USER_LINE_TIMEOUT {
+        } else if started.elapsed() >= timeout {
             kill_tree(&mut child);
             return None;
         }
@@ -383,18 +388,21 @@ mod tests {
         if git_bash().is_none() {
             return;
         }
-        let started = Instant::now();
-        let out = run_user_line("(sleep 30 &) ; echo quick", b"").unwrap_or_default();
+        // Bounds measured against the minute the background child holds
+        // stdout, not against how fast a loaded machine starts Git Bash:
+        // a line that waited on the child would overrun the generous
+        // timeout here and come back empty, however long bash took.
+        let roomy = Duration::from_secs(30);
+        let out = run_user_line_within("(sleep 60 &) ; echo quick", b"", roomy).unwrap_or_default();
         assert!(out.contains("quick"), "{out:?}");
-        assert!(
-            started.elapsed() < Duration::from_secs(4),
-            "{:?}",
-            started.elapsed()
-        );
-        // A line that never ends is cut off, and the caller falls back.
+        // A line that never ends is cut off at its timeout, and the caller
+        // falls back.
         let started = Instant::now();
-        assert_eq!(run_user_line("sleep 30", b""), None);
-        assert!(started.elapsed() < USER_LINE_TIMEOUT + Duration::from_secs(3));
+        assert_eq!(
+            run_user_line_within("sleep 60", b"", Duration::from_secs(1)),
+            None
+        );
+        assert!(started.elapsed() < roomy, "{:?}", started.elapsed());
         assert_eq!(run_user_line("true", b""), None, "an empty line falls back");
     }
 

@@ -206,7 +206,6 @@ mod tests {
 
     #[test]
     fn search_finds_tracked_and_untracked() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let repo = make_repo(&dir);
         std::fs::write(repo.join("fresh.txt"), "another Needle here\n").unwrap();
@@ -232,7 +231,6 @@ mod tests {
 
     #[test]
     fn search_errors_outside_a_repo() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let err = search(dir.path(), "anything").unwrap_err();
         assert!(err.contains("git grep failed"), "{err}");

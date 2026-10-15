@@ -25,7 +25,6 @@ fn launches_something(action: crate::keymap::Action) -> bool {
 /// and name every one that panicked.
 fn press_every_default(seed: bool, focus: Option<Focus>) -> Vec<String> {
     // `g` and friends read git inline when no loop is running.
-    let _env = crate::test_env::spawning();
     let mut failed = Vec::new();
     for spec in crate::keymap::ACTIONS {
         if seed && launches_something(spec.action) {

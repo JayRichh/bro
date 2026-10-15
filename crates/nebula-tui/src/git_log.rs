@@ -1025,7 +1025,6 @@ mod tests {
     /// a file's diff read against its parent.
     #[test]
     fn read_log_lists_local_and_remote_commits_against_the_upstream() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         let origin: PathBuf = dir.path().join("origin");
         let clone: PathBuf = dir.path().join("clone");
@@ -1068,7 +1067,6 @@ mod tests {
 
     #[test]
     fn read_log_on_an_unborn_head_lists_no_commits() {
-        let _env = crate::test_env::spawning();
         let dir = tempfile::tempdir().unwrap();
         git(dir.path(), &["init", "-q"]);
         let read = read_log(dir.path()).unwrap();
