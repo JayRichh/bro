@@ -639,8 +639,12 @@ window.addEventListener('load', async () => {
       (await until(reviewBtn('Merge'))).click();
     }
     if (view === 'board-verbs') {
-      (await until(() => document.querySelector('[data-target="agent:a3"]'))).focus();
-      key('?');
+      // The card's own button takes the focus (its wrapper cannot), and
+      // `?` goes to it, so the menu is the card's.
+      const card = await until(() => document.querySelector('[data-target="agent:a3"] button'));
+      card.focus();
+      await wait(100);
+      card.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true }));
     }
     if (view === 'board-palette') {
       await until(() => document.querySelector('[data-target="agent:a3"]'));
