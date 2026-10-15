@@ -8,6 +8,7 @@
 import type { Agent, Model, PrInfo, TerminalTab, Worktree } from '../api';
 import { buildForest, type Node } from '../overview/tree';
 import type { CheckoutState, WorktreeGit } from './api';
+import { compareWorktrees, hasUserOrder } from '../order';
 
 export type WorktreeGroup = {
   worktree: Worktree;
@@ -72,24 +73,23 @@ export function isEmpty(g: WorktreeGroup): boolean {
   return !g.forest.length && !g.terminals.length;
 }
 
-/** The root first, then the most recently worked in; a checkout never
- *  worked in keeps its place in the repo's order, at the bottom. */
-export function orderGroups(groups: WorktreeGroup[]): WorktreeGroup[] {
-  return [...groups].sort(
-    (a, b) =>
-      Number(b.worktree.is_main) - Number(a.worktree.is_main) ||
-      b.activity - a.activity ||
-      a.worktree.sort_order - b.worktree.sort_order,
-  );
+/** The root first, then the user's order when the repo's worktrees have
+ *  one (`ordered`, read across all of them, shown or not), else the most
+ *  recently worked in; a checkout never worked in keeps its place in the
+ *  repo's order, at the bottom. The rule is order.ts's. */
+export function orderGroups(groups: WorktreeGroup[], ordered = false): WorktreeGroup[] {
+  const by = compareWorktrees(ordered, (w) => groups.find((g) => g.worktree.id === w.id)?.activity ?? 0);
+  return [...groups].sort((a, b) => by(a.worktree, b.worktree));
 }
 
 /** The overview's groups for a repo. Empty when nothing would show but
  *  the root's empty group: the repo row says "No sessions" instead. */
 export function worktreeGroups(m: Model, project: string, opts: GroupOpts = {}): WorktreeGroup[] {
-  const groups = m.worktrees.filter((w) => w.project_id === project).map((w) => groupOf(m, w, opts.archived));
+  const all = m.worktrees.filter((w) => w.project_id === project);
+  const groups = all.map((w) => groupOf(m, w, opts.archived));
   const shown = groups.filter((g) => !isEmpty(g) || opts.showAll);
   if (shown.every((g) => g.worktree.is_main && isEmpty(g))) return [];
-  return orderGroups(shown);
+  return orderGroups(shown, hasUserOrder(all));
 }
 
 /** Changes when the checkouts' git state is worth reading again: a
