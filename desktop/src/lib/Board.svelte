@@ -23,6 +23,9 @@
   /** The lane under the pointer, and the card it would land beside. */
   let target = $state<{ lane: Lane | 'archived'; card?: { id: string; place: Place } } | null>(null);
   const dragged = $derived(drag.item?.kind === 'agent' && drag.item.lane ? drag.item : null);
+  $effect(() => {
+    if (!dragged) target = null;
+  });
 
   function overLane(e: DragEvent, lane: Lane | 'archived') {
     if (!dragged) return;

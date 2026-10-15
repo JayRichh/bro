@@ -33,6 +33,15 @@ export function endDrag() {
   drag.item = null;
 }
 
+// A dragged row can lose its node mid-drag (a card whose lane changes as
+// its turn ends), and its dragend with it. The window's drop (after the
+// rows' own) and the first mouse move after a drag (none fire during
+// one) end it anyway, so no Archived zone or faded card stays behind.
+if (typeof window !== 'undefined') {
+  window.addEventListener('drop', endDrag);
+  window.addEventListener('mousemove', () => drag.item && endDrag());
+}
+
 /** The drop zone's pointer offset from a row's top, and its height. */
 export function offsetIn(e: DragEvent): [number, number] {
   const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
