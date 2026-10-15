@@ -641,6 +641,19 @@ impl ClientConnection {
                 reply_done(&self.out_tx, req_id, result).await;
                 Ok(true)
             }
+            ClientRequest::SessionChanges { req_id, agent } => {
+                let result = self
+                    .blocking_daemon(move |daemon| daemon.session_changes(&agent))
+                    .await;
+                match result {
+                    Ok(changes) => {
+                        self.send(ServerEvent::SessionChanges { req_id, changes })
+                            .await
+                    }
+                    Err(err) => reply_done(&self.out_tx, req_id, Err(err)).await,
+                }
+                Ok(true)
+            }
             ClientRequest::SwitchAgentAccount {
                 req_id,
                 id,
@@ -948,8 +961,13 @@ impl ClientConnection {
             ports: self.daemon.worktree_ports(),
         })
         .await;
-        // ACCOUNT USAGE and SESSION CONTEXT too, to a peer that reads them.
-        for ev in usage_events(&self.daemon, self.peer_protocol).await {
+        // RECORDED BASES, ACCOUNT USAGE and SESSION CONTEXT too, to a peer
+        // that reads them.
+        for ev in base_events(&self.daemon, self.peer_protocol)
+            .await
+            .into_iter()
+            .chain(usage_events(&self.daemon, self.peer_protocol).await)
+        {
             self.send(ev).await;
         }
         let tx = self.out_tx.clone();
@@ -1489,6 +1507,23 @@ async fn usage_events(daemon: &Arc<Daemon>, peer: u32) -> Vec<ServerEvent> {
     .unwrap_or_default()
 }
 
+/// The recorded worktree bases a subscriber at `peer` gets beside the
+/// Snapshot: none for a peer older than `RECORDED_BASE_PROTOCOL`.
+async fn base_events(daemon: &Arc<Daemon>, peer: u32) -> Vec<ServerEvent> {
+    if peer < nebula_core::RECORDED_BASE_PROTOCOL {
+        return Vec::new();
+    }
+    let store = daemon.store.clone();
+    match tokio::task::spawn_blocking(move || store.worktree_bases()).await {
+        Ok(Ok(bases)) => vec![ServerEvent::WorktreeBases { bases }],
+        Ok(Err(error)) => {
+            tracing::warn!(%error, "read worktree bases failed");
+            Vec::new()
+        }
+        Err(_) => Vec::new(),
+    }
+}
+
 async fn send_snapshot(daemon: &Arc<Daemon>, tx: &mpsc::Sender<ServerEvent>, peer: u32) -> bool {
     if !(tx.send(snapshot_or_empty(daemon)).await.is_ok()
         && tx
@@ -1500,7 +1535,11 @@ async fn send_snapshot(daemon: &Arc<Daemon>, tx: &mpsc::Sender<ServerEvent>, pee
     {
         return false;
     }
-    for ev in usage_events(daemon, peer).await {
+    for ev in base_events(daemon, peer)
+        .await
+        .into_iter()
+        .chain(usage_events(daemon, peer).await)
+    {
         if tx.send(ev).await.is_err() {
             return false;
         }

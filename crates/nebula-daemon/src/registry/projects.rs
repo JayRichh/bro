@@ -256,8 +256,13 @@ impl Daemon {
             .map(|w| w.id)
             .collect();
         self.kill_sessions_in(&wt_ids, &agents, &terminals);
-        // Removing a project only forgets it in nebula — never touches disk.
+        let refs = self.snapshot_refs_under(id, None);
+        // Removing a project only forgets it in nebula — never touches disk
+        // (but for the session snapshot refs Kete itself wrote there).
         self.store.delete_project(id)?;
+        if let Some((repo, agents)) = refs {
+            self.drop_snapshot_refs(repo, agents);
+        }
         self.broadcast(ServerEvent::EntityRemoved {
             id: EntityId::Project(id.clone()),
         });
@@ -302,7 +307,7 @@ impl Daemon {
         // auto-created one — starts at the `worktree_base_branch` SETTING
         // when one is set (`master`, resolved the same way), else at the
         // fetched `origin/HEAD`; never at this checkout's HEAD.
-        let path = match base {
+        let cut = match base {
             Some(base) => git::add_worktree_off_ref(&project.repo_path, branch, base).await?,
             None => match crate::config::Config::load().worktree_base_branch() {
                 Some(configured) => {
@@ -311,7 +316,9 @@ impl Daemon {
                 None => git::add_worktree_off_default(&project.repo_path, branch).await?,
             },
         };
-        let worktree = self.register_worktree(project_id, path, branch).await?;
+        let worktree = self.register_worktree(project_id, cut.path, branch).await?;
+        self.record_worktree_base(&worktree, cut.base.as_deref())
+            .await;
         // The row is out; the WORKTREE HOOK runs still under the lock, so
         // it is ordered with the operation it belongs to — a delete of
         // this path waits for it, two hooks never overlap — and the Ack
@@ -434,6 +441,45 @@ impl Daemon {
         Ok(worktree)
     }
 
+    /// Record the ref `worktree` was cut from, and the merge-base of its
+    /// HEAD with it, as its base (`review_base::RecordedBase`), and tell
+    /// every 59+ client. Nothing for a cut from HEAD or from nothing: the
+    /// review derives those bases as it always has. Best effort: a failure
+    /// is logged and leaves the derivation.
+    pub(super) async fn record_worktree_base(
+        self: &Arc<Self>,
+        worktree: &Worktree,
+        base: Option<&str>,
+    ) {
+        let Some(refname) = base
+            .map(str::trim)
+            .filter(|b| !b.is_empty() && !b.starts_with("HEAD"))
+        else {
+            return;
+        };
+        let Some(sha) = git::cut_point(&worktree.path, refname).await else {
+            tracing::warn!(worktree = %worktree.id, base = refname, "no merge-base for the cut; base not recorded");
+            return;
+        };
+        let (id, refname) = (worktree.id.clone(), refname.to_string());
+        let recorded = self
+            .store_blocking(move |store| store.set_worktree_base(&id, &refname, &sha))
+            .await;
+        if let Err(error) = recorded {
+            tracing::warn!(%error, "record worktree base failed");
+            return;
+        }
+        self.broadcast_worktree_bases().await;
+    }
+
+    /// Every recorded base, to every subscriber that reads them.
+    pub(crate) async fn broadcast_worktree_bases(self: &Arc<Self>) {
+        match self.store_blocking(|store| store.worktree_bases()).await {
+            Ok(bases) => self.broadcast(ServerEvent::WorktreeBases { bases }),
+            Err(error) => tracing::warn!(%error, "read worktree bases failed"),
+        }
+    }
+
     /// Record a checkout git just made as a worktree row and tell every
     /// client. Callers hold `worktree_ops`.
     pub(super) async fn register_worktree(
@@ -503,6 +549,8 @@ impl Daemon {
         self.broadcast(ServerEvent::EntityRemoved {
             id: EntityId::Worktree(id.clone()),
         });
+        // Its sessions' snapshot refs went with the rows: drop them in git.
+        self.prune_session_refs();
         // The delete has happened as far as git and every client are
         // concerned; the WORKTREE HOOK only releases what the checkout
         // owned elsewhere, so it runs after, and its failure is a warning
@@ -588,6 +636,8 @@ impl Daemon {
         self.broadcast(ServerEvent::EntityRemoved {
             id: EntityId::Worktree(id.clone()),
         });
+        // Its sessions' snapshot refs went with the rows: drop them in git.
+        self.prune_session_refs();
         tracing::info!(branch, pr_number, pr_url, "cleaned up merged worktree");
         self.run_worktree_hook(WorktreeHook::Delete, &project.repo_path, &worktree)
             .await;

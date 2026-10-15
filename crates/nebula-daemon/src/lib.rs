@@ -172,6 +172,9 @@ async fn serve(opts: DaemonOpts) -> Result<()> {
         handoff::report(&carry.nonce, Ok(sessions));
     }
     handoff::advertise();
+    // Session snapshot refs whose rows went while no daemon was here to
+    // drop them (`registry/snapshots.rs`), in the snapshot worker.
+    daemon.prune_session_refs();
 
     // An IN-PLACE RESTART request: a client wrote one and sent SIGWINCH,
     // the signal chosen because its default action is to do nothing, so a

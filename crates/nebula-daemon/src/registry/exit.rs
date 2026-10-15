@@ -8,6 +8,10 @@ impl Daemon {
             .insert(session.sref.clone(), session.clone());
         // After the insert: a forward task woken by this looks the ref up.
         let _ = self.session_installs.send(session.sref.clone());
+        // Its start snapshot, unless it already has one in its worktree.
+        if let SessionRef::Agent(agent) = &session.sref {
+            self.snapshot_session_start(agent);
+        }
         self.watch_for_exit(session);
     }
 
