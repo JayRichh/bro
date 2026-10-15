@@ -43,6 +43,7 @@ export type ActionId =
   | "create_pull_request"
   | "merge_pull_request"
   | "focus_scope"
+  | "scope_account"
   | "move_card_left"
   | "move_card_right"
   | "open_issue"
@@ -157,6 +158,7 @@ export type DeskKeyId =
   | "new_terminal"
   | "open_editor"
   | "open_remote"
+  | "open_pr"
   | "switch_branch"
   | "row_menu"
   | "move_up"
@@ -164,18 +166,23 @@ export type DeskKeyId =
   | "list_move"
   | "list_open"
   | "overview_fold"
-  | "board_lanes";
+  | "board_lanes"
+  | "review_pr"
+  | "review_merge"
+  | "review_archive"
+  | "review_delete_worktree";
 
 export type DeskGroup =
   | "General"
   | "Views"
   | "Sessions"
-  | "Overview and board";
+  | "Overview and board"
+  | "Review";
 
 export type AppliesTo = "global" | "repo" | "worktree" | "session" | "terminal" | "account";
 export type WorksIn = "grid" | "board" | "pane" | "diff" | "overlay";
 export type Surface = "both" | "tui" | "desktop";
-export type DeskScope = "anywhere" | "fields" | "global" | "row" | "overview" | "board";
+export type DeskScope = "anywhere" | "fields" | "global" | "row" | "overview" | "board" | "review";
 
 /** One verb. `tui` is the terminal app's default chords in its own
  *  spelling; `desktop` names the window's key rows for it. */
@@ -620,7 +627,7 @@ export const ACTIONS: readonly ActionRow[] = [
     worksIn: ["grid", "board"],
     surface: "both",
     tui: [],
-    desktop: [],
+    desktop: ["review_delete_worktree"],
   },
   {
     id: "remove_project",
@@ -669,10 +676,10 @@ export const ACTIONS: readonly ActionRow[] = [
     word: "PR",
     destructive: false,
     appliesTo: ["worktree", "session"],
-    worksIn: ["grid", "board"],
-    surface: "tui",
+    worksIn: ["grid", "board", "diff"],
+    surface: "both",
     tui: ["shift+v"],
-    desktop: [],
+    desktop: ["open_pr", "review_pr"],
   },
   {
     id: "create_pull_request",
@@ -698,7 +705,7 @@ export const ACTIONS: readonly ActionRow[] = [
     worksIn: ["grid", "board", "diff"],
     surface: "both",
     tui: [],
-    desktop: [],
+    desktop: ["review_merge"],
   },
   {
     id: "focus_scope",
@@ -710,6 +717,19 @@ export const ACTIONS: readonly ActionRow[] = [
     appliesTo: ["repo", "worktree", "session"],
     worksIn: ["grid", "board"],
     surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
+    id: "scope_account",
+    label: "Scope to an account\u2026",
+    hint: "Narrow the scope chip to the sessions of one account, picked from those the board's sessions run on (or back to any account); the chip's @ does the same by click. The desktop's chip menu lists the accounts too",
+    group: "PROJECTS & WORKTREES",
+    word: "account",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board"],
+    surface: "tui",
     tui: [],
     desktop: [],
   },
@@ -919,7 +939,7 @@ export const ACTIONS: readonly ActionRow[] = [
     worksIn: ["grid", "board", "pane"],
     surface: "both",
     tui: ["a"],
-    desktop: ["archive"],
+    desktop: ["archive", "review_archive"],
   },
   {
     id: "unarchive",
@@ -1549,6 +1569,7 @@ export const DESK_KEYS: readonly DeskKey[] = [
   { id: "new_terminal", action: "new_terminal", label: "New terminal in its worktree", group: "Sessions", scope: "row", editorOwns: false, chords: ["t"] },
   { id: "open_editor", action: "open_worktree", label: "Open its worktree in the editor", group: "Sessions", scope: "row", editorOwns: false, chords: ["shift+o"] },
   { id: "open_remote", action: "open_repo", label: "Open the repo remote in the browser", group: "Sessions", scope: "row", editorOwns: false, chords: ["shift+g"] },
+  { id: "open_pr", action: "open_pull_request", label: "Open the pull request in the browser", group: "Sessions", scope: "row", editorOwns: false, chords: ["shift+v"] },
   { id: "switch_branch", action: "switch_branch", label: "Switch the repo root checkout to another branch", group: "Sessions", scope: "row", editorOwns: false, chords: ["c"] },
   { id: "row_menu", action: "row_menu", label: "Actions menu", group: "Sessions", scope: "row", editorOwns: false, chords: ["shift+f10", "contextmenu"] },
   { id: "move_up", action: "reorder_up", label: "Move up: the session, worktree or repo (or drag it)", group: "Sessions", scope: "row", editorOwns: false, chords: ["alt+arrowup"] },
@@ -1557,6 +1578,10 @@ export const DESK_KEYS: readonly DeskKey[] = [
   { id: "list_open", action: "list_open", label: "Open the session", group: "Overview and board", scope: "overview", editorOwns: false, chords: ["enter"] },
   { id: "overview_fold", action: "overview_fold", label: "Overview: unfold, fold nested sessions", group: "Overview and board", scope: "overview", editorOwns: false, chords: ["arrowright", "arrowleft"] },
   { id: "board_lanes", action: "board_lanes", label: "Board: across lanes (also the side arrows)", group: "Overview and board", scope: "board", editorOwns: false, chords: ["h", "l"] },
+  { id: "review_pr", action: "open_pull_request", label: "Review: view the pull request, or open one\u2026", group: "Review", scope: "review", editorOwns: false, chords: ["alt+p"] },
+  { id: "review_merge", action: "merge_pull_request", label: "Review: merge the pull request\u2026", group: "Review", scope: "review", editorOwns: false, chords: ["alt+m"] },
+  { id: "review_archive", action: "archive", label: "Review: archive the session", group: "Review", scope: "review", editorOwns: false, chords: ["alt+a"] },
+  { id: "review_delete_worktree", action: "delete_worktree", label: "Review: delete the worktree\u2026", group: "Review", scope: "review", editorOwns: false, chords: ["alt+w"] },
 ];
 
 /** A verb's words in a menu, the verbs menu and the verb bar; `on`: that kind only. */

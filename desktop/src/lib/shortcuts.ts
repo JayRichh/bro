@@ -26,7 +26,11 @@ export type ShortcutId = DeskKeyId;
  * - `overview`, `board`: the home view's own walking keys, handled by
  *   Overview.svelte and Board.svelte (listed here for the help and the
  *   clash test; App.svelte never dispatches them, and they can't be
- *   rebound).
+ *   rebound);
+ * - `review`: the review row's Alt chords, handled by the review row
+ *   itself (ReviewBar.svelte) while a review's diff is up, even inside
+ *   the diff editor, as the terminal app's docked review takes them;
+ *   fixed too.
  */
 export type Scope = DeskScope;
 
@@ -58,9 +62,10 @@ export function actionOf(id: ShortcutId): ActionId | undefined {
   return DESK_KEYS.find((k) => k.id === id)?.action;
 }
 
-/** The home views' walking keys: listed, never rebound. */
+/** The home views' walking keys and the review row's: listed, never
+ *  rebound. */
 export function isFixed(scope: Scope): boolean {
-  return scope === 'overview' || scope === 'board';
+  return scope === 'overview' || scope === 'board' || scope === 'review';
 }
 
 /** Lay the user's bindings (key id to chords; an empty list unbinds) over
@@ -143,6 +148,7 @@ export function inScope(scope: Scope, ctx: KeyContext): boolean {
       return !ctx.typing && ctx.onRow;
     case 'overview':
     case 'board':
+    case 'review':
       return false;
   }
 }
@@ -155,6 +161,18 @@ export function shortcutFor(
 ): Shortcut | undefined {
   const chord = chordOf(e);
   return table.find((s) => s.keys.includes(chord) && inScope(s.scope, ctx) && !(ctx.inEditor && s.editorOwns));
+}
+
+/** The review row's key a key event is, if any: Alt and a letter, read
+ *  from the physical key (`e.code`), since Option and a letter on a Mac
+ *  types a symbol (Option+P is a pi) rather than the letter. */
+export function reviewKeyFor(
+  e: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey'>,
+  table: Shortcut[] = SHORTCUTS,
+): Shortcut | undefined {
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || !/^Key[A-Z]$/.test(e.code)) return undefined;
+  const chord = `alt+${e.code.slice(3).toLowerCase()}`;
+  return table.find((s) => s.scope === 'review' && s.keys.includes(chord));
 }
 
 /** A chord as the help overlay and palette print it: `Ctrl+Shift+B`. */

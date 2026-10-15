@@ -5,7 +5,7 @@
 // a verb does on a row lives in actions.ts; this file only says which
 // verbs, in which order, by which words and keys.
 
-import { ACTIONS, MENU_LABELS, MENUS, PRIMARY, PRIMARY_SHOWN, type ActionId, type AppliesTo, type DeskKeyId } from './actions.gen';
+import { ACTIONS, DESK_KEYS, MENU_LABELS, MENUS, PRIMARY, PRIMARY_SHOWN, type ActionId, type AppliesTo, type DeskKeyId } from './actions.gen';
 import { keysOf, type Shortcut } from './shortcuts';
 import { SHORTCUTS } from './keytable.svelte';
 
@@ -52,9 +52,14 @@ export function deskKeysOf(id: ActionId): DeskKeyId[] {
   return [...(ACTIONS.find((a) => a.id === id)?.desktop ?? [])] as DeskKeyId[];
 }
 
-/** A verb's chords as the window has them bound now, shortest first. */
+/** A verb's chords as the window has them bound now, shortest first.
+ *  The review row's Alt chords count in a review only: a menu row, which
+ *  works anywhere, does not name them. */
 export function verbKeys(id: ActionId, table: Shortcut[] = SHORTCUTS): string[] {
-  const all = deskKeysOf(id).flatMap((k) => keysOf(k, table));
+  const reviewOnly = (k: DeskKeyId) => DESK_KEYS.find((d) => d.id === k)?.scope === 'review';
+  const all = deskKeysOf(id)
+    .filter((k) => !reviewOnly(k))
+    .flatMap((k) => keysOf(k, table));
   return [...new Set(all)].sort((a, b) => a.length - b.length);
 }
 

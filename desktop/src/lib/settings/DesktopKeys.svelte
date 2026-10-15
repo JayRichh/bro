@@ -19,6 +19,7 @@
     row: 'on a focused row',
     overview: 'overview, fixed',
     board: 'board, fixed',
+    review: 'review, fixed',
   };
 
   /** The row taking a chord, and a chord held for a clash's confirm. */

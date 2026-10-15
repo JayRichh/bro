@@ -2112,6 +2112,48 @@ pub(super) fn open_more_tabs_menu(app: &mut App) {
     app.chrome.dirty = true;
 }
 
+/// The SCOPE CHIP's account picker: Any account, then each account the
+/// sessions on the board run on (`@work`, `@claude` for a harness's own
+/// login), the one in the scope ticked. A pick narrows the scope to it,
+/// the repo and worktree kept, as the desktop chip's menu does.
+pub(super) fn open_account_picker(app: &mut App) {
+    use nebula_core::scope::Scope;
+    let scope = app.launcher.scope.clone();
+    let tick = |on: bool, label: &str| {
+        if on {
+            format!("\u{2713} {label}")
+        } else {
+            format!("  {label}")
+        }
+    };
+    let mut items = vec![MenuItem::new(
+        tick(scope.account.is_none(), "Any account"),
+        MenuAction::FocusScope(Scope {
+            account: None,
+            ..scope.clone()
+        }),
+    )];
+    for key in nebula_core::accounts::sessions_by_account(&app.tree.agents).into_keys() {
+        let on = scope.account.as_deref() == Some(key.as_str());
+        let label = format!("@{}", key.trim_start_matches('@'));
+        items.push(MenuItem::new(
+            tick(on, &label),
+            MenuAction::FocusScope(Scope {
+                account: Some(key),
+                ..scope.clone()
+            }),
+        ));
+    }
+    if items.len() == 1 {
+        app.chrome.flash = Some("no sessions yet: nothing to scope by account".into());
+        app.chrome.dirty = true;
+        return;
+    }
+    let at = crumb_anchor(app, &HitTarget::ScopeAccount);
+    super::open_menu(app, items, at);
+    app.chrome.dirty = true;
+}
+
 /// Put the cursor on project `id` — the grid's scope, and the lit tab.
 /// Nothing is attached here: [`open_project`] puts the cursor on a card
 /// next, and that is what brings its session up in the pane.
@@ -13589,7 +13631,7 @@ mod tests {
             // The board on this project: the SCOPE CHIP names it, and its
             // ✕ widens the board to every project (saved, as Tab saves it).
             let text = screen_text(&draw_at(&mut app, 200, 40));
-            assert!(text.contains("all ▸ demo ✕"), "{text}");
+            assert!(text.contains("all ▸ demo @ ✕"), "{text}");
             let (x, y) = crumb_cell(&app, HitTarget::ScopeClear);
             mouse(&mut app, MouseEventKind::Down(MouseButton::Left), x, y);
             assert!(app.launcher.kanban_all);

@@ -948,6 +948,8 @@ fn handle_left_click_target(app: &mut App, mouse: MouseEvent, out: &mut Vec<Clie
             super::board::widen_scope(app, 0);
             launcher::after_scope_change(app, out);
         }
+        // Its account: the picker of the board's accounts.
+        Some(HitTarget::ScopeAccount) => launcher::open_account_picker(app),
         // The key cap in the empty grid's welcome: the QUICK
         // PROMPT, through the `open_box` its key runs.
         Some(HitTarget::LauncherWelcomePrompt) => launcher::open_box(app),

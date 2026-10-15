@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SHORTCUTS, chordOf, helpGroups, inScope, keyLabel, shortcutFor, withKey, type KeyContext, type Scope } from './shortcuts';
+import { SHORTCUTS, chordOf, helpGroups, inScope, keyLabel, reviewKeyFor, shortcutFor, withKey, type KeyContext, type Scope } from './shortcuts';
 
 const key = (k: string, m: Partial<{ ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean }> = {}) => ({
   key: k,
@@ -130,7 +130,7 @@ describe('chordOf and shortcutFor', () => {
 
   it('groups the help in table order', () => {
     const groups = helpGroups();
-    expect(groups.map((g) => g.group)).toEqual(['General', 'Views', 'Sessions', 'Overview and board']);
+    expect(groups.map((g) => g.group)).toEqual(['General', 'Views', 'Sessions', 'Overview and board', 'Review']);
     const keys = (n: number, g: { rows: { keys: string[] }[] }) => n + g.rows.reduce((m, r) => m + r.keys.length, 0);
     expect(groups.reduce(keys, 0)).toBe(SHORTCUTS.reduce((n, s) => n + s.keys.length, 0));
     const palette = groups[0].rows.find((r) => r.label === 'Command palette')!;
@@ -140,7 +140,27 @@ describe('chordOf and shortcutFor', () => {
 
   it('every scope is reachable', () => {
     const scopes = new Set<Scope>(SHORTCUTS.map((s) => s.scope));
-    expect([...scopes].sort()).toEqual(['anywhere', 'board', 'fields', 'global', 'overview', 'row']);
+    expect([...scopes].sort()).toEqual(['anywhere', 'board', 'fields', 'global', 'overview', 'review', 'row']);
+  });
+
+  it("reads the review row's Alt chords from the physical key, as the terminal app's review has them", () => {
+    const alt = (code: string, m: Partial<{ ctrlKey: boolean; shiftKey: boolean; metaKey: boolean }> = {}) => ({
+      code,
+      altKey: true,
+      ctrlKey: false,
+      shiftKey: false,
+      metaKey: false,
+      ...m,
+    });
+    expect(reviewKeyFor(alt('KeyP'))?.id).toBe('review_pr');
+    expect(reviewKeyFor(alt('KeyM'))?.id).toBe('review_merge');
+    expect(reviewKeyFor(alt('KeyA'))?.id).toBe('review_archive');
+    expect(reviewKeyFor(alt('KeyW'))?.id).toBe('review_delete_worktree');
+    expect(reviewKeyFor(alt('KeyP', { ctrlKey: true }))).toBeUndefined();
+    expect(reviewKeyFor(alt('KeyP', { shiftKey: true }))).toBeUndefined();
+    expect(reviewKeyFor({ ...alt('KeyP'), altKey: false })).toBeUndefined();
+    // Only the review row takes them: no window key fires on them anywhere.
+    for (const ctx of [idle, row, field, term]) expect(shortcutFor(key('p', { altKey: true }), ctx)).toBeUndefined();
   });
 });
 

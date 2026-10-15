@@ -219,7 +219,7 @@ fn focus_here_narrows_the_board_and_the_chip_widens_it() {
             .collect();
         assert_eq!(shown, ["polish-nav"]);
         let text = draw_at(&mut app, 200, 50);
-        assert!(text.contains("all ▸ demo ▸ feat ✕"), "{text}");
+        assert!(text.contains("all ▸ demo ▸ feat @ ✕"), "{text}");
         assert!(text.contains("1 more outside scope"), "{text}");
         let running = crate::attention::tally(&app)
             .get(&crate::subagents::Tone::Running)
@@ -260,7 +260,7 @@ fn focus_here_narrows_the_board_and_the_chip_widens_it() {
         );
         assert!(crate::config::Config::load().kanban_scope == "project");
         let text = draw_at(&mut app, 200, 50);
-        assert!(text.contains("all ▸ demo ✕"), "the chip says it: {text}");
+        assert!(text.contains("all ▸ demo @ ✕"), "the chip says it: {text}");
         // Esc clears that too, once the card is let go of.
         key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
         key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
@@ -884,4 +884,68 @@ fn a_board_card_names_its_commits_since_the_base() {
     );
     let text = draw_at(&mut app, 200, 50);
     assert!(text.contains("3 commits"), "{text}");
+}
+
+/// The chip's `@`: a picker of the accounts the board's sessions run on;
+/// a pick narrows the scope to that account, the place kept, and the
+/// chip names it; Any account widens it back.
+#[test]
+fn the_chip_picks_an_account() {
+    with_default_config(|| {
+        let mut app = bench();
+        agent(&mut app, "a2").profile = Some("work".into());
+        let text = draw_at(&mut app, 200, 50);
+        assert!(text.contains("all @"), "{text}");
+        let at = rect_where(&app, |h| *h == HitTarget::ScopeAccount);
+        mouse_at(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            at.x,
+            at.y,
+        );
+        let items = match &app.modals.overlay {
+            Some(Overlay::Menu(m)) => m.items.clone(),
+            other => panic!("no picker: {other:?}"),
+        };
+        let labels: Vec<&str> = items.iter().map(|i| i.label.trim()).collect();
+        assert_eq!(labels[0], "\u{2713} Any account");
+        assert!(labels.contains(&"@work"), "{labels:?}");
+        assert_eq!(labels.len(), 3, "one row per account in use: {labels:?}");
+        let work = items.iter().find(|i| i.label.trim() == "@work").unwrap();
+        let mut out = Vec::new();
+        let pick = work.action.clone();
+        app.modals.overlay = None;
+        crate::event_loop::commands::run_menu_action(&mut app, pick, &mut out);
+        assert_eq!(app.launcher.scope.account.as_deref(), Some("work"));
+        let lanes = crate::launcher::kanban(&app, app.launcher.kanban_all);
+        let shown: Vec<&str> = lanes
+            .iter()
+            .flatten()
+            .map(|r| r.agent.name.as_str())
+            .collect();
+        assert_eq!(shown, ["polish-nav"]);
+        let text = draw_at(&mut app, 200, 50);
+        assert!(text.contains("all ▸ @work ✕"), "{text}");
+
+        // The account's segment opens the picker again; Any account
+        // takes the account off.
+        let at = rect_where(&app, |h| *h == HitTarget::ScopeAccount);
+        mouse_at(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            at.x,
+            at.y,
+        );
+        let any = match &app.modals.overlay {
+            Some(Overlay::Menu(m)) => m.items[0].action.clone(),
+            other => panic!("no picker: {other:?}"),
+        };
+        app.modals.overlay = None;
+        crate::event_loop::commands::run_menu_action(&mut app, any, &mut out);
+        assert!(app.launcher.scope.account.is_none());
+
+        // The palette's row does what the click does.
+        run_action(&mut app, crate::keymap::Action::ScopeAccount, &mut out);
+        assert!(matches!(app.modals.overlay, Some(Overlay::Menu(_))));
+    });
 }

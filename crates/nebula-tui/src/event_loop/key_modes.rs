@@ -433,6 +433,8 @@ fn handle_global_action(
         // `Shift+←` / `Shift+→` on the board: the card onto the next lane.
         Action::MoveCardLeft => board::move_card(app, -1, out),
         Action::MoveCardRight => board::move_card(app, 1, out),
+        // The scope chip's account picker, as a click on its `@` opens it.
+        Action::ScopeAccount => launcher::open_account_picker(app),
         // Listed rather than `_`: a new action is a compile error here
         // until it is routed, never an `unreachable!` at the user's press.
         Action::GitDiff

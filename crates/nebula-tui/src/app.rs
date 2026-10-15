@@ -173,6 +173,10 @@ pub enum HitTarget {
     /// The chip's `✕`: the scope back to everything, as Esc does once the
     /// cursor has let go of the card.
     ScopeClear,
+    /// The chip's account: its `@account` segment, or a bare `@` while
+    /// the scope names none. A click opens the picker of the accounts the
+    /// board's sessions run on, as **Scope to an account…** does.
+    ScopeAccount,
     /// Draggable top edge of the LAUNCHER VIEW's PANE: the blank row the
     /// pane opens with, plus the grid row above it. Registered ahead of
     /// the cards so a card ending on that row never swallows the grab.
