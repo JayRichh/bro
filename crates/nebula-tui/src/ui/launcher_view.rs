@@ -3162,7 +3162,14 @@ pub(super) fn pane_frame(
                 .filter(|(_, hit)| *hit != HitTarget::LauncherPaneSide)
             {
                 let w = glyph.chars().count() as u16;
-                header_button(f, app, Rect { x, width: w, ..r }, glyph, hit.clone(), th.accent);
+                header_button(
+                    f,
+                    app,
+                    Rect { x, width: w, ..r },
+                    glyph,
+                    hit.clone(),
+                    th.accent,
+                );
                 x += w;
             }
             let side_button = extras

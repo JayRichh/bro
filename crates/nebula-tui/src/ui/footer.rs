@@ -316,10 +316,10 @@ fn launcher_grid_footer_hint(app: &App, _th: Theme) -> FooterHint {
         return FooterHint {
             sep: " ",
             ..key_bar(vec![
-            keys(walk, "move"),
-            button(k(Action::Activate), "open", Action::Activate),
-            button(k(Action::QuickPrompt), "sub-prompt", Action::QuickPrompt),
-        ])
+                keys(walk, "move"),
+                button(k(Action::Activate), "open", Action::Activate),
+                button(k(Action::QuickPrompt), "sub-prompt", Action::QuickPrompt),
+            ])
         };
     }
     // Every entry that is one action's key is a button: a click on it runs
@@ -369,16 +369,16 @@ fn launcher_grid_footer_hint(app: &App, _th: Theme) -> FooterHint {
             button(k(Action::Activate), "open", Action::Activate),
             button(k(Action::QuickPrompt), "new session", Action::QuickPrompt),
             keys(
-                format!(
-                    "{}{}",
-                    k(Action::PrevProjectTab),
-                    k(Action::NextProjectTab)
-                ),
+                format!("{}{}", k(Action::PrevProjectTab), k(Action::NextProjectTab)),
                 "project tabs",
             ),
             button(k(Action::PaneTabs), "terminals", Action::PaneTabs),
             button(k(Action::Archive), "archive", Action::Archive),
-            button(k(Action::ToggleArchived), "archived", Action::ToggleArchived),
+            button(
+                k(Action::ToggleArchived),
+                "archived",
+                Action::ToggleArchived,
+            ),
             button(k(Action::ToggleKanban), "board", Action::ToggleKanban),
             button(k(Action::GitDiff), "diff", Action::GitDiff),
         ]
@@ -586,13 +586,10 @@ fn append_footer_hint(
         if i > 0 {
             spans.push((Span::raw("  "), None));
         }
-        let hovered = hint.action.is_some_and(|a| {
-            app.launcher.hover_crumb == Some(HitTarget::FooterHint(a))
-        });
-        let (mut key, mut does) = (
-            Style::default().fg(th.text),
-            Style::default().fg(th.muted),
-        );
+        let hovered = hint
+            .action
+            .is_some_and(|a| app.launcher.hover_crumb == Some(HitTarget::FooterHint(a)));
+        let (mut key, mut does) = (Style::default().fg(th.text), Style::default().fg(th.muted));
         if hovered {
             key = key.fg(th.accent).add_modifier(Modifier::UNDERLINED);
             does = does.fg(th.text).add_modifier(Modifier::UNDERLINED);

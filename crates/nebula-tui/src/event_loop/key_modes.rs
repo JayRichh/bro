@@ -293,7 +293,11 @@ fn handle_global_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>)
 /// (a click is one press), and the chord handed on is the action's first
 /// binding — what the KEY COMBO DISPLAY and a held-key watch read — or,
 /// for an action left unbound, a chord no key sends.
-pub(super) fn run_action(app: &mut App, action: crate::keymap::Action, out: &mut Vec<ClientRequest>) {
+pub(super) fn run_action(
+    app: &mut App,
+    action: crate::keymap::Action,
+    out: &mut Vec<ClientRequest>,
+) {
     let chord = app
         .chrome
         .keymap

@@ -20597,7 +20597,8 @@ fn help_click_outside_closes_and_inside_stays() {
     let mut out = Vec::new();
     press(&mut app, KeyCode::Char('?'), KeyModifiers::NONE, &mut out);
     let area = drawn_modal_area(&mut app);
-    click(&mut app, area.x + 2, area.y + 2, &mut out);
+    // Its border: inside the box, and no row's button.
+    click(&mut app, area.x + 2, area.y, &mut out);
     assert!(
         matches!(app.modals.overlay, Some(Overlay::Help(_))),
         "inside click keeps it"

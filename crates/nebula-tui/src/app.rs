@@ -807,11 +807,109 @@ pub struct ConfirmDialog {
     pub area: Rect,
 }
 
-/// The `?` keymap overlay. Carries nothing but its drawn rect, so a click
-/// outside the box can close it.
+/// One of a CONFIRM DIALOG's answers, as its legend draws it: the words,
+/// the key it answers with, and whether it is the destructive one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConfirmAnswer {
+    pub label: &'static str,
+    pub key: crossterm::event::KeyCode,
+    pub destructive: bool,
+}
+
+/// The columns of air between two answers in a confirm's legend.
+pub const CONFIRM_ANSWER_GAP: u16 = 3;
+
+impl ConfirmDialog {
+    /// The answers the legend offers, left to right. Each is a BUTTON too:
+    /// a click on it is its key, pressed. A forced delete puts its one
+    /// destructive answer LAST, so it never sits where the confirm before
+    /// it drew its yes — the second click of a double-click lands on
+    /// `keep it`, never on `delete anyway`.
+    pub fn answers(&self) -> Vec<ConfirmAnswer> {
+        use crossterm::event::KeyCode;
+        let answer = |label, key, destructive| ConfirmAnswer {
+            label,
+            key,
+            destructive,
+        };
+        match self.action {
+            PendingAction::ForceDeleteWorktree(_) => vec![
+                answer("[Enter/y/Esc/n] keep it", KeyCode::Esc, false),
+                answer("[f] delete anyway", KeyCode::Char('f'), true),
+            ],
+            PendingAction::ThenDeleteWorktree { offered: true, .. } => vec![
+                answer("[Enter/y] yes, both", KeyCode::Enter, true),
+                answer("[n] no, the card only", KeyCode::Char('n'), true),
+                answer("[Esc] cancel", KeyCode::Esc, false),
+            ],
+            _ => vec![
+                answer("[Enter/y] confirm", KeyCode::Enter, true),
+                answer("[Esc/n] cancel", KeyCode::Esc, false),
+            ],
+        }
+    }
+
+    /// Where each answer is drawn, from the rect the draw wrote back: the
+    /// legend is the box's last row inside its border.
+    pub fn answer_rects(&self) -> Vec<(Rect, ConfirmAnswer)> {
+        let a = self.area;
+        if a.width < 2 || a.height < 3 {
+            return Vec::new();
+        }
+        let y = a.y + a.height - 2;
+        let mut x = a.x + 1;
+        let end = a.x + a.width - 1;
+        let mut out = Vec::new();
+        for answer in self.answers() {
+            let w = answer.label.chars().count() as u16;
+            if x + w > end {
+                break;
+            }
+            out.push((
+                Rect {
+                    x,
+                    y,
+                    width: w,
+                    height: 1,
+                },
+                answer,
+            ));
+            x += w + CONFIRM_ANSWER_GAP;
+        }
+        out
+    }
+}
+
+/// The `?` keymap overlay: its drawn rect, so a click outside the box can
+/// close it, and its rows' buttons, written back at draw time — each
+/// entry's key (or the whole row, for the row's first action) is a click
+/// that closes the help and runs that action, as the key would.
 #[derive(Debug, Clone, Default)]
 pub struct HelpView {
     pub area: Rect,
+    pub buttons: Vec<(Rect, crate::keymap::Action)>,
+    /// The row under the pointer, lit as a menu's hovered row is.
+    pub hover: Option<Rect>,
+}
+
+impl HelpView {
+    /// The action a click at `pos` runs: the first button holding the
+    /// cell — a key's own ahead of its row's.
+    pub fn button_at(&self, pos: ratatui::layout::Position) -> Option<crate::keymap::Action> {
+        self.buttons
+            .iter()
+            .find(|(r, _)| r.contains(pos))
+            .map(|(_, a)| *a)
+    }
+
+    /// The row under `pos`, for the hover: the widest button holding it.
+    pub fn row_at(&self, pos: ratatui::layout::Position) -> Option<Rect> {
+        self.buttons
+            .iter()
+            .filter(|(r, _)| r.contains(pos))
+            .map(|(r, _)| *r)
+            .max_by_key(|r| r.width)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1019,6 +1117,56 @@ impl PromptDialog {
         prompt.input.set_multiline(multiline);
         prompt.refresh_dirs();
         prompt
+    }
+
+    /// The one-line prompt's key row: its keys, with `[Enter]` first and
+    /// `[Esc] cancel` last — the two of them BUTTONS ([`Self::answer_rects`]).
+    pub fn key_row(&self) -> &'static str {
+        if self.completes_paths() {
+            "[Enter] add  [↓↑] pick  [→] open  [←] up  [Tab] complete  [Esc] cancel"
+        } else {
+            "[Enter] ok  [⌥←→] word  [Ctrl+u] clear  [Esc] cancel"
+        }
+    }
+
+    /// Where the one-line prompt drew its two BUTTONS — `[Enter] ok` (or
+    /// `add`) at the key row's start, `[Esc] cancel` at its end — from the
+    /// rect the draw wrote back, with the key each one presses. None on a
+    /// multi-row box, which has its own row of keys, nor on a box too
+    /// narrow to draw its key row whole.
+    pub fn answer_rects(&self) -> Vec<(Rect, crossterm::event::KeyCode)> {
+        use crossterm::event::KeyCode;
+        let a = self.area;
+        let row = self.key_row();
+        let row_w = row.chars().count() as u16;
+        if self.is_multiline() || a.height < 3 || a.width < row_w + 2 {
+            return Vec::new();
+        }
+        let y = a.y + a.height - 2;
+        let enter = row.split("  ").next().unwrap_or_default();
+        let esc = "[Esc] cancel";
+        let enter_w = enter.chars().count() as u16;
+        let esc_w = esc.chars().count() as u16;
+        vec![
+            (
+                Rect {
+                    x: a.x + 1,
+                    y,
+                    width: enter_w,
+                    height: 1,
+                },
+                KeyCode::Enter,
+            ),
+            (
+                Rect {
+                    x: a.x + 1 + row_w - esc_w,
+                    y,
+                    width: esc_w,
+                    height: 1,
+                },
+                KeyCode::Esc,
+            ),
+        ]
     }
 
     /// Does Tab complete filesystem paths in this prompt?
@@ -4246,6 +4394,15 @@ impl Default for ChromeState {
 
 pub struct ModalState {
     pub overlay: Option<Overlay>,
+    /// When a modal's BUTTON was last clicked (a confirm's `[Enter/y]`, a
+    /// prompt's `[Esc]`). A button click inside the double-click window
+    /// after it is dropped: the answer can put another dialog up in the
+    /// same place — a dirty checkout's forced delete after its confirm —
+    /// and the second half of a double-click must never answer that one.
+    pub button_clicked_at: Option<std::time::Instant>,
+    /// The modal BUTTON under the pointer (a confirm's answer, a prompt's
+    /// `[Enter]`), by its drawn rect, so the draw can light it.
+    pub button_hover: Option<Rect>,
     /// The expanded session card's FOLLOW-UP COMPOSER, or None with every
     /// card folded. Not an `Overlay`: it draws inside the SESSIONS PANEL
     /// and the panels stay live around it — what it takes is the keyboard,
@@ -4303,6 +4460,8 @@ impl Default for ModalState {
     fn default() -> Self {
         Self {
             overlay: None,
+            button_clicked_at: None,
+            button_hover: None,
             follow_up: None,
             diff_files_width: DEFAULT_DIFF_FILES_W,
             diff_tree: false,

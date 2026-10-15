@@ -202,35 +202,29 @@ fn draw_confirm_overlay(f: &mut Frame, app: &mut App, confirm: crate::app::Confi
     // answers: yes takes both, no takes the card alone, and
     // cancel keeps the card alive. The dialog is sized to the
     // legend too, so the three never wrap.
-    let three_way = matches!(
-        confirm.action,
-        crate::app::PendingAction::ThenDeleteWorktree { offered: true, .. }
-    );
-    let forced = matches!(
-        confirm.action,
-        crate::app::PendingAction::ForceDeleteWorktree(_)
-    );
-    let legend = if forced {
-        Line::from(vec![
-            Span::styled("[f] delete anyway", Style::default().fg(th.err)),
-            Span::raw("   "),
-            Span::styled("[Enter/y/Esc/n] keep it", Style::default().fg(th.dim)),
-        ])
-    } else if three_way {
-        Line::from(vec![
-            Span::styled("[Enter/y] yes, both", Style::default().fg(th.err)),
-            Span::raw("   "),
-            Span::styled("[n] no, the card only", Style::default().fg(th.err)),
-            Span::raw("   "),
-            Span::styled("[Esc] cancel", Style::default().fg(th.dim)),
-        ])
-    } else {
-        Line::from(vec![
-            Span::styled("[Enter/y] confirm", Style::default().fg(th.err)),
-            Span::raw("   "),
-            Span::styled("[Esc/n] cancel", Style::default().fg(th.dim)),
-        ])
-    };
+    // Each answer is a BUTTON (`ConfirmDialog::answers`): a click on it is
+    // its key. The one under the pointer is underlined and brightened, as
+    // the grid's buttons are; the destructive answers keep the red.
+    let hover = app.modals.button_hover;
+    let drawn = confirm.answer_rects();
+    let mut legend_spans = Vec::new();
+    for (i, answer) in confirm.answers().into_iter().enumerate() {
+        if i > 0 {
+            legend_spans.push(Span::raw(
+                " ".repeat(usize::from(crate::app::CONFIRM_ANSWER_GAP)),
+            ));
+        }
+        let mut style = Style::default().fg(if answer.destructive { th.err } else { th.dim });
+        let lit = drawn.iter().any(|(r, a)| *a == answer && Some(*r) == hover);
+        if lit {
+            style = style.add_modifier(Modifier::UNDERLINED | Modifier::BOLD);
+            if !answer.destructive {
+                style = style.fg(th.text);
+            }
+        }
+        legend_spans.push(Span::styled(answer.label, style));
+    }
+    let legend = Line::from(legend_spans);
     let longest = msg_lines
         .iter()
         .map(|l| l.chars().count())
@@ -367,15 +361,38 @@ fn draw_prompt_overlay(f: &mut Frame, app: &mut App, prompt: PromptDialog) {
         }
     }
 
-    // Bottom row: the key hints.
+    // Bottom row: the key hints, `[Enter]` and `[Esc] cancel` at either end
+    // of it BUTTONS (`PromptDialog::answer_rects`) — a click on one is the
+    // key — in the brighter text a button is drawn in, underlined under
+    // the pointer.
     if let Some(r) = row_rect(inner, (3 + list_h) as usize) {
-        let hint = if is_path {
-            "[Enter] add  [↓↑] pick  [→] open  [←] up  [Tab] complete  [Esc] cancel"
-        } else {
-            "[Enter] ok  [⌥←→] word  [Ctrl+u] clear  [Esc] cancel"
+        let hint = prompt.key_row();
+        let enter = hint.split("  ").next().unwrap_or_default();
+        let esc = "[Esc] cancel";
+        let middle = &hint[enter.len()..hint.len() - esc.len()];
+        let hovered = |key: crossterm::event::KeyCode| {
+            prompt
+                .answer_rects()
+                .iter()
+                .any(|(rect, k)| *k == key && Some(*rect) == app.modals.button_hover)
+        };
+        let button = |label: &'static str, lit: bool| {
+            let style = Style::default().fg(th.text);
+            Span::styled(
+                label,
+                if lit {
+                    style.add_modifier(Modifier::UNDERLINED | Modifier::BOLD)
+                } else {
+                    style
+                },
+            )
         };
         f.render_widget(
-            Paragraph::new(Span::styled(hint, Style::default().fg(th.dim))),
+            Paragraph::new(Line::from(vec![
+                button(enter, hovered(crossterm::event::KeyCode::Enter)),
+                Span::styled(middle, Style::default().fg(th.dim)),
+                button(esc, hovered(crossterm::event::KeyCode::Esc)),
+            ])),
             r,
         );
     }
@@ -460,7 +477,10 @@ const HELP_RIGHT: &[HelpSection] = &[
         &[
             (Act(&[QuickPrompt]), "quick prompt: Enter launches"),
             (Act(&[New]), "new session: pick a CLI first"),
-            (Act(&[DuplicateSession]), "quick prompt as this card"),
+            (
+                Act(&[DuplicateSession, MoveSession]),
+                "this card: re-prompt / move",
+            ),
             (Act(&[AgentPresets]), "agent presets: saved launches"),
             (
                 Act(&[NewTerminal, OpenGhosttyTab]),
@@ -495,12 +515,16 @@ const HELP_RIGHT: &[HelpSection] = &[
         &[
             (Act(&[ToggleLauncherPane]), "fold / unfold the pane"),
             (Act(&[ToggleFullScreen]), "full-screen / normal size"),
+            (
+                Act(&[ToggleKanban, ToggleOrchestratorView]),
+                "board / orchestrator view",
+            ),
             // The SHIFT PAIRS' rule (#93), once, for every
             // letter above that has a shifted twin.
             (Lit("⇧ + letter"), "bigger, or outside kete"),
             (Act(&[Hosts]), "ssh hosts (a: new, d: del)"),
             (Act(&[Settings]), "settings; Hotkeys tab rebinds"),
-            (Act(&[Metrics]), "memory: kete + agents"),
+            (Act(&[Metrics, Accounts]), "memory / accounts + usage"),
             (Act(&[Quit, Help]), "quit / toggle this help"),
         ],
     ),
@@ -571,7 +595,17 @@ fn draw_help_overlay(f: &mut Frame, app: &mut App, _: crate::app::HelpView) {
     f.render_widget(block, area);
     let [left_a, right_a] =
         Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(inner);
-    let column = |sections: &[HelpSection], width: u16| -> Vec<Line> {
+    let hover = match &app.modals.overlay {
+        Some(Overlay::Help(h)) => h.hover,
+        _ => None,
+    };
+    // Every row naming an action is a button: a click on it closes the
+    // help and runs the action, as its key would. A row of two or three
+    // actions (`a / u / ⇧A`) is a button per key where the keys are drawn
+    // whole, the row's first action everywhere else on it.
+    let mut buttons: Vec<(Rect, crate::keymap::Action)> = Vec::new();
+    let mut column = |sections: &[HelpSection], col: Rect| -> Vec<Line> {
+        let width = col.width;
         let mut lines = Vec::new();
         for (i, (title, entries)) in sections.iter().enumerate() {
             if i > 0 {
@@ -586,26 +620,56 @@ fn draw_help_overlay(f: &mut Frame, app: &mut App, _: crate::app::HelpView) {
                 // column is padded to a fixed width and clipped
                 // there — an exotic binding can't shove the
                 // descriptions out of alignment.
-                let keys = truncate(&keys_of(k), HELP_KEY_W);
+                let full = keys_of(k);
+                let keys = truncate(&full, HELP_KEY_W);
+                let y = col.y + lines.len() as u16;
+                let row = Rect {
+                    y,
+                    height: 1,
+                    ..col
+                };
+                // Only the rows the box has room for are buttons.
+                let drawn = y < col.y + col.height;
+                if let (Act(actions), true) = (k, drawn) {
+                    if keys == full && actions.len() > 1 {
+                        let mut x = col.x + 1;
+                        for (n, action) in actions.iter().enumerate() {
+                            let label = app.chrome.keymap.shown_label(*action);
+                            let w = label.chars().count() as u16;
+                            buttons.push((Rect { x, width: w, ..row }, *action));
+                            x += w + if n + 1 < actions.len() { 3 } else { 0 };
+                        }
+                    }
+                    buttons.push((row, actions[0]));
+                }
+                let lit = hover == Some(row) && matches!(k, Act(_));
+                let bg = |s: Style| if lit { s.bg(th.sel_bg) } else { s };
                 lines.push(Line::from(vec![
                     Span::styled(
                         format!(" {keys:<width$}", width = HELP_KEY_W),
-                        Style::default().fg(th.accent),
+                        bg(Style::default().fg(th.accent)),
                     ),
                     Span::styled(
-                        truncate(v, (width as usize).saturating_sub(16)),
-                        Style::default().fg(th.dim),
+                        format!(
+                            "{:<w$}",
+                            truncate(v, (width as usize).saturating_sub(16)),
+                            w = (width as usize).saturating_sub(HELP_KEY_W + 1)
+                        ),
+                        bg(Style::default().fg(if lit { th.text } else { th.dim })),
                     ),
                 ]));
             }
         }
         lines
     };
-    f.render_widget(Paragraph::new(column(HELP_LEFT, left_a.width)), left_a);
-    f.render_widget(Paragraph::new(column(HELP_RIGHT, right_a.width)), right_a);
-    // Record the drawn area for click hit-testing.
+    let left_lines = column(HELP_LEFT, left_a);
+    let right_lines = column(HELP_RIGHT, right_a);
+    f.render_widget(Paragraph::new(left_lines), left_a);
+    f.render_widget(Paragraph::new(right_lines), right_a);
+    // Record the drawn area and the rows' buttons for click hit-testing.
     if let Some(Overlay::Help(h)) = &mut app.modals.overlay {
         h.area = area;
+        h.buttons = buttons;
     }
 }
 
