@@ -29,6 +29,10 @@ use nebula_core::{env, paths};
 /// fast, and a zero or near-zero tick would just spin the daemon.
 const MIN_TICK_MS: u64 = 50;
 
+/// How often a running daemon sweeps its orphaned session snapshot refs,
+/// beyond the sweep at startup and when a project comes or goes.
+const SNAPSHOT_SWEEP_EVERY: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
 /// A loop period from an env override's value: unset or unparseable falls
 /// back to `default_ms`, and nothing goes below [`MIN_TICK_MS`].
 fn env_period_ms(value: Option<&str>, default_ms: u64) -> u64 {
@@ -309,6 +313,22 @@ async fn serve(opts: DaemonOpts) -> Result<()> {
     // namespace, and its refs for sessions it no longer has swept (on the
     // snapshot worker, never another daemon's).
     daemon.sweep_snapshot_refs();
+    // And once a day after, for a daemon that runs for weeks: a crash
+    // mid-delete leaves refs the startup sweep would have taken.
+    {
+        let daemon = daemon.clone();
+        tokio::spawn(async move {
+            let start = tokio::time::Instant::now() + SNAPSHOT_SWEEP_EVERY;
+            let mut interval = tokio::time::interval_at(start, SNAPSHOT_SWEEP_EVERY);
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tokio::select! {
+                    _ = daemon.shutdown.cancelled() => break,
+                    _ = interval.tick() => daemon.sweep_snapshot_refs(),
+                }
+            }
+        });
+    }
 
     // Learn which agent CLIs are installed before anyone asks, so a create
     // that has to refuse ("codex was not found on your PATH") answers at once

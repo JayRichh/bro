@@ -102,6 +102,9 @@ impl Daemon {
                 entity: Entity::Worktree(worktree),
             });
         }
+        // Refs this daemon left in the repo for sessions it no longer has
+        // (a project removed and added back): swept, as at startup.
+        self.sweep_snapshot_refs_in(project.repo_path.clone());
         Ok(EntityId::Project(project.id))
     }
 
@@ -257,11 +260,18 @@ impl Daemon {
             .collect();
         self.kill_sessions_in(&wt_ids, &agents, &terminals);
         let refs = self.snapshot_refs_under(id, None);
+        let repo = self.store.get_project(id)?.map(|p| p.repo_path);
         // Removing a project only forgets it in nebula — never touches disk
         // (but for the session snapshot refs Kete itself wrote there).
         self.store.delete_project(id)?;
         if let Some((repo, agents)) = refs {
             self.drop_snapshot_refs(repo, agents);
+        }
+        // Its sessions went with it, so whatever refs this daemon still
+        // has there (a session whose delete crashed before its refs went)
+        // are orphans now.
+        if let Some(repo) = repo {
+            self.sweep_snapshot_refs_in(repo);
         }
         self.broadcast(ServerEvent::EntityRemoved {
             id: EntityId::Project(id.clone()),

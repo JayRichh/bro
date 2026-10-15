@@ -70,8 +70,11 @@ enum Job {
         repo: PathBuf,
         agents: Vec<String>,
     },
-    /// Adopt 0.51 refs and sweep orphans in every project's repo.
-    Sweep,
+    /// Adopt 0.51 refs and sweep orphans in the repo at `repo`, or in
+    /// every project's repo.
+    Sweep {
+        repo: Option<PathBuf>,
+    },
     /// Answer once every job sent before it is done.
     #[cfg(test)]
     Flush(mpsc::Sender<()>),
@@ -145,10 +148,17 @@ impl Daemon {
         }
     }
 
-    /// Adopt this daemon's 0.51 refs and sweep its orphaned ones, in the
-    /// worker: once at startup.
+    /// Adopt this daemon's 0.51 refs and sweep its orphaned ones in every
+    /// project's repo, in the worker: at startup and once a day after.
     pub fn sweep_snapshot_refs(&self) {
-        self.snapshot_job(Job::Sweep);
+        self.snapshot_job(Job::Sweep { repo: None });
+    }
+
+    /// [`Self::sweep_snapshot_refs`] in the repo at `repo` alone: a
+    /// project just added, or just removed (its sessions gone with it, so
+    /// every ref this daemon left there is an orphan).
+    pub(super) fn sweep_snapshot_refs_in(&self, repo: PathBuf) {
+        self.snapshot_job(Job::Sweep { repo: Some(repo) });
     }
 
     /// The sessions under `project` or `worktree` that have snapshots,
@@ -224,8 +234,8 @@ fn run_job(store: &Store, daemon_id: &str, job: Job) {
                 tracing::debug!(repo = %repo.display(), "dropping session refs failed");
             }
         }
-        Job::Sweep => {
-            if let Err(error) = sweep(store, daemon_id) {
+        Job::Sweep { repo } => {
+            if let Err(error) = sweep(store, daemon_id, repo.as_deref()) {
                 tracing::debug!(%error, "session ref sweep failed");
             }
         }
@@ -236,22 +246,24 @@ fn run_job(store: &Store, daemon_id: &str, job: Job) {
     }
 }
 
-fn sweep(store: &Store, daemon_id: &str) -> Result<()> {
+/// One `for-each-ref` and at most one `update-ref` per repo
+/// (`session_snapshot::tidy`). `only`: that repo, whether or not a
+/// project still has it.
+fn sweep(store: &Store, daemon_id: &str, only: Option<&Path>) -> Result<()> {
     let live = store.agent_ids()?;
-    let mut repos = store.project_repos()?;
+    let mut repos = match only {
+        Some(repo) => vec![repo.to_path_buf()],
+        None => store.project_repos()?,
+    };
     repos.sort();
     repos.dedup();
     for repo in repos.iter().filter(|r| r.is_dir()) {
-        let mine: Vec<String> = snap::legacy_agents(repo)
-            .into_iter()
-            .filter(|a| live.contains(a))
-            .collect();
-        if !mine.is_empty() && !snap::adopt_legacy(repo, daemon_id, &mine) {
-            tracing::debug!(repo = %repo.display(), "adopting 0.51 session refs failed");
+        let done = snap::tidy(repo, daemon_id, &live);
+        if !done.adopted.is_empty() {
+            tracing::info!(repo = %repo.display(), count = done.adopted.len(), "adopted 0.51 session refs");
         }
-        let swept = snap::sweep(repo, daemon_id, &live);
-        if !swept.is_empty() {
-            tracing::info!(repo = %repo.display(), count = swept.len(), "swept orphaned session refs");
+        if !done.swept.is_empty() {
+            tracing::info!(repo = %repo.display(), count = done.swept.len(), "swept orphaned session refs");
         }
     }
     Ok(())
