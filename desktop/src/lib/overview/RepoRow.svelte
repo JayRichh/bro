@@ -12,6 +12,8 @@
   import Icon from '../ui/Icon.svelte';
   import { openMenu } from '../ui/ui.svelte';
   import { prWord } from '../status';
+  import { drag, dropProject, endDrag, leftFor, offsetIn, startDrag } from '../reorder.svelte';
+  import { dropZone, type Place } from '../order';
 
   let { row }: { row: RepoRow } = $props();
 
@@ -37,6 +39,27 @@
     'grid size-6 flex-none place-items-center self-center border border-transparent bg-transparent p-0 text-muted hover:border-rule hover:text-ink';
   const main = $derived(row.worktrees.find((w) => w.is_main) ?? row.worktrees[0]);
   const switchable = $derived(canSwitchBranch(row.project.id));
+
+  // The header drags to reorder the repos (the rail's order too); a repo
+  // dropped on it lands above or below by the pointer's half.
+  let mark = $state<Place | null>(null);
+  function over(e: DragEvent) {
+    const d = drag.item;
+    if (d?.kind !== 'project' || d.id === row.project.id) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    const [y, h] = offsetIn(e);
+    mark = dropZone(y, h, { insert: true, onto: false }) as Place;
+  }
+  function drop(e: DragEvent) {
+    const d = drag.item;
+    const at = mark;
+    mark = null;
+    if (d?.kind !== 'project' || !at) return;
+    e.preventDefault();
+    endDrag();
+    void dropProject(d.id, row.project.id, at);
+  }
 </script>
 
 <section class="pt-6" data-repo={row.project.id} aria-labelledby="repo-{row.project.id}">
@@ -45,7 +68,14 @@
        keys (Shift+N, C, Shift+O, P) act on this repo. -->
   <header
     data-target="project:{row.project.id}"
-    class="flex min-w-0 items-baseline gap-4 border-b border-rule-strong pr-4 pb-2 pl-1.5"
+    class="relative flex min-w-0 items-baseline gap-4 border-b border-rule-strong pr-4 pb-2 pl-1.5"
+    draggable="true"
+    ondragstart={(e) => startDrag(e, { kind: 'project', id: row.project.id })}
+    ondragend={() => ((mark = null), endDrag())}
+    ondragenter={over}
+    ondragover={over}
+    ondragleave={(e) => leftFor(e) && (mark = null)}
+    ondrop={drop}
     oncontextmenu={(e) => (e.preventDefault(), openMenu(projectMenu(row.project.id), { x: e.clientX, y: e.clientY }, row.name))}
   >
     <button
@@ -59,7 +89,14 @@
         ><path d={folded ? 'M3.5 1.5L7 5 3.5 8.5' : 'M1.5 3.5L5 7l3.5-3.5'} fill="none" stroke="currentColor" stroke-width="1.4" /></svg
       >
     </button>
-    <h2 id="repo-{row.project.id}" class="m-0 min-w-0 truncate text-[15px] font-semibold text-ink" title={row.project.repo_path}>
+    {#if mark && drag.item}
+      <span class="pointer-events-none absolute inset-x-0 z-10 h-px bg-ember {mark === 'before' ? '-top-px' : '-bottom-px'}" aria-hidden="true"></span>
+    {/if}
+    <h2
+      id="repo-{row.project.id}"
+      class="m-0 min-w-0 cursor-grab truncate text-[15px] font-semibold text-ink"
+      title="{row.project.repo_path}. {withKey('Drag to reorder the repos', ['move_up', 'move_down'])} on its header"
+    >
       {row.name}
     </h2>
     <span class="flex-1"></span>

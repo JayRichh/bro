@@ -18,6 +18,7 @@ import { checkoutSessions, deleteAllSessions } from './checkout';
 import { moveToAccount, pickProjectAccount, SWITCH_UNAVAILABLE } from './accounts/actions';
 import { canSwitch } from './accounts/view';
 import { whileCutting } from './worktrees/rows.svelte';
+import { moveStep, stepInFor, type StepIn } from './reorder.svelte';
 
 export type Target =
   /** `viaSub`: picked from one of its subagents' rows, so it acts on
@@ -411,7 +412,14 @@ function worktreeItems(w: Worktree | undefined): MenuEntry[] {
   return out;
 }
 
-export function agentMenu(a: Agent, viaSub = false): MenuEntry[] {
+/** Move up / Move down, the keyboard's (and the menu's) drag. */
+export function moveItems(t: { kind: string; id: string }, where: StepIn = 'tree'): MenuEntry[] {
+  return [item('Move up', () => moveStep(t, -1, where), 'move_up'), item('Move down', () => moveStep(t, 1, where), 'move_down')];
+}
+
+/** `where`: the board orders a lane's cards, the overview a tree's rows;
+ *  by default wherever the focus is as the menu opens. */
+export function agentMenu(a: Agent, viaSub = false, where: StepIn = stepInFor()): MenuEntry[] {
   const w = worktreeOf(a.worktree_id);
   // From a subagent's row every verb is the parent's: say so up top.
   const head: MenuEntry[] = viaSub ? [{ heading: `Parent session: ${a.name}` }] : [];
@@ -435,6 +443,7 @@ export function agentMenu(a: Agent, viaSub = false): MenuEntry[] {
       ? item('Move to account\u2026', () => moveToAccount(a.id))
       : { label: 'Move to account\u2026 (daemon too old)', run: () => toast(SWITCH_UNAVAILABLE), disabled: true },
     item('Rename\u2026', () => renameAgent(a.id), 'rename'),
+    ...(viaSub ? [] : moveItems({ kind: 'agent', id: a.id }, where)),
   ];
   if (a.unseen) out.push(item('Mark seen', () => seeAgent(a.id)));
   out.push(...orchestratorMenuItems(a));
@@ -467,6 +476,7 @@ export function projectMenu(project: string): MenuEntry[] {
     item('Default account\u2026', () => pickProjectAccount(project)),
     'sep',
     item('Rename\u2026', () => renameProject(project)),
+    ...moveItems({ kind: 'project', id: project }),
     item('Locate folder\u2026', () => locateProject(project)),
     item('Remove from Kete\u2026', () => removeProject(project), undefined, true),
   ];
@@ -490,8 +500,10 @@ export function menuFor(t: Target): MenuEntry[] {
       const x = terminalOf(t.id);
       return x ? terminalMenu(x) : [];
     }
-    case 'worktree':
-      return worktreeItems(worktreeOf(t.id));
+    case 'worktree': {
+      const w = worktreeOf(t.id);
+      return [...worktreeItems(w), ...(w && !w.is_main ? ['sep' as const, ...moveItems(t)] : [])];
+    }
     case 'project':
       return projectMenu(t.id);
   }

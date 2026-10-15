@@ -137,8 +137,8 @@ export type LaneDrop =
   | { act: 'refuse'; reason: string };
 
 const OWNED: Partial<Record<Lane, string>> = {
-  needs: 'Needs you is the agent’s: the card leaves it when you answer the session.',
-  running: 'Running is the agent’s: the card lands in Done when the turn ends.',
+  needs: 'Needs you is the agent\u2019s: the card leaves it when you answer the session.',
+  running: 'Running is the agent\u2019s: the card lands in Done when the turn ends.',
   pr: 'Its pull request is open: the card leaves PR open when the PR merges or closes.',
 };
 
@@ -156,7 +156,7 @@ export function laneDrop(from: Lane, to: Lane | 'archived'): LaneDrop {
     needs: 'Only the agent puts a card in Needs you, by asking.',
     running: 'Only the agent puts a card in Running, by starting a turn: send it a follow-up (F).',
     unseen: 'Unread comes from a turn finishing while you were away; a card cannot be marked unread.',
-    pr: 'PR open follows the worktree’s pull request: open one and the card moves.',
+    pr: 'PR open follows the worktree\u2019s pull request: open one and the card moves.',
   };
   return { act: 'refuse', reason: why[to] };
 }
@@ -178,6 +178,15 @@ export function refill(cards: Agent[], ordered: (worktree: string) => boolean): 
     at.forEach((i, k) => (out[i] = mine[k]));
   }
   return out;
+}
+
+/** A checkout's sessions as the board shows them, for a drop or a step
+ *  there: the user's order, or newest first while it has none (the order
+ *  its cards stand in down a lane), so the first move keeps the rest put. */
+export function boardIds(m: Model, worktree: string): string[] {
+  const here = m.agents.filter((a) => a.worktree_id === worktree);
+  if (hasUserOrder(here)) return orderedAgents(here).map((a) => a.id);
+  return [...here].sort((x, y) => y.status_changed_at - x.status_changed_at).map((a) => a.id);
 }
 
 /** The checkouts whose sessions carry a user order. */

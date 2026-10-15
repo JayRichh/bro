@@ -10,6 +10,9 @@
   import AccountsSection from '../accounts/AccountsSection.svelte';
   import { openAccounts } from '../accounts/actions';
   import VersionPlate from './VersionPlate.svelte';
+  import { drag, dropProject, endDrag, leftFor, moveOnto, offsetIn, rootOf, startDrag } from '../reorder.svelte';
+  import { dropZone, type Zone } from '../order';
+  import { withKey } from '../shortcuts';
 
   /** Icons only, for a narrow window: the repos as their initials. */
   let { compact = false }: { compact?: boolean } = $props();
@@ -31,6 +34,44 @@
     { view: 'branches', label: 'Branches' },
     { view: 'prs', label: 'Pull requests' },
   ];
+
+  // A repo drags to reorder the repos; a session dropped on one moves to
+  // its root checkout (asked first), as onto a worktree's header.
+  let mark = $state<{ id: string; zone: Zone } | null>(null);
+  function over(e: DragEvent, id: string) {
+    const d = drag.item;
+    let zone: Zone | null = null;
+    if (d?.kind === 'project' && d.id !== id) {
+      const [y, h] = offsetIn(e);
+      zone = dropZone(y, h, { insert: true, onto: false });
+    } else if (d?.kind === 'agent' && rootOf(id) && rootOf(id) !== d.worktree) zone = 'onto';
+    if (!zone) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    mark = { id, zone };
+  }
+  function drop(e: DragEvent, id: string) {
+    const d = drag.item;
+    const at = mark;
+    mark = null;
+    if (!d || !at || at.id !== id) return;
+    e.preventDefault();
+    endDrag();
+    const root = rootOf(id);
+    if (d.kind === 'project' && at.zone !== 'onto') void dropProject(d.id, id, at.zone);
+    else if (d.kind === 'agent' && at.zone === 'onto' && root) void moveOnto(d.id, root);
+  }
+  /** The drag wiring a repo's rail button takes. */
+  const dnd = (id: string) => ({
+    draggable: true,
+    ondragstart: (e: DragEvent) => startDrag(e, { kind: 'project', id }),
+    ondragend: () => ((mark = null), endDrag()),
+    ondragenter: (e: DragEvent) => over(e, id),
+    ondragover: (e: DragEvent) => over(e, id),
+    ondragleave: (e: DragEvent) => leftFor(e) && mark?.id === id && (mark = null),
+    ondrop: (e: DragEvent) => drop(e, id),
+  });
+  const reorderHint = withKey('drag to reorder', ['move_up', 'move_down']);
 
   async function addProject(e: SubmitEvent) {
     e.preventDefault();
@@ -90,12 +131,17 @@
         {@const running = c.running?.length ?? 0}
         {@const on = here === r.project.id}
         <button
-          class="{tile} {on ? 'bg-surface font-semibold text-ink' : 'bg-transparent text-muted hover:text-ink'}"
+          class="{tile} {on ? 'bg-surface font-semibold text-ink' : 'bg-transparent text-muted hover:text-ink'} {mark?.id === r.project.id && mark.zone === 'onto' && drag.item ? 'outline-2 -outline-offset-2 outline-ember' : ''}"
+          data-target="project:{r.project.id}"
+          {...dnd(r.project.id)}
           onclick={() => revealRepo(r.project.id)}
-          title="{r.name}{needs ? `: ${needs} ${needs === 1 ? 'needs' : 'need'} you` : running ? `: ${running} running` : ''}"
+          title="{r.name}{needs ? `: ${needs} ${needs === 1 ? 'needs' : 'need'} you` : running ? `: ${running} running` : ''}. {reorderHint}; drop a session to move it here"
           aria-label={r.name}
           aria-current={on ? 'true' : undefined}
         >
+          {#if mark?.id === r.project.id && mark.zone !== 'onto' && drag.item}
+            <span class="pointer-events-none absolute inset-x-0 z-10 h-px bg-ember {mark.zone === 'before' ? '-top-px' : '-bottom-px'}" aria-hidden="true"></span>
+          {/if}
           {initials(r.name)}
           {#if needs}<span class="absolute top-1 right-1 size-1.5 bg-ember" aria-hidden="true"></span>
           {:else if running}<span class="absolute top-1 right-1 size-1.5 bg-running" aria-hidden="true"></span>{/if}
@@ -218,11 +264,16 @@
       {@const on = here === r.project.id}
       {@const ctx = app.adoCtx[r.project.id]}
       <button
-        class="{item} {on ? 'bg-surface font-semibold text-ink' : 'bg-transparent text-ink'}"
+        class="{item} relative {on ? 'bg-surface font-semibold text-ink' : 'bg-transparent text-ink'} {mark?.id === r.project.id && mark.zone === 'onto' && drag.item ? 'outline-2 -outline-offset-2 outline-ember' : ''}"
+        data-target="project:{r.project.id}"
+        {...dnd(r.project.id)}
         onclick={() => revealRepo(r.project.id)}
-        title={r.project.repo_path}
+        title="{r.project.repo_path}. {reorderHint}; drop a session to move it to the root checkout"
         aria-current={on ? 'true' : undefined}
       >
+        {#if mark?.id === r.project.id && mark.zone !== 'onto' && drag.item}
+          <span class="pointer-events-none absolute inset-x-0 z-10 h-px bg-ember {mark.zone === 'before' ? '-top-px' : '-bottom-px'}" aria-hidden="true"></span>
+        {/if}
         <span class="min-w-0 flex-1 truncate">{r.name}</span>
         {#if needs}
           <span class="inline-flex flex-none items-center gap-1.5 text-[12px] text-ember-ink"

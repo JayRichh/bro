@@ -10,7 +10,7 @@ import { api, type Worktree } from '../api';
 import { app, focusQuickPrompt, openDiff, toast } from '../store.svelte';
 import { ask, type MenuEntry } from '../ui/ui.svelte';
 import { keyLabel, keysOf, type ShortcutId } from '../shortcuts';
-import { deleteWorktree, newTerminal, openEditor, openRemote } from '../actions';
+import { deleteWorktree, moveItems, newTerminal, openEditor, openRemote } from '../actions';
 import { canSwitchBranch, openBranchSwitch } from './switcher.svelte';
 import { worktreeApi, type CheckoutState } from './api';
 import { stateLines } from './offer';
@@ -94,7 +94,11 @@ export function worktreeMenu(w: Worktree): MenuEntry[] {
   for (const v of verbs) {
     if (v.id === 'delete') entries.push('sep');
     entries.push({ label: v.label, run: () => void v.run(), keys: v.key ? keysOf(v.key) : v.rowKey ? [v.rowKey] : undefined, danger: v.danger });
-    if (v.id === 'copy') entries.push({ label: 'Open remote in browser', run: () => void openRemote(w.id), keys: keysOf('open_remote') });
+    if (v.id === 'copy') {
+      entries.push({ label: 'Open remote in browser', run: () => void openRemote(w.id), keys: keysOf('open_remote') });
+      // The keyboard's drag of the group (the root stays first).
+      if (!w.is_main) entries.push(...moveItems({ kind: 'worktree', id: w.id }));
+    }
   }
   return entries;
 }

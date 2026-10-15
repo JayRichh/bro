@@ -45,6 +45,8 @@ export type ShortcutId =
   | 'open_remote'
   | 'switch_branch'
   | 'row_menu'
+  | 'move_up'
+  | 'move_down'
   | 'list_move'
   | 'list_open'
   | 'overview_fold'
@@ -125,6 +127,9 @@ export const SHORTCUTS: Shortcut[] = [
   { id: 'open_remote', keys: ['shift+g'], scope: 'row', label: 'Open the repo remote in the browser', group: 'Sessions' },
   { id: 'switch_branch', keys: ['c'], scope: 'row', label: 'Switch the repo root checkout to another branch', group: 'Sessions' },
   { id: 'row_menu', keys: ['shift+f10', 'contextmenu'], scope: 'row', label: 'Actions menu', group: 'Sessions' },
+  // The keyboard's drag: a session, worktree or repo one place up or down.
+  { id: 'move_up', keys: ['alt+arrowup'], scope: 'row', label: 'Move up: the session, worktree or repo (or drag it)', group: 'Sessions' },
+  { id: 'move_down', keys: ['alt+arrowdown'], scope: 'row', label: 'Move down: the session, worktree or repo (or drag it)', group: 'Sessions' },
 
   { id: 'list_move', keys: ['j', 'k', 'arrowdown', 'arrowup'], scope: 'overview', label: 'Move through the rows (cards on the board)', group: 'Overview and board' },
   { id: 'list_open', keys: ['enter', 'space'], scope: 'overview', label: 'Open the session', group: 'Overview and board' },
@@ -189,6 +194,8 @@ export function keyLabel(chord: string): string {
   const NAMES: Record<string, string> = {
     arrowleft: '\u2190',
     arrowright: '\u2192',
+    arrowup: '\u2191',
+    arrowdown: '\u2193',
     escape: 'Esc',
     delete: 'Del',
     contextmenu: 'Menu',

@@ -12,7 +12,9 @@
   import { openMenu } from '../ui/ui.svelte';
   import OrchBadge from '../orchestrator/OrchBadge.svelte';
   import { openOrchestrator } from '../orch.svelte';
-  import { DRAG_SESSION } from './drag';
+  import { agentDropOk, drag, dropAgent, endDrag, leftFor, offsetIn, startDrag } from '../reorder.svelte';
+  import { dropZone, type Place } from '../order';
+  import { withKey } from '../shortcuts';
 
   let { repo, forest, terminals }: { repo: string; forest: Node[]; terminals: TerminalTab[] } = $props();
 
@@ -74,6 +76,34 @@
     return 0;
   }
 
+  // A session row dragged beside another under the same parent reorders
+  // them (Alt+Up / Alt+Down from the keys); onto a worktree's header it
+  // moves (WorktreeBand). The 1px ember rule says where it lands.
+  let mark = $state<{ id: string; place: Place } | null>(null);
+
+  function over(e: DragEvent, n: Node) {
+    const id = n.agent?.id;
+    if (!id || !agentDropOk(drag.item, id)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    const [y, h] = offsetIn(e);
+    mark = { id, place: dropZone(y, h, { insert: true, onto: false }) as Place };
+  }
+
+  function dropOn(e: DragEvent, n: Node) {
+    const d = drag.item;
+    const at = mark;
+    mark = null;
+    if (!n.agent || !at || at.id !== n.agent.id || !agentDropOk(d, n.agent.id)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    endDrag();
+    void dropAgent(n.agent.worktree_id, d.id, n.agent.id, at.place);
+  }
+
+  const reorderHint = withKey('drag to reorder', ['move_up', 'move_down']);
+
   const ROW =
     'group relative grid min-h-9 cursor-default items-center border-b border-rule pr-4 outline-none ' +
     'grid-cols-[112px_minmax(0,1.15fr)_minmax(0,170px)_minmax(0,2fr)_44px] ' +
@@ -95,12 +125,21 @@
       data-row
       data-target={n.agent ? `agent:${n.agent.id}` : n.sub ? `subagent:${n.sub.parent_agent}` : undefined}
       class="{ROW} {sel ? 'bg-surface' : 'hover:bg-surface'} {n.agent?.archived ? 'opacity-60' : ''}"
+      title={n.agent ? `${n.label}: ${reorderHint}, or onto a worktree to move it` : undefined}
       draggable={!!n.agent}
-      ondragstart={(e) => n.agent && e.dataTransfer && (e.dataTransfer.setData(DRAG_SESSION, n.agent.id), (e.dataTransfer.effectAllowed = 'move'))}
+      ondragstart={(e) => n.agent && startDrag(e, { kind: 'agent', id: n.agent.id, worktree: n.agent.worktree_id })}
+      ondragend={() => ((mark = null), endDrag())}
+      ondragenter={(e) => over(e, n)}
+      ondragover={(e) => over(e, n)}
+      ondragleave={(e) => leftFor(e) && mark?.id === n.agent?.id && (mark = null)}
+      ondrop={(e) => dropOn(e, n)}
       onclick={() => openNode(n)}
       oncontextmenu={(e) => menu(e, { kind: 'agent', id: n.agent?.id ?? n.sub?.parent_agent ?? '', viaSub: !n.agent && !!n.sub })}
       onkeydown={(e) => onRowKey(e, n, expanded, hasKids)}
     >
+      {#if mark && drag.item && mark.id === n.agent?.id}
+        <span class="pointer-events-none absolute inset-x-0 z-10 h-px bg-ember {mark.place === 'before' ? '-top-px' : '-bottom-px'}" aria-hidden="true"></span>
+      {/if}
       {#if needs}
         <span class="absolute inset-y-0 left-0 w-[3px] origin-left bg-ember" out:retract aria-hidden="true"></span>
       {/if}

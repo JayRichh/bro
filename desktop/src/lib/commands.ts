@@ -28,6 +28,7 @@ import { askStartOrchestrator, openOrchestrator, orchestratorCommands } from './
 import { orchestratorOf } from './orchestrator';
 import { openAccounts } from './accounts/actions';
 import { openAddAccount } from './accounts/add.svelte';
+import { moveStep, stepInFor } from './reorder.svelte';
 
 /** 0 / F10: the orchestrator, or the Start form when there is none. */
 function orchestratorKey() {
@@ -134,6 +135,7 @@ export function runShortcut(id: ShortcutId): boolean {
   // Row keys act on the focused row or card.
   const t = focusedTarget();
   if (!t) return false;
+  if (id === 'move_up' || id === 'move_down') return moveStep(t, id === 'move_up' ? -1 : 1, stepInFor(document.activeElement));
   if (id === 'row_menu') {
     const el = document.activeElement as HTMLElement;
     openMenu(menuFor(t), el);
