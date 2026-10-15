@@ -714,4 +714,406 @@ mod tests {
             assert_ne!(view.config, nebula_core::paths::config_path());
         });
     }
+
+    // ---- the overlay's verbs ----
+
+    fn view(app: &App) -> &AccountsView {
+        match &app.modals.overlay {
+            Some(Overlay::Accounts(v)) => v,
+            other => panic!("the accounts overlay is not up: {other:?}"),
+        }
+    }
+
+    fn saved() -> serde_json::Value {
+        let (config, _) = crate::config::Config::layer_paths();
+        serde_json::from_str(&std::fs::read_to_string(config).unwrap()).unwrap()
+    }
+
+    fn key(app: &mut App, code: KeyCode, out: &mut Vec<ClientRequest>) {
+        press(app, code, KeyModifiers::NONE, out);
+    }
+
+    fn typed(app: &mut App, text: &str, out: &mut Vec<ClientRequest>) {
+        for c in text.chars() {
+            key(app, KeyCode::Char(c), out);
+        }
+    }
+
+    fn draw(app: &mut App) -> String {
+        let mut terminal = ratatui::Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal.draw(|f| crate::ui::draw(f, app)).unwrap();
+        buffer_text(&terminal)
+    }
+
+    /// Click the overlay's spot `hit`, as drawn, through the app's own
+    /// mouse handling.
+    fn click(app: &mut App, hit: AccountsHit, out: &mut Vec<ClientRequest>) {
+        draw(app);
+        let rect = view(app)
+            .hits
+            .iter()
+            .find(|(_, h)| *h == hit)
+            .map(|(r, _)| *r)
+            .unwrap_or_else(|| panic!("{hit:?} not drawn"));
+        let event = crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: rect.x + rect.width / 2,
+            row: rect.y,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_terminal_event(app, crossterm::event::Event::Mouse(event), out);
+    }
+
+    fn open_overlay(app: &mut App, out: &mut Vec<ClientRequest>) {
+        press(app, KeyCode::Char('U'), KeyModifiers::SHIFT, out);
+        assert!(matches!(app.modals.overlay, Some(Overlay::Accounts(_))));
+    }
+
+    /// `a`: a harness and a name, checked as `kete profile add` checks
+    /// them; the profile is written, its home made, and its sign-in runs
+    /// in a new terminal session that gets the login command typed in.
+    #[test]
+    fn add_writes_the_profile_and_runs_its_sign_in_in_a_new_terminal() {
+        with_config_json("{}", || {
+            let mut app = App::new();
+            seed_tree(&mut app);
+            let mut out = Vec::new();
+            open_overlay(&mut app, &mut out);
+            key(&mut app, KeyCode::Char('a'), &mut out);
+            let Mode::Form(form) = &view(&app).mode else {
+                panic!("no form");
+            };
+            assert_eq!(form.kind, FormKind::Add);
+            assert_eq!(
+                form.name,
+                format!("{}-2", form.harness),
+                "a name is offered"
+            );
+            let offered = form.name.len();
+            assert!(draw(&mut app).contains("Add account"));
+            // A bad name is refused where it was typed.
+            for _ in 0..offered {
+                key(&mut app, KeyCode::Backspace, &mut out);
+            }
+            typed(&mut app, "bad name", &mut out);
+            key(&mut app, KeyCode::Enter, &mut out);
+            let Mode::Form(form) = &view(&app).mode else {
+                panic!("the form stays up on a refusal");
+            };
+            assert!(form.error.is_some(), "{form:?}");
+            assert!(saved().get("profiles").is_none(), "nothing written");
+            for _ in 0.."bad name".len() {
+                key(&mut app, KeyCode::Backspace, &mut out);
+            }
+            // The harness steps with →, back to claude with ←.
+            key(&mut app, KeyCode::BackTab, &mut out);
+            key(&mut app, KeyCode::Right, &mut out);
+            key(&mut app, KeyCode::Left, &mut out);
+            key(&mut app, KeyCode::Tab, &mut out);
+            typed(&mut app, "work", &mut out);
+            click(&mut app, AccountsHit::Key(KeyCode::Enter), &mut out);
+            let s = saved();
+            assert_eq!(s["profiles"][0]["name"], "work");
+            assert_eq!(s["profiles"][0]["harness"], "claude");
+            let (config, _) = crate::config::Config::layer_paths();
+            assert!(
+                config
+                    .parent()
+                    .unwrap()
+                    .join("profiles")
+                    .join("work")
+                    .exists(),
+                "its home is made beside the routed config"
+            );
+            // The sign-in: a terminal in the selected checkout, then the
+            // command typed into it once the daemon made it.
+            assert!(
+                app.modals.overlay.is_none(),
+                "the terminal takes the screen"
+            );
+            let req_id = match out.as_slice() {
+                [ClientRequest::CreateTerminal { req_id, name, .. }] => {
+                    assert_eq!(name.as_deref(), Some("sign in work"));
+                    *req_id
+                }
+                other => panic!("expected a CreateTerminal, got {other:?}"),
+            };
+            out.clear();
+            handle_server_event(
+                &mut app,
+                ServerEvent::Ack {
+                    req_id,
+                    created: Some(nebula_core::EntityId::Terminal(nebula_core::TerminalId(
+                        "t9".into(),
+                    ))),
+                },
+                &mut out,
+            );
+            assert!(
+                out.iter().any(|r| matches!(r,
+                    ClientRequest::Input { data, .. } if data == b"kete profile login work\r")),
+                "{out:?}"
+            );
+        });
+    }
+
+    /// Adopting the current login makes no home and runs no sign-in; a
+    /// name already taken is refused.
+    #[test]
+    fn add_adopting_the_login_signs_nothing_in_and_a_taken_name_is_refused() {
+        with_config_json(
+            r#"{"profiles":[{"name":"work","harness":"claude"}]}"#,
+            || {
+                let mut app = App::new();
+                seed_tree(&mut app);
+                let mut out = Vec::new();
+                open_overlay(&mut app, &mut out);
+                key(&mut app, KeyCode::Char('a'), &mut out);
+                let n = match &view(&app).mode {
+                    Mode::Form(f) => f.name.len(),
+                    _ => panic!(),
+                };
+                for _ in 0..n {
+                    key(&mut app, KeyCode::Backspace, &mut out);
+                }
+                typed(&mut app, "work", &mut out);
+                key(&mut app, KeyCode::Enter, &mut out);
+                assert!(
+                    app.chrome.flash.as_deref().unwrap_or("").contains("exists"),
+                    "{:?}",
+                    app.chrome.flash
+                );
+                typed(&mut app, "2", &mut out);
+                key(&mut app, KeyCode::Tab, &mut out);
+                key(&mut app, KeyCode::Char(' '), &mut out);
+                key(&mut app, KeyCode::Tab, &mut out);
+                key(&mut app, KeyCode::Char(' '), &mut out);
+                key(&mut app, KeyCode::Enter, &mut out);
+                let s = saved();
+                assert_eq!(s["profiles"][1]["name"], "work2");
+                assert_eq!(s["profiles"][1]["use_default"], true);
+                assert_eq!(s["profiles"][1]["default"], true);
+                assert!(out.is_empty(), "no sign-in for an adopted login: {out:?}");
+                assert_eq!(view(&app).mode, Mode::List);
+                assert_eq!(
+                    view(&app).selected().map(|r| r.key.as_str()),
+                    Some("work2"),
+                    "the cursor lands on the new account"
+                );
+            },
+        );
+    }
+
+    /// Enter edits the harness, the kind of login and the variables (the
+    /// name and the switch stay); `c` duplicates under a new name.
+    #[test]
+    fn edit_and_duplicate_write_the_settings() {
+        with_config_json(
+            r#"{"profiles":[{"name":"work","harness":"claude","env":{"K":"old"},"disabled":true}]}"#,
+            || {
+                let mut app = App::new();
+                let mut out = Vec::new();
+                open_overlay(&mut app, &mut out);
+                click(&mut app, AccountsHit::Key(KeyCode::Enter), &mut out);
+                let Mode::Form(form) = &view(&app).mode else {
+                    panic!("no form");
+                };
+                assert_eq!(form.env_keys, ["K"]);
+                assert!(draw(&mut app).contains("keep K"), "values never shown");
+                key(&mut app, KeyCode::Tab, &mut out);
+                key(&mut app, KeyCode::Char(' '), &mut out);
+                key(&mut app, KeyCode::Tab, &mut out);
+                typed(&mut app, "A=1; B=two", &mut out);
+                key(&mut app, KeyCode::Enter, &mut out);
+                let p = &saved()["profiles"][0];
+                assert_eq!(p["use_default"], true);
+                assert_eq!(p["env"], serde_json::json!({"A": "1", "B": "two"}));
+                assert_eq!(p["disabled"], true, "the switch stays");
+
+                key(&mut app, KeyCode::Char('c'), &mut out);
+                let Mode::Form(form) = &view(&app).mode else {
+                    panic!("no form");
+                };
+                assert_eq!(form.name, "work-2");
+                key(&mut app, KeyCode::Enter, &mut out);
+                let copy = &saved()["profiles"][1];
+                assert_eq!(copy["name"], "work-2");
+                assert_eq!(copy["env"]["B"], "two", "the variables come along");
+                assert!(copy.get("disabled").is_none(), "but not the switch");
+            },
+        );
+    }
+
+    /// `x` warns of the sessions and repos that use the account before
+    /// it goes; `n` keeps it, `y` removes it.
+    #[test]
+    fn remove_warns_of_the_sessions_and_repos_on_the_account() {
+        with_config_json(
+            r#"{"profiles":[{"name":"work","harness":"claude"}],"projects":{"/tmp/demo":{"default_profiles":{"claude":"work"}}}}"#,
+            || {
+                let mut app = App::new();
+                seed_tree(&mut app);
+                app.tree.agents[0].profile = Some("work".into());
+                let mut out = Vec::new();
+                open_overlay(&mut app, &mut out);
+                key(&mut app, KeyCode::Char('x'), &mut out);
+                let Mode::Remove { message, .. } = &view(&app).mode else {
+                    panic!("no confirm");
+                };
+                assert!(
+                    message.contains("1 session runs under it (agent-1)"),
+                    "{message}"
+                );
+                assert!(message.contains("Default account of demo"), "{message}");
+                key(&mut app, KeyCode::Char('n'), &mut out);
+                assert_eq!(view(&app).mode, Mode::List);
+                assert_eq!(saved()["profiles"][0]["name"], "work", "kept");
+                key(&mut app, KeyCode::Delete, &mut out);
+                click(&mut app, AccountsHit::Key(KeyCode::Char('y')), &mut out);
+                assert_eq!(saved()["profiles"], serde_json::json!([]));
+                assert!(view(&app).rows.iter().all(|r| r.key != "work"));
+            },
+        );
+    }
+
+    /// The switch and the star are buttons as well as keys.
+    #[test]
+    fn toggle_and_default_are_buttons_too() {
+        with_config_json(
+            r#"{"profiles":[{"name":"work","harness":"claude","default":true},{"name":"home","harness":"claude"}]}"#,
+            || {
+                let mut app = App::new();
+                let mut out = Vec::new();
+                open_overlay(&mut app, &mut out);
+                click(&mut app, AccountsHit::Row(1), &mut out);
+                assert_eq!(view(&app).cursor, 1);
+                click(&mut app, AccountsHit::Key(KeyCode::Char('d')), &mut out);
+                assert_eq!(saved()["profiles"][1]["default"], true);
+                click(&mut app, AccountsHit::Key(KeyCode::Char(' ')), &mut out);
+                assert_eq!(saved()["profiles"][1]["disabled"], true);
+                key(&mut app, KeyCode::Char(' '), &mut out);
+                assert!(saved()["profiles"][1].get("disabled").is_none());
+            },
+        );
+    }
+
+    /// `p` makes the account a repo's default for its harness, and again
+    /// clears it; the spread is set from the top, by click or `s` / `t`.
+    #[test]
+    fn use_for_repo_and_the_spread_write_the_settings() {
+        with_config_json(
+            r#"{"profiles":[{"name":"work","harness":"claude"}]}"#,
+            || {
+                let mut app = App::new();
+                seed_tree(&mut app);
+                let mut out = Vec::new();
+                open_overlay(&mut app, &mut out);
+                key(&mut app, KeyCode::Char('p'), &mut out);
+                assert!(matches!(view(&app).mode, Mode::UseFor { cursor: 0 }));
+                assert!(draw(&mut app).contains("demo"));
+                key(&mut app, KeyCode::Enter, &mut out);
+                assert_eq!(
+                    saved()["projects"]["/tmp/demo"]["default_profiles"]["claude"],
+                    "work"
+                );
+                assert_eq!(
+                    app.launcher.project_accounts[std::path::Path::new("/tmp/demo")]["claude"],
+                    "work",
+                    "launches see it at once"
+                );
+                click(&mut app, AccountsHit::Project(0), &mut out);
+                assert!(saved().get("projects").is_none(), "cleared without a trace");
+                key(&mut app, KeyCode::Esc, &mut out);
+
+                click(&mut app, AccountsHit::Spread(2), &mut out);
+                assert_eq!(saved()["account_spread"], "least_used");
+                assert_eq!(
+                    app.launcher.spread.spread,
+                    nebula_core::accounts::Spread::LeastUsed
+                );
+                key(&mut app, KeyCode::Char('s'), &mut out);
+                assert_eq!(saved()["account_spread"], "manual");
+                click(&mut app, AccountsHit::Key(KeyCode::Char('t')), &mut out);
+                assert_eq!(saved()["account_spread_threshold"], "95");
+            },
+        );
+    }
+
+    /// `m` moves the session under the grid's cursor onto the selected
+    /// account, through MOVE TO ACCOUNT's confirm; one of another harness
+    /// is refused.
+    #[test]
+    fn m_moves_the_cursors_session_onto_the_account() {
+        with_config_json(
+            r#"{"profiles":[{"name":"work","harness":"claude"},{"name":"gpt","harness":"codex"}]}"#,
+            || {
+                let mut app = App::new();
+                seed_tree(&mut app);
+                app.nav.focus = Focus::Sessions;
+                app.nav.sel_session = 0;
+                let mut out = Vec::new();
+                open_overlay(&mut app, &mut out);
+                let at = view(&app).rows.iter().position(|r| r.key == "gpt").unwrap();
+                click(&mut app, AccountsHit::Row(at), &mut out);
+                key(&mut app, KeyCode::Char('m'), &mut out);
+                assert!(
+                    app.chrome
+                        .flash
+                        .as_deref()
+                        .unwrap_or("")
+                        .contains("codex account"),
+                    "{:?}",
+                    app.chrome.flash
+                );
+                let at = view(&app)
+                    .rows
+                    .iter()
+                    .position(|r| r.key == "work")
+                    .unwrap();
+                click(&mut app, AccountsHit::Row(at), &mut out);
+                click(&mut app, AccountsHit::Key(KeyCode::Char('m')), &mut out);
+                let Some(Overlay::Confirm(confirm)) = &app.modals.overlay else {
+                    panic!("{:?}", app.modals.overlay);
+                };
+                assert!(
+                    confirm.message.contains("fresh on work"),
+                    "{}",
+                    confirm.message
+                );
+                assert!(out.is_empty());
+            },
+        );
+    }
+
+    /// Every form and confirm draws, in a roomy terminal and a tiny one.
+    #[test]
+    fn every_mode_draws_at_any_size() {
+        with_config_json(
+            r#"{"profiles":[{"name":"work","harness":"claude"}]}"#,
+            || {
+                let mut app = App::new();
+                seed_tree(&mut app);
+                let mut out = Vec::new();
+                open_overlay(&mut app, &mut out);
+                let text = draw(&mut app);
+                for word in ["Spread [s]", "[a] add", "[l] sign in", "[p] use for repo"] {
+                    assert!(text.contains(word), "{word}: {text}");
+                }
+                for (open, back) in [
+                    ('a', KeyCode::Esc),
+                    ('c', KeyCode::Esc),
+                    ('x', KeyCode::Char('n')),
+                    ('p', KeyCode::Esc),
+                ] {
+                    key(&mut app, KeyCode::Char(open), &mut out);
+                    for (w, h) in [(120u16, 40u16), (40, 6), (20, 3)] {
+                        let mut terminal = ratatui::Terminal::new(TestBackend::new(w, h)).unwrap();
+                        terminal.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+                    }
+                    key(&mut app, back, &mut out);
+                    assert_eq!(view(&app).mode, Mode::List);
+                }
+            },
+        );
+    }
 }
