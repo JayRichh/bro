@@ -2,7 +2,7 @@
   import { app, closeDiff, projectOf, saveDesktopPref, sessionWorktree } from './store.svelte';
   import { nav } from './shell/history.svelte';
   import { isDiffMode, type DiffMode } from './diff-api';
-  import { placeOf } from './status';
+  import { groupWorktrees } from './diff-base';
   import DiffPane from './DiffPane.svelte';
   import { toggleMaximize } from './commands';
   import { withKey } from './shortcuts';
@@ -10,9 +10,10 @@
 
   let pane: DiffPane | undefined = $state();
 
-  const worktree = $derived(
-    app.diffWorktree ?? sessionWorktree(app.session) ?? app.model.worktrees[0]?.id ?? null,
-  );
+  // No worktree named and no session to take one from: the view asks
+  // which, rather than diffing whichever checkout happens to be first.
+  const worktree = $derived(app.diffWorktree ?? sessionWorktree(app.session) ?? null);
+  const groups = $derived(groupWorktrees(app.model));
   const repo = $derived(projectOf(worktree) ?? '');
   // The mode is per repo, kept with the view's other state.
   const ui = $derived(nav.ui('diff', repo));
@@ -55,18 +56,55 @@
 
 <svelte:window onkeydown={onKey} />
 
-<DiffPane bind:this={pane} {worktree} range={app.diffRange} bind:mode={() => mode, setMode} keys={active}>
+<DiffPane
+  bind:this={pane}
+  {worktree}
+  range={app.diffRange}
+  bind:mode={() => mode, setMode}
+  bind:against={app.diffAgainst}
+  bind:shown={app.diffShown}
+  keys={active}
+>
   {#snippet lead()}
     <select
       class="h-7 max-w-[240px] min-w-[96px] shrink border border-rule bg-bg px-1.5 font-mono text-[12px] text-ink"
       aria-label="Worktree"
+      title="The worktree to diff, by repo"
       value={worktree ?? ''}
       onchange={(e) => pickWorktree((e.target as HTMLSelectElement).value)}
     >
-      {#each app.model.worktrees as w (w.id)}
-        <option value={w.id}>{placeOf(app.model, w.id).project} / {w.branch}</option>
+      {#if !worktree}<option value="" disabled>Pick a worktree</option>{/if}
+      {#each groups as g (g.project)}
+        <optgroup label={g.name}>
+          {#each g.worktrees as w (w.id)}
+            <option value={w.id}>{w.branch}{w.isMain ? ' (main checkout)' : ''}</option>
+          {/each}
+        </optgroup>
       {/each}
     </select>
+  {/snippet}
+  {#snippet pick()}
+    <div class="max-w-[560px] px-6 pt-6 text-[13px]">
+      <p class="m-0 text-[15px] font-semibold text-ink">Which worktree?</p>
+      <p class="mt-1 mb-4 text-muted">Nothing in view names one. Pick the checkout to diff.</p>
+      {#each groups as g (g.project)}
+        <h2 class="m-0 mt-3 border-b border-rule pb-1 text-[12px] font-normal text-muted">{g.name}</h2>
+        <ul class="m-0 list-none p-0">
+          {#each g.worktrees as w (w.id)}
+            <li>
+              <button
+                class="flex h-7 w-full items-center gap-2 border-0 border-b border-rule bg-transparent px-2 text-left font-mono text-[12px] text-ink hover:bg-surface"
+                onclick={() => pickWorktree(w.id)}
+                title="Diff {g.name} / {w.branch}"
+                ><span class="min-w-0 truncate">{w.branch}</span>{#if w.isMain}<span class="flex-none text-faint">main checkout</span>{/if}</button
+              >
+            </li>
+          {/each}
+        </ul>
+      {:else}
+        <p class="m-0 text-muted">No worktrees yet. Add a repo first.</p>
+      {/each}
+    </div>
   {/snippet}
   {#snippet trail()}
     <button

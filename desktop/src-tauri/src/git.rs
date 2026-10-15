@@ -154,6 +154,37 @@ pub fn changed_files(root: &Path) -> Result<Vec<DiffFile>, String> {
     if let Ok(numstat) = git(root, &["diff", "HEAD", "--numstat", "-z", "-M"]) {
         apply_numstat(&mut files, &numstat);
     }
+    count_untracked(root, &mut files);
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(files)
+}
+
+/// Every path the checkout differs in from commit `base` (the merge-base
+/// `nebula_core::review_base::resolve` found): committed since, staged,
+/// unstaged and untracked, each once, with line counts against `base`.
+pub fn files_since(root: &Path, base: &str) -> Result<Vec<DiffFile>, String> {
+    let mut files: Vec<DiffFile> = nebula_core::review_base::files_since(root, base)?
+        .into_iter()
+        .map(|c| DiffFile {
+            path: c.path,
+            from: c.from,
+            status: c.status,
+            added: None,
+            removed: None,
+        })
+        .collect();
+    if let Ok(numstat) = git(
+        root,
+        &["diff", base, "--numstat", "-z", "-M", "--no-ext-diff", "--"],
+    ) {
+        apply_numstat(&mut files, &numstat);
+    }
+    count_untracked(root, &mut files);
+    Ok(files)
+}
+
+/// An untracked file's lines all count as added.
+fn count_untracked(root: &Path, files: &mut [DiffFile]) {
     for f in files.iter_mut().filter(|f| f.status == 'U') {
         if let Ok(text) = std::fs::read(root.join(&f.path)) {
             if !is_binary(&text) {
@@ -162,8 +193,6 @@ pub fn changed_files(root: &Path) -> Result<Vec<DiffFile>, String> {
             }
         }
     }
-    files.sort_by(|a, b| a.path.cmp(&b.path));
-    Ok(files)
 }
 
 /// `git diff --numstat -z`: `add\tdel\tpath\0`, or for a rename
@@ -1144,6 +1173,38 @@ pub(crate) mod tests {
         let side = DiffSide::Commit("0123456789abcdef0123456789abcdef01234567".into());
         let e = blob(&repo.0, &side, "a.txt").unwrap_err();
         assert!(e.contains("not in this clone"), "{e}");
+    }
+
+    #[test]
+    fn files_since_the_base_keep_committed_work_and_count_lines() {
+        let repo = Repo::new("since");
+        repo.write("a.txt", b"one\n");
+        let base = repo.commit("base");
+        repo.git(&["checkout", "-q", "-b", "feat"]);
+        repo.write("b.txt", b"b1\nb2\n");
+        repo.commit("agent work");
+        repo.write("a.txt", b"one\ntwo\n");
+        repo.write("new.txt", b"x");
+        // Against HEAD the committed file is gone; against the base it stays.
+        let head: Vec<String> = changed_files(&repo.0)
+            .unwrap()
+            .into_iter()
+            .map(|f| f.path)
+            .collect();
+        assert_eq!(head, vec!["a.txt", "new.txt"]);
+        let since = files_since(&repo.0, &base).unwrap();
+        let got: Vec<(&str, char, Option<u64>)> = since
+            .iter()
+            .map(|f| (f.path.as_str(), f.status, f.added))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("a.txt", 'M', Some(1)),
+                ("b.txt", 'A', Some(2)),
+                ("new.txt", 'U', Some(1)),
+            ]
+        );
     }
 
     #[test]

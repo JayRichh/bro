@@ -8,6 +8,7 @@ import { ado, type AdoContextInfo } from './ado/api';
 import { nav, type Place } from './shell/history.svelte';
 import { applyOverrides } from './shortcuts';
 import { diffItem, isDiffMode, parseDiffItem, type DiffMode, type DiffRange } from './diff-api';
+import type { Against, ReviewBase } from './diff-base';
 
 export type ThemePref = 'system' | 'light' | 'dark';
 /** What the main column shows when no view is open: the overview or the board. */
@@ -52,6 +53,11 @@ export const app = $state({
   diffWorktree: null as string | null,
   /** The range the Diff view compares; null: the working tree against HEAD. */
   diffRange: null as DiffRange | null,
+  /** What the Diff view reads a working tree against, as the reader picked
+   *  it (the header's toggle, the palette); null: the base when there is one. */
+  diffAgainst: null as Against | null,
+  /** What the Diff view last read against, and the base there is. */
+  diffShown: null as { against: Against; base: ReviewBase | null } | null,
   /** The mode for a repo whose Diff view has none saved yet. */
   diffMode: 'side' as DiffMode,
   /** Bumped to ask the quick prompt to take focus. */
