@@ -1116,4 +1116,66 @@ mod tests {
             },
         );
     }
+
+    /// Settings → Project: a **Default account** row per harness with
+    /// profiles; Enter steps it through the harness's accounts and back to
+    /// none, written under the project's repo path, and a launch sees it.
+    #[test]
+    fn the_project_tab_sets_a_default_account_per_harness() {
+        with_config_json(
+            r#"{"profiles":[{"name":"work","harness":"claude"},{"name":"home","harness":"claude"},{"name":"gpt","harness":"codex"}]}"#,
+            || {
+                let mut app = App::new();
+                seed_tree(&mut app);
+                let mut out = Vec::new();
+                let tab = crate::config::project_tab();
+                let declared = crate::config::tab_settings(tab).len();
+                assert_eq!(
+                    crate::config::tab_len(tab),
+                    declared + 2,
+                    "claude and codex"
+                );
+                let rows = crate::config::settings_rows(tab);
+                assert!(rows.contains(&crate::config::SettingsRow::Header(
+                    crate::config::PROJECT_ACCOUNTS_HEADER.into()
+                )));
+                press(&mut app, KeyCode::Char('s'), KeyModifiers::NONE, &mut out);
+                let digit = char::from_digit(tab as u32 + 1, 10).unwrap();
+                press(&mut app, KeyCode::Char(digit), KeyModifiers::NONE, &mut out);
+                let text = draw(&mut app);
+                assert!(text.contains("Default account"), "{text}");
+                assert!(text.contains("none (the spread picks)"), "{text}");
+
+                let claude =
+                    || saved()["projects"]["/tmp/demo"]["default_profiles"]["claude"].clone();
+                apply_setting_at(&mut app, tab, declared, 0);
+                assert_eq!(claude(), "work");
+                apply_setting_at(&mut app, tab, declared, 1);
+                assert_eq!(claude(), "home");
+                assert_eq!(
+                    crate::quick_prompt::project_default(
+                        &app,
+                        &crate::quick_prompt::QuickTarget::Worktree(WorktreeId("w1".into())),
+                        "claude"
+                    )
+                    .as_deref(),
+                    Some("home"),
+                    "the launch mirror follows"
+                );
+                assert!(draw(&mut app).contains("[home]"));
+                apply_setting_at(&mut app, tab, declared + 1, 0);
+                assert_eq!(
+                    saved()["projects"]["/tmp/demo"]["default_profiles"]["codex"],
+                    "gpt",
+                    "one entry per harness"
+                );
+                apply_setting_at(&mut app, tab, declared, 1);
+                apply_setting_at(&mut app, tab, declared + 1, -1);
+                assert!(
+                    saved().get("projects").is_none(),
+                    "none again, no trace left"
+                );
+            },
+        );
+    }
 }
