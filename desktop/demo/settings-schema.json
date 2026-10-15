@@ -322,129 +322,6 @@
             {
               "target": {
                 "scope": "global",
-                "key": "preset_text"
-              },
-              "label": "Preset text",
-              "hint": "Where a new agent preset's text goes: a prefix before the task, a postfix after it, or both (its Text row can change one)",
-              "control": {
-                "type": "choice",
-                "options": [
-                  "prefix",
-                  "postfix",
-                  "prefix & postfix"
-                ],
-                "labels": [
-                  "prefix",
-                  "postfix",
-                  "prefix & postfix"
-                ]
-              },
-              "value": "prefix",
-              "default": "prefix",
-              "restart": null,
-              "is_new": false
-            },
-            {
-              "target": {
-                "scope": "global",
-                "key": "ask_before_archive"
-              },
-              "label": "Confirm on archive",
-              "hint": "a and the card menu's Archive ask before archiving a session (off archives at once; u brings it back)",
-              "control": {
-                "type": "toggle"
-              },
-              "value": true,
-              "default": true,
-              "restart": null,
-              "is_new": false
-            }
-          ]
-        },
-        {
-          "title": "Accounts",
-          "subtitle": null,
-          "terminal": false,
-          "rows": [
-            {
-              "target": {
-                "scope": "global",
-                "key": "account_spread"
-              },
-              "label": "Account spread",
-              "hint": "Which profile a new session takes when none is picked: manual = the harness's default; failover = the default until its 5h or weekly use reaches the threshold, then the next enabled one; least_used = the enabled one with the least use",
-              "control": {
-                "type": "choice",
-                "options": [
-                  "manual",
-                  "failover",
-                  "least_used"
-                ],
-                "labels": [
-                  "manual",
-                  "failover",
-                  "least_used"
-                ]
-              },
-              "value": "manual",
-              "default": "manual",
-              "restart": null,
-              "is_new": true
-            },
-            {
-              "target": {
-                "scope": "global",
-                "key": "account_spread_threshold"
-              },
-              "label": "Failover at",
-              "hint": "Percent of an account's 5h or weekly limit at which failover moves to the next enabled profile",
-              "control": {
-                "type": "choice",
-                "options": [
-                  "50",
-                  "70",
-                  "80",
-                  "90",
-                  "95"
-                ],
-                "labels": [
-                  "50",
-                  "70",
-                  "80",
-                  "90",
-                  "95"
-                ]
-              },
-              "value": "90",
-              "default": "90",
-              "restart": null,
-              "is_new": true
-            },
-            {
-              "target": {
-                "scope": "global",
-                "key": "usage_statusline"
-              },
-              "label": "Usage status line",
-              "hint": "Claude sessions get kete's status line, which reads plan usage and context for the accounts list (your own statusLine still runs and prints; off = only the on-screen usage notice)",
-              "control": {
-                "type": "toggle"
-              },
-              "value": true,
-              "default": true,
-              "restart": null,
-              "is_new": true
-            }
-          ]
-        },
-        {
-          "title": "Terminal app",
-          "subtitle": "Only the terminal app acts on these. They share its config file.",
-          "terminal": true,
-          "rows": [
-            {
-              "target": {
-                "scope": "global",
                 "key": "done_sound"
               },
               "label": "Done sound",
@@ -547,6 +424,31 @@
             {
               "target": {
                 "scope": "global",
+                "key": "preset_text"
+              },
+              "label": "Preset text",
+              "hint": "Where a new agent preset's text goes: a prefix before the task, a postfix after it, or both (its Text row can change one)",
+              "control": {
+                "type": "choice",
+                "options": [
+                  "prefix",
+                  "postfix",
+                  "prefix & postfix"
+                ],
+                "labels": [
+                  "prefix",
+                  "postfix",
+                  "prefix & postfix"
+                ]
+              },
+              "value": "prefix",
+              "default": "prefix",
+              "restart": null,
+              "is_new": false
+            },
+            {
+              "target": {
+                "scope": "global",
                 "key": "delete_empty_worktree"
               },
               "label": "Delete emptied worktree",
@@ -589,6 +491,104 @@
               "restart": null,
               "is_new": false
             },
+            {
+              "target": {
+                "scope": "global",
+                "key": "ask_before_archive"
+              },
+              "label": "Confirm on archive",
+              "hint": "a and the card menu's Archive ask before archiving a session (off archives at once; u brings it back)",
+              "control": {
+                "type": "toggle"
+              },
+              "value": true,
+              "default": true,
+              "restart": null,
+              "is_new": false
+            }
+          ]
+        },
+        {
+          "title": "Accounts",
+          "subtitle": null,
+          "terminal": false,
+          "rows": [
+            {
+              "target": {
+                "scope": "global",
+                "key": "account_spread"
+              },
+              "label": "Account spread",
+              "hint": "Which profile a new session takes when none is picked: manual = the harness's default; failover = the default until its 5h or weekly use reaches the threshold, then the next enabled one; least_used = the enabled one with the least use",
+              "control": {
+                "type": "choice",
+                "options": [
+                  "manual",
+                  "failover",
+                  "least_used"
+                ],
+                "labels": [
+                  "manual",
+                  "failover",
+                  "least_used"
+                ]
+              },
+              "value": "manual",
+              "default": "manual",
+              "restart": null,
+              "is_new": true
+            },
+            {
+              "target": {
+                "scope": "global",
+                "key": "account_spread_threshold"
+              },
+              "label": "Failover at",
+              "hint": "Percent of an account's 5h or weekly limit at which failover moves to the next enabled profile",
+              "control": {
+                "type": "choice",
+                "options": [
+                  "50",
+                  "70",
+                  "80",
+                  "90",
+                  "95"
+                ],
+                "labels": [
+                  "50",
+                  "70",
+                  "80",
+                  "90",
+                  "95"
+                ]
+              },
+              "value": "90",
+              "default": "90",
+              "restart": null,
+              "is_new": true
+            },
+            {
+              "target": {
+                "scope": "global",
+                "key": "usage_statusline"
+              },
+              "label": "Usage status line",
+              "hint": "Claude sessions get kete's status line, which reads plan usage and context for the accounts list (your own statusLine still runs and prints; off = only the on-screen usage notice)",
+              "control": {
+                "type": "toggle"
+              },
+              "value": true,
+              "default": true,
+              "restart": null,
+              "is_new": true
+            }
+          ]
+        },
+        {
+          "title": "Terminal app",
+          "subtitle": "Only the terminal app acts on these. They share its config file.",
+          "terminal": true,
+          "rows": [
             {
               "target": {
                 "scope": "global",
@@ -1931,7 +1931,7 @@
     {
       "id": "hotkeys",
       "title": "Hotkeys",
-      "note": "The terminal app's keys, read-only here: rebind them in its Settings, Hotkeys tab. A running terminal app picks up changes when it next starts.",
+      "note": "This window's keys first: press a chord to bind one, or put it back. Then the terminal app's, read-only here: rebind those in its Settings, Hotkeys tab. A running terminal app picks up changes when it next starts.",
       "groups": [],
       "hotkeys": [
         {
@@ -2056,6 +2056,49 @@
           ],
           "bound": [
             "/"
+          ],
+          "overridden": false
+        },
+        {
+          "id": "command_palette",
+          "label": "Command palette",
+          "hint": "Search every project, worktree, session and pull request, and every action by its name: Enter jumps to the row or runs the action",
+          "group": "NAVIGATE",
+          "defaults": [
+            "ctrl+k"
+          ],
+          "bound": [
+            "ctrl+k"
+          ],
+          "overridden": false
+        },
+        {
+          "id": "nav_back",
+          "label": "Back",
+          "hint": "Go back to the place the grid was on before (its project tab, the card under the cursor, full-screen or not), as the header's ‹ does. < is bound beside ⌥←, which needs Option as Meta on a Mac",
+          "group": "NAVIGATE",
+          "defaults": [
+            "alt+left",
+            "<"
+          ],
+          "bound": [
+            "alt+left",
+            "<"
+          ],
+          "overridden": false
+        },
+        {
+          "id": "nav_forward",
+          "label": "Forward",
+          "hint": "Go forward again after a back, as the header's › does. > is bound beside ⌥→, which needs Option as Meta on a Mac",
+          "group": "NAVIGATE",
+          "defaults": [
+            "alt+right",
+            ">"
+          ],
+          "bound": [
+            "alt+right",
+            ">"
           ],
           "overridden": false
         },
@@ -2301,14 +2344,52 @@
           "overridden": false
         },
         {
+          "id": "new_worktree",
+          "label": "New worktree",
+          "hint": "Cut a new worktree in the selected or shown project",
+          "group": "PROJECTS & WORKTREES",
+          "defaults": [],
+          "bound": [],
+          "overridden": false
+        },
+        {
+          "id": "toggle_run",
+          "label": "Run / stop the run command",
+          "hint": "Start the checkout's run command (the project's Run setting, else its .kete.json run), or stop it while it runs",
+          "group": "PROJECTS & WORKTREES",
+          "defaults": [],
+          "bound": [],
+          "overridden": false
+        },
+        {
+          "id": "delete_worktree",
+          "label": "Delete worktree",
+          "hint": "Delete the selected linked worktree's folder, behind a confirmation; its branch stays",
+          "group": "PROJECTS & WORKTREES",
+          "defaults": [],
+          "bound": [],
+          "overridden": false
+        },
+        {
+          "id": "remove_project",
+          "label": "Remove project",
+          "hint": "Take the project off the list, behind a confirmation: nothing on disk is touched",
+          "group": "PROJECTS & WORKTREES",
+          "defaults": [],
+          "bound": [],
+          "overridden": false
+        },
+        {
           "id": "git_diff",
           "label": "Git diff",
           "hint": "Open the diff viewer for the checkout under the cursor, or, with the pane reading a pull request, that pull request's diff",
           "group": "PROJECTS & WORKTREES",
           "defaults": [
+            "d",
             "g"
           ],
           "bound": [
+            "d",
             "g"
           ],
           "overridden": false
@@ -2414,6 +2495,19 @@
           ],
           "bound": [
             "c"
+          ],
+          "overridden": false
+        },
+        {
+          "id": "azure_devops",
+          "label": "Azure DevOps",
+          "hint": "On a project whose remote is on Azure DevOps (the header shows an ado button): your sprint's tasks, the active pull requests and the branches. Enter opens a task or pull request in the browser and checks a branch out in a worktree; s twice starts a task (branch, worktree, agent)",
+          "group": "PROJECTS & WORKTREES",
+          "defaults": [
+            "shift+b"
+          ],
+          "bound": [
+            "shift+b"
           ],
           "overridden": false
         },
@@ -2541,17 +2635,13 @@
         {
           "id": "delete",
           "label": "Delete selected",
-          "hint": "Remove the selected row, behind a confirmation. With the PROJECT TABS holding the keys, close the tab under their cursor, behind the same kind of confirmation: x closes it outright",
+          "hint": "Remove the selected row, behind a confirmation. With the PROJECT TABS holding the keys, close the tab under their cursor, behind the same kind of confirmation: x closes it outright. On a Mac keyboard Del is fn+⌫",
           "group": "SESSIONS",
           "defaults": [
-            "d",
-            "delete",
-            "backspace"
+            "delete"
           ],
           "bound": [
-            "d",
-            "delete",
-            "backspace"
+            "delete"
           ],
           "overridden": false
         },
@@ -2566,6 +2656,33 @@
           "bound": [
             "shift+d"
           ],
+          "overridden": false
+        },
+        {
+          "id": "restart",
+          "label": "Restart the agent",
+          "hint": "Restart the selected session's agent, resuming its conversation",
+          "group": "SESSIONS",
+          "defaults": [],
+          "bound": [],
+          "overridden": false
+        },
+        {
+          "id": "pin_orchestrator",
+          "label": "Make or unpin the orchestrator",
+          "hint": "Pin the selected session as the machine's orchestrator, or unpin it when it is one",
+          "group": "SESSIONS",
+          "defaults": [],
+          "bound": [],
+          "overridden": false
+        },
+        {
+          "id": "move_to_account",
+          "label": "Move to another account",
+          "hint": "Restart the selected session fresh on another account, picked from a list (its conversation stays behind)",
+          "group": "SESSIONS",
+          "defaults": [],
+          "bound": [],
           "overridden": false
         },
         {
@@ -2630,6 +2747,49 @@
           ],
           "bound": [
             "m"
+          ],
+          "overridden": false
+        },
+        {
+          "id": "reorder_up",
+          "label": "Move item up",
+          "hint": "Move the card under the cursor one place earlier in its band (on the board, among its worktree's cards in its lane), or on a band with no card to be on (empty or folded) that band, or with the project tabs holding the keys the tab under their cursor one place left; the menus' Move up and dragging do the same. ⌥↑ needs Option as Meta on a Mac; ⇧↑ is bound beside it",
+          "group": "SESSIONS",
+          "defaults": [
+            "alt+up",
+            "shift+up"
+          ],
+          "bound": [
+            "alt+up",
+            "shift+up"
+          ],
+          "overridden": false
+        },
+        {
+          "id": "reorder_down",
+          "label": "Move item down",
+          "hint": "Move the card under the cursor one place later in its band (on the board, in its lane), or the project tab under the header's cursor one place right; the menus' Move down and dragging do the same",
+          "group": "SESSIONS",
+          "defaults": [
+            "alt+down",
+            "shift+down"
+          ],
+          "bound": [
+            "alt+down",
+            "shift+down"
+          ],
+          "overridden": false
+        },
+        {
+          "id": "subagents",
+          "label": "Subagents and session tree",
+          "hint": "The project's sessions as a tree, each session under the one that started it and the subagents running inside it under that; Enter opens the session, → and ← open and fold, Tab every project. A card's ⑂ chip opens it on that session",
+          "group": "SESSIONS",
+          "defaults": [
+            "shift+s"
+          ],
+          "bound": [
+            "shift+s"
           ],
           "overridden": false
         },
@@ -2709,7 +2869,7 @@
         {
           "id": "toggle_kanban",
           "label": "Kanban board",
-          "hint": "Lay the grid out as lanes by status (Needs input, Running, Unseen, Done, PR open) or back to a band per worktree. On the board h/l walk the lanes, j/k the cards, Tab flips between this project and every project",
+          "hint": "Lay the grid out as lanes by status (Needs you, Running, Unread, Done, PR open) or back to a band per worktree; the Overview | Board toggle at the right of the grid's header does the same by click. On the board h/l walk the lanes, j/k the cards, Tab flips between this project and every project",
           "group": "GENERAL",
           "defaults": [
             "shift+k"
@@ -2748,12 +2908,14 @@
         {
           "id": "toggle_full_screen",
           "label": "Full-screen session",
-          "hint": "Give the session in the pane the whole screen, or bring it back down beside the cards, from inside the pane too, where it is never forwarded to the agent. From the cards it full-screens the one under the cursor. ^q and ^` also bring a full-screen session back down",
+          "hint": "Give the session in the pane the whole screen, or bring it back down beside the cards. From the cards it full-screens the one under the cursor. z is typed into a locked pane like any letter; ^f works from inside it too, where it is never forwarded to the agent. ^q and ^` also bring a full-screen session back down",
           "group": "GENERAL",
           "defaults": [
+            "z",
             "ctrl+f"
           ],
           "bound": [
+            "z",
             "ctrl+f"
           ],
           "overridden": false
@@ -2787,13 +2949,15 @@
         {
           "id": "settings",
           "label": "Settings",
-          "hint": "Open this settings overlay",
+          "hint": "Open this settings overlay (^, needs the kitty protocol; s arrives everywhere)",
           "group": "GENERAL",
           "defaults": [
-            "s"
+            "s",
+            "ctrl+,"
           ],
           "bound": [
-            "s"
+            "s",
+            "ctrl+,"
           ],
           "overridden": false
         },
@@ -2811,15 +2975,28 @@
           "overridden": false
         },
         {
-          "id": "help",
-          "label": "Help",
-          "hint": "Toggle the keyboard help overlay",
+          "id": "verbs",
+          "label": "Verbs for the selection",
+          "hint": "What can be done to the card, band, tab or row under the cursor, each with its key: type to narrow, Enter runs one; the last row is every key",
           "group": "GENERAL",
           "defaults": [
             "?"
           ],
           "bound": [
             "?"
+          ],
+          "overridden": false
+        },
+        {
+          "id": "help",
+          "label": "Help",
+          "hint": "Toggle the keyboard help overlay: every key (? lists the selection's verbs, with this one row down)",
+          "group": "GENERAL",
+          "defaults": [
+            "f1"
+          ],
+          "bound": [
+            "f1"
           ],
           "overridden": false
         },

@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.49.0
+
+Both apps now share one list of verbs and one key table. You learn by pointing at a thing instead of memorising keys, and the diff keeps an agent's committed work.
+
+- **`?` shows what you can do here.** Press `?` on any card, worktree, repo, board card, diff file or account to get its verbs with their keys. Type to filter, then Enter to run. The last row opens every key. Full help is on `F1`. Both command palettes (`Ctrl+K`) list the selection's verbs first.
+- **A verb bar and footer that follow the selection.** The desktop has a slim bar under the overview, board and worktrees views with the focused row's top verbs as buttons. The terminal app's footer leads with `? more`, then the selection's top four verbs. Every menu row in the terminal app now shows its key.
+- **One list of verbs, one key table.** Verbs, their labels and their keys come from one registry used by both apps, so menus read the same in both ("Open", "Open in editor", "Close terminal…", "Remove from Kete…").
+- **Keys changed** (keys you've rebound yourself keep working; delete keeps its confirm):
+
+  | Verb | Terminal app | Desktop |
+  |---|---|---|
+  | Diff | `d` (was `g`, which still works) | `d` anywhere (was `Ctrl+Shift+D`, which still works) |
+  | Delete | `Del` only (`d` and `⌫` no longer delete) | `Del` (unchanged) |
+  | Reply to the agent | `Space` (unchanged) | `Space` (was `f`) |
+  | Open a session | `Enter` (unchanged) | `Enter` (`Space` no longer opens) |
+  | Filter | `f` (unchanged) | `f` or `/`: the view's filter, otherwise the palette |
+  | Refresh | `⇧R` (unchanged) | `⇧R` refreshes PRs (restart lost its `⇧R` default; it's in the menus) |
+  | Digits | repos 1–9 (unchanged) | repos 1–9 in rail order (were Home/Session/Diff/Orchestrator; the orchestrator keeps `F10`) |
+  | Full screen | `z` (`Ctrl+F` still works) | `z` (`Ctrl+Shift+M` still works) |
+  | Help | `F1` (`?` is now the verbs menu) | `F1` (`?` is now the verbs menu) |
+  | Settings | `s` or `Ctrl+,` | `Ctrl+,` |
+  | ADO Branches | | `f` filters, fetch moved to `⇧R` |
+
+- **Rebind keys on the desktop.** Settings → Hotkeys lists the window's own keys and you can edit them: add a key, unbind it, reset it, with a warning when a chord is already taken. The terminal app's keys show below as a separate group, which you can't edit. Desktop keys are saved beside the terminal app's under `keybindings` (`"desktop.<id>"`).
+- **The diff keeps committed work.** Both apps compare a worktree against where it split from its base branch: the `worktree_base_branch` setting, else `origin/HEAD`, else main or master. An agent's commits stay in the diff. A toggle switches back to HEAD (desktop toolbar button and palette; `Ctrl+g` in the terminal app's diff). Staging and discarding work against HEAD only. A strip lists the commits since the base. The desktop's worktree picker is grouped by repo and asks which worktree instead of guessing.
+- **Accounts, finished in the apps.** Rename an account (refused while a session still uses it, with the reason), delete its home on remove, set variables when adding one and clear them when editing, in both apps. Desktop Settings → Profiles now opens the Accounts view. Adopted-login accounts show their sign-in command everywhere. New CLI: `kete profile rename`, `kete profile duplicate`, `kete profile spread <manual|failover|least-used> [--threshold N]`, `kete session move-account`.
+- **The apps agree on what needs you.** Board lanes, attention and ordering are computed once in the shared core, so the desktop no longer counts a stopped session as unread.
+
 ## 0.48.0
 
 Pastes land whole, accounts are managed in the app, the two apps trade their best views, and
