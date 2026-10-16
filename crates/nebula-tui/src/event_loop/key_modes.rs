@@ -451,6 +451,12 @@ fn handle_global_action(
         | Action::CopyBranch
         | Action::WakeAccount
         | Action::Critters => super::verbs::pending_verb(app, action),
+        // The menu matrix's verbs, for the menu lanes (and lane/wake's
+        // schedule) to route: their own arm, so each lane takes its ids
+        // out without touching the one above.
+        Action::MarkSeen | Action::CopyPrUrl | Action::ArchiveDone | Action::WakeSchedule => {
+            super::verbs::pending_verb(app, action)
+        }
         // `Shift+←` / `Shift+→` on the board: the card onto the next lane.
         Action::MoveCardLeft => board::move_card(app, -1, out),
         Action::MoveCardRight => board::move_card(app, 1, out),

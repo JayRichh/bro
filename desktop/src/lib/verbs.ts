@@ -5,7 +5,21 @@
 // a verb does on a row lives in actions.ts; this file only says which
 // verbs, in which order, by which words and keys.
 
-import { ACTIONS, DESK_KEYS, MENU_LABELS, MENUS, PRIMARY, PRIMARY_SHOWN, type ActionId, type AppliesTo, type DeskKeyId } from './actions.gen';
+import {
+  ACTIONS,
+  DESK_KEYS,
+  MENU_GROUPS,
+  MENU_LABELS,
+  MENU_SECTIONS,
+  MENUS,
+  PRIMARY,
+  PRIMARY_SHOWN,
+  type ActionId,
+  type AppliesTo,
+  type DeskKeyId,
+  type MenuGroup,
+  type MenuSection,
+} from './actions.gen';
 import { keysOf, type Shortcut } from './shortcuts';
 import { SHORTCUTS } from './keytable.svelte';
 
@@ -44,6 +58,25 @@ export function destructive(id: ActionId): boolean {
 /** A kind's menu, in the registry's order. */
 export function menuIds(on: AppliesTo): readonly ActionId[] {
   return MENUS[on] ?? [];
+}
+
+/** The section verb `id`'s row sits in on a thing of kind `on`, the
+ *  kind's own first (`section_of` in the registry): a menu draws a rule
+ *  where the section changes. */
+export function sectionOf(id: ActionId, on: AppliesTo): MenuSection | undefined {
+  return (MENU_SECTIONS.find((s) => s.id === id && s.on === on) ?? MENU_SECTIONS.find((s) => s.id === id && s.on === null))?.section;
+}
+
+/** The submenu verb `id`'s row folds into on a thing of kind `on`, and
+ *  its word there (`group_of`): it folds where two or more of the
+ *  group's rows mean something now; one alone keeps its whole words. */
+export function groupOf(id: ActionId, on: AppliesTo): { group: MenuGroup; label: string } | undefined {
+  for (const group of MENU_GROUPS) {
+    if (!group.on.includes(on)) continue;
+    const row = group.rows.find((r) => r.id === id);
+    if (row) return { group, label: row.label };
+  }
+  return undefined;
 }
 
 /** The window's key rows for a verb, the row a single key reaches first

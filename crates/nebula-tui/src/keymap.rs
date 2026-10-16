@@ -1106,6 +1106,10 @@ mod tests {
                             | Action::CopyBranch
                             | Action::WakeAccount
                             | Action::Critters
+                            | Action::MarkSeen
+                            | Action::CopyPrUrl
+                            | Action::ArchiveDone
+                            | Action::WakeSchedule
                     ),
                     "{} ships with no chord",
                     spec.id

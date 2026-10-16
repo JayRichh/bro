@@ -198,6 +198,22 @@ pub(crate) fn menu_action(app: &App, action: Action, t: &Target) -> Option<MenuA
                     })
                 }
                 Action::CreatePullRequest | Action::MergePullRequest => None,
+                // The menu matrix's rules: a row only where it can act. A
+                // comment needs an open pull request, a link any one.
+                Action::CommentPullRequest if !a.archived && merges(app, &a.worktree_id) => {
+                    keyed(app)
+                }
+                Action::CopyPrUrl
+                    if !a.archived
+                        && crate::launcher::row(app, &id).is_some_and(|r| r.pr.is_some()) =>
+                {
+                    keyed(app)
+                }
+                Action::CommentPullRequest | Action::CopyPrUrl => None,
+                Action::MarkSeen if a.unseen && !a.archived => keyed(app),
+                Action::MarkSeen => None,
+                Action::OpenInBrowser if local && serves(app, &a.worktree_id) => keyed(app),
+                Action::OpenInBrowser => None,
                 Action::FocusScope => super::board::scope_for(app, t).map(MenuAction::FocusScope),
                 Action::ReorderUp | Action::ReorderDown if !a.archived => {
                     Some(MenuAction::Reorder(
@@ -244,6 +260,34 @@ pub(crate) fn menu_action(app: &App, action: Action, t: &Target) -> Option<MenuA
                     })
                 }
                 Action::FocusScope => super::board::scope_for(app, t).map(MenuAction::FocusScope),
+                // The checkout's pull request rows only with one to act on,
+                // the dev server only while something listens, the bulk
+                // verbs only with something to take.
+                Action::OpenPullRequest | Action::CopyPrUrl
+                    if crate::launcher::worktree_pr(app, &id).is_none() =>
+                {
+                    None
+                }
+                Action::CommentPullRequest if !merges(app, &id) => None,
+                Action::OpenInBrowser if !serves(app, &id) => None,
+                Action::MarkSeen
+                    if !app
+                        .tree
+                        .agents
+                        .iter()
+                        .any(|a| a.worktree_id == id && unread(a)) =>
+                {
+                    None
+                }
+                Action::ArchiveDone
+                    if !app
+                        .tree
+                        .agents
+                        .iter()
+                        .any(|a| a.worktree_id == id && done(a)) =>
+                {
+                    None
+                }
                 // The band's place among the project's; the root's stays
                 // first.
                 Action::ReorderUp | Action::ReorderDown => (!w.is_main).then(|| {
@@ -295,10 +339,57 @@ pub(crate) fn menu_action(app: &App, action: Action, t: &Target) -> Option<MenuA
                     .any(|w| &w.project_id == id && !w.is_main)
                     .then(|| MenuAction::SweepWorktrees(id.clone())),
                 Action::FocusScope => super::board::scope_for(app, t).map(MenuAction::FocusScope),
+                // Its remote's lists by host, the dev server while it
+                // listens, the bulk verbs with something to take.
+                Action::Ado if !on_ado(app, id) => None,
+                Action::PullRequests | Action::Issues if on_ado(app, id) => None,
+                // `w` reads the grid's checkout, not this repo's: no row
+                // until the menus give it the checkout to open (tui-menus).
+                Action::OpenInBrowser => None,
+                Action::MarkSeen if !in_project(app, id, unread) => None,
+                Action::ArchiveDone if !in_project(app, id, done) => None,
                 _ => keyed(app),
             }
         }
     }
+}
+
+/// Is something listening on checkout `w`'s ports: its dev server up.
+fn serves(app: &App, w: &WorktreeId) -> bool {
+    app.tree.ports.get(w).is_some_and(|p| !p.live.is_empty())
+}
+
+/// A finished turn nobody has read: what Mark seen clears.
+fn unread(a: &nebula_core::Agent) -> bool {
+    a.unseen && !a.archived
+}
+
+/// A finished session already read, not the orchestrator: what Archive
+/// done sessions takes.
+fn done(a: &nebula_core::Agent) -> bool {
+    a.status == nebula_core::AgentStatus::Finished
+        && !a.unseen
+        && !a.archived
+        && !a.role.is_orchestrator()
+}
+
+/// Has project `p` a session `pick` takes, in any of its checkouts.
+fn in_project(app: &App, p: &ProjectId, pick: fn(&nebula_core::Agent) -> bool) -> bool {
+    app.tree.agents.iter().any(|a| {
+        pick(a)
+            && app
+                .tree
+                .worktrees
+                .iter()
+                .any(|w| w.id == a.worktree_id && &w.project_id == p)
+    })
+}
+
+/// Is project `p`'s remote on Azure DevOps, as the background probe
+/// (`ado::probe`) found. Not known yet counts as no: a menu never runs
+/// `git` on the loop, and the probe answers within moments of startup.
+fn on_ado(app: &App, p: &ProjectId) -> bool {
+    app.desk.ado_remote.get(p).copied().unwrap_or(false)
 }
 
 /// Can checkout `w` open a pull request from here: none open on it, not
@@ -393,6 +484,19 @@ fn rows(app: &App, ids: &[&str], t: &Target) -> Vec<MenuItem> {
 /// card has a row of the same verb (Move worktree up).
 pub(crate) fn menu_for(app: &App, t: &Target) -> Vec<MenuItem> {
     let mut items = rows(app, menu_of(t.kind()), t);
+    // Make orchestrator only while no other session is pinned (the menu
+    // matrix's trim): replacing one is rare, and `?`'s More, the palette
+    // and a bound key still reach it.
+    if let Target::Session(id) = t {
+        let pinned = app
+            .tree
+            .agents
+            .iter()
+            .any(|a| &a.id != id && !a.archived && a.role.is_orchestrator());
+        if pinned {
+            items.retain(|i| !matches!(i.action, MenuAction::MakeOrchestrator(_)));
+        }
+    }
     let card = matches!(t, Target::Session(_) | Target::Terminal(_));
     // An archived card keeps no checkout verbs: it runs in none.
     let live = match t {

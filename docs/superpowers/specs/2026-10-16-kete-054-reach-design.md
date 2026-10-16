@@ -484,6 +484,8 @@ Jay's framing: "if enabled and conditions warrant it, send the smallest message 
 
 ## Context-menu matrix (desktop; TUI is the same minus headings, separators and disabled rows)
 
+Superseded by the gap-analysed matrix v2, [2026-10-16-kete-054-menu-matrix.md](2026-10-16-kete-054-menu-matrix.md) (lane/menu-matrix). It covers every target in both apps, the state rules, the submenus the registry now carries, the connections between sessions, PRs, worktrees, branches, accounts, ports and tasks, and the verdict on each row. The table below is the first draft it grew from.
+
 | Target | Rows (registry ids or local rows, in order) |
 |---|---|
 | Session | Open · Reply · Diff · Review… — Open in ▸ (VS Code, Visual Studio, Explorer) · Dock editor beside Kete — Copy ▸ (Path, Branch) — Account ▸ — Restart · Duplicate · Move to… · Rename · Pin as orchestrator — PR ▸ (Open, Create, Merge, Issue) — Focus scope · Move up/down — Archive/Unarchive · Delete |

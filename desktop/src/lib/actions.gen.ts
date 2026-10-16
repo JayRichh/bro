@@ -106,6 +106,10 @@ export type ActionId =
   | "copy_branch"
   | "wake_account"
   | "critters"
+  | "mark_seen"
+  | "copy_pr_url"
+  | "archive_done"
+  | "wake_schedule"
   | "cycle_theme"
   | "home_board"
   | "home_overview"
@@ -739,11 +743,11 @@ export const ACTIONS: readonly ActionRow[] = [
   {
     id: "scope_account",
     label: "Scope to an account\u2026",
-    hint: "Narrow the scope chip to the sessions of one account, picked from those the board's sessions run on (or back to any account); the chip's @ does the same by click. The desktop's chip menu lists the accounts too",
+    hint: "Narrow the scope chip to the sessions of one account, picked from those the board's sessions run on (or back to any account); the chip's @ does the same by click, and an account's menu narrows to it straight away. The desktop's chip menu lists the accounts too",
     group: "PROJECTS & WORKTREES",
     word: "account",
     destructive: false,
-    appliesTo: ["global"],
+    appliesTo: ["global", "account"],
     worksIn: ["grid", "board"],
     surface: "tui",
     tui: [],
@@ -886,7 +890,7 @@ export const ACTIONS: readonly ActionRow[] = [
     group: "PROJECTS & WORKTREES",
     word: "browser",
     destructive: false,
-    appliesTo: ["worktree"],
+    appliesTo: ["worktree", "session", "repo"],
     worksIn: ["grid", "board"],
     surface: "tui",
     tui: ["w"],
@@ -1250,7 +1254,7 @@ export const ACTIONS: readonly ActionRow[] = [
     group: "GENERAL",
     word: "accounts",
     destructive: false,
-    appliesTo: ["account"],
+    appliesTo: ["account", "global"],
     worksIn: ["grid", "board", "pane"],
     surface: "both",
     tui: ["shift+u"],
@@ -1497,7 +1501,7 @@ export const ACTIONS: readonly ActionRow[] = [
     group: "FILES",
     word: "copy path",
     destructive: false,
-    appliesTo: ["worktree", "repo", "session", "folder", "file"],
+    appliesTo: ["worktree", "repo", "session", "terminal", "folder", "file"],
     worksIn: ["grid", "board", "pane", "diff", "overlay"],
     surface: "both",
     tui: [],
@@ -1551,6 +1555,58 @@ export const ACTIONS: readonly ActionRow[] = [
     destructive: false,
     appliesTo: ["global"],
     worksIn: ["grid", "board", "pane"],
+    surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
+    id: "mark_seen",
+    label: "Mark seen",
+    hint: "Mark the session's finished turn as read, or every unread session in the checkout, the repo or what the board shows, so the review lane empties without opening each one",
+    group: "SESSIONS",
+    word: "seen",
+    destructive: false,
+    appliesTo: ["session", "worktree", "repo", "global"],
+    worksIn: ["grid", "board", "pane"],
+    surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
+    id: "copy_pr_url",
+    label: "Copy pull request link",
+    hint: "Copy the link of the checkout's pull request to the clipboard",
+    group: "FILES",
+    word: "copy link",
+    destructive: false,
+    appliesTo: ["session", "worktree"],
+    worksIn: ["grid", "board", "pane", "diff"],
+    surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
+    id: "archive_done",
+    label: "Archive done sessions",
+    hint: "Archive every finished session you have already read, in the checkout, the repo or what the board shows, after one confirm listing them; unread, running and waiting ones stay, and U brings any back",
+    group: "SESSIONS",
+    word: "archive done",
+    destructive: false,
+    appliesTo: ["worktree", "repo", "global"],
+    worksIn: ["grid", "board"],
+    surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
+    id: "wake_schedule",
+    label: "Wake-up schedule",
+    hint: "Whakaoho: each account's wake-up switch, hour and days, and where its 5-hour windows fall across the day; from an account, on that account",
+    group: "ACCOUNTS",
+    word: "wake-up",
+    destructive: false,
+    appliesTo: ["account", "global"],
+    worksIn: ["grid", "board", "pane", "overlay"],
     surface: "both",
     tui: [],
     desktop: [],
@@ -1834,24 +1890,33 @@ export const MENU_LABELS: readonly { id: ActionId; on: AppliesTo | null; label: 
   { id: "toggle_full_screen", on: null, label: "Full screen" },
   { id: "accounts", on: null, label: "Accounts\u2026" },
   { id: "add_project", on: null, label: "Add project\u2026" },
-  { id: "open_in_vscode", on: null, label: "VS Code" },
-  { id: "open_in_visual_studio", on: null, label: "Visual Studio" },
+  { id: "open_in_vscode", on: null, label: "Open in VS Code" },
+  { id: "open_in_visual_studio", on: null, label: "Open in Visual Studio" },
   { id: "reveal_in_explorer", on: null, label: "Show in Explorer" },
   { id: "copy_path", on: null, label: "Copy path" },
   { id: "copy_relative_path", on: null, label: "Copy relative path" },
-  { id: "copy_branch", on: null, label: "Copy branch" },
-  { id: "dock_editor", on: null, label: "Dock beside Kete" },
+  { id: "copy_branch", on: null, label: "Copy branch name" },
+  { id: "dock_editor", on: null, label: "Dock editor beside Kete" },
+  { id: "mark_seen", on: "worktree", label: "Mark all seen" },
+  { id: "mark_seen", on: "repo", label: "Mark all seen" },
+  { id: "mark_seen", on: "global", label: "Mark all seen" },
+  { id: "archive_done", on: null, label: "Archive done sessions\u2026" },
+  { id: "wake_schedule", on: "global", label: "Whakaoho\u2026" },
+  { id: "wake_schedule", on: null, label: "Wake-up schedule\u2026" },
+  { id: "scope_account", on: "account", label: "Show its sessions" },
+  { id: "accounts", on: "account", label: "Account details\u2026" },
 ];
 
 /** Each kind's menu, in order: a right-click's rows in both apps. */
 export const MENUS: Readonly<Partial<Record<AppliesTo, readonly ActionId[]>>> = {
-  session: ["activate", "follow_up", "open_in_vscode", "open_in_visual_studio", "reveal_in_explorer", "dock_editor", "copy_path", "copy_branch", "restart", "duplicate_session", "move_session", "move_to_account", "rename", "pin_orchestrator", "open_pull_request", "create_pull_request", "merge_pull_request", "open_issue", "focus_scope", "reorder_up", "reorder_down", "unarchive", "archive", "delete"],
-  terminal: ["activate", "rename", "delete"],
-  worktree: ["new", "quick_prompt", "new_terminal", "toggle_run", "git_diff", "open_worktree", "open_repo", "open_in_vscode", "open_in_visual_studio", "reveal_in_explorer", "dock_editor", "copy_path", "copy_branch", "switch_branch", "create_pull_request", "merge_pull_request", "focus_scope", "reorder_up", "reorder_down", "delete_all", "delete_worktree"],
-  repo: ["quick_prompt", "new_worktree", "switch_branch", "toggle_run", "open_worktree", "open_repo", "open_in_vscode", "open_in_visual_studio", "reveal_in_explorer", "dock_editor", "copy_path", "refresh_pull_requests", "focus_scope", "rename", "reorder_up", "reorder_down", "delete_worktree", "sweep_worktrees", "remove_project"],
+  session: ["activate", "follow_up", "git_diff", "open_pull_request", "create_pull_request", "merge_pull_request", "comment_pull_request", "open_issue", "open_in_vscode", "open_in_visual_studio", "reveal_in_explorer", "open_in_browser", "dock_editor", "copy_path", "copy_branch", "copy_pr_url", "mark_seen", "restart", "duplicate_session", "rename", "pin_orchestrator", "move_session", "move_to_account", "reorder_up", "reorder_down", "unarchive", "archive", "delete"],
+  terminal: ["activate", "copy_path", "rename", "delete"],
+  worktree: ["new", "quick_prompt", "new_terminal", "toggle_run", "git_diff", "open_pull_request", "create_pull_request", "merge_pull_request", "comment_pull_request", "focus_scope", "open_repo", "open_worktree", "open_in_vscode", "open_in_visual_studio", "reveal_in_explorer", "open_in_browser", "dock_editor", "copy_path", "copy_branch", "copy_pr_url", "mark_seen", "switch_branch", "reorder_up", "reorder_down", "archive_done", "delete_all", "delete_worktree"],
+  repo: ["quick_prompt", "new_worktree", "toggle_run", "focus_scope", "open_repo", "pull_requests", "issues", "azure_devops", "refresh_pull_requests", "open_worktree", "open_in_vscode", "open_in_visual_studio", "reveal_in_explorer", "open_in_browser", "dock_editor", "copy_path", "mark_seen", "switch_branch", "rename", "reorder_up", "reorder_down", "archive_done", "sweep_worktrees", "remove_project"],
   folder: ["open_in_vscode", "reveal_in_explorer", "copy_path", "copy_relative_path"],
   file: ["open_file_in_kete", "open_in_vscode", "open_in_visual_studio", "open_with_default", "reveal_in_explorer", "copy_path", "copy_relative_path"],
-  account: ["wake_account"],
+  account: ["scope_account", "accounts", "wake_account", "wake_schedule"],
+  global: ["quick_prompt", "add_project", "command_palette", "home_overview", "home_board", "toggle_kanban", "toggle_orchestrator_view", "accounts", "wake_schedule", "toggle_archived", "settings", "mark_seen", "critters", "archive_done"],
 };
 
 /** The verbs a footer and the verb bar lead with, per kind, best first. */
@@ -1866,6 +1931,94 @@ export const PRIMARY: Readonly<Partial<Record<AppliesTo, readonly ActionId[]>>> 
 
 /** How many verbs the verb bar shows before `? more`. */
 export const PRIMARY_SHOWN = 4;
+
+/** Where a menu row sits, top to bottom; the window draws a rule where it changes. */
+export type MenuSection = "act" | "go" | "open" | "copy" | "change" | "organise" | "away";
+/** The sections in their order. */
+export const MENU_SECTION_ORDER: readonly MenuSection[] = ["act", "go", "open", "copy", "change", "organise", "away"];
+
+/** Each menu verb's section; `on`: that kind only. */
+export const MENU_SECTIONS: readonly { id: ActionId; on: AppliesTo | null; section: MenuSection }[] = [
+  { id: "activate", on: null, section: "act" },
+  { id: "follow_up", on: null, section: "act" },
+  { id: "new", on: null, section: "act" },
+  { id: "quick_prompt", on: null, section: "act" },
+  { id: "new_terminal", on: null, section: "act" },
+  { id: "toggle_run", on: null, section: "act" },
+  { id: "new_worktree", on: null, section: "act" },
+  { id: "add_project", on: null, section: "act" },
+  { id: "command_palette", on: null, section: "act" },
+  { id: "open_file_in_kete", on: null, section: "act" },
+  { id: "git_diff", on: null, section: "go" },
+  { id: "open_pull_request", on: null, section: "go" },
+  { id: "create_pull_request", on: null, section: "go" },
+  { id: "merge_pull_request", on: null, section: "go" },
+  { id: "comment_pull_request", on: null, section: "go" },
+  { id: "open_issue", on: null, section: "go" },
+  { id: "focus_scope", on: null, section: "go" },
+  { id: "open_repo", on: null, section: "go" },
+  { id: "pull_requests", on: null, section: "go" },
+  { id: "issues", on: null, section: "go" },
+  { id: "azure_devops", on: null, section: "go" },
+  { id: "refresh_pull_requests", on: null, section: "go" },
+  { id: "scope_account", on: null, section: "go" },
+  { id: "accounts", on: null, section: "go" },
+  { id: "home_overview", on: null, section: "go" },
+  { id: "home_board", on: null, section: "go" },
+  { id: "toggle_kanban", on: null, section: "go" },
+  { id: "toggle_orchestrator_view", on: null, section: "go" },
+  { id: "toggle_archived", on: null, section: "go" },
+  { id: "settings", on: null, section: "go" },
+  { id: "wake_schedule", on: "account", section: "change" },
+  { id: "wake_schedule", on: null, section: "go" },
+  { id: "open_worktree", on: null, section: "open" },
+  { id: "open_in_vscode", on: null, section: "open" },
+  { id: "open_in_visual_studio", on: null, section: "open" },
+  { id: "reveal_in_explorer", on: null, section: "open" },
+  { id: "open_in_browser", on: null, section: "open" },
+  { id: "open_with_default", on: null, section: "open" },
+  { id: "dock_editor", on: null, section: "open" },
+  { id: "copy_path", on: null, section: "copy" },
+  { id: "copy_relative_path", on: null, section: "copy" },
+  { id: "copy_branch", on: null, section: "copy" },
+  { id: "copy_pr_url", on: null, section: "copy" },
+  { id: "mark_seen", on: null, section: "change" },
+  { id: "restart", on: null, section: "change" },
+  { id: "duplicate_session", on: null, section: "change" },
+  { id: "rename", on: null, section: "change" },
+  { id: "pin_orchestrator", on: null, section: "change" },
+  { id: "switch_branch", on: null, section: "change" },
+  { id: "wake_account", on: null, section: "change" },
+  { id: "critters", on: null, section: "change" },
+  { id: "move_session", on: null, section: "organise" },
+  { id: "move_to_account", on: null, section: "organise" },
+  { id: "reorder_up", on: null, section: "organise" },
+  { id: "reorder_down", on: null, section: "organise" },
+  { id: "unarchive", on: null, section: "away" },
+  { id: "archive", on: null, section: "away" },
+  { id: "delete", on: null, section: "away" },
+  { id: "archive_done", on: null, section: "away" },
+  { id: "delete_all", on: null, section: "away" },
+  { id: "delete_worktree", on: null, section: "away" },
+  { id: "sweep_worktrees", on: null, section: "away" },
+  { id: "remove_project", on: null, section: "away" },
+];
+
+/** A submenu: on the kinds in `on`, two or more of its rows that mean something now fold into one `title` row at the first one's place; one alone stays a plain row. `label` is a row's word inside it. */
+export interface MenuGroup {
+  id: string;
+  title: string;
+  on: readonly AppliesTo[];
+  rows: readonly { id: ActionId; label: string }[];
+}
+export const MENU_GROUPS: readonly MenuGroup[] = [
+  { id: "pull_request", title: "Pull request", on: ["session", "worktree"], rows: [{ id: "open_pull_request", label: "Open in browser" }, { id: "create_pull_request", label: "Create\u2026" }, { id: "merge_pull_request", label: "Merge\u2026" }, { id: "comment_pull_request", label: "Comment\u2026" }, { id: "open_issue", label: "Open the issue" }] },
+  { id: "remote", title: "Remote", on: ["repo"], rows: [{ id: "open_repo", label: "Open in browser" }, { id: "pull_requests", label: "Pull requests\u2026" }, { id: "issues", label: "Issues\u2026" }, { id: "azure_devops", label: "Azure DevOps\u2026" }, { id: "refresh_pull_requests", label: "Refresh pull requests" }] },
+  { id: "open_in", title: "Open in", on: ["session", "worktree", "repo"], rows: [{ id: "open_worktree", label: "Open command" }, { id: "open_in_vscode", label: "VS Code" }, { id: "open_in_visual_studio", label: "Visual Studio" }, { id: "reveal_in_explorer", label: "Explorer" }, { id: "open_in_browser", label: "Browser" }, { id: "dock_editor", label: "Dock editor beside Kete" }] },
+  { id: "copy", title: "Copy", on: ["session", "worktree"], rows: [{ id: "copy_path", label: "Path" }, { id: "copy_branch", label: "Branch name" }, { id: "copy_pr_url", label: "Pull request link" }] },
+  { id: "move", title: "Move", on: ["session", "worktree", "repo"], rows: [{ id: "move_session", label: "To another worktree\u2026" }, { id: "move_to_account", label: "To another account\u2026" }, { id: "reorder_up", label: "Up" }, { id: "reorder_down", label: "Down" }] },
+  { id: "view", title: "View", on: ["global"], rows: [{ id: "home_overview", label: "Overview" }, { id: "home_board", label: "Board" }, { id: "toggle_kanban", label: "Board or bands" }, { id: "toggle_orchestrator_view", label: "Orchestrator" }, { id: "accounts", label: "Accounts" }, { id: "wake_schedule", label: "Whakaoho" }, { id: "toggle_archived", label: "Archived sessions" }] },
+];
 
 /** First-use tips (nebula-config learn.rs): `{verb}` / `{verb|words}` name a key. */
 export const TIPS: readonly { id: string; text: string }[] = [

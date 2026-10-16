@@ -114,11 +114,22 @@ describe('menus from the registry', () => {
     setAgents([agent('a')]);
     const menu = actions.menuFor({ kind: 'agent', id: 'a' });
     const w = words(menu);
-    expect(w.slice(0, 3)).toEqual(['Open', 'Follow-up prompt\u2026', 'Restart agent']);
+    // Its diff is its own row, after the reply (the registry's Go
+    // section), not left to the checkout's rows.
+    expect(w.slice(0, 3)).toEqual(['Open', 'Follow-up prompt\u2026', 'Diff']);
+    expect(w).toContain('Restart agent');
     expect(w).toContain('Rename\u2026');
     expect(w.indexOf('Archive')).toBeLessThan(w.indexOf('Delete\u2026'));
     const rename = menu.find((e) => typeof e === 'object' && 'label' in e && e.label === 'Rename\u2026');
     expect((rename as { keys?: string[] } | undefined)?.keys).toEqual(['r']);
+  });
+
+  it('offers Make orchestrator only while no other session is pinned', () => {
+    setAgents([agent('a'), agent('o', { role: 'orchestrator' })]);
+    expect(words(actions.menuFor({ kind: 'agent', id: 'a' }))).not.toContain('Make orchestrator');
+    expect(words(actions.menuFor({ kind: 'agent', id: 'o' }))).toContain('Unpin orchestrator');
+    setAgents([agent('a'), agent('o')]);
+    expect(words(actions.menuFor({ kind: 'agent', id: 'a' }))).toContain('Make orchestrator');
   });
 
   it('a terminal closes, a repo is removed from Kete', () => {

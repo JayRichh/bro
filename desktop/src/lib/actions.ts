@@ -520,7 +520,13 @@ function agentVerbs(a: Agent, viaSub = false, where: StepIn = stepInFor()): Verb
       ? { run: () => moveToAccount(a.id) }
       : { run: () => toast(SWITCH_UNAVAILABLE), label: `${menuLabel('move_to_account', 'session')} (daemon too old)`, disabled: true },
     rename: { run: () => renameAgent(a.id) },
-    pin_orchestrator: pinned ? { run: unpinOrchestrator, label: 'Unpin orchestrator' } : { run: () => makeOrchestrator(a) },
+    // Make orchestrator only while none is pinned (the menu matrix):
+    // replacing one is rare, and Unpin on it comes first.
+    pin_orchestrator: pinned
+      ? { run: unpinOrchestrator, label: 'Unpin orchestrator' }
+      : orchestratorOf(m())
+        ? undefined
+        : { run: () => makeOrchestrator(a) },
     archive: { run: () => archiveAgent(a.id, viaSub), label: viaSub ? 'Archive parent session\u2026' : undefined },
     delete: { run: () => deleteAgent(a.id) },
   };
