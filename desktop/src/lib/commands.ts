@@ -31,6 +31,7 @@ import {
   menuFor,
   newWorktree,
   openTargetMenu,
+  openWakeView,
   parseTarget,
   refreshPrs,
   registryRows,
@@ -256,6 +257,34 @@ function scopedSessions() {
   return app.model.agents.filter((a) => !a.archived && inScope(app.model, a.id));
 }
 
+/** The shared critters setting (config.json `critters`, which the terminal
+ *  app's critters follow), as the window last read or wrote it: null until
+ *  read. The desktop's own critters (lane/critters-desk) take this row over
+ *  with their state once they land. */
+let crittersOn: boolean | null = null;
+
+async function readCritters(): Promise<boolean> {
+  const schema = await api.settingsSchema();
+  const row = schema.tabs
+    .flatMap((t) => t.groups.flatMap((g) => g.rows))
+    .find((r) => r.target.scope === 'global' && r.target.key === 'critters');
+  crittersOn = row?.value === true;
+  return crittersOn;
+}
+
+/** Critters on or off: the shared setting flipped, as the terminal app's
+ *  verb flips it (read fresh, so a change made elsewhere is not undone). */
+async function toggleCritters() {
+  try {
+    const on = !(await readCritters());
+    await api.settingsSet({ scope: 'global', key: 'critters' }, on);
+    crittersOn = on;
+    toast(on ? 'Critters on: they wander through the terminal app.' : 'Critters off.');
+  } catch (e) {
+    toast(String(e));
+  }
+}
+
 /** The background's menu (\u00a75.15): the window's own verbs, for a
  *  right-click on empty space and `?` with nothing selected. View \u25b8 ticks
  *  the home in use and the archived sessions shown; Mark all seen and
@@ -271,9 +300,13 @@ export function backgroundMenu(): MenuEntry[] {
     home_board: { run: () => setHome('board', nav.current.repo), checked: app.home === 'board', radio: true },
     toggle_orchestrator_view: { run: orchestratorKey, checked: view === 'orchestrator', radio: true },
     accounts: { run: openAccounts, checked: view === 'accounts', radio: true },
+    wake_schedule: { run: openWakeView, checked: view === 'whakaoho', radio: true },
     toggle_archived: { run: toggleArchived, checked: app.showArchived },
     settings: { run: () => openSettings() },
+    // Ticked once the setting is read; this open reads it for the next.
+    critters: { run: toggleCritters, ...(crittersOn === null ? {} : { checked: crittersOn }) },
   };
+  void readCritters().catch(() => {});
   const where = isEverything(app.model.scope) ? 'across every repo' : 'in the scope';
   if (scopedSessions().some((a) => a.unseen)) t.mark_seen = { run: () => markAllSeen(scopedSessions()) };
   if (scopedSessions().some(isDone)) t.archive_done = { run: () => archiveDone(scopedSessions, where) };
@@ -288,7 +321,7 @@ export function backgroundMenu(): MenuEntry[] {
         { label: 'Worktrees', run: () => nav.go({ view: 'worktrees', repo }), checked: view === 'worktrees', radio: true },
         { id: 'view', title: 'View', label: 'Worktrees' },
       ),
-      { after: ['accounts', 'toggle_orchestrator_view', 'home_board'] },
+      { after: ['wake_schedule', 'accounts', 'toggle_orchestrator_view', 'home_board'] },
     );
   return layout(rows);
 }

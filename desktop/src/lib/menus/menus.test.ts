@@ -333,6 +333,28 @@ describe('the background menu (\u00a75.15)', () => {
     expect(lines[lines.length - 1]).toBe('Archive done sessions\u2026');
   });
 
+  it('lists Whakaoho in View after Accounts, and Critters ticked once its shared setting is read', async () => {
+    const critters = (value: boolean) => ({
+      tabs: [{ id: 't', title: 'T', note: null, hotkeys: [], groups: [{ title: 'g', subtitle: null, terminal: true, rows: [{ target: { scope: 'global', key: 'critters' }, value }] }] }],
+      problem: null,
+    });
+    const settingsSet = vi.fn(() => Promise.resolve());
+    Object.assign(api, { settingsSchema: vi.fn(() => Promise.resolve(critters(false))), settingsSet });
+    nav.go({ view: 'overview' });
+    const first = dump(backgroundMenu());
+    const view = first.slice(first.indexOf('View >') + 1);
+    expect(view.indexOf('  [ ] Whakaoho')).toBe(view.indexOf('  [ ] Accounts') + 1);
+    expect(view.indexOf('  [ ] Archived sessions')).toBeGreaterThan(view.indexOf('  [ ] Whakaoho'));
+    await vi.waitFor(() => expect(dump(backgroundMenu())).toContain('[ ] Critters'));
+    const lines = dump(backgroundMenu());
+    expect(lines.indexOf('[ ] Critters')).toBe(lines.indexOf('Mark all seen') + 1);
+    find(backgroundMenu(), 'Whakaoho')!.run();
+    expect(nav.current.view).toBe('whakaoho');
+    expect(dump(backgroundMenu())).toContain('  [v] Whakaoho');
+    find(backgroundMenu(), 'Critters')!.run();
+    await vi.waitFor(() => expect(settingsSet).toHaveBeenCalledWith({ scope: 'global', key: 'critters' }, true));
+  });
+
   it('leaves the bulk rows off with nothing to take', () => {
     app.model = model({ agents: [agent('a', { status: 'running' })] });
     const lines = dump(backgroundMenu());
