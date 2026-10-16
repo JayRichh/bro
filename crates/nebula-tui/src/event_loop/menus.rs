@@ -161,6 +161,13 @@ pub(crate) fn right_click(app: &mut App, mouse: MouseEvent, out: &mut Vec<Client
             }
             let moved = select_clicked_row(app, &hit, out);
             match target {
+                // A project's row in the Projects column keeps the
+                // column's own Add project… after the project's rows.
+                Some(t) if matches!(hit, HitTarget::ProjectRow(_)) => {
+                    let mut items = verbs::menu_for(app, &t);
+                    items.extend(panel_menu_items(app, Focus::Projects));
+                    open_at(app, verbs::menu_title(app, &t), items, at);
+                }
                 Some(t) => open_target_menu(app, &t, at),
                 // A pull request's, an issue's or a link's row in the
                 // panels: its own menu, the row under the cursor.
