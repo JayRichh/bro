@@ -99,7 +99,7 @@ pub fn read(path: &std::path::Path) -> Option<serde_json::Value> {
 /// Where a value sits in a JSONC text: the byte range it spans in the
 /// text as written (comments, BOM and all), and — for an object or an
 /// array — where its members do. The OUTLINE is what an edit that must
-/// keep a file's comments and layout goes by (`crate::wt_settings`): the
+/// keep a file's comments and layout goes by (the TUI's `wt_settings`): the
 /// change is spliced in at a range found here, and the rest of the text is
 /// left byte for byte as it was.
 #[derive(Debug, Clone, PartialEq, Eq)]

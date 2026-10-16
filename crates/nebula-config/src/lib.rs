@@ -14,8 +14,10 @@ pub mod claude_catalogue;
 mod config;
 pub mod cursor_catalogue;
 pub mod desktop;
+pub mod jsonc;
 pub mod learn;
 pub mod presets;
 pub mod schema;
+pub mod vscode;
 
 pub use config::*;

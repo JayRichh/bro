@@ -1,243 +1,33 @@
 //! The `vscode` THEME SOURCE: the palette VS Code itself is wearing, read
 //! off the machine, so Kete beside it looks like the rest of the editor.
 //!
-//! Three reads, each of which may come up empty — and then the theme is
-//! One Dark, as with nothing to read at all:
-//!
-//! 1. VS Code's user `settings.json` (JSONC, `crate::jsonc`): which theme
-//!    is set — `workbench.colorTheme`, or with `window.autoDetectColorScheme`
-//!    on, `workbench.preferredDarkColorTheme` / `preferredLightColorTheme`
-//!    by what the OS says ([`chosen_theme`]).
-//! 2. The theme's file: every installed extension's `package.json` lists
-//!    the themes it contributes by `label` (what settings name) and `id`,
-//!    with a `uiTheme` that says light or dark; VS Code's own built-in
-//!    themes are extensions too, under its install ([`find_theme`]).
-//!    A theme file may `include` another it builds on, followed here.
-//! 3. Its `colors` (the workbench) and `tokenColors` (the editor's
-//!    syntax): mapped onto Kete's roles by [`derive`], over One Dark or One
-//!    Light as the base, and then held to the rules every preset keeps —
-//!    a derived role that would break one (a `merged` that is not purple,
-//!    a `done` that reads as a status) gives way to the base's.
+//! The reading — VS Code's settings, which theme they name, the theme's
+//! file and its `include` chain — is `nebula_config::vscode`'s, shared
+//! with the desktop window. What is the TUI's own is the mapping: the
+//! theme's `colors` (the workbench) and `tokenColors` (the editor's
+//! syntax) onto Kete's roles by [`derive`], over One Dark or One Light as
+//! the base, and then held to the rules every preset keeps — a derived
+//! role that would break one (a `merged` that is not purple, a `done`
+//! that reads as a status) gives way to the base's. With nothing to read
+//! the theme is One Dark.
 
 use crate::theme::{blend, color_rgb, Theme, ONE_DARK, ONE_LIGHT};
 use ratatui::style::Color;
-use serde_json::Value;
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 
-/// The default theme VS Code shows before anyone picks one, for each side
-/// of `window.autoDetectColorScheme`.
-const DEFAULT_DARK: &str = "Default Dark Modern";
-const DEFAULT_LIGHT: &str = "Default Light Modern";
-
-/// How deep a chain of `include`s is followed before it is taken for a
-/// loop.
-const MAX_INCLUDES: usize = 6;
-
-/// VS Code's user `settings.json` on this OS: `%APPDATA%\Code\User` on
-/// Windows, `~/Library/Application Support/Code/User` on macOS,
-/// `$XDG_CONFIG_HOME/Code/User` (else `~/.config`) elsewhere.
-pub fn settings_path() -> Option<PathBuf> {
-    let dir = if cfg!(windows) {
-        PathBuf::from(std::env::var_os("APPDATA")?)
-    } else if cfg!(target_os = "macos") {
-        std::env::home_dir()?.join("Library/Application Support")
-    } else {
-        match std::env::var_os("XDG_CONFIG_HOME") {
-            Some(dir) if !dir.is_empty() => PathBuf::from(dir),
-            _ => std::env::home_dir()?.join(".config"),
-        }
-    };
-    Some(dir.join("Code").join("User").join("settings.json"))
-}
-
-/// Where VS Code's extensions live: the user's (`~/.vscode/extensions`),
-/// then the built-in ones under the install, which hold the default
-/// themes.
-pub fn extension_dirs() -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-    if let Some(home) = std::env::home_dir() {
-        dirs.push(home.join(".vscode").join("extensions"));
-    }
-    if cfg!(windows) {
-        for var in ["LOCALAPPDATA", "ProgramFiles"] {
-            if let Some(base) = std::env::var_os(var) {
-                let base = PathBuf::from(base);
-                let install = if var == "LOCALAPPDATA" {
-                    base.join("Programs").join("Microsoft VS Code")
-                } else {
-                    base.join("Microsoft VS Code")
-                };
-                dirs.push(install.join("resources").join("app").join("extensions"));
-            }
-        }
-    } else if cfg!(target_os = "macos") {
-        dirs.push(PathBuf::from(
-            "/Applications/Visual Studio Code.app/Contents/Resources/app/extensions",
-        ));
-    } else {
-        dirs.push(PathBuf::from("/usr/share/code/resources/app/extensions"));
-    }
-    dirs
-}
-
-/// The theme the user's VS Code shows: with `window.autoDetectColorScheme`
-/// on and the OS's light or dark known, the preferred theme for that side
-/// (VS Code's own defaults where unset); otherwise `workbench.colorTheme`.
-pub fn chosen_theme(settings: &Value, os_light: Option<bool>) -> String {
-    let get = |key: &str| {
-        settings
-            .get(key)
-            .and_then(Value::as_str)
-            .map(str::to_string)
-    };
-    let auto = settings
-        .get("window.autoDetectColorScheme")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    match (auto, os_light) {
-        (true, Some(true)) => {
-            get("workbench.preferredLightColorTheme").unwrap_or_else(|| DEFAULT_LIGHT.into())
-        }
-        (true, Some(false)) => {
-            get("workbench.preferredDarkColorTheme").unwrap_or_else(|| DEFAULT_DARK.into())
-        }
-        _ => get("workbench.colorTheme").unwrap_or_else(|| DEFAULT_DARK.into()),
-    }
-}
-
-/// A theme some extension contributes: the file, and whether it is a
-/// light one (`uiTheme` `vs` or `hc-light`).
-#[derive(Debug, Clone, PartialEq)]
-pub struct ThemeFile {
-    pub path: PathBuf,
-    pub light: bool,
-}
-
-/// Find the theme named `label` (or with that `id`) among the extensions
-/// under `dirs`, case-insensitively. The first directory that has it wins,
-/// so the user's own extensions come before the built-in ones.
-pub fn find_theme(label: &str, dirs: &[PathBuf]) -> Option<ThemeFile> {
-    let want = label.trim().to_lowercase();
-    for dir in dirs {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            continue;
-        };
-        let mut exts: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
-        // Newest version last, so it is the one kept when two are
-        // installed side by side.
-        exts.sort();
-        let mut hit = None;
-        for ext in exts {
-            let Some(pkg) = crate::jsonc::read(&ext.join("package.json")) else {
-                continue;
-            };
-            let Some(themes) = pkg.pointer("/contributes/themes").and_then(Value::as_array) else {
-                continue;
-            };
-            for t in themes {
-                let names = ["label", "id"].map(|k| t.get(k).and_then(Value::as_str));
-                if !names.iter().flatten().any(|n| n.to_lowercase() == want) {
-                    continue;
-                }
-                let Some(rel) = t.get("path").and_then(Value::as_str) else {
-                    continue;
-                };
-                let ui = t
-                    .get("uiTheme")
-                    .and_then(Value::as_str)
-                    .unwrap_or("vs-dark");
-                hit = Some(ThemeFile {
-                    path: ext.join(rel),
-                    light: matches!(ui, "vs" | "hc-light"),
-                });
-            }
-        }
-        if hit.is_some() {
-            return hit;
-        }
-    }
-    None
-}
-
-/// A theme file's `colors` and `tokenColors`, with every file it
-/// `include`s read first and overridden by what includes it.
-#[derive(Debug, Default, Clone)]
-pub struct ThemeData {
-    pub colors: HashMap<String, String>,
-    /// `(scope, foreground)` in file order, a later entry overriding.
-    pub tokens: Vec<(String, String)>,
-}
-
-/// Read `path`'s theme, following its `include` chain.
-pub fn load_theme(path: &Path) -> Option<ThemeData> {
-    let mut data = ThemeData::default();
-    load_into(path, &mut data, 0)?;
-    Some(data)
-}
-
-fn load_into(path: &Path, data: &mut ThemeData, depth: usize) -> Option<()> {
-    if depth > MAX_INCLUDES {
-        return None;
-    }
-    let json = crate::jsonc::read(path)?;
-    if let Some(include) = json.get("include").and_then(Value::as_str) {
-        let parent = path.parent().unwrap_or(Path::new("."));
-        // A missing base still leaves this file's own colors worth having.
-        let _ = load_into(&parent.join(include), data, depth + 1);
-    }
-    if let Some(colors) = json.get("colors").and_then(Value::as_object) {
-        for (k, v) in colors {
-            if let Some(v) = v.as_str() {
-                data.colors.insert(k.clone(), v.to_string());
-            }
-        }
-    }
-    if let Some(tokens) = json.get("tokenColors").and_then(Value::as_array) {
-        for t in tokens {
-            let Some(fg) = t.pointer("/settings/foreground").and_then(Value::as_str) else {
-                continue;
-            };
-            let scopes: Vec<String> = match t.get("scope") {
-                Some(Value::String(s)) => s.split(',').map(|s| s.trim().to_string()).collect(),
-                Some(Value::Array(list)) => list
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(|s| s.trim().to_string())
-                    .collect(),
-                _ => continue,
-            };
-            for scope in scopes {
-                data.tokens.push((scope, fg.to_string()));
-            }
-        }
-    }
-    Some(())
-}
+pub use nebula_config::vscode::{
+    chosen_theme, extension_dirs, find_theme, load_theme, settings_path, settings_stamp, ThemeData,
+    ThemeFile, DEFAULT_DARK, DEFAULT_LIGHT,
+};
 
 /// A VS Code color string — `#RGB`, `#RGBA`, `#RRGGBB` or `#RRGGBBAA` —
 /// with any alpha blended over `under`, the way VS Code composites it.
 pub fn parse_color(s: &str, under: Option<Color>) -> Option<Color> {
-    let hex = s.trim().strip_prefix('#')?;
-    let digits: Vec<u8> = hex
-        .chars()
-        .map(|c| c.to_digit(16).map(|d| d as u8))
-        .collect::<Option<_>>()?;
-    let (rgb, alpha) = match digits.len() {
-        3 => ([0, 1, 2].map(|i| digits[i] * 17), 255),
-        4 => ([0, 1, 2].map(|i| digits[i] * 17), digits[3] * 17),
-        6 => ([0, 2, 4].map(|i| digits[i] * 16 + digits[i + 1]), 255),
-        8 => (
-            [0, 2, 4].map(|i| digits[i] * 16 + digits[i + 1]),
-            digits[6] * 16 + digits[7],
-        ),
-        _ => return None,
-    };
-    let color = Color::Rgb(rgb[0], rgb[1], rgb[2]);
-    if alpha == 255 {
+    let c = nebula_config::vscode::Rgba::parse(s)?;
+    let color = Color::Rgb(c.r, c.g, c.b);
+    if c.opaque() {
         return Some(color);
     }
-    Some(blend(color, under, f32::from(alpha) / 255.0))
+    Some(blend(color, under, f32::from(c.a) / 255.0))
 }
 
 /// The foreground the theme gives the first of `scopes` it styles: an
@@ -468,16 +258,11 @@ pub fn load(os_light: Option<bool>) -> Option<Theme> {
     Some(derive(&data, file.light))
 }
 
-/// When VS Code's settings last changed, so a beat can tell a theme
-/// switched in the editor from one that has not, by a `stat`.
-pub fn settings_stamp() -> Option<std::time::SystemTime> {
-    std::fs::metadata(settings_path()?).ok()?.modified().ok()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::path::{Path, PathBuf};
 
     /// An extension directory with one theme in it, `include`ing a base,
     /// the way VS Code's own Dark Modern builds on Dark+.
