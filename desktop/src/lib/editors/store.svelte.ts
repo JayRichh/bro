@@ -63,7 +63,8 @@ export function probeWindows(ids: string[]): Promise<void> {
     .windows(ids)
     .then((r) => {
       const at = Date.now();
-      for (const id of ids) editors.windows[id] = { at, ids: r[id] ?? [] };
+      // A checkout the answer leaves out stays unknown.
+      for (const id of ids) if (r[id]) editors.windows[id] = { at, ids: r[id] };
     })
     .catch(() => {});
 }

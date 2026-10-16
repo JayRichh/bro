@@ -52,14 +52,15 @@ export interface Facts {
 /** What a checkout opens in by default: the hover icon, the checked row. */
 export type FolderDefault = { kind: 'editor'; editor: EditorInstall } | { kind: 'command' };
 
-/** `editor_folder` on a checkout: `command` the Open command; `vscode` VS
- *  Code (its default install); `visual-studio` Visual Studio where the
- *  checkout has a solution; `auto`, or a choice with nothing for it here,
- *  VS Code, then Visual Studio, then the Open command. */
-export function folderDefault(f: Pick<Facts, 'code' | 'vs' | 'folder' | 'solutions'>): FolderDefault {
+/** `editor_folder` on a checkout: `command` the Open command (where the
+ *  checkout has one); `vscode` VS Code (its default install);
+ *  `visual-studio` Visual Studio where the checkout has a solution; `auto`,
+ *  or a choice with nothing for it here, VS Code, then Visual Studio, then
+ *  the Open command. */
+export function folderDefault(f: Pick<Facts, 'code' | 'vs' | 'folder' | 'solutions'> & { openCommand?: boolean }): FolderDefault {
   const code = f.code[0];
   const vs = f.solutions?.length ? f.vs[0] : undefined;
-  if (f.folder === 'command') return { kind: 'command' };
+  if (f.folder === 'command' && f.openCommand !== false) return { kind: 'command' };
   if (f.folder === 'visual-studio' && vs) return { kind: 'editor', editor: vs };
   if (code) return { kind: 'editor', editor: code };
   if (vs) return { kind: 'editor', editor: vs };
@@ -126,7 +127,13 @@ export function checkoutTable(f: Facts, on: AppliesTo, act: CheckoutActs): VerbT
       word: `${f.vs.length > 1 ? vs.short : 'Visual Studio'}${several}`,
       icon: vs.icon ?? undefined,
       checked: isDefault(d, vs),
-      also: moreVs.map((e) => ({ run: () => act.vs(e), label: `Open in ${e.short}${several}`, word: `${e.short}${several}`, icon: e.icon ?? undefined })),
+      also: moreVs.map((e) => ({
+        run: () => act.vs(e),
+        label: `Open in ${e.short}${several}`,
+        word: `${e.short}${several}`,
+        icon: e.icon ?? undefined,
+        checked: isDefault(d, e),
+      })),
     };
   }
   t.reveal_in_explorer = { run: act.reveal };
@@ -149,6 +156,8 @@ export function openCommandRow(f: Pick<Facts, 'code' | 'vs' | 'folder' | 'soluti
 
 /** What a file is, as its rows need it. */
 export interface FileFacts extends Facts {
+  /** `editor_file`: which row is checked as what opens a file. */
+  file: string;
   /** Gone from disk (a deleted file in a diff). */
   deleted: boolean;
   /** A program or script (Open with default app refuses it). */
@@ -171,7 +180,9 @@ export interface FileActs {
 export function fileTable(f: FileFacts, act: FileActs): VerbTable {
   const t: VerbTable = {};
   if (!f.deleted) {
-    t.open_file_in_kete = { run: act.view };
+    // The row checked is what opens a file by default (`editor_file`).
+    const d = fileDefault(f);
+    t.open_file_in_kete = { run: act.view, checked: d === 'kete' };
     const [code, ...moreCode] = f.code;
     if (code)
       t.open_in_vscode = {
@@ -179,12 +190,13 @@ export function fileTable(f: FileFacts, act: FileActs): VerbTable {
         label: openLabel(code, f.code, 'file', 'open_in_vscode'),
         word: code.short,
         icon: code.icon ?? undefined,
-        also: moreCode.map((e) => ({ run: () => act.code(e), label: `Open in ${e.short}`, word: e.short, icon: e.icon ?? undefined })),
+        checked: d === code,
+        also: moreCode.map((e) => ({ run: () => act.code(e), label: `Open in ${e.short}`, word: e.short, icon: e.icon ?? undefined, checked: false })),
       };
     else if (!f.loaded) t.open_in_vscode = { run: () => act.code(null) };
     if (f.vs.length && f.solutions?.length) {
       const vs = f.vs[0];
-      t.open_in_visual_studio = { run: () => act.vs(vs), icon: vs.icon ?? undefined, word: 'Visual Studio' };
+      t.open_in_visual_studio = { run: () => act.vs(vs), icon: vs.icon ?? undefined, word: 'Visual Studio', checked: d === vs };
     }
     t.open_with_default = f.program ? { run: act.openDefault, disabled: true, why: RUNS_PROGRAM } : { run: act.openDefault };
     t.reveal_in_explorer = { run: act.reveal };
@@ -315,7 +327,7 @@ export function openDefault(w: Worktree, runCommand: () => unknown) {
 /** `rel` under the checkout at `root`, with its separators. */
 export function underRoot(root: string, rel: string): string {
   const sep = root.includes('\\') && !root.includes('/') ? '\\' : '/';
-  return root.replace(/[\\/]+$/, '') + sep + rel.split(/[\\/]+/).join(sep);
+  return root.replace(/[\\/]+$/, '') + sep + rel.split(/[\\/]+/).filter(Boolean).join(sep);
 }
 
 /** Program and script extensions Open with default app refuses
@@ -367,7 +379,7 @@ export function fileVerbs(t: PathTarget, opts: { deleted?: boolean; line?: numbe
   const abs = w ? underRoot(w.path, t.path) : t.path;
   const where = w ? { worktree: w.id, path: t.path } : { worktree: null, path: t.path };
   return fileTable(
-    { ...factsFor(w?.id ?? null), deleted: !!opts.deleted, program: runsProgram(t.path), inCheckout: !!w },
+    { ...factsFor(w?.id ?? null), file: editors.file, deleted: !!opts.deleted, program: runsProgram(t.path), inCheckout: !!w },
     {
       view: () => viewFile(t, t.path.split(/[\\/]/).pop() ?? t.path),
       code: (e) => void openWith({ ...where, editor: e?.id ?? 'vscode', line: opts.line ?? null }),
