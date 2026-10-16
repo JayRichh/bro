@@ -33,6 +33,7 @@ import { toneOf } from './status';
 import { copyText } from './menus/clipboard';
 import { submenu } from './menus/model';
 import { insertRows, layout, withoutIds, type Row } from './menus/layout';
+import { checkoutVerbs, factsFor, openCommandRow, touch } from './editors/verbs';
 
 export type Target =
   /** `viaSub`: picked from one of its subagents' rows, so it acts on
@@ -460,7 +461,7 @@ export async function removeProject(id: string) {
 // reason, or turns its words; it never reorders.
 
 /** What the window does for a registry verb on one thing. */
-interface VerbImpl {
+export interface VerbImpl {
   run: () => unknown;
   /** Words where the verb turns (Run or Stop run, Unpin orchestrator). */
   label?: string;
@@ -473,9 +474,15 @@ interface VerbImpl {
   /** What a live row acts on (a folder, a link): its tooltip. */
   note?: string;
   /** A checkbox row (View \u25b8 Archived sessions), or with `radio` one of a
-   *  set (View \u25b8 Overview). */
+   *  set (View \u25b8 Overview). On an editor's row: the default, what the
+   *  checkout or file opens in. */
   checked?: boolean;
   radio?: boolean;
+  /** The row's icon: an editor's own (a data URL). */
+  icon?: string;
+  /** More rows of the same verb right after it, in its submenu: each other
+   *  install of an editor (Insiders, Cursor; another Visual Studio). */
+  also?: VerbImpl[];
 }
 export type VerbTable = Partial<Record<ActionId, VerbImpl>>;
 
@@ -488,25 +495,33 @@ const entry = (id: ActionId, on: AppliesTo, v: VerbImpl): MenuItem => ({
   ...(v.disabled ? (v.why ? { title: v.why } : {}) : v.note ? { title: v.note } : {}),
   ...(v.checked !== undefined ? { checked: v.checked } : {}),
   ...(v.radio ? { radio: true } : {}),
+  ...(v.icon ? { icon: { src: v.icon } } : {}),
 });
 
 /** The registry's rows of `on`'s menu that `table` has, in its order,
- *  with their sections and submenu groups. `titles`: a group's title where
- *  the window knows better (the repo's Remote \u25b8 is GitHub \u25b8). */
+ *  with their sections and submenu groups; a verb's `also` rows (an
+ *  editor's other installs) right after it, in the same group. `titles`:
+ *  a group's title where the window knows better (the repo's Remote \u25b8 is
+ *  GitHub \u25b8). */
 export function registryRows(on: AppliesTo, table: VerbTable, titles: Record<string, string> = {}): Row[] {
   return menuIds(on).flatMap((id): Row[] => {
     const v = table[id];
     if (!v) return [];
     const g = menuGroupOf(id, on);
-    return [
-      {
-        id,
-        section: sectionOf(id, on) ?? null,
-        ...(g ? { group: { id: g.group.id, title: titles[g.group.id] ?? g.group.title, label: v.word ?? g.label } } : {}),
-        item: entry(id, on, v),
-      },
-    ];
+    return [v, ...(v.also ?? [])].map((x) => ({
+      id,
+      section: sectionOf(id, on) ?? null,
+      ...(g ? { group: { id: g.group.id, title: titles[g.group.id] ?? g.group.title, label: x.word ?? g.label } } : {}),
+      item: entry(id, on, x),
+    }));
   });
+}
+
+/** The registry's rows of `on`'s menu that `table` has, flat and in its
+ *  order, a verb's `also` rows after it: what a table offers, laid out by
+ *  nothing (the tests, a list). */
+export function flatRows(on: AppliesTo, table: VerbTable): MenuItem[] {
+  return registryRows(on, table).map((r) => r.item);
 }
 
 /** A row the window builds itself, at its matrix place. */
@@ -633,7 +648,8 @@ function worktreeVerbs(w: Worktree): VerbTable {
     new_terminal: { run: () => newTerminal(w.id) },
     toggle_run: runVerbOf(w),
     git_diff: { run: () => openDiff(w.id) },
-    open_worktree: { run: () => openEditor(w.id) },
+    // The Open command, only where there is one.
+    open_worktree: openCommandRow(factsFor(w.id), () => openEditor(w.id)),
     open_repo: { run: () => openRemote(w.id) },
     ...prVerbs(w.id),
     focus_scope: focusVerb({ worktree: w.id }),
@@ -655,7 +671,7 @@ function projectVerbs(project: string): VerbTable {
     quick_prompt: { run: () => focusQuickPrompt({ project }) },
     new_worktree: { run: () => newWorktree(project) },
     toggle_run: runVerbOf(main),
-    open_worktree: { run: () => openEditor(main?.id) },
+    open_worktree: main ? openCommandRow(factsFor(main.id), () => openEditor(main.id)) : { run: () => openEditor(undefined) },
     open_repo: { run: () => openRemote(main?.id) },
     refresh_pull_requests: { run: refreshPrs },
     focus_scope: focusVerb({ repo: project }),
@@ -743,15 +759,15 @@ function prLinkVerb(w: string): VerbImpl | undefined {
   return pr ? { run: () => copyText(pr.url, pr.url), note: pr.url } : undefined;
 }
 
-/** A checkout's Explorer and Copy path rows, the band's Open folder and
- *  Copy path as they were (worktrees/verbs.ts before the menus were one).
- *  lane/editors owns `reveal_in_explorer` and the copy verbs: its rows in
- *  the verb tables take these places when it lands (`verbTable` lays the
- *  tables over these). */
-function checkoutFallbacks(path: string | undefined, worktree: string | undefined): VerbTable {
-  const t: VerbTable = {};
-  if (worktree) t.reveal_in_explorer = { run: () => attempt('Could not open the folder', () => worktreeApi.reveal(worktree)), note: path };
-  if (path) t.copy_path = { run: () => copyText(path, path), note: path };
+/** A checkout's editor and copy rows (lane/editors' `checkoutVerbs`: Open
+ *  in VS Code and each other install, Visual Studio with a solution, Show
+ *  in Explorer, Dock, Copy path, Copy branch name), the folder or branch
+ *  each acts on as its tooltip. */
+function editorVerbs(w: Worktree, on: AppliesTo): VerbTable {
+  const t = checkoutVerbs(w, on);
+  if (t.reveal_in_explorer) t.reveal_in_explorer = { ...t.reveal_in_explorer, note: w.path };
+  if (t.copy_path) t.copy_path = { ...t.copy_path, note: w.path };
+  if (t.copy_branch) t.copy_branch = { ...t.copy_branch, note: w.branch };
   return t;
 }
 
@@ -820,11 +836,11 @@ export function verbTable(t: Target): VerbTable {
   }
 }
 
-// The tables with the checkout fallbacks under them (lane/editors' rows
-// win where both have one).
+// The tables: a checkout's editor and copy rows (`editorVerbs`) under the
+// thing's own verbs. An archived card runs in no checkout.
 function sessionTable(a: Agent, viaSub = false, where: StepIn = stepInFor()): VerbTable {
   const w = worktreeOf(a.worktree_id);
-  return { ...(a.archived ? {} : checkoutFallbacks(w?.path, w?.id)), ...agentVerbs(a, viaSub, where) };
+  return { ...(a.archived || !w ? {} : editorVerbs(w, 'session')), ...agentVerbs(a, viaSub, where) };
 }
 function terminalTable(x: TerminalTab): VerbTable {
   // Copy path on a terminal is its checkout's folder (the matrix widened
@@ -833,11 +849,14 @@ function terminalTable(x: TerminalTab): VerbTable {
   return { ...terminalVerbs(x), ...(path ? { copy_path: { run: () => copyText(path, path), note: path } } : {}) };
 }
 function worktreeTable(w: Worktree): VerbTable {
-  return { ...checkoutFallbacks(w.path, w.id), ...worktreeVerbs(w) };
+  return { ...editorVerbs(w, 'worktree'), ...worktreeVerbs(w) };
 }
 function projectTable(project: string): VerbTable {
+  const main = mainOf(project);
   const p = m().projects.find((x) => x.id === project);
-  return { ...checkoutFallbacks(p?.repo_path, mainOf(project)?.id), ...projectVerbs(project) };
+  // Its main checkout's; a repo whose checkout isn't listed yet copies its folder.
+  const under: VerbTable = main ? editorVerbs(main, 'repo') : p ? { copy_path: { run: () => copyText(p.repo_path, p.repo_path), note: p.repo_path } } : {};
+  return { ...under, ...projectVerbs(project) };
 }
 
 /** Run verb `id` on `t`, as its menu row does. False when it means
@@ -1116,6 +1135,9 @@ export function projectMenu(project: string): MenuEntry[] {
 /** The menu for `t`: every way in (right-click, `\u22ef`, Shift+F10, Enter on
  *  a Worktrees row, `?`) builds this one. */
 export function menuFor(t: Target, opts: MenuOpts = {}): MenuEntry[] {
+  // Whether an editor window is open on its checkout, for Dock and the
+  // icons' dot: asked as the menu opens, never polled.
+  touch(t.kind === 'agent' ? agentOf(t.id)?.worktree_id : t.kind === 'terminal' ? terminalOf(t.id)?.worktree_id : t.kind === 'worktree' ? t.id : t.kind === 'project' ? mainOf(t.id)?.id : undefined);
   switch (t.kind) {
     case 'agent': {
       const a = agentOf(t.id);

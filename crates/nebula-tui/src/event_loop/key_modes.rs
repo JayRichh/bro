@@ -454,17 +454,17 @@ fn handle_global_action(
         | Action::CopyBranch
         | Action::CopyPrUrl
         // A file in this app's own reader, where the selection is a file.
-        | Action::OpenFileInKete => super::verbs::run_on_selection(app, action, out),
-        // Wake up now: on the account the accounts overlay has picked, else
-        // the overlay opens on its Wake view to pick one.
-        Action::WakeAccount => accounts::wake_account_verb(app),
-        // The editors' verbs, whose lane has not landed yet: a word in the
-        // footer, never a dead key. lane/editors takes these ids out.
-        Action::OpenInVscode
+        | Action::OpenFileInKete
+        // The editor verbs (lane/editors): on the selection's checkout, or
+        // a file's, as its menu row runs them (`verbs::editor_act`).
+        | Action::OpenInVscode
         | Action::OpenInVisualStudio
         | Action::DockEditor
         | Action::RevealInExplorer
-        | Action::OpenWithDefault => super::verbs::pending_verb(app, action),
+        | Action::OpenWithDefault => super::verbs::run_on_selection(app, action, out),
+        // Wake up now: on the account the accounts overlay has picked, else
+        // the overlay opens on its Wake view to pick one.
+        Action::WakeAccount => accounts::wake_account_verb(app),
         Action::Critters => crate::critters::toggle(app),
         Action::WakeSchedule => super::accounts::open_wake_tab(app),
         // `Shift+←` / `Shift+→` on the board: the card onto the next lane.

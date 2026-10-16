@@ -1,0 +1,18 @@
+{
+  "nameShort": "Windsurf",
+  "nameLong": "Windsurf",
+  "applicationName": "windsurf",
+  "dataFolderName": ".windsurf",
+  "win32MutexName": "windsurf",
+  "win32DirName": "Windsurf",
+  "win32NameVersion": "Windsurf",
+  "win32RegValueName": "Windsurf",
+  "win32AppUserModelId": "Codeium.Windsurf",
+  "win32ShellNameShort": "Windsurf",
+  "win32x64UserAppId": "{{5C3A9E17-2B64-4D08-9F51-C0E7A8B36D24}",
+  "urlProtocol": "windsurf",
+  "quality": "stable",
+  "commit": "3f9c2a7d51e8b04c6a1d97e3f08b52c4a6d1e790",
+  "version": "1.12.4",
+  "date": "2026-09-28T08:17:40.000Z"
+}

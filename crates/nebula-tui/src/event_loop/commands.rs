@@ -453,6 +453,9 @@ pub(crate) fn run_pending_action(
         }
         PendingAction::ResetSettings => reset_settings(app),
         PendingAction::Quit => app.chrome.should_quit = true,
+        PendingAction::RunOpenCommand { worktree, command } => {
+            super::worktree_views::run_approved_open(app, &worktree, &command)
+        }
     }
 }
 
@@ -904,6 +907,7 @@ pub(crate) fn run_menu_action(app: &mut App, action: MenuAction, out: &mut Vec<C
                 app.modals.diff_land_on = None;
             }
         }
+        MenuAction::Editor(act) => crate::editors::run(app, act),
     }
 }
 

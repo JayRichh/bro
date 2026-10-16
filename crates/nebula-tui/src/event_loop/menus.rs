@@ -305,6 +305,9 @@ pub(crate) fn keeps_overlay(action: &MenuAction) -> bool {
         | MenuAction::OverlayKeys(_)
         | MenuAction::FileGit { .. }
         | MenuAction::FoldTree(_) => true,
+        // An editor, Explorer or the default app opened beside Kete; not
+        // Kete's own file tabs, which take the screen.
+        MenuAction::Editor(act) => !matches!(act, crate::editors::EditorAct::View { .. }),
         MenuAction::Verb { action, .. } => matches!(
             action,
             Action::OpenInVscode

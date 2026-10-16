@@ -548,6 +548,10 @@ pub enum MenuAction {
     /// **Log in to ‹account›…** on a session stopped on its login: the
     /// account's sign-in, in a terminal (`accounts::sign_in`).
     LogIn(String),
+    /// An editor row: Open in VS Code / Visual Studio, Show in Explorer,
+    /// Dock editor beside Kete, Open with default app, Open in Kete
+    /// (`crate::editors`).
+    Editor(crate::editors::EditorAct),
 }
 
 /// What a diff file row's git row does to the file.
@@ -1075,6 +1079,13 @@ pub enum PendingAction {
     DiscardFile {
         root: std::path::PathBuf,
         rel: String,
+    },
+    /// A checkout's Open command from its repo's `.kete.json`, shown and
+    /// answered yes: run it if it is still the command shown, and keep the
+    /// approval (`nebula_config::desktop::open_allowed`).
+    RunOpenCommand {
+        worktree: WorktreeId,
+        command: String,
     },
 }
 

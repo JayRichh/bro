@@ -919,6 +919,8 @@
           {@const p = split(f.path)}
           {@const cur = current?.path === f.path}
           <li>
+            <!-- The file's own menu on a right-click (fileMenu: the editors' rows, then Stage, Unstage, Discard).
+                 No `file:` target here: the row keys would take the diff's own s/i/e/r. -->
             <button
               data-file-cur={cur || undefined}
               class="flex min-h-7 w-full items-center gap-2 border-0 border-b border-rule px-3 py-1 text-left text-[13px]

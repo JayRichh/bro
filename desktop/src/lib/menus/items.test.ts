@@ -87,6 +87,24 @@ describe('fieldItems', () => {
     ['Paste', 'paste'],
     ['Select all', 'selectAll'],
   ];
+  it('ends on Open this line in the editor, at the clicked line, from the new side only', () => {
+    const openLine = vi.fn();
+    const v = { ...viewVerbs(), openLine };
+    const at = viewerItems(view({ path: '/home/me/app/src/a.ts', line: 12, editor: 'VS Code' }), v);
+    expect(labels(at)).toEqual(['Copy', 'Select all', 'sep', 'Copy path:line', 'Open this line in VS Code']);
+    const row = item(at, 'Open this line in VS Code');
+    expect(row.title).toBe('/home/me/app/src/a.ts:12');
+    row.run();
+    expect(openLine).toHaveBeenCalledTimes(1);
+    // No line under the pointer: the file, in the editor the user has.
+    expect(labels(viewerItems(view({ path: '/a.ts', line: null, editor: 'Cursor' }), v))).toContain('Open in Cursor');
+    // A diff's old side: its lines are not the file's now.
+    expect(labels(viewerItems(view({ path: '/a.ts', line: 3, old: true, editor: 'VS Code' }), v))).not.toContain('Open this line in VS Code');
+    // No editor installed, or no file: no row.
+    expect(labels(viewerItems(view({ path: '/a.ts', line: 3, editor: null }), v)).at(-1)).toBe('Copy path:line');
+    expect(labels(viewerItems(view({ editor: 'VS Code' }), v))).toEqual(['Copy', 'Select all']);
+  });
+
   it.each(wiring)('runs %s through the %s verb', (label, verb) => {
     const v = fieldVerbs();
     item(fieldItems(field(), v), label).run();
@@ -239,7 +257,7 @@ describe('viewerItems', () => {
     expect(v.copyPath).toHaveBeenCalledWith(false);
   });
 
-  const wiring: [string, keyof ViewerVerbs][] = [
+  const wiring: [string, Exclude<keyof ViewerVerbs, 'openLine'>][] = [
     ['Copy', 'copy'],
     ['Select all', 'selectAll'],
   ];

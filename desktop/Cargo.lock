@@ -2220,6 +2220,7 @@ version = "0.53.1"
 dependencies = [
  "directories",
  "libc",
+ "png 0.17.16",
  "rmp-serde",
  "serde",
  "serde_bytes",

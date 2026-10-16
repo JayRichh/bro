@@ -14,6 +14,7 @@
   import { refreshGit, rows, watchGit } from './rows.svelte';
   import { sweepWorktrees, verbTitle, verbsFor } from './verbs';
   import VerbBar from '../VerbBar.svelte';
+  import EditorButtons from '../editors/EditorButtons.svelte';
 
   let { repo }: { repo: string } = $props();
 
@@ -182,6 +183,7 @@
           <span
             class="pointer-events-none absolute top-1/2 right-7 flex -translate-y-1/2 items-center gap-0.5 bg-surface opacity-0 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 group-hover/row:pointer-events-auto group-hover/row:opacity-100 @max-[620px]:hidden"
           >
+            <EditorButtons worktree={w} btn="grid size-6 flex-none place-items-center border border-transparent bg-transparent p-0 text-muted hover:border-rule hover:text-ink" size={13} />
             {#each verbsFor(w).filter((v) => ['session', 'terminal', 'diff', 'delete'].includes(v.id)) as v (v.id)}
               <button
                 class="h-6 border border-transparent bg-transparent px-1.5 text-[12px] hover:border-rule {v.danger ? 'text-fail' : 'text-muted hover:text-ink'}"

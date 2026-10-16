@@ -229,21 +229,83 @@ const NO_OPEN_COMMAND: &str =
 /// command** setting (Settings → Project) when it is set, else the
 /// checkout's `.nebula.json` `open`. The TUI runs it, not the DAEMON: it
 /// opens a browser or an editor on the machine the user is sitting at.
+///
+/// A command from the file (anyone who can push to the repo wrote it)
+/// asks first, once per repo and command, as the desktop window does: the
+/// same approval in the same `desktop` prefs, so one allowed in either app
+/// runs in both, and a changed one asks again.
 pub(crate) fn open_worktree(app: &mut App, worktree: &nebula_core::Worktree) {
-    let main = app
-        .tree
-        .projects
-        .iter()
-        .find(|p| p.id == worktree.project_id)
-        .map_or_else(|| worktree.path.clone(), |p| p.repo_path.clone());
-    let command = match open_command_for(&worktree.path, &main) {
-        Ok(command) => command,
+    let main = main_checkout(app, worktree);
+    let (command, from_file) = match open_command_for(&worktree.path, &main) {
+        Ok(found) => found,
         Err(msg) => {
             app.chrome.flash = Some(msg);
             return;
         }
     };
-    app.chrome.flash = Some(match spawn_open_command(&command, &worktree.path) {
+    let repo = main.to_string_lossy().into_owned();
+    match nebula_config::desktop::open_allowed(&repo, &command, from_file, None) {
+        Ok(true) => run_open_command(app, &command, &worktree.path),
+        Ok(false) => {
+            app.modals.overlay = Some(Overlay::Confirm(ConfirmDialog {
+                title: "Run the repo's open command?".into(),
+                message: format!(
+                    "This command comes from the repo's .kete.json, not your settings:\n\n  {command}\n\nRun it? You won't be asked again for this repo unless it changes."
+                ),
+                action: PendingAction::RunOpenCommand {
+                    worktree: worktree.id.clone(),
+                    command,
+                },
+                area: ratatui::layout::Rect::default(),
+            }));
+        }
+        Err(e) => app.chrome.flash = Some(format!("couldn't read the settings: {e}")),
+    }
+}
+
+/// The repo's main checkout a worktree belongs to.
+fn main_checkout(app: &App, worktree: &nebula_core::Worktree) -> std::path::PathBuf {
+    app.tree
+        .projects
+        .iter()
+        .find(|p| p.id == worktree.project_id)
+        .map_or_else(|| worktree.path.clone(), |p| p.repo_path.clone())
+}
+
+/// The confirm answered yes to `shown`: run it, unless the file changed
+/// under the dialog (then nothing runs and the next press asks again).
+pub(crate) fn run_approved_open(app: &mut App, worktree: &WorktreeId, shown: &str) {
+    let Some(w) = app
+        .tree
+        .worktrees
+        .iter()
+        .find(|w| &w.id == worktree)
+        .cloned()
+    else {
+        app.chrome.flash = Some("that worktree is gone".into());
+        return;
+    };
+    let main = main_checkout(app, &w);
+    let now = open_command_for(&w.path, &main);
+    let repo = main.to_string_lossy().into_owned();
+    match now {
+        Ok((command, from_file)) if command == shown => {
+            match nebula_config::desktop::open_allowed(&repo, &command, from_file, Some(shown)) {
+                Ok(true) => run_open_command(app, &command, &w.path),
+                Ok(false) => app.chrome.flash = Some("the open command was not allowed".into()),
+                Err(e) => app.chrome.flash = Some(format!("couldn't save the approval: {e}")),
+            }
+        }
+        _ => {
+            app.chrome.flash = Some(
+                "the repo's open command changed before it ran: open again to review it".into(),
+            )
+        }
+    }
+}
+
+fn run_open_command(app: &mut App, command: &str, cwd: &std::path::Path) {
+    app.chrome.flash = Some(match spawn_open_command(command, cwd) {
         Ok(()) => format!("↗ {command}"),
         Err(e) => format!("couldn't run {command}: {e}"),
     });
@@ -254,21 +316,22 @@ pub(crate) fn open_worktree(app: &mut App, worktree: &nebula_core::Worktree) {
 /// applies on the next press, else the PROJECT FILE's `open` — the
 /// worktree's own checkout, then the project's main one. Err is the footer
 /// line: nothing set in either place, or a file that is there and won't
-/// parse.
+/// parse. The flag says the command came from the file.
 pub(crate) fn open_command_for(
     worktree: &std::path::Path,
     main: &std::path::Path,
-) -> Result<String, String> {
+) -> Result<(String, bool), String> {
     let setting = crate::config::Config::load().project(main).open_command;
     let setting = setting.trim();
     if !setting.is_empty() {
-        return Ok(setting.to_string());
+        return Ok((setting.to_string(), false));
     }
     nebula_core::project_file::lookup(
         worktree,
         main,
         nebula_core::project_file::ProjectCommand::Open,
     )?
+    .map(|command| (command, true))
     .ok_or_else(|| NO_OPEN_COMMAND.to_string())
 }
 

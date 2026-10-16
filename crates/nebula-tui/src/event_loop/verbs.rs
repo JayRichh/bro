@@ -215,16 +215,29 @@ pub(crate) fn path_of(app: &App, t: &Target) -> Option<PathBuf> {
     }
 }
 
-/// The verbs that open another app on this machine: none from a kete run
-/// over ssh, whose editors and Explorer are on the far side (its Copy rows
-/// stay: they go through OSC 52); Visual Studio and the dock only where
-/// they exist.
-fn opens_here(app: &App, action: Action) -> bool {
-    !app.chrome.is_remote
-        && match action {
-            Action::OpenInVisualStudio | Action::DockEditor => cfg!(windows),
-            _ => true,
+/// What an editor verb does on `t` (lane/editors' `crate::editors`): a
+/// card's, a checkout's or a repo's folder, or a file or folder in one,
+/// in VS Code, Visual Studio, Explorer, docked or with its default app.
+/// None where its rules say it can't run now: over ssh (the far side's
+/// screen), an editor not installed, Visual Studio with no solution, Dock
+/// with no window open on the checkout, a program for the default app.
+pub(crate) fn editor_act(app: &App, action: Action, t: &Target) -> Option<MenuAction> {
+    match t {
+        Target::File { worktree, .. } | Target::Folder { worktree, .. } => {
+            let path = path_of(app, t)?;
+            crate::editors::file_action(app, action, worktree, &path, None)
         }
+        _ => crate::editors::checkout_action(app, action, &checkout_root(app, t)?),
+    }
+}
+
+/// The checkout an editor row on `t` opens in: a file's or folder's own,
+/// else [`checkout_root`].
+fn editor_root(app: &App, t: &Target) -> Option<PathBuf> {
+    match t {
+        Target::File { worktree, .. } | Target::Folder { worktree, .. } => Some(worktree.clone()),
+        _ => checkout_root(app, t),
+    }
 }
 
 /// What verb `action` does to `t`, as a menu row runs it: None where it
@@ -329,7 +342,7 @@ pub(crate) fn menu_action(app: &App, action: Action, t: &Target) -> Option<MenuA
                     .map(|pr| MenuAction::Copy(pr.url)),
                 Action::MarkSeen => a.unseen.then(verb),
                 Action::OpenInBrowser => (local && serves(app, &w)).then(verb),
-                _ if editor => (local && opens_here(app, action)).then(verb),
+                _ if editor => local.then(|| editor_act(app, action, t)).flatten(),
                 Action::FocusScope => super::board::scope_for(app, t).map(MenuAction::FocusScope),
                 Action::ReorderUp | Action::ReorderDown => Some(MenuAction::Reorder(
                     crate::order::OrderTarget::Agent(id),
@@ -388,7 +401,7 @@ pub(crate) fn menu_action(app: &App, action: Action, t: &Target) -> Option<MenuA
                 Action::CopyBranch => Some(MenuAction::Copy(w.branch.clone())),
                 Action::CommentPullRequest if !pr_live(app, &id) => None,
                 Action::OpenInBrowser => serves(app, &id).then(verb),
-                _ if editor => opens_here(app, action).then(verb),
+                _ if editor => editor_act(app, action, t),
                 Action::MarkSeen => app
                     .tree
                     .agents
@@ -463,7 +476,7 @@ pub(crate) fn menu_action(app: &App, action: Action, t: &Target) -> Option<MenuA
                     .is_some_and(|w| serves(app, &w))
                     .then(verb),
                 Action::CopyPath => path_of(app, t).map(|p| MenuAction::Copy(native(&p))),
-                _ if editor => opens_here(app, action).then(verb),
+                _ if editor => editor_act(app, action, t),
                 Action::MarkSeen => in_project(app, id, unread).then(verb),
                 Action::ArchiveDone => in_project(app, id, done).then(verb),
                 _ => keyed(app),
@@ -474,7 +487,7 @@ pub(crate) fn menu_action(app: &App, action: Action, t: &Target) -> Option<MenuA
         // deleted file opens nowhere) the file's menu takes out after.
         Target::File { rel, .. } | Target::Folder { rel, .. } => match action {
             Action::OpenFileInKete => Some(verb()),
-            _ if editor => opens_here(app, action).then(verb),
+            _ if editor => editor_act(app, action, t),
             Action::CopyPath => path_of(app, t).map(|p| MenuAction::Copy(native(&p))),
             Action::CopyRelativePath => Some(MenuAction::Copy(rel.clone())),
             _ => None,
@@ -543,6 +556,33 @@ fn widens(app: &App, t: &Target) -> bool {
         Target::Repo(p) => scope.repo.as_ref() == Some(p) && scope.worktree.is_none(),
         _ => false,
     }
+}
+
+/// The folder `t`'s editor rows open: a card's or a worktree's checkout,
+/// a repo's main one. None for a checkout still being cut.
+fn checkout_root(app: &App, t: &Target) -> Option<std::path::PathBuf> {
+    let w = match t {
+        Target::Repo(p) => match app.root_worktree(p) {
+            Some(w) => w,
+            None => {
+                return app
+                    .tree
+                    .projects
+                    .iter()
+                    .find(|x| &x.id == p)
+                    .map(|x| x.repo_path.clone())
+            }
+        },
+        _ => worktree_of(app, t)?,
+    };
+    if app.is_placeholder_worktree(&w) {
+        return None;
+    }
+    app.tree
+        .worktrees
+        .iter()
+        .find(|x| x.id == w)
+        .map(|x| x.path.clone())
 }
 
 /// Is something listening on checkout `w`'s ports: its dev server up.
@@ -701,6 +741,13 @@ fn label(app: &App, action: Action, t: &Target) -> String {
         {
             "Delete worktree (pull request merged)\u{2026}".into()
         }
+        // The editor the row opens, by name where it isn't VS Code
+        // (Cursor); Visual Studio's year beside another, and its pick.
+        (Action::OpenInVscode, _) => crate::editors::code_label(menu_label(id, t.kind())),
+        (Action::OpenInVisualStudio, _) => match editor_root(app, t) {
+            Some(root) => crate::editors::vs_label(menu_label(id, t.kind()), &root),
+            None => menu_label(id, t.kind()).to_string(),
+        },
         _ => menu_label(id, t.kind()).to_string(),
     }
 }
@@ -726,9 +773,20 @@ fn row(app: &App, id: &str, t: &Target) -> Option<MenuItem> {
     })
 }
 
-/// The rows of `ids` that mean something on `t`, in that order.
+/// The rows of `ids` that mean something on `t`, in that order; an
+/// editor's other installs right after its row (Cursor after VS Code),
+/// each its verb's, so it folds into `Open in ▸` beside it.
 pub(crate) fn rows(app: &App, ids: &[&str], t: &Target) -> Vec<MenuItem> {
-    ids.iter().filter_map(|id| row(app, id, t)).collect()
+    ids.iter()
+        .filter_map(|id| row(app, id, t))
+        .flat_map(|item| {
+            let verb = item.verb;
+            let more = crate::editors::more_installs(&item.action)
+                .into_iter()
+                .map(move |m| MenuItem { verb, ..m });
+            std::iter::once(item).chain(more)
+        })
+        .collect()
 }
 
 /// A row that opens a submenu of `items`.
@@ -799,6 +857,11 @@ fn fold(app: &App, t: &Target, items: Vec<MenuItem>) -> Vec<MenuItem> {
 /// A row's words inside its group's submenu: the group's short word, the
 /// dev server with its port, a view checked while it is on.
 fn child_word(app: &App, t: &Target, item: &MenuItem, word: &str) -> String {
+    if let MenuAction::Editor(_) = &item.action {
+        if let Some(name) = item.label.strip_prefix("Open in ") {
+            return name.to_string();
+        }
+    }
     match item.verb {
         Some(Action::OpenInBrowser) => match port_of(app, t) {
             Some(port) => format!("{word} \u{b7} localhost:{port}"),
@@ -1003,6 +1066,16 @@ fn checkout_row(app: &App, t: &Target, card: &[MenuItem]) -> Option<MenuItem> {
     }
     let w = worktree_of(app, t)?;
     let checkout = app.tree.worktrees.iter().find(|x| x.id == w)?;
+    // A Cloud card's agent runs in the cloud sandbox: no editor for the
+    // checkout it is listed under.
+    let cloud = match t {
+        Target::Session(id) => app
+            .tree
+            .agents
+            .iter()
+            .any(|a| &a.id == id && a.cloud_session_url().is_some()),
+        _ => false,
+    };
     let shown = flat(card);
     let mut items = Vec::new();
     for mut item in rows(
@@ -1010,6 +1083,9 @@ fn checkout_row(app: &App, t: &Target, card: &[MenuItem]) -> Option<MenuItem> {
         menu_of(AppliesTo::Worktree),
         &Target::Worktree(w.clone()),
     ) {
+        if cloud && matches!(item.action, MenuAction::Editor(_)) {
+            continue;
+        }
         if shown.iter().any(|i| i.verb == item.verb) {
             match item.verb {
                 Some(Action::ReorderUp) => item.label = "Move worktree up".into(),
@@ -1142,7 +1218,11 @@ fn more_rows(app: &App, t: &Target, shown: &[MenuItem]) -> Vec<MenuItem> {
                 continue;
             }
             if let Some(item) = row(app, spec.id, &on) {
-                out.push(item);
+                // The editors are the menu's to offer (an archived or Cloud
+                // card offers none for the checkout it sits under).
+                if !matches!(item.action, MenuAction::Editor(_)) {
+                    out.push(item);
+                }
             }
         }
     }
@@ -1348,15 +1428,6 @@ fn flash_nothing(app: &mut App, action: Action) {
     app.chrome.flash = Some(format!("{label}: not for what is under the cursor"));
 }
 
-/// A registry verb whose behaviour lands later in this release (the
-/// editors, wake-up, the critters): its key, menu row or palette row says
-/// so in the footer rather than doing nothing.
-pub(crate) fn pending_verb(app: &mut App, action: Action) {
-    let label = crate::keymap::spec_of(action).map_or("that", |s| s.label);
-    app.chrome.flash = Some(format!("{label}: coming in this release"));
-    app.chrome.dirty = true;
-}
-
 /// A row-addressed verb ([`MenuAction::Verb`]), run on its target: the
 /// one dispatcher for the verbs with no older action of their own,
 /// however their row was reached — a right-click, `?`, the palette or a
@@ -1382,13 +1453,17 @@ pub(crate) fn run_verb(app: &mut App, action: Action, t: &Target, out: &mut Vec<
             Target::File { worktree, rel } => super::open_file_in(app, worktree, rel),
             _ => flash_nothing(app, action),
         },
-        // lane/editors routes these: `t` names the checkout, folder or file
-        // (`path_of`), a file in a diff from its checkout's root.
+        // lane/editors': on the checkout, folder or file `t` names, by its
+        // rules (`editor_act`); never back through the key, which comes
+        // here.
         Action::OpenInVscode
         | Action::OpenInVisualStudio
         | Action::DockEditor
         | Action::RevealInExplorer
-        | Action::OpenWithDefault => pending_verb(app, action),
+        | Action::OpenWithDefault => match editor_act(app, action, t) {
+            Some(m) => run_menu_action(app, m, out),
+            None => flash_nothing(app, action),
+        },
         // lane/wake's: Wake up now on the row's own account (the picked
         // one, else the Wake view to pick one), its schedule on that
         // account or, from the background, on all of them.

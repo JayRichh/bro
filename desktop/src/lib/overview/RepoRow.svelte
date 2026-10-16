@@ -6,7 +6,7 @@
   import { repoKey, worktreeGroups } from '../worktrees/groups';
   import { isCollapsed, rows, toggleCollapsed } from '../worktrees/rows.svelte';
   import RunButton from './RunButton.svelte';
-  import { newWorktree, openEditor, openTargetMenu } from '../actions';
+  import { newWorktree, openTargetMenu } from '../actions';
   import { canSwitchBranch, openBranchSwitch } from '../worktrees/switcher.svelte';
   import { withKey } from '../shortcuts';
   import Icon from '../ui/Icon.svelte';
@@ -14,6 +14,7 @@
   import { drag, dropProject, endDrag, leftFor, offsetIn, startDrag } from '../reorder.svelte';
   import { dropZone, type Place } from '../order';
   import { scopeModel } from '../scope';
+  import EditorButtons from '../editors/EditorButtons.svelte';
 
   let { row }: { row: RepoRow } = $props();
 
@@ -147,9 +148,8 @@
           onclick={() => openBranchSwitch(row.project.id)}><Icon name="switch" size={12} /></button
         >
       {/if}
-      <button class="{verb} @max-[640px]:hidden" title={withKey('Open in the editor', 'open_editor')} aria-label="Open {row.name} in the editor" onclick={() => openEditor(main?.id)}
-        ><Icon name="editor" size={12} /></button
-      >
+      <!-- The default editor's own icon (and Visual Studio's where there is a solution). -->
+      <EditorButtons worktree={main} btn="{verb} @max-[640px]:hidden" size={13} />
     </span>
     <button
       class={verb}

@@ -40,6 +40,7 @@ import { hasChildren, leafItems } from './model';
 import { setBuilder, setRowBuilder, type Opened } from './router';
 import { attentionItems, fileItems, laneItems, orchestratorItems, portItems, prItems, viewItems, type LaneId, type PrStanding } from './rows';
 import { joinPath } from './surfaces';
+import { fileVerbs, touch, underRoot, type PathTarget } from '../editors/verbs';
 // The account rows' menu (`account:<key>`): its own module, registered here.
 import '../accounts/account-menu';
 
@@ -243,24 +244,21 @@ setBuilder('none', (hit) => {
 
 // ---- files (\u00a75.8) ----
 
-/** A file, as its menu's registry rows need it: its path on disk, and
- *  within its checkout. */
-export interface FileRef {
-  abs: string;
-  rel: string | null;
-}
-
-/** The registry's rows for a file. lane/editors owns these verbs in the
- *  desktop (Open in Kete, Open in VS Code, Visual Studio, Show in
- *  Explorer, the copy verbs); until its rows are in the verb table,
- *  Copy path and Copy relative path (a clipboard write) and Open with
- *  default app where the file was announced (`kete open`) stand in here,
- *  each as the verb it is, so its row takes their place when it lands. */
-export function fileTable(f: FileRef, opts: { openDefault?: () => void } = {}): VerbTable {
-  const t: VerbTable = { copy_path: { run: () => copy(f.abs, f.abs), note: f.abs } };
-  if (f.rel) t.copy_relative_path = { run: () => copy(f.rel!, f.rel!), note: f.rel };
-  if (opts.openDefault) t.open_with_default = { run: opts.openDefault };
-  return t;
+/** The registry's rows for a file: lane/editors' (`fileVerbs`), Open in
+ *  Kete, Open in VS Code and each other install, Visual Studio where the
+ *  checkout has a solution, Open with default app (greyed for a program),
+ *  Show in Explorer, Copy path and Copy relative path; a deleted file
+ *  keeps only its copies. `line`: where VS Code opens it (a diff's hunk). */
+export function fileTable(t: PathTarget, opts: { deleted?: boolean; line?: number | null } = {}): VerbTable {
+  // Whether an editor window is open there, and its solutions, for next time.
+  touch(t.worktree);
+  const table = fileVerbs(t, opts);
+  // The copies say what they copy.
+  const w = t.worktree ? m().worktrees.find((x) => x.id === t.worktree) : undefined;
+  const abs = w ? underRoot(w.path, t.path) : t.path;
+  if (table.copy_path) table.copy_path = { ...table.copy_path, note: abs };
+  if (table.copy_relative_path) table.copy_relative_path = { ...table.copy_relative_path, note: t.path };
+  return table;
 }
 
 /** A changed file in the diff: its registry rows, then Stage / Unstage
@@ -271,22 +269,31 @@ export function diffFileMenu(
   stage: { unstaged: boolean; staged: boolean } | null,
   verbs: { stage(): void; unstage(): void; discard(): void },
 ): Opened | null {
-  const root = m().worktrees.find((w) => w.id === worktree)?.path;
-  if (!root) return null;
-  const abs = joinPath(root, file.path);
+  if (!m().worktrees.some((w) => w.id === worktree)) return null;
   const items = fileItems(
-    registryRows('file', fileTable({ abs, rel: file.path })),
+    registryRows('file', fileTable({ worktree, path: file.path }, { deleted: file.status === 'D' })),
     { path: file.path, deleted: file.status === 'D', untracked: file.status === 'U', stage },
     verbs,
   );
   return { items, label: file.path };
 }
 
-/** A file a session opened (`kete open`): its registry rows. */
-export function openedFileMenu(path: string, root: string | null, openDefault: () => void): Opened {
-  const rel = root && path.toLowerCase().startsWith(root.toLowerCase()) ? path.slice(root.length).replace(/^[\\/]+/, '') : null;
+/** A file tab of the sheet: one a session opened (`kete open`), or a
+ *  checkout's file Open in Kete raised (`worktree`, `rel`). Its registry
+ *  rows less Open in Kete, where it is already; its default app the way
+ *  the sheet's Open goes (`openDefault`); Copy relative path from the
+ *  session's folder (`root`) for a file outside a checkout. */
+export function openedFileMenu(f: { path: string; worktree?: string; rel?: string }, root: string | null, openDefault: () => void): Opened {
+  const { path } = f;
+  const t: PathTarget = f.worktree && f.rel ? { worktree: f.worktree, path: f.rel } : { worktree: null, path };
+  const table = fileTable(t);
+  delete table.open_file_in_kete;
+  if (table.open_with_default && !table.open_with_default.disabled) table.open_with_default = { ...table.open_with_default, run: openDefault };
+  const rel = !t.worktree && root && path.toLowerCase().startsWith(root.toLowerCase()) ? path.slice(root.length).replace(/^[\\/]+/, '') : null;
+  if (rel) table.copy_relative_path = { run: () => copy(rel, rel), note: rel };
+  if (table.copy_path) table.copy_path = { ...table.copy_path, note: path };
   const none = () => {};
-  const items = fileItems(registryRows('file', fileTable({ abs: path, rel }, { openDefault })), { path, deleted: false, untracked: false, stage: null }, {
+  const items = fileItems(registryRows('file', table), { path, deleted: false, untracked: false, stage: null }, {
     stage: none,
     unstage: none,
     discard: none,

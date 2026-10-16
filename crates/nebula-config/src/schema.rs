@@ -698,6 +698,7 @@ fn desktop_tab(prefs: &DesktopPrefs) -> Tab {
                 rows: vec![
                     row("editor_folder", "Open folders in", "What opens a checkout or folder: auto picks the editor found, VS Code first; command runs the repo's Open command (Settings, Project)", &["Auto", "VS Code", "Visual Studio", "Open command"]),
                     row("editor_file", "Open files in", "What opens a file: auto picks the editor found, VS Code first, else Kete's own viewer", &["Auto", "VS Code", "Visual Studio", "Kete"]),
+                    row("editor_reuse", "Reuse window", "VS Code opens a checkout in the window you last used instead of a window of its own (its -r); a checkout already open in a window is focused there either way", &["Off", "On"]),
                 ],
             },
         ],

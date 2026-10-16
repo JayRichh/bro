@@ -1027,31 +1027,47 @@ fn archive_done_asks_first_and_lists_the_finished_read_sessions() {
     });
 }
 
-/// The editors' keys still say they are coming rather than doing
-/// nothing, and send nothing (the critters and wake-up have landed, and
-/// Open in Kete runs on a file, which a card is not).
+/// No 0.54 verb's key says it is coming any more: the editors' run on
+/// the card's checkout (Visual Studio and the default app, which mean
+/// nothing there with no solution and no file, say so), and send nothing
+/// to the daemon; Open in Kete runs on a file, which a card is not.
 #[test]
-fn the_keys_of_the_verbs_still_to_land_say_they_are_coming() {
+fn the_editor_keys_act_on_the_selection() {
     with_default_config(|| {
+        crate::editors::test::installs(Some(vec![crate::editors::test::install(
+            "code",
+            nebula_core::editors::Family::Code,
+            "VS Code",
+        )]));
+        crate::editors::test::window(Some(true));
+        crate::editors::test::launched();
         let mut app = bench();
+        app.chrome.is_remote = false;
         cursor_on_a1(&mut app);
         let mut out = Vec::new();
-        for action in [
-            Action::OpenInVscode,
-            Action::OpenInVisualStudio,
-            Action::DockEditor,
-            Action::RevealInExplorer,
-            Action::OpenWithDefault,
+        for (action, acts) in [
+            (Action::OpenInVscode, true),
+            (Action::RevealInExplorer, true),
+            (Action::DockEditor, true),
+            (Action::OpenInVisualStudio, false),
+            (Action::OpenWithDefault, false),
         ] {
             app.chrome.flash = None;
             run_action(&mut app, action, &mut out);
             let label = crate::keymap::spec_of(action).unwrap().label;
-            assert_eq!(
-                app.chrome.flash.as_deref(),
-                Some(format!("{label}: coming in this release").as_str()),
-                "{action:?}"
-            );
+            let flash = app.chrome.flash.clone().unwrap_or_default();
+            assert!(!flash.contains("coming"), "{action:?}: {flash}");
+            if acts {
+                assert_eq!(
+                    crate::editors::test::launched().len(),
+                    1,
+                    "{action:?}: {flash}"
+                );
+            } else {
+                assert_eq!(flash, format!("{label}: not for what is under the cursor"));
+            }
         }
+        crate::editors::test::window(None);
         app.chrome.flash = None;
         run_action(&mut app, Action::OpenFileInKete, &mut out);
         let label = crate::keymap::spec_of(Action::OpenFileInKete)

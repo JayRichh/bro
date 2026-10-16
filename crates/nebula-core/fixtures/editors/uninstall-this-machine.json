@@ -1,0 +1,18 @@
+[
+  {
+    "hive": "HKCU",
+    "key": "{771FD6B0-FA20-440A-A002-3B3BAC16DC50}_is1",
+    "DisplayName": "Microsoft Visual Studio Code (User)",
+    "DisplayVersion": "1.141.0",
+    "InstallLocation": "C:\\Users\\Jay\\AppData\\Local\\Programs\\Microsoft VS Code\\",
+    "DisplayIcon": "C:\\Users\\Jay\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe"
+  },
+  {
+    "hive": "HKLM",
+    "key": "ZAP",
+    "DisplayName": "Zed Attack Proxy by Checkmarx 2.17.0",
+    "DisplayVersion": "2.17.0",
+    "InstallLocation": "C:\\Program Files\\ZAP\\Zed Attack Proxy",
+    "DisplayIcon": "C:\\Program Files\\ZAP\\Zed Attack Proxy\\.install4j\\installer.ico"
+  }
+]

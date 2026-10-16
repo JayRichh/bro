@@ -178,16 +178,21 @@ describe('files', () => {
     const verbs = { stage: vi.fn(), unstage: vi.fn(), discard: vi.fn() };
     const o = t.diffFileMenu('w1', { path: 'src/a.ts', status: 'M' }, { unstaged: true, staged: true }, verbs);
     expect(o?.label).toBe('src/a.ts');
-    expect(labels(o?.items)).toEqual(['Copy path', 'Copy relative path', '---', 'Stage file', 'Unstage file', '---', 'Discard changes\u2026']);
+    // lane/editors' rows first (VS Code assumed until the scan answers).
+    const opens = ['Open in Kete', '---', 'Open in VS Code', 'Open with default app', 'Show in Explorer', '---'];
+    expect(labels(o?.items)).toEqual([...opens, 'Copy path', 'Copy relative path', '---', 'Stage file', 'Unstage file', '---', 'Discard changes\u2026']);
     expect(row(o?.items, 'Copy path')?.title).toBe('C:\\code\\kete-x\\src\\a.ts');
     // Read against the base: no staging.
-    expect(labels(t.diffFileMenu('w1', { path: 'src/a.ts', status: 'M' }, null, verbs)?.items)).toEqual(['Copy path', 'Copy relative path']);
+    expect(labels(t.diffFileMenu('w1', { path: 'src/a.ts', status: 'M' }, null, verbs)?.items)).toEqual([...opens, 'Copy path', 'Copy relative path']);
+    // A deleted file opens nowhere: its copies only.
+    expect(labels(t.diffFileMenu('w1', { path: 'src/a.ts', status: 'D' }, null, verbs)?.items)).toEqual(['Copy path', 'Copy relative path']);
   });
 
   it("gives an opened file's tab its path and its own app", () => {
     const open = vi.fn();
-    const o = t.openedFileMenu('C:\\code\\kete\\README.md', 'C:\\code\\kete', open);
-    expect(labels(o.items)).toEqual(['Open with default app', '---', 'Copy path', 'Copy relative path']);
+    const o = t.openedFileMenu({ path: 'C:\\code\\kete\\README.md' }, 'C:\\code\\kete', open);
+    // Open in Kete is where it already is.
+    expect(labels(o.items)).toEqual(['Open in VS Code', 'Open with default app', 'Show in Explorer', '---', 'Copy path', 'Copy relative path']);
     expect(row(o.items, 'Copy relative path')?.title).toBe('README.md');
     row(o.items, 'Open with default app')!.run();
     expect(open).toHaveBeenCalled();

@@ -29,6 +29,7 @@ kete ado <cmd>            Azure DevOps tasks, task worktrees, PRs     (see Azure
 kete config <cmd>         back up, restore or locate this machine's settings
 kete profile <cmd>        several accounts per harness: add, sign in, rename, spread, remove
 kete wake <cmd>           start accounts' 5-hour windows early at an hour you pick (Whakaoho)
+kete editors <cmd>        list the VS Code and Visual Studio installs Kete finds; open a path in one
 kete setup terminal       install a Nerd Font and add a "Kete" Windows Terminal profile
 kete browser              serve this TUI in a web browser via ttyd
 kete ssh <host>           open kete on a remote host over ssh
@@ -256,6 +257,19 @@ A heartbeat goes out only when the switch is on, it's one of its days and the ho
 - **Print** runs `claude -p` instead. It needs no daemon, but it may bill your plan's API credits rather than start the window.
 
 On Windows, `kete wake set` and `off` keep one Task Scheduler task, `Kete\Whakaoho`, that runs `kete wake --all` at every switched-on hour (Kete open or not; `--wake-pc` lets it wake the PC). The task runs `kete-w.exe wake --all`: kete with no console window, installed beside `kete.exe`, so a wake-up never opens a window or takes the focus (without it, from an older install, each run shows a console and `kete wake status` says so). It is removed when no account is on. On macOS and Linux, `kete wake set` prints the crontab lines to add instead. Schedules live in this machine's `config.local.json` under `wake` (never exported or sent to remotes), and every decision is a line in `<data dir>/wake-log.jsonl`, with the reset time before and after, so a heartbeat that didn't start a window shows as one.
+
+## Editors
+
+The same VS Code and Visual Studio the menus' Open in rows use: VS Code and its forks (Insiders, VSCodium, Cursor, Windsurf…) found by their own install, and Visual Studio through its installer (Community, Professional and Enterprise alike, previews too). Each opens directly and detached, without Kete's own environment.
+
+```sh
+kete editors list [--json]             # what is installed, the default of each kind first
+kete editors open .                    # this checkout in VS Code (a window already on it is focused)
+kete editors open src/main.rs --line 42
+kete editors open . --with vs          # its solution or project in Visual Studio
+kete editors open Api.sln              # a .sln, .slnx, .csproj or .vcxproj opens in Visual Studio
+kete editors open . --with cursor      # an install by its id from the list
+```
 
 ## Windows Terminal
 

@@ -182,7 +182,11 @@ flow('a Review card opens the review split: the diff against base with its commi
   // under the pointer.
   await d.contextClick('.editor.modified .view-line');
   const rows = await d.menu('Viewer');
-  assert.deepEqual(rows.map((r) => r.label), ['Copy', 'Select all', 'Copy path:line']);
+  // Then Open this line in the editor, on a machine that has one (never
+  // run here: no flow may start an editor).
+  const words = rows.map((r) => r.label);
+  assert.deepEqual(words.slice(0, 3), ['Copy', 'Select all', 'Copy path:line']);
+  assert.ok(words.length === 3 || (words.length === 4 && words[3].startsWith('Open this line in ')), words.join(', '));
   assert.equal((await lastRightClick(d)).kind, 'viewer');
   const st = await d.invoke('get_state');
   const wt = st.worktrees.find((w) => w.id === st.agents.find((a) => a.id === id).worktree_id).path;

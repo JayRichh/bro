@@ -95,16 +95,22 @@ export interface ViewerState {
   path: string | null;
   line: number | null;
   old: boolean;
+  /** The editor "Open this line in" names (VS Code, Cursor); null or
+   *  absent with none installed. */
+  editor?: string | null;
 }
 
 export interface ViewerVerbs {
   copy(): void;
   selectAll(): void;
   copyPath(withLine: boolean): void;
+  /** Open the file at the line in that editor. */
+  openLine?(): void;
 }
 
 /** Copy, Select all, then Copy path:line (Copy path on a diff's old side,
- *  or with no line). */
+ *  or with no line), then Open this line in VS Code (not from a diff's old
+ *  side, whose lines are not the file's now). */
 export function viewerItems(s: ViewerState, v: ViewerVerbs): MenuEntry[] {
   const out: MenuEntry[] = [
     row('Copy', ['ctrl+c'], v.copy, !s.selected && NOTHING_SELECTED),
@@ -118,8 +124,14 @@ export function viewerItems(s: ViewerState, v: ViewerVerbs): MenuEntry[] {
       title: line ? `${s.path}:${s.line}` : s.old ? `${s.path} (the old side's lines are not the file's now)` : s.path,
     });
   }
-  // lane/editors: "Open this line in VS Code" (open_in_vscode at the
-  // path and line) goes here once that verb is bound.
+  if (s.path && s.editor && !s.old && v.openLine) {
+    const line = s.line != null;
+    out.push({
+      label: line ? `Open this line in ${s.editor}` : `Open in ${s.editor}`,
+      run: v.openLine,
+      title: line ? `${s.path}:${s.line}` : s.path,
+    });
+  }
   return out;
 }
 

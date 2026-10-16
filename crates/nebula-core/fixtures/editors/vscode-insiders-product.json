@@ -1,0 +1,18 @@
+{
+  "nameShort": "Code - Insiders",
+  "nameLong": "Visual Studio Code - Insiders",
+  "applicationName": "code-insiders",
+  "dataFolderName": ".vscode-insiders",
+  "win32MutexName": "vscodeinsiders",
+  "win32DirName": "Microsoft VS Code Insiders",
+  "win32NameVersion": "Microsoft Visual Studio Code Insiders",
+  "win32RegValueName": "VSCodeInsiders",
+  "win32AppUserModelId": "Microsoft.VisualStudioCodeInsiders",
+  "win32ShellNameShort": "Code - Insiders",
+  "win32x64UserAppId": "{{217B4C08-948D-4EC8-90F8-4D6C2A0E02E5}",
+  "urlProtocol": "vscode-insiders",
+  "quality": "insider",
+  "commit": "c4f8a27e90b3d15f6a8e2c70b9d4e1a35f7c8d26",
+  "version": "1.142.0-insider",
+  "date": "2026-10-15T09:41:07+02:00"
+}

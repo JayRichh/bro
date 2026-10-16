@@ -130,10 +130,21 @@ fn draw_menu_overlay(f: &mut Frame, app: &mut App, menu: crate::app::ContextMenu
         .as_deref()
         .map(|t| t.chars().count() + 2)
         .unwrap_or(0);
+    // An editor row leads with its editor's glyph (VS Code's, Visual
+    // Studio's; `VSC` / `VS` without a Nerd Font).
+    let glyphs: Vec<Option<(String, ratatui::style::Color)>> = menu
+        .items
+        .iter()
+        .map(|i| crate::editors::glyph(i, app.chrome.icons))
+        .collect();
+    let glyph_w = |g: &Option<(String, ratatui::style::Color)>| {
+        g.as_ref().map_or(0, |(t, _)| t.chars().count())
+    };
     let label_w = menu
         .items
         .iter()
-        .map(|i| i.label.chars().count())
+        .zip(&glyphs)
+        .map(|(i, g)| i.label.chars().count() + glyph_w(g))
         .max()
         .unwrap_or(8);
     // Each verb's key at the row's right, as the keymap has it now (a
@@ -211,18 +222,20 @@ fn draw_menu_overlay(f: &mut Frame, app: &mut App, menu: crate::app::ContextMenu
         if i == menu.hover {
             style = style.bg(th.sel_bg).add_modifier(Modifier::BOLD);
         }
-        let label: String = item.label.chars().take(label_w).collect();
+        let glyph = &glyphs[i];
+        let room = label_w.saturating_sub(glyph_w(glyph));
+        let label: String = item.label.chars().take(room).collect();
         let key = if key_col > 0 {
             format!("{:>key_w$}  ", keys[i])
         } else {
             String::new()
         };
         let (text, tail) = if item.action.submenu().is_some() {
-            (format!(" {label:<label_w$}"), format!("{key}▸ "))
+            (format!("{label:<room$}"), format!("{key}▸ "))
         } else if any_submenu {
-            (format!(" {label:<label_w$}"), format!("{key}  "))
+            (format!("{label:<room$}"), format!("{key}  "))
         } else {
-            (format!(" {label:<label_w$}"), key)
+            (format!("{label:<room$}"), key)
         };
         let dim = if i == menu.hover {
             style
@@ -230,13 +243,13 @@ fn draw_menu_overlay(f: &mut Frame, app: &mut App, menu: crate::app::ContextMenu
             style.fg(th.dim)
         };
         let tail = format!(" {tail}");
-        f.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(text, style),
-                Span::styled(tail, dim),
-            ])),
-            row,
-        );
+        let mut spans = vec![Span::styled(" ", style)];
+        if let Some((g, color)) = glyph {
+            spans.push(Span::styled(g.clone(), style.fg(*color)));
+        }
+        spans.push(Span::styled(text, style));
+        spans.push(Span::styled(tail, dim));
+        f.render_widget(Paragraph::new(Line::from(spans)), row);
     }
     // Record the drawn area and window for the pointer's hit test.
     if let Some(Overlay::Menu(m)) = &mut app.modals.overlay {

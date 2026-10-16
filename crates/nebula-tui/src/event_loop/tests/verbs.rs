@@ -755,13 +755,21 @@ fn the_panels_footer_leads_with_the_registrys_verbs() {
     });
 }
 
-/// The 0.54/0.55 verbs ahead of their lanes: the editor rows sit in a
-/// card's `Open in ▸` after its own verbs, the copies in `Copy ▸` before
-/// its changes; an editor's (a key, a row, the palette) still says it is
-/// coming, while the menus' own verbs and the copies now act.
+/// The 0.54/0.55 verbs all act now: a card's editor rows sit in its
+/// `Open in ▸` after its own verbs (each install by its name inside), the
+/// copies in `Copy ▸` before its changes, and a key runs an editor verb
+/// on the selection's checkout, never a word about a later release. The
+/// editors' own rules have their tests in `tests/editors.rs`.
 #[test]
-fn the_new_verbs_have_rows_and_say_they_are_coming() {
+fn the_new_verbs_have_rows_and_act() {
+    // The menu below lists editor rows too: name the installs it sees.
+    crate::editors::test::installs(Some(vec![crate::editors::test::install(
+        "code",
+        nebula_core::editors::Family::Code,
+        "VS Code",
+    )]));
     let mut app = bench();
+    app.chrome.is_remote = false;
     let rows = app.visible_session_rows();
     let at = rows
         .iter()
@@ -789,15 +797,12 @@ fn the_new_verbs_have_rows_and_say_they_are_coming() {
         1
     );
     let mut out = Vec::new();
-    for action in [Action::OpenInVscode, Action::DockEditor] {
-        app.chrome.flash = None;
-        run_action(&mut app, action, &mut out);
-        let label = crate::keymap::spec_of(action).unwrap().label;
-        assert_eq!(
-            app.chrome.flash.as_deref(),
-            Some(format!("{label}: coming in this release").as_str())
-        );
-    }
+    crate::editors::test::launched();
+    app.chrome.flash = None;
+    run_action(&mut app, Action::OpenInVscode, &mut out);
+    let flash = app.chrome.flash.clone().unwrap_or_default();
+    assert!(flash.starts_with("opening "), "{flash}");
+    assert_eq!(crate::editors::test::launched().len(), 1);
     // The copy is the card's checkout's folder.
     app.chrome.flash = None;
     run_action(&mut app, Action::CopyPath, &mut out);

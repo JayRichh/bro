@@ -1,7 +1,9 @@
 // `kete open <file>` from inside a session: the daemon's FilesOpened, which
 // the terminal app raises as its FILE TABS. The window shows the files in
 // a read-only sheet (FileSheet.svelte), one tab per file. The Rust side
-// serves only files a session opened (src-tauri/src/files.rs).
+// serves only files a session opened (src-tauri/src/files.rs), and a
+// checkout's file through its worktree (Open in Kete: editors.rs checks it
+// stays inside the checkout).
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -10,6 +12,9 @@ export interface OpenedFile {
   path: string;
   /** Relative to the checkout, cut from the left when long. */
   label: string;
+  /** A checkout's file (Open in Kete): read through its worktree. */
+  worktree?: string;
+  rel?: string;
 }
 export interface FilesOpened {
   root: string;
@@ -33,6 +38,22 @@ export const sheet = $state({
   tabs: [] as OpenedFile[],
   at: 0,
 });
+
+/** A tab's text: a checkout's file through its worktree, else one a session
+ *  opened. */
+export function readTab(f: OpenedFile): Promise<FileText> {
+  return f.worktree && f.rel ? invoke<FileText>('worktree_file_read', { worktree: f.worktree, path: f.rel }) : filesApi.read(f.path);
+}
+
+/** Hand a tab's file to its default app (never a program or a script). */
+export function openTabDefault(f: OpenedFile): Promise<void> {
+  return f.worktree && f.rel ? invoke<void>('path_open_default', { worktree: f.worktree, path: f.rel }) : filesApi.openDefault(f.path);
+}
+
+/** Raise the sheet on one checkout file (Open in Kete). */
+export function showWorktreeFile(root: string, worktree: string, rel: string, path: string) {
+  showFiles({ root, files: [{ path, label: rel.length > 28 ? `\u2026${rel.slice(rel.length - 27)}` : rel, worktree, rel }] });
+}
 
 /** Raise the sheet on `o`, as the TUI does: the new files replace the
  *  last set, the first one shown. Nothing for an empty set. */

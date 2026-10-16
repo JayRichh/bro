@@ -15,6 +15,7 @@ import { clipboardHasText, copyText, readClipboard } from './clipboard';
 import { fieldItems, selectionItems, terminalItems, viewerItems, type FieldState } from './items';
 import { installMenuRouter, setBuilder, setRowBuilder, type Opened } from './router';
 import { joinPath, terminalAt, viewerAt } from './surfaces';
+import { lineEditor, openLine } from '../editors/verbs';
 
 type Field = HTMLInputElement | HTMLTextAreaElement | HTMLElement;
 
@@ -164,7 +165,7 @@ setBuilder('viewer', (hit, at): Opened | null => {
           .join('\n')
       : '';
   const items = viewerItems(
-    { selected: !!text(), path, line, old },
+    { selected: !!text(), path, line, old, editor: lineEditor() },
     {
       copy: () => void copyText(text()),
       selectAll: () => {
@@ -177,6 +178,7 @@ setBuilder('viewer', (hit, at): Opened | null => {
         const value = withLine ? `${path}:${line}` : path;
         void copyText(value, value);
       },
+      openLine: () => path && openLine(path, line),
     },
   );
   return { items, label: 'Viewer', keep: true };

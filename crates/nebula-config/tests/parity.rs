@@ -216,7 +216,8 @@ fn a_write_from_the_window_changes_one_key_and_keeps_the_rest() {
         read(&path),
         json!({"future_key": {"a": 1}, "editor": "hx", "kanban": true,
                "desktop": {"theme": "dark", "home": "board", "diff_mode": "side", "startup": "home",
-                           "editor_folder": "auto", "editor_file": "auto"}})
+                           "editor_folder": "auto", "editor_file": "auto",
+                           "editor_reuse": "off"}})
     );
     assert_eq!(read(&local), json!({"session_idle_timeout": "15m"}));
     assert!(set_in(&path, &local, &global("kanban"), &json!("sideways")).is_err());
@@ -461,7 +462,8 @@ fn the_critters_rows_are_shared_and_the_editors_are_the_windows() {
         keys,
         [
             ("editor_folder", &json!("auto")),
-            ("editor_file", &json!("auto"))
+            ("editor_file", &json!("auto")),
+            ("editor_reuse", &json!("off"))
         ]
     );
 
