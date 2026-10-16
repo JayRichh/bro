@@ -10,9 +10,9 @@
 use crate::desktop::DesktopPrefs;
 use crate::{
     agent_kind_names, choices, effort_choices_in, model_choices_in, Config, HarnessField,
-    SettingKind, SettingSpec, TabBody, AGENTS_HEAD, DEFAULT_CHOICE, DIFF_CONTEXTS, EDITORS,
-    INLINE_GRAPHICS, KANBAN_SCOPES, ORCHESTRATOR_VIEWS, PRESET_TEXTS, PROJECT_FILE_CHOICE,
-    SESSION_IDLE_TIMEOUTS, SETTINGS_TABS, SOUNDS, WORKTREE_LAYOUTS,
+    SettingKind, SettingSpec, TabBody, AGENTS_HEAD, CRITTER_SIZES, CRITTER_VISITS, DEFAULT_CHOICE,
+    DIFF_CONTEXTS, EDITORS, INLINE_GRAPHICS, KANBAN_SCOPES, ORCHESTRATOR_VIEWS, PRESET_TEXTS,
+    PROJECT_FILE_CHOICE, SESSION_IDLE_TIMEOUTS, SETTINGS_TABS, SOUNDS, WORKTREE_LAYOUTS,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -116,6 +116,9 @@ impl SettingKind {
             SettingKind::AccountSpreadThreshold => nebula_core::accounts::THRESHOLD_KEY,
             SettingKind::UsageStatusline => "usage_statusline",
             SettingKind::ShowTips => "show_tips",
+            SettingKind::Critters => "critters",
+            SettingKind::CrittersSize => "critters_size",
+            SettingKind::CrittersOften => "critters_often",
         }
     }
 }
@@ -230,6 +233,7 @@ fn flag(cfg: &mut Config, kind: SettingKind) -> Option<&mut bool> {
         SettingKind::AskBeforeArchive => &mut cfg.ask_before_archive,
         SettingKind::ConfirmDragMove => &mut cfg.confirm_drag_move,
         SettingKind::ShowTips => &mut cfg.show_tips,
+        SettingKind::Critters => &mut cfg.critters,
         SettingKind::UsageStatusline => &mut cfg.usage_statusline,
         SettingKind::Animations => &mut cfg.animations,
         SettingKind::BlackBackground => &mut cfg.black_background,
@@ -278,6 +282,8 @@ fn choice_options(cfg: &Config, kind: SettingKind) -> Option<Vec<String>> {
             String::new(),
         ),
         SettingKind::DiffContext => (strs(DIFF_CONTEXTS), String::new()),
+        SettingKind::CrittersSize => (strs(CRITTER_SIZES), String::new()),
+        SettingKind::CrittersOften => (strs(CRITTER_VISITS), String::new()),
         SettingKind::HideCardMarks | SettingKind::HideDraftPrs => {
             (strs(&["shown", "hidden"]), String::new())
         }
@@ -387,6 +393,8 @@ pub fn set_value(cfg: &mut Config, kind: SettingKind, value: &Value) -> Result<(
         SettingKind::InlineGraphics => cfg.inline_graphics = word,
         SettingKind::DiffMode => cfg.diff_mode = word,
         SettingKind::DiffContext => cfg.diff_context = word,
+        SettingKind::CrittersSize => cfg.critters_size = word,
+        SettingKind::CrittersOften => cfg.critters_often = word,
         SettingKind::HideCardMarks => cfg.hide_card_marks = word == "hidden",
         SettingKind::HideDraftPrs => cfg.hide_draft_prs = word == "hidden",
         SettingKind::QuickPromptKind => cfg.quick_prompt_kind = word,
@@ -671,17 +679,28 @@ fn desktop_tab(prefs: &DesktopPrefs) -> Tab {
         id: "desktop".into(),
         title: "Desktop".into(),
         note: Some("This window's own preferences. The terminal app has its own colour theme, under Appearance.".into()),
-        groups: vec![Group {
-            title: String::new(),
-            subtitle: None,
-            terminal: false,
-            rows: vec![
-                row("theme", "Theme", "Follow the system's light or dark mode, or pin one (Ctrl+Shift+L cycles; --theme overrides for one run)", &["System", "Light", "Dark"]),
-                row("home", "Home view", "What the main column shows with nothing open: the overview of repos, or the board of lanes (Shift+K switches)", &["Overview", "Board"]),
-                row("startup", "Open on", "What the window shows when it opens: its home view, or the orchestrator (its start form when there is none yet)", &["Home view", "Orchestrator"]),
-                row("diff_mode", "Diff layout", "How the Diff view lays out a repo that has no layout saved yet (--diff overrides for one run)", &["Side by side", "Inline", "Replacement"]),
-            ],
-        }],
+        groups: vec![
+            Group {
+                title: String::new(),
+                subtitle: None,
+                terminal: false,
+                rows: vec![
+                    row("theme", "Theme", "Follow the system's light or dark mode, or pin one (Ctrl+Shift+L cycles; --theme overrides for one run)", &["System", "Light", "Dark"]),
+                    row("home", "Home view", "What the main column shows with nothing open: the overview of repos, or the board of lanes (Shift+K switches)", &["Overview", "Board"]),
+                    row("startup", "Open on", "What the window shows when it opens: its home view, or the orchestrator (its start form when there is none yet)", &["Home view", "Orchestrator"]),
+                    row("diff_mode", "Diff layout", "How the Diff view lays out a repo that has no layout saved yet (--diff overrides for one run)", &["Side by side", "Inline", "Replacement"]),
+                ],
+            },
+            Group {
+                title: "Editors".into(),
+                subtitle: None,
+                terminal: false,
+                rows: vec![
+                    row("editor_folder", "Open folders in", "What opens a checkout or folder: auto picks the editor found, VS Code first; command runs the repo's Open command (Settings, Project)", &["Auto", "VS Code", "Visual Studio", "Open command"]),
+                    row("editor_file", "Open files in", "What opens a file: auto picks the editor found, VS Code first, else Kete's own viewer", &["Auto", "VS Code", "Visual Studio", "Kete"]),
+                ],
+            },
+        ],
         hotkeys: Vec::new(),
     }
 }

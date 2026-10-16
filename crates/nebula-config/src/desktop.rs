@@ -19,6 +19,12 @@ pub const DIFF_MODES: &[&str] = &["side", "inline", "replacement"];
 pub const HOMES: &[&str] = &["overview", "board"];
 /// What the window opens on: its home view, or the orchestrator.
 pub const STARTUPS: &[&str] = &["home", "orchestrator"];
+/// What opens a folder (a checkout, a repo): the editor found (VS Code
+/// first), VS Code, Visual Studio, or the project's own Open command.
+pub const EDITOR_FOLDERS: &[&str] = &["auto", "vscode", "visual-studio", "command"];
+/// What opens a file: the editor found, VS Code, Visual Studio, or Kete's
+/// own viewer.
+pub const EDITOR_FILES: &[&str] = &["auto", "vscode", "visual-studio", "kete"];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -36,6 +42,10 @@ pub struct DesktopPrefs {
     /// `wt:<worktree id>`.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub collapsed: Vec<String>,
+    /// What Open in editor uses on a folder ([`EDITOR_FOLDERS`]).
+    pub editor_folder: String,
+    /// What Open in editor uses on a file ([`EDITOR_FILES`]).
+    pub editor_file: String,
     /// Keys a newer window wrote, kept through a save.
     #[serde(flatten)]
     pub other: BTreeMap<String, serde_json::Value>,
@@ -50,6 +60,8 @@ impl Default for DesktopPrefs {
             approved_open: BTreeMap::new(),
             startup: STARTUPS[0].into(),
             collapsed: Vec::new(),
+            editor_folder: EDITOR_FOLDERS[0].into(),
+            editor_file: EDITOR_FILES[0].into(),
             other: BTreeMap::new(),
         }
     }
@@ -62,6 +74,8 @@ pub fn choices(key: &str) -> Option<&'static [&'static str]> {
         "diff_mode" => Some(DIFF_MODES),
         "home" => Some(HOMES),
         "startup" => Some(STARTUPS),
+        "editor_folder" => Some(EDITOR_FOLDERS),
+        "editor_file" => Some(EDITOR_FILES),
         _ => None,
     }
 }
@@ -81,7 +95,14 @@ impl DesktopPrefs {
             .and_then(|value| serde_json::from_value(value).ok())
             .unwrap_or_default();
         let fallback = DesktopPrefs::default();
-        for key in ["theme", "diff_mode", "home", "startup"] {
+        for key in [
+            "theme",
+            "diff_mode",
+            "home",
+            "startup",
+            "editor_folder",
+            "editor_file",
+        ] {
             let ok = choices(key).is_some_and(|list| list.contains(&prefs.get(key)));
             if !ok {
                 prefs.set_unchecked(key, fallback.get(key));
@@ -101,6 +122,8 @@ impl DesktopPrefs {
             "diff_mode" => &self.diff_mode,
             "home" => &self.home,
             "startup" => &self.startup,
+            "editor_folder" => &self.editor_folder,
+            "editor_file" => &self.editor_file,
             _ => "",
         }
     }
@@ -111,6 +134,8 @@ impl DesktopPrefs {
             "diff_mode" => self.diff_mode = value.into(),
             "home" => self.home = value.into(),
             "startup" => self.startup = value.into(),
+            "editor_folder" => self.editor_folder = value.into(),
+            "editor_file" => self.editor_file = value.into(),
             _ => {}
         }
     }
@@ -251,5 +276,41 @@ mod tests {
         std::fs::write(&path, r#"{"desktop": {"startup": "sideways"}}"#).unwrap();
         assert_eq!(DesktopPrefs::load_at(&path, &local).startup, "home");
         assert!(DesktopPrefs::update_in(&path, &local, |p| p.set("startup", "x")).is_err());
+    }
+
+    #[test]
+    fn editors_default_to_auto_and_take_their_choices() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let local = dir.path().join("config.local.json");
+        let prefs = DesktopPrefs::load_at(&path, &local);
+        assert_eq!(
+            (prefs.editor_folder.as_str(), prefs.editor_file.as_str()),
+            ("auto", "auto")
+        );
+        DesktopPrefs::update_in(&path, &local, |p| {
+            p.set("editor_folder", "visual-studio")?;
+            p.set("editor_file", "kete")
+        })
+        .unwrap();
+        let prefs = DesktopPrefs::load_at(&path, &local);
+        assert_eq!(prefs.get("editor_folder"), "visual-studio");
+        assert_eq!(prefs.get("editor_file"), "kete");
+        // Each list is its own: a file is never the Open command, a folder
+        // never Kete's viewer.
+        assert!(
+            DesktopPrefs::update_in(&path, &local, |p| p.set("editor_file", "command")).is_err()
+        );
+        assert!(
+            DesktopPrefs::update_in(&path, &local, |p| p.set("editor_folder", "kete")).is_err()
+        );
+        std::fs::write(
+            &path,
+            r#"{"desktop": {"editor_folder": "emacs", "editor_file": "vscode"}}"#,
+        )
+        .unwrap();
+        let prefs = DesktopPrefs::load_at(&path, &local);
+        assert_eq!(prefs.editor_folder, "auto");
+        assert_eq!(prefs.editor_file, "vscode");
     }
 }

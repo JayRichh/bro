@@ -745,3 +745,40 @@ fn the_panels_footer_leads_with_the_registrys_verbs() {
         assert!(!text.contains("del  "), "no hand-written list: {text}");
     });
 }
+
+/// The 0.54/0.55 verbs ahead of their lanes: the editor and copy rows
+/// sit in a card's menu after its Open group, and running one (a key, a
+/// row, the palette) says it is coming rather than doing nothing.
+#[test]
+fn the_new_verbs_have_rows_and_say_they_are_coming() {
+    let mut app = bench();
+    let rows = app.visible_session_rows();
+    let at = rows
+        .iter()
+        .position(|r| r.sref() == Some(SessionRef::Agent(AgentId("a1".into()))))
+        .unwrap();
+    app.nav.sel_session = at;
+    let menu = verbs::menu_for(&app, &Target::Session(AgentId("a1".into())));
+    let labels: Vec<&str> = menu.iter().map(|i| i.label.as_str()).collect();
+    let pos = |l: &str| {
+        labels
+            .iter()
+            .position(|x| *x == l)
+            .unwrap_or_else(|| panic!("{l}: {labels:?}"))
+    };
+    assert!(pos("Follow-up prompt\u{2026}") < pos("VS Code"));
+    assert!(pos("VS Code") < pos("Visual Studio"));
+    assert!(pos("Copy branch") < pos("Restart agent"));
+    assert_eq!(labels.iter().filter(|l| **l == "Copy path").count(), 1);
+    let mut out = Vec::new();
+    for action in [Action::OpenInVscode, Action::CopyPath, Action::Critters] {
+        app.chrome.flash = None;
+        run_action(&mut app, action, &mut out);
+        let label = crate::keymap::spec_of(action).unwrap().label;
+        assert_eq!(
+            app.chrome.flash.as_deref(),
+            Some(format!("{label}: coming in this release").as_str())
+        );
+    }
+    assert!(out.is_empty(), "nothing sent: {out:?}");
+}

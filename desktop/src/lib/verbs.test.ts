@@ -20,7 +20,10 @@ describe('the registry words', () => {
     expect(session[0]).toBe('activate');
     expect(session.slice(-1)).toEqual(['delete']);
     expect(menuIds('terminal')).toEqual(['activate', 'rename', 'delete']);
-    expect(menuIds('account')).toEqual([]);
+    expect(menuIds('account')).toEqual(['wake_account']);
+    expect(menuIds('folder')).toEqual(['open_in_vscode', 'reveal_in_explorer', 'copy_path', 'copy_relative_path']);
+    expect(menuIds('file')[0]).toBe('open_file_in_kete');
+    expect(menuLabel('open_in_vscode', 'worktree')).toBe('VS Code');
   });
 });
 

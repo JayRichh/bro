@@ -95,6 +95,17 @@ export type ActionId =
   | "sweep_worktrees"
   | "export_settings"
   | "import_settings"
+  | "open_in_vscode"
+  | "open_in_visual_studio"
+  | "dock_editor"
+  | "reveal_in_explorer"
+  | "open_with_default"
+  | "open_file_in_kete"
+  | "copy_path"
+  | "copy_relative_path"
+  | "copy_branch"
+  | "wake_account"
+  | "critters"
   | "cycle_theme"
   | "home_board"
   | "home_overview"
@@ -184,7 +195,7 @@ export type DeskGroup =
   | "Overview and board"
   | "Review";
 
-export type AppliesTo = "global" | "repo" | "worktree" | "session" | "terminal" | "account";
+export type AppliesTo = "global" | "repo" | "worktree" | "session" | "terminal" | "account" | "file" | "folder";
 export type WorksIn = "grid" | "board" | "pane" | "diff" | "overlay";
 export type Surface = "both" | "tui" | "desktop";
 export type DeskScope = "anywhere" | "fields" | "global" | "row" | "overview" | "board" | "review";
@@ -1402,6 +1413,149 @@ export const ACTIONS: readonly ActionRow[] = [
     desktop: [],
   },
   {
+    id: "open_in_vscode",
+    label: "Open in VS Code",
+    hint: "Open the checkout, folder or file in VS Code (or the Insiders, VSCodium, Cursor or Windsurf install found), focusing a window already open on it; a file opens at its line",
+    group: "FILES",
+    word: "vs code",
+    destructive: false,
+    appliesTo: ["worktree", "repo", "session", "folder", "file"],
+    worksIn: ["grid", "board", "pane", "diff", "overlay"],
+    surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
+    id: "open_in_visual_studio",
+    label: "Open in Visual Studio",
+    hint: "Open the checkout's solution in Visual Studio (its folder when it has none), or the file in the instance already running; only where Visual Studio is installed",
+    group: "FILES",
+    word: "visual studio",
+    destructive: false,
+    appliesTo: ["worktree", "repo", "session", "file"],
+    worksIn: ["grid", "board", "pane", "diff", "overlay"],
+    surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
+    id: "dock_editor",
+    label: "Dock editor beside Kete",
+    hint: "Snap the checkout's open editor window to the half of the screen beside Kete's window and fit Kete to the other half; the system's own snap keys undo it",
+    group: "FILES",
+    word: "dock",
+    destructive: false,
+    appliesTo: ["worktree", "repo", "session"],
+    worksIn: ["grid", "board", "pane"],
+    surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
+    id: "reveal_in_explorer",
+    label: "Show in Explorer",
+    hint: "Show the checkout, folder or file in Explorer (Finder on macOS, the file manager elsewhere)",
+    group: "FILES",
+    word: "reveal",
+    destructive: false,
+    appliesTo: ["worktree", "repo", "session", "folder", "file"],
+    worksIn: ["grid", "board", "pane", "diff", "overlay"],
+    surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
+    id: "open_with_default",
+    label: "Open with default app",
+    hint: "Open the file with the app the system gives its type",
+    group: "FILES",
+    word: "open with",
+    destructive: false,
+    appliesTo: ["file"],
+    worksIn: ["pane", "diff", "overlay"],
+    surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
+    id: "open_file_in_kete",
+    label: "Open in Kete",
+    hint: "Open the file in Kete's own viewer",
+    group: "FILES",
+    word: "view",
+    destructive: false,
+    appliesTo: ["file"],
+    worksIn: ["pane", "diff", "overlay"],
+    surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
+    id: "copy_path",
+    label: "Copy path",
+    hint: "Copy the full path of the checkout, folder or file to the clipboard",
+    group: "FILES",
+    word: "copy path",
+    destructive: false,
+    appliesTo: ["worktree", "repo", "session", "folder", "file"],
+    worksIn: ["grid", "board", "pane", "diff", "overlay"],
+    surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
+    id: "copy_relative_path",
+    label: "Copy relative path",
+    hint: "Copy the file's or folder's path from its worktree's root to the clipboard",
+    group: "FILES",
+    word: "copy relative",
+    destructive: false,
+    appliesTo: ["folder", "file"],
+    worksIn: ["pane", "diff", "overlay"],
+    surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
+    id: "copy_branch",
+    label: "Copy branch name",
+    hint: "Copy the checkout's branch name to the clipboard",
+    group: "FILES",
+    word: "copy branch",
+    destructive: false,
+    appliesTo: ["worktree", "session"],
+    worksIn: ["grid", "board", "pane"],
+    surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
+    id: "wake_account",
+    label: "Wake up now",
+    hint: "Whakaoho: send the account one tiny prompt on its cheapest model now, so its 5-hour window starts, and resets, sooner; it runs on your own subscription",
+    group: "ACCOUNTS",
+    word: "wake",
+    destructive: false,
+    appliesTo: ["account"],
+    worksIn: ["grid", "board", "overlay"],
+    surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
+    id: "critters",
+    label: "Critters",
+    hint: "Turn the critters overlay on or off: little pixel visitors along the bottom of the window (Settings, Appearance has their size and how often they come)",
+    group: "GENERAL",
+    word: "critters",
+    destructive: false,
+    appliesTo: ["global"],
+    worksIn: ["grid", "board", "pane"],
+    surface: "both",
+    tui: [],
+    desktop: [],
+  },
+  {
     id: "cycle_theme",
     label: "Cycle theme",
     hint: "Step the window's theme through system, light and dark",
@@ -1680,14 +1834,24 @@ export const MENU_LABELS: readonly { id: ActionId; on: AppliesTo | null; label: 
   { id: "toggle_full_screen", on: null, label: "Full screen" },
   { id: "accounts", on: null, label: "Accounts\u2026" },
   { id: "add_project", on: null, label: "Add project\u2026" },
+  { id: "open_in_vscode", on: null, label: "VS Code" },
+  { id: "open_in_visual_studio", on: null, label: "Visual Studio" },
+  { id: "reveal_in_explorer", on: null, label: "Show in Explorer" },
+  { id: "copy_path", on: null, label: "Copy path" },
+  { id: "copy_relative_path", on: null, label: "Copy relative path" },
+  { id: "copy_branch", on: null, label: "Copy branch" },
+  { id: "dock_editor", on: null, label: "Dock beside Kete" },
 ];
 
 /** Each kind's menu, in order: a right-click's rows in both apps. */
 export const MENUS: Readonly<Partial<Record<AppliesTo, readonly ActionId[]>>> = {
-  session: ["activate", "follow_up", "restart", "duplicate_session", "move_session", "move_to_account", "rename", "pin_orchestrator", "open_pull_request", "create_pull_request", "merge_pull_request", "open_issue", "focus_scope", "reorder_up", "reorder_down", "unarchive", "archive", "delete"],
+  session: ["activate", "follow_up", "open_in_vscode", "open_in_visual_studio", "reveal_in_explorer", "dock_editor", "copy_path", "copy_branch", "restart", "duplicate_session", "move_session", "move_to_account", "rename", "pin_orchestrator", "open_pull_request", "create_pull_request", "merge_pull_request", "open_issue", "focus_scope", "reorder_up", "reorder_down", "unarchive", "archive", "delete"],
   terminal: ["activate", "rename", "delete"],
-  worktree: ["new", "quick_prompt", "new_terminal", "toggle_run", "git_diff", "open_worktree", "open_repo", "switch_branch", "create_pull_request", "merge_pull_request", "focus_scope", "reorder_up", "reorder_down", "delete_all", "delete_worktree"],
-  repo: ["quick_prompt", "new_worktree", "switch_branch", "toggle_run", "open_worktree", "open_repo", "refresh_pull_requests", "focus_scope", "rename", "reorder_up", "reorder_down", "delete_worktree", "sweep_worktrees", "remove_project"],
+  worktree: ["new", "quick_prompt", "new_terminal", "toggle_run", "git_diff", "open_worktree", "open_repo", "open_in_vscode", "open_in_visual_studio", "reveal_in_explorer", "dock_editor", "copy_path", "copy_branch", "switch_branch", "create_pull_request", "merge_pull_request", "focus_scope", "reorder_up", "reorder_down", "delete_all", "delete_worktree"],
+  repo: ["quick_prompt", "new_worktree", "switch_branch", "toggle_run", "open_worktree", "open_repo", "open_in_vscode", "open_in_visual_studio", "reveal_in_explorer", "dock_editor", "copy_path", "refresh_pull_requests", "focus_scope", "rename", "reorder_up", "reorder_down", "delete_worktree", "sweep_worktrees", "remove_project"],
+  folder: ["open_in_vscode", "reveal_in_explorer", "copy_path", "copy_relative_path"],
+  file: ["open_file_in_kete", "open_in_vscode", "open_in_visual_studio", "open_with_default", "reveal_in_explorer", "copy_path", "copy_relative_path"],
+  account: ["wake_account"],
 };
 
 /** The verbs a footer and the verb bar lead with, per kind, best first. */

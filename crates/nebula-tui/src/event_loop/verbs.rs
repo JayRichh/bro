@@ -638,6 +638,15 @@ fn flash_nothing(app: &mut App, action: Action) {
     app.chrome.flash = Some(format!("{label}: not for what is under the cursor"));
 }
 
+/// A registry verb whose behaviour lands later in this release (the
+/// editors, the copies, wake-up, the critters): its key, menu row or
+/// palette row says so in the footer rather than doing nothing.
+pub(crate) fn pending_verb(app: &mut App, action: Action) {
+    let label = crate::keymap::spec_of(action).map_or("that", |s| s.label);
+    app.chrome.flash = Some(format!("{label}: coming in this release"));
+    app.chrome.dirty = true;
+}
+
 // ---- an overlay's verbs ----
 
 /// What `?` lists over an overlay with rows of its own: its keys, as the

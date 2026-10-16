@@ -60,6 +60,11 @@ fn is_auto(word: &str) -> bool {
 /// side of a change, or the whole file.
 pub const DIFF_CONTEXTS: &[&str] = &["collapsed", "full"];
 
+/// What **Critter size** cycles through, the default in the middle.
+pub const CRITTER_SIZES: &[&str] = &["small", "medium", "large"];
+/// What **Critters visit** cycles through: how often a visitor turns up.
+pub const CRITTER_VISITS: &[&str] = &["rare", "normal", "busy"];
+
 /// Inline graphics choices (Settings → Appearance).
 pub const INLINE_GRAPHICS: &[&str] = crate::choices::INLINE_GRAPHICS_MODES;
 
@@ -447,6 +452,9 @@ pub enum SettingKind {
     AccountSpreadThreshold,
     UsageStatusline,
     ShowTips,
+    Critters,
+    CrittersSize,
+    CrittersOften,
 }
 
 /// One harness field row in the Agents tab. The tab renders one section
@@ -552,6 +560,9 @@ impl SettingKind {
             | SettingKind::Icons => (2026, 10, 13),
             SettingKind::OrchestratorView => (2026, 10, 14),
             SettingKind::ShowTips => (2026, 10, 15),
+            SettingKind::Critters | SettingKind::CrittersSize | SettingKind::CrittersOften => {
+                (2026, 10, 16)
+            }
         }
     }
 
@@ -832,6 +843,26 @@ pub const SETTINGS_TABS: &[SettingsTab] = &[
                 label: "Show commit graph",
                 hint: "Add the read-only git commit graph under the g diff view's changed files",
                 group: "",
+            },
+            // Both apps' (the window draws them too): after the terminal
+            // app's rows here, in a group of their own.
+            SettingSpec {
+                kind: SettingKind::Critters,
+                label: "Critters",
+                hint: "Little pixel visitors walk along the bottom of the window. Click, drag, or right-click them.",
+                group: "Critters",
+            },
+            SettingSpec {
+                kind: SettingKind::CrittersSize,
+                label: "Critter size",
+                hint: "How big the critters are drawn: small, medium or large",
+                group: "Critters",
+            },
+            SettingSpec {
+                kind: SettingKind::CrittersOften,
+                label: "Critters visit",
+                hint: "How often a critter turns up: rare, normal or busy",
+                group: "Critters",
             },
         ]),
     },
@@ -1562,6 +1593,15 @@ pub struct Config {
     /// SHOW TIPS: the one-line first-use tips ([`crate::learn::TIPS`]),
     /// each shown once. On by default, a config predating the key too.
     pub show_tips: bool,
+    /// CRITTERS: the overlay of little pixel visitors along the bottom of
+    /// either app's window. Off by default, a config predating the key too.
+    pub critters: bool,
+    /// How big the critters are drawn ([`CRITTER_SIZES`]). Read through
+    /// [`Config::critters_size_word`], so a word off the list is `medium`.
+    pub critters_size: String,
+    /// How often a critter visits ([`CRITTER_VISITS`]). Read through
+    /// [`Config::critters_often_word`], so a word off the list is `normal`.
+    pub critters_often: String,
     /// The tips already shown, by [`crate::learn::Tip::id`]: shared by
     /// both apps, so one seen in the terminal app is not shown again in
     /// the window. Left out of the file while empty. No settings row:
@@ -1796,6 +1836,9 @@ impl Default for Config {
             confirm_drag_move: true,
             quick_prompt_new_worktree: false,
             show_tips: true,
+            critters: false,
+            critters_size: CRITTER_SIZES[1].into(),
+            critters_often: CRITTER_VISITS[1].into(),
             tips_seen: BTreeSet::new(),
             tracked_settings_noticed: BTreeSet::new(),
             whats_new_seen: String::new(),
@@ -2071,6 +2114,26 @@ impl Config {
             .copied()
             .find(|w| w.eq_ignore_ascii_case(stored))
             .unwrap_or(DIFF_CONTEXTS[0])
+    }
+
+    /// `critters_size` as one of [`CRITTER_SIZES`].
+    pub fn critters_size_word(&self) -> &'static str {
+        let stored = self.critters_size.trim();
+        CRITTER_SIZES
+            .iter()
+            .copied()
+            .find(|w| w.eq_ignore_ascii_case(stored))
+            .unwrap_or(CRITTER_SIZES[1])
+    }
+
+    /// `critters_often` as one of [`CRITTER_VISITS`].
+    pub fn critters_often_word(&self) -> &'static str {
+        let stored = self.critters_often.trim();
+        CRITTER_VISITS
+            .iter()
+            .copied()
+            .find(|w| w.eq_ignore_ascii_case(stored))
+            .unwrap_or(CRITTER_VISITS[1])
     }
 
     /// `worktree_layout` says the compact LIST rather than the cards.
@@ -2936,6 +2999,9 @@ impl Config {
             SettingKind::ConfirmDragMove => on_off(self.confirm_drag_move).into(),
             SettingKind::ShowTips => on_off(self.show_tips).into(),
             SettingKind::QuickPromptNewWorktree => on_off(self.quick_prompt_new_worktree).into(),
+            SettingKind::Critters => on_off(self.critters).into(),
+            SettingKind::CrittersSize => self.critters_size_word().into(),
+            SettingKind::CrittersOften => self.critters_often_word().into(),
         }
     }
 
@@ -3117,6 +3183,17 @@ impl Config {
             }
             SettingKind::UsageStatusline => {
                 self.usage_statusline = !self.usage_statusline;
+            }
+            SettingKind::Critters => {
+                self.critters = !self.critters;
+            }
+            SettingKind::CrittersSize => {
+                let now = self.critters_size_word();
+                self.critters_size = cycle_choice(now, CRITTER_SIZES, step).into();
+            }
+            SettingKind::CrittersOften => {
+                let now = self.critters_often_word();
+                self.critters_often = cycle_choice(now, CRITTER_VISITS, step).into();
             }
         }
     }

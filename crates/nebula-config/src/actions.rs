@@ -242,6 +242,33 @@ pub enum Action {
     /// Merge a settings file in (`kete config import`), after a confirm
     /// saying what it changes.
     ImportSettings,
+    // 0.54/0.55: the editors, the copy verbs, wake-up and the critters,
+    // unbound by default like the menus' verbs above.
+    /// Open the folder or file in VS Code (or the VS Code family editor
+    /// detected), focusing a window already on it.
+    OpenInVscode,
+    /// Open the checkout's solution (or the file) in Visual Studio.
+    OpenInVisualStudio,
+    /// Snap the checkout's editor window to the half of the screen beside
+    /// Kete's.
+    DockEditor,
+    /// Show the folder or file in Explorer (Finder, the file manager).
+    RevealInExplorer,
+    /// Open the file with the app the system gives its type.
+    OpenWithDefault,
+    /// Open the file in Kete's own viewer.
+    OpenFileInKete,
+    /// Copy the thing's full path.
+    CopyPath,
+    /// Copy the file's or folder's path from its worktree's root.
+    CopyRelativePath,
+    /// Copy the checkout's branch name.
+    CopyBranch,
+    /// WHAKAOHO now: start the account's 5-hour window with one tiny
+    /// prompt.
+    WakeAccount,
+    /// The CRITTERS overlay on or off.
+    Critters,
 }
 
 /// What a verb acts on.
@@ -257,6 +284,11 @@ pub enum AppliesTo {
     /// A shell terminal (and, in the TUI, the pane's PTY).
     Terminal,
     Account,
+    /// A file in a worktree: a diff's file row, the tree browser's, a
+    /// finder's.
+    File,
+    /// A folder in a worktree.
+    Folder,
 }
 
 /// Where a verb means something.
@@ -1762,6 +1794,198 @@ pub const ACTIONS: &[ActionSpec] = &[
         surface: Surface::Both,
         desktop: &[],
     },
+    // 0.54/0.55, appended: the editors, where else a path opens, the copy
+    // verbs, wake-up and the critters. Unbound: the menus, `?` and the
+    // palette reach them, and a user may bind one.
+    ActionSpec {
+        action: Action::OpenInVscode,
+        id: "open_in_vscode",
+        label: "Open in VS Code",
+        hint: "Open the checkout, folder or file in VS Code (or the Insiders, VSCodium, Cursor or Windsurf install found), focusing a window already open on it; a file opens at its line",
+        group: "FILES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "vs code",
+        destructive: false,
+        applies_to: &[
+            AppliesTo::Worktree,
+            AppliesTo::Repo,
+            AppliesTo::Session,
+            AppliesTo::Folder,
+            AppliesTo::File,
+        ],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff, WorksIn::Overlay],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::OpenInVisualStudio,
+        id: "open_in_visual_studio",
+        label: "Open in Visual Studio",
+        hint: "Open the checkout's solution in Visual Studio (its folder when it has none), or the file in the instance already running; only where Visual Studio is installed",
+        group: "FILES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "visual studio",
+        destructive: false,
+        applies_to: &[
+            AppliesTo::Worktree,
+            AppliesTo::Repo,
+            AppliesTo::Session,
+            AppliesTo::File,
+        ],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff, WorksIn::Overlay],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::DockEditor,
+        id: "dock_editor",
+        label: "Dock editor beside Kete",
+        hint: "Snap the checkout's open editor window to the half of the screen beside Kete's window and fit Kete to the other half; the system's own snap keys undo it",
+        group: "FILES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "dock",
+        destructive: false,
+        applies_to: &[AppliesTo::Worktree, AppliesTo::Repo, AppliesTo::Session],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::RevealInExplorer,
+        id: "reveal_in_explorer",
+        label: "Show in Explorer",
+        hint: "Show the checkout, folder or file in Explorer (Finder on macOS, the file manager elsewhere)",
+        group: "FILES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "reveal",
+        destructive: false,
+        applies_to: &[
+            AppliesTo::Worktree,
+            AppliesTo::Repo,
+            AppliesTo::Session,
+            AppliesTo::Folder,
+            AppliesTo::File,
+        ],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff, WorksIn::Overlay],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::OpenWithDefault,
+        id: "open_with_default",
+        label: "Open with default app",
+        hint: "Open the file with the app the system gives its type",
+        group: "FILES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "open with",
+        destructive: false,
+        applies_to: &[AppliesTo::File],
+        works_in: &[WorksIn::Pane, WorksIn::Diff, WorksIn::Overlay],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::OpenFileInKete,
+        id: "open_file_in_kete",
+        label: "Open in Kete",
+        hint: "Open the file in Kete's own viewer",
+        group: "FILES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "view",
+        destructive: false,
+        applies_to: &[AppliesTo::File],
+        works_in: &[WorksIn::Pane, WorksIn::Diff, WorksIn::Overlay],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::CopyPath,
+        id: "copy_path",
+        label: "Copy path",
+        hint: "Copy the full path of the checkout, folder or file to the clipboard",
+        group: "FILES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "copy path",
+        destructive: false,
+        applies_to: &[
+            AppliesTo::Worktree,
+            AppliesTo::Repo,
+            AppliesTo::Session,
+            AppliesTo::Folder,
+            AppliesTo::File,
+        ],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff, WorksIn::Overlay],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::CopyRelativePath,
+        id: "copy_relative_path",
+        label: "Copy relative path",
+        hint: "Copy the file's or folder's path from its worktree's root to the clipboard",
+        group: "FILES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "copy relative",
+        destructive: false,
+        applies_to: &[AppliesTo::Folder, AppliesTo::File],
+        works_in: &[WorksIn::Pane, WorksIn::Diff, WorksIn::Overlay],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::CopyBranch,
+        id: "copy_branch",
+        label: "Copy branch name",
+        hint: "Copy the checkout's branch name to the clipboard",
+        // Beside the other copies, one Hotkeys section for them all.
+        group: "FILES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "copy branch",
+        destructive: false,
+        applies_to: &[AppliesTo::Worktree, AppliesTo::Session],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::WakeAccount,
+        id: "wake_account",
+        label: "Wake up now",
+        hint: "Whakaoho: send the account one tiny prompt on its cheapest model now, so its 5-hour window starts, and resets, sooner; it runs on your own subscription",
+        group: "ACCOUNTS",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "wake",
+        destructive: false,
+        applies_to: &[AppliesTo::Account],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Overlay],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::Critters,
+        id: "critters",
+        label: "Critters",
+        hint: "Turn the critters overlay on or off: little pixel visitors along the bottom of the window (Settings, Appearance has their size and how often they come)",
+        group: "GENERAL",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "critters",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Both,
+        desktop: &[],
+    },
 ];
 
 pub fn spec_at(index: usize) -> Option<&'static ActionSpec> {
@@ -2085,6 +2309,14 @@ pub const MENU_LABELS: &[(&str, Option<AppliesTo>, &str)] = &[
     ("toggle_full_screen", None, "Full screen"),
     ("accounts", None, "Accounts\u{2026}"),
     ("add_project", None, "Add project…"),
+    // Short, for the Open in and Copy submenus.
+    ("open_in_vscode", None, "VS Code"),
+    ("open_in_visual_studio", None, "Visual Studio"),
+    ("reveal_in_explorer", None, "Show in Explorer"),
+    ("copy_path", None, "Copy path"),
+    ("copy_relative_path", None, "Copy relative path"),
+    ("copy_branch", None, "Copy branch"),
+    ("dock_editor", None, "Dock beside Kete"),
 ];
 
 /// The words a menu row for verb `id` on a thing of kind `on` says.
@@ -2120,6 +2352,12 @@ pub const MENUS: &[(AppliesTo, &[&str])] = &[
         &[
             "activate",
             "follow_up",
+            "open_in_vscode",
+            "open_in_visual_studio",
+            "reveal_in_explorer",
+            "dock_editor",
+            "copy_path",
+            "copy_branch",
             "restart",
             "duplicate_session",
             "move_session",
@@ -2149,6 +2387,12 @@ pub const MENUS: &[(AppliesTo, &[&str])] = &[
             "git_diff",
             "open_worktree",
             "open_repo",
+            "open_in_vscode",
+            "open_in_visual_studio",
+            "reveal_in_explorer",
+            "dock_editor",
+            "copy_path",
+            "copy_branch",
             "switch_branch",
             "create_pull_request",
             "merge_pull_request",
@@ -2168,6 +2412,11 @@ pub const MENUS: &[(AppliesTo, &[&str])] = &[
             "toggle_run",
             "open_worktree",
             "open_repo",
+            "open_in_vscode",
+            "open_in_visual_studio",
+            "reveal_in_explorer",
+            "dock_editor",
+            "copy_path",
             "refresh_pull_requests",
             "focus_scope",
             "rename",
@@ -2178,6 +2427,33 @@ pub const MENUS: &[(AppliesTo, &[&str])] = &[
             "remove_project",
         ],
     ),
+    // A file's and a folder's rows in a worktree (a diff's file list, the
+    // tree, a finder); each app adds its own local rows after these (Diff
+    // this file, Mark reviewed, Expand all).
+    (
+        AppliesTo::Folder,
+        &[
+            "open_in_vscode",
+            "reveal_in_explorer",
+            "copy_path",
+            "copy_relative_path",
+        ],
+    ),
+    (
+        AppliesTo::File,
+        &[
+            "open_file_in_kete",
+            "open_in_vscode",
+            "open_in_visual_studio",
+            "open_with_default",
+            "reveal_in_explorer",
+            "copy_path",
+            "copy_relative_path",
+        ],
+    ),
+    // An account's own rows (Use as default, Enable, Log in again…) are
+    // each app's; the registry's verb is the wake-up.
+    (AppliesTo::Account, &["wake_account"]),
 ];
 
 /// The verbs a footer and the verb bar lead with, per kind, best first:
@@ -2575,6 +2851,8 @@ pub fn render_ts() -> String {
         AppliesTo::Session,
         AppliesTo::Terminal,
         AppliesTo::Account,
+        AppliesTo::File,
+        AppliesTo::Folder,
     ];
     let works = [
         WorksIn::Grid,
@@ -2804,7 +3082,28 @@ mod tests {
         // jump, the window's Ctrl+K is `command_palette`; `move_up` walks
         // the cursor where the window's reorders, `reorder_up`): the
         // window's key ids are their own namespace.
-        assert_eq!(ACTIONS.len(), 91);
+        assert_eq!(ACTIONS.len(), 102);
+        // The 0.54/0.55 slots, appended in this order and unbound.
+        let tail: Vec<&str> = ACTIONS[91..].iter().map(|s| s.id).collect();
+        assert_eq!(
+            tail,
+            [
+                "open_in_vscode",
+                "open_in_visual_studio",
+                "dock_editor",
+                "reveal_in_explorer",
+                "open_with_default",
+                "open_file_in_kete",
+                "copy_path",
+                "copy_relative_path",
+                "copy_branch",
+                "wake_account",
+                "critters",
+            ]
+        );
+        assert!(ACTIONS[91..]
+            .iter()
+            .all(|s| s.defaults.is_empty() && s.desktop.is_empty() && !s.destructive));
         for id in [
             "palette",
             "move_up",
@@ -2913,7 +3212,42 @@ mod tests {
             menu_label("subagents", AppliesTo::Session),
             "Subagents and session tree"
         );
-        assert!(menu_of(AppliesTo::Account).is_empty());
+        // A file's, a folder's and an account's menus: the registry's rows
+        // (each app adds its local ones after).
+        assert_eq!(menu_of(AppliesTo::Account), ["wake_account"]);
+        assert_eq!(
+            menu_of(AppliesTo::Folder),
+            [
+                "open_in_vscode",
+                "reveal_in_explorer",
+                "copy_path",
+                "copy_relative_path"
+            ]
+        );
+        assert_eq!(
+            menu_of(AppliesTo::File),
+            [
+                "open_file_in_kete",
+                "open_in_vscode",
+                "open_in_visual_studio",
+                "open_with_default",
+                "reveal_in_explorer",
+                "copy_path",
+                "copy_relative_path"
+            ]
+        );
+        assert_eq!(menu_label("open_in_vscode", AppliesTo::File), "VS Code");
+        assert_eq!(
+            menu_label("open_file_in_kete", AppliesTo::File),
+            "Open in Kete"
+        );
+        // The editor and copy verbs sit after the Open group of a
+        // checkout's menu, ahead of Switch branch.
+        let worktree = menu_of(AppliesTo::Worktree);
+        let at = |id: &str| worktree.iter().position(|i| *i == id).unwrap();
+        assert!(at("open_repo") < at("open_in_vscode"));
+        assert!(at("copy_branch") < at("switch_branch"));
+        assert!(!menu_of(AppliesTo::Repo).contains(&"copy_branch"));
         assert_eq!(
             primary_of(AppliesTo::Session)[..2],
             ["activate", "follow_up"]

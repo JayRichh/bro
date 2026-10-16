@@ -215,7 +215,8 @@ fn a_write_from_the_window_changes_one_key_and_keeps_the_rest() {
     assert_eq!(
         read(&path),
         json!({"future_key": {"a": 1}, "editor": "hx", "kanban": true,
-               "desktop": {"theme": "dark", "home": "board", "diff_mode": "side", "startup": "home"}})
+               "desktop": {"theme": "dark", "home": "board", "diff_mode": "side", "startup": "home",
+                           "editor_folder": "auto", "editor_file": "auto"}})
     );
     assert_eq!(read(&local), json!({"session_idle_timeout": "15m"}));
     assert!(set_in(&path, &local, &global("kanban"), &json!("sideways")).is_err());
@@ -407,4 +408,80 @@ fn the_account_rows_are_shared_and_the_policy_reads_them() {
     );
     assert_eq!(policy.spread, nebula_core::accounts::Spread::Failover);
     assert_eq!(policy.threshold, 80);
+}
+
+/// The critters are both apps': a Critters group on Appearance, not under
+/// "Terminal app", off by default; the window's editor preferences sit in
+/// an Editors group on its own tab.
+#[test]
+fn the_critters_rows_are_shared_and_the_editors_are_the_windows() {
+    let schema = export(&Config::default(), &DesktopPrefs::default(), &[]);
+    let look = schema
+        .tabs
+        .iter()
+        .find(|t| t.title == "Appearance")
+        .unwrap();
+    let group = look
+        .groups
+        .iter()
+        .find(|g| g.title == "Critters")
+        .expect("a Critters group");
+    assert!(!group.terminal);
+    let rows: Vec<(String, Value)> = group
+        .rows
+        .iter()
+        .map(|r| match &r.target {
+            Target::Global { key } => (key.clone(), r.value.clone()),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("critters".to_string(), json!(false)),
+            ("critters_size".to_string(), json!("medium")),
+            ("critters_often".to_string(), json!("normal")),
+        ]
+    );
+    let desktop = schema.tabs.iter().find(|t| t.id == "desktop").unwrap();
+    let editors = desktop
+        .groups
+        .iter()
+        .find(|g| g.title == "Editors")
+        .expect("an Editors group");
+    let keys: Vec<(&str, &Value)> = editors
+        .rows
+        .iter()
+        .map(|r| match &r.target {
+            Target::Desktop { key } => (key.as_str(), &r.value),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            ("editor_folder", &json!("auto")),
+            ("editor_file", &json!("auto"))
+        ]
+    );
+
+    let (_dir, path, local) = layers();
+    let global = |key: &str| Target::Global { key: key.into() };
+    set_in(&path, &local, &global("critters"), &json!(true)).unwrap();
+    set_in(&path, &local, &global("critters_size"), &json!("large")).unwrap();
+    assert!(set_in(&path, &local, &global("critters_often"), &json!("never")).is_err());
+    set_in(
+        &path,
+        &local,
+        &Target::Desktop {
+            key: "editor_file".into(),
+        },
+        &json!("kete"),
+    )
+    .unwrap();
+    let cfg = Config::load_at(&path, &local);
+    assert!(cfg.critters);
+    assert_eq!(cfg.critters_size_word(), "large");
+    assert_eq!(cfg.critters_often_word(), "normal");
+    assert_eq!(DesktopPrefs::load_at(&path, &local).editor_file, "kete");
 }

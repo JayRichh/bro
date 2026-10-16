@@ -20117,7 +20117,12 @@ fn hosts_click_on_a_row_connects_and_outside_closes() {
 /// Draw once so the modal writes back its hit-test rect, and return it.
 /// Every variant is inset from the frame, so (0, 0) is always outside.
 fn drawn_modal_area(app: &mut App) -> ratatui::layout::Rect {
-    let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
+    drawn_modal_area_in(app, 40)
+}
+
+/// [`drawn_modal_area`] in a frame `height` rows tall.
+fn drawn_modal_area_in(app: &mut App, height: u16) -> ratatui::layout::Rect {
+    let mut terminal = Terminal::new(TestBackend::new(140, height)).unwrap();
     terminal.draw(|f| ui::draw(f, app)).unwrap();
     let overlay = app.modals.overlay.as_ref().expect("no modal open");
     let area = crate::overlay_close::overlay_area(overlay);
@@ -20911,7 +20916,9 @@ fn click_outside_into_the_pane_focuses_and_locks_it() {
     app.nav.focus = Focus::Sessions;
     let mut out = Vec::new();
     press(&mut app, KeyCode::Char('?'), KeyModifiers::NONE, &mut out);
-    let modal = drawn_modal_area(&mut app);
+    // A session's verbs run past 40 rows since the editor and copy verbs
+    // joined its menu: a taller frame keeps the modal inset.
+    let modal = drawn_modal_area_in(&mut app, 60);
     // The modal is centred over the pane; its bottom-right cell is not.
     let pane = app.pane.term_area;
     let (x, y) = (pane.x + pane.width - 1, pane.y + pane.height - 1);

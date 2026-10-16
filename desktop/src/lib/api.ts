@@ -427,6 +427,10 @@ export interface DesktopPrefs {
   startup?: string;
   /** Folded overview groups: `repo:<id>`, `wt:<id>`. */
   collapsed?: string[];
+  /** What opens a folder: `auto`, `vscode`, `visual-studio` or `command`. */
+  editor_folder?: string;
+  /** What opens a file: `auto`, `vscode`, `visual-studio` or `kete`. */
+  editor_file?: string;
 }
 export interface Startup {
   view: string | null;
