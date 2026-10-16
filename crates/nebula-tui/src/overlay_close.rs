@@ -190,12 +190,8 @@ fn close_menu(app: &mut App) {
         *menu = *parent;
     }
     let back = crate::event_loop::menu_quick_return(menu).filter(|back| back.from_box);
-    // A verbs menu `?` opened over an overlay goes back to it, as on Esc.
-    let under = app
-        .modals
-        .verbs_under
-        .take()
-        .filter(|_| menu.is_over_overlay());
+    // A menu opened over an overlay goes back to it, as on Esc.
+    let under = app.modals.verbs_under.take();
     app.modals.overlay = under.map(|o| *o);
     if let Some(back) = back {
         crate::quick_prompt::reopen(app, back.launch, &back.text);

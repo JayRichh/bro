@@ -493,15 +493,84 @@ pub enum MenuAction {
     /// accounts'): the overlay put back as it was, then this key pressed
     /// in it.
     OverlayKey(crossterm::event::KeyCode, crossterm::event::KeyModifiers),
+    /// The same with several keys, pressed in turn: a row that is a key
+    /// and then its answer (Azure DevOps' `v` and the vote's letter, `s`
+    /// that arms a task's start and `s` again that starts it).
+    OverlayKeys(Vec<(crossterm::event::KeyCode, crossterm::event::KeyModifiers)>),
+    /// A row that opens a submenu of `items`, drawn `title ▸`: one of the
+    /// menu matrix's folded groups (Open in, Copy, Pull request, Move…), a
+    /// card's checkout, the verbs menu's More. Enter, → or a click opens
+    /// it in the parent's place (drill-in); it never runs anything itself.
+    Submenu {
+        title: String,
+        items: Vec<MenuItem>,
+    },
+    /// Registry verb `action` on `target`, addressed by the row rather
+    /// than the cursor: the verbs with no older action of their own (Mark
+    /// seen, Archive done sessions, the editors, wake-up) and every verb on
+    /// a file, a folder or an account. One dispatcher runs them
+    /// (`event_loop::verbs::run_verb`), however the row was reached.
+    Verb {
+        action: crate::keymap::Action,
+        target: crate::event_loop::verbs::Target,
+    },
+    /// Copy `text` to the clipboard (OSC 52 where the local tool is
+    /// missing or the app runs remote), flashing `Copied <text>`.
+    Copy(String),
+    /// Land where a `/` palette row lands: a worktree's band, a pull
+    /// request's row. The connections the menus draw between a pull
+    /// request, a branch, a worktree and its sessions.
+    Jump(crate::palette::PaletteTarget),
+    /// Check `branch` out in a worktree of its own in `project`, cut from
+    /// `remote` when only the remote has it: what Enter on an Azure DevOps
+    /// branch does, from a pull request's menu or a branch's.
+    CheckoutBranch {
+        project: ProjectId,
+        branch: String,
+        remote: Option<String>,
+    },
+    /// A file of checkout `root` staged, unstaged, or (after a confirm
+    /// naming it) its unstaged changes thrown away: the diff's file menu.
+    FileGit {
+        root: PathBuf,
+        rel: String,
+        op: FileOp,
+    },
+}
+
+/// What a diff file row's git row does to the file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileOp {
+    /// `git add`: all of it, untracked or not.
+    Stage,
+    /// `git restore --staged`: out of the index, the worktree kept.
+    Unstage,
+    /// `git restore`: the worktree's changes not staged yet thrown away,
+    /// once the confirm naming the file is answered.
+    Discard,
 }
 
 /// The first row a menu of `len` rows draws in `visible` of them, so
 /// the hovered row is on screen: the draw and the click's hit test agree.
 pub fn menu_scroll(hover: usize, len: usize, visible: usize) -> usize {
+    menu_window(0, hover, len, visible)
+}
+
+/// [`menu_scroll`] from a window already at `scroll`: it moves only as
+/// far as it must to keep `hover` on screen, so a row the pointer lights
+/// stays under the pointer.
+pub fn menu_window(scroll: usize, hover: usize, len: usize, visible: usize) -> usize {
     if visible == 0 || len <= visible {
         return 0;
     }
-    (hover + 1).saturating_sub(visible).min(len - visible)
+    let scroll = scroll.min(len - visible);
+    if hover < scroll {
+        hover
+    } else if hover >= scroll + visible {
+        (hover + 1 - visible).min(len - visible)
+    } else {
+        scroll
+    }
 }
 
 /// Which submenu → (right arrow) opens from a menu row.
@@ -511,6 +580,8 @@ pub enum SubmenuKind {
     Models,
     /// Effort list, offered once a model row is highlighted.
     Efforts,
+    /// A [`MenuAction::Submenu`]'s own rows.
+    Rows,
 }
 
 impl MenuAction {
@@ -521,6 +592,7 @@ impl MenuAction {
     /// effort variants, like `auto`).
     pub fn submenu(&self) -> Option<SubmenuKind> {
         match self {
+            MenuAction::Submenu { .. } => Some(SubmenuKind::Rows),
             MenuAction::NewAgentOfKind {
                 kind,
                 custom,
@@ -547,7 +619,7 @@ impl MenuAction {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MenuItem {
     pub label: String,
     pub action: MenuAction,
@@ -661,6 +733,10 @@ pub struct ContextMenu {
     pub hover: usize,
     /// Set during draw for click hit-testing.
     pub area: Rect,
+    /// The first row drawn, written back during draw ([`menu_window`]): a
+    /// long menu's window moves only as far as its hover needs, and the
+    /// pointer's hit test reads the rows where they are on screen.
+    pub scroll: usize,
     /// The menu ← returns to when this one is a submenu.
     pub parent: Option<Box<ContextMenu>>,
     /// Type-ahead over the rows — set on the MODEL / EFFORT submenus, where
@@ -688,8 +764,24 @@ impl ContextMenu {
         // The VERBS MENU's **All keys…** stays its last row whatever is
         // typed: the way on when the verb wanted is not in the list.
         let pinned = |i: &MenuItem| matches!(i.action, MenuAction::AllKeys);
-        let (rows, tail): (Vec<&MenuItem>, Vec<&MenuItem>) =
-            filter.all.iter().partition(|i| !pinned(i));
+        // A query searches inside the submenus too: their rows, by the
+        // path to them (`Open in › VS Code`), so the keyboard loses nothing
+        // to the fold, and Enter runs the hit itself.
+        let searching = !query.trim().is_empty();
+        let mut rows: Vec<MenuItem> = Vec::new();
+        let mut tail: Vec<MenuItem> = Vec::new();
+        for item in &filter.all {
+            match &item.action {
+                _ if pinned(item) => tail.push(item.clone()),
+                MenuAction::Submenu { title, items } if searching => {
+                    rows.extend(items.iter().map(|child| MenuItem {
+                        label: format!("{title} \u{203a} {}", child.label),
+                        ..child.clone()
+                    }))
+                }
+                _ => rows.push(item.clone()),
+            }
+        }
         let labels: Vec<&str> = rows.iter().map(|i| i.label.as_str()).collect();
         let ranked = crate::fuzzy::rank(query, labels.iter().copied());
         if ranked.is_empty() {
@@ -698,7 +790,7 @@ impl ContextMenu {
         let items: Vec<MenuItem> = ranked
             .iter()
             .map(|(i, _)| rows[*i].clone())
-            .chain(tail.into_iter().cloned())
+            .chain(tail)
             .collect();
         self.hover = if query.trim().is_empty() {
             items
@@ -735,15 +827,6 @@ impl ContextMenu {
 
     pub fn has_filter_text(&self) -> bool {
         !self.filter_query().is_empty()
-    }
-
-    /// Is this a VERBS MENU `?` opened over another overlay (the diff's,
-    /// the accounts')? Its rows press that overlay's keys, and closing it
-    /// puts that overlay back (`ModalState::verbs_under`).
-    pub fn is_over_overlay(&self) -> bool {
-        self.items
-            .iter()
-            .any(|i| matches!(i.action, MenuAction::OverlayKey(..)))
     }
 
     /// Is this the LAUNCHER VIEW's PROJECT DROPDOWN? Its rows are
@@ -974,6 +1057,13 @@ pub enum PendingAction {
     /// (every setting and every hotkey), then reopen the overlay on them.
     ResetSettings,
     Quit,
+    /// A diff file menu's **Discard changes…**: the worktree's changes to
+    /// `rel` not staged yet thrown away (`git restore`). Either answer
+    /// puts the diff it was asked from back (`ModalState::verbs_under`).
+    DiscardFile {
+        root: std::path::PathBuf,
+        rel: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -4784,9 +4874,13 @@ impl Default for ChromeState {
 
 pub struct ModalState {
     pub overlay: Option<Overlay>,
-    /// The overlay a VERBS MENU (`?`) was opened over — the diff's, the
-    /// accounts' — put back when the menu goes, and before its row's key
-    /// is pressed in it (`MenuAction::OverlayKey`).
+    /// The overlay a menu was opened over — `?` or a right-click on a row
+    /// of the diff, the accounts, the tree, Azure DevOps… — put back when
+    /// the menu goes, and before its row's key is pressed in it
+    /// (`MenuAction::OverlayKey`). Set only by the opening over an overlay
+    /// (`event_loop::verbs::open_over`) and taken by every way the menu
+    /// goes (Esc, a click off it, a row chosen, the unlock), so it never
+    /// comes back under a later menu.
     pub verbs_under: Option<Box<Overlay>>,
     /// When a modal's BUTTON was last clicked (a confirm's `[Enter/y]`, a
     /// prompt's `[Esc]`). A button click inside the double-click window

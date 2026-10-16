@@ -295,6 +295,7 @@ pub(crate) fn open_kind_picker(app: &mut App, picker: KindPicker) {
         at: None,
         hover,
         area: ratatui::layout::Rect::default(),
+        scroll: 0,
         parent: None,
         filter: None,
     }));

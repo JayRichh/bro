@@ -173,6 +173,11 @@ pub(crate) fn scope_for(app: &App, t: &super::verbs::Target) -> Option<Scope> {
             .find(|x| &x.id == id)?
             .worktree_id
             .clone(),
+        // A file, a folder, an account and the background are no place on
+        // the bench to narrow to.
+        Target::File { .. } | Target::Folder { .. } | Target::Account(_) | Target::Global => {
+            return None
+        }
     };
     let w = app.tree.worktrees.iter().find(|x| x.id == worktree)?;
     Some(Scope {

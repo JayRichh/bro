@@ -220,6 +220,14 @@ fn target(app: &mut App) -> Option<(nebula_core::Worktree, PathBuf, String)> {
         app.chrome.flash = Some("select a worktree first".into());
         return None;
     };
+    target_in(app, worktree)
+}
+
+/// [`target`] for checkout `worktree`, wherever the cursor is.
+fn target_in(
+    app: &mut App,
+    worktree: nebula_core::Worktree,
+) -> Option<(nebula_core::Worktree, PathBuf, String)> {
     let Some(port) = app.tree.browse_port(&worktree.id) else {
         app.chrome.flash = Some(format!(
             "nothing is listening in {} yet: start its dev server (PORT is set in its sessions)",
@@ -242,6 +250,29 @@ pub(crate) fn open_chooser(app: &mut App) {
     let Some((_, repo, url)) = target(app) else {
         return;
     };
+    chooser(app, repo, url);
+}
+
+/// The same chooser for checkout `worktree`'s dev server, whichever card
+/// the cursor is on: a menu's **Open in ▸ Browser** on a card, a band or
+/// a repo (its root checkout).
+pub(crate) fn open_chooser_for(app: &mut App, worktree: &nebula_core::WorktreeId) {
+    let Some(w) = app
+        .tree
+        .worktrees
+        .iter()
+        .find(|w| &w.id == worktree)
+        .cloned()
+    else {
+        return;
+    };
+    let Some((_, repo, url)) = target_in(app, w) else {
+        return;
+    };
+    chooser(app, repo, url);
+}
+
+fn chooser(app: &mut App, repo: PathBuf, url: String) {
     let cfg = crate::config::Config::load();
     let last = cfg.project(&repo).browser;
     let browsers = detect();
@@ -277,6 +308,7 @@ pub(crate) fn open_chooser(app: &mut App) {
         at: None,
         hover,
         area: ratatui::layout::Rect::default(),
+        scroll: 0,
         parent: None,
         filter: None,
     }));

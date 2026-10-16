@@ -63,6 +63,16 @@ pub(crate) fn open(app: &mut App) {
     app.chrome.dirty = true;
 }
 
+/// **Account details…**: the overlay with its cursor on account `key`.
+pub(crate) fn open_on(app: &mut App, key: &str) {
+    open(app);
+    if let Some(Overlay::Accounts(view)) = &mut app.modals.overlay {
+        if let Some(i) = view.rows.iter().position(|r| r.key == key) {
+            view.cursor = i;
+        }
+    }
+}
+
 /// Rebuild the open overlay's rows (a push, an edit), keeping the cursor.
 pub(crate) fn refresh(app: &mut App) {
     if !matches!(app.modals.overlay, Some(Overlay::Accounts(_))) {

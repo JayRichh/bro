@@ -276,6 +276,18 @@ fn selected_pr(app: &App) -> Option<OpenPr> {
     cursor_index(view, &list).and_then(|i| list.get(i).cloned())
 }
 
+/// A right-click's first half on a row: the cursor onto it, as a left
+/// click puts it, and the pull request there for its menu.
+pub(crate) fn select_at(app: &mut App, pos: Position) -> Option<OpenPr> {
+    let Some(Overlay::PullRequests(view)) = &app.modals.overlay else {
+        return None;
+    };
+    let row = view.list.hit(pos)?;
+    let index = view.list.matches.get(row)?.item;
+    select(app, index as i64);
+    selected_pr(app)
+}
+
 /// The URL of the pull request under the cursor, for the browser.
 fn selected_url(app: &App) -> Option<String> {
     selected_pr(app).map(|pr| pr.url)

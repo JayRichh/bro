@@ -936,6 +936,26 @@ pub(crate) fn open_file_link(app: &mut App, path: &str, line: Option<u64>) {
     spawn_editor_modal(app, &editor, &root, &file, line.unwrap_or(1), size);
 }
 
+/// **Open in Kete** on a file row: the file in this app's own reader —
+/// the FILE TABS for markdown, the editor modal for the rest — at its
+/// first line, from the checkout the row is in rather than the pane's.
+pub(crate) fn open_file_in(app: &mut App, root: &std::path::Path, rel: &str) {
+    if !root.join(rel).is_file() {
+        app.chrome.flash = Some(format!("file not found: {rel}"));
+        return;
+    }
+    if crate::markdown::is_markdown_path(rel) {
+        crate::file_tabs::open(app, root.to_path_buf(), vec![root.join(rel)]);
+        return;
+    }
+    // A menu's row leaves nothing up to come back to: the editor takes
+    // the screen.
+    app.modals.overlay = None;
+    let editor = crate::config::Config::load().editor_command();
+    let size = vim_size_guess(app);
+    spawn_editor_modal(app, &editor, root, rel, 1, size);
+}
+
 /// Worktree root of the attached agent or shell; falls back to the
 /// selected worktree when nothing is attached (or it isn't in the tree yet).
 pub(crate) fn attached_worktree_root(app: &App) -> Option<std::path::PathBuf> {

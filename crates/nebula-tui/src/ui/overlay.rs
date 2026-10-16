@@ -15,6 +15,14 @@ pub(super) fn draw_overlay(f: &mut Frame, app: &mut App) {
         Some(ModalUnder::PullRequests(view)) => crate::pr_modal::draw(f, app, &view, th, true),
         None => {}
     }
+    // A menu opened over an overlay (`?`, or a right-click on one of its
+    // rows) stands on it: the diff, the tree or the accounts stay on
+    // screen under the menu, so the row it was opened on is still seen.
+    if matches!(overlay, Overlay::Menu(_)) {
+        if let Some(under) = app.modals.verbs_under.as_deref().cloned() {
+            under.draw(f, app);
+        }
+    }
     overlay.draw(f, app);
 }
 
@@ -176,8 +184,14 @@ fn draw_menu_overlay(f: &mut Frame, app: &mut App, menu: crate::app::ContextMenu
     // wider than the rows leaves no ragged gap beside them.
     let row_w = inner.width as usize;
     let label_w = row_w.saturating_sub(if any_submenu { 4 } else { 2 } + key_col);
-    // A list taller than the screen scrolls with its hover.
-    let skip = crate::app::menu_scroll(menu.hover, menu.items.len(), inner.height as usize);
+    // A list taller than the screen scrolls with its hover, only as far
+    // as the hover needs: a row lit by the pointer stays under it.
+    let skip = crate::app::menu_window(
+        menu.scroll,
+        menu.hover,
+        menu.items.len(),
+        inner.height as usize,
+    );
     for (i, item) in menu.items.iter().enumerate().skip(skip) {
         let Some(row) = row_rect(inner, i - skip) else {
             break;
@@ -217,9 +231,10 @@ fn draw_menu_overlay(f: &mut Frame, app: &mut App, menu: crate::app::ContextMenu
             row,
         );
     }
-    // Record the drawn area for click hit-testing.
+    // Record the drawn area and window for the pointer's hit test.
     if let Some(Overlay::Menu(m)) = &mut app.modals.overlay {
         m.area = area;
+        m.scroll = skip;
     }
 }
 

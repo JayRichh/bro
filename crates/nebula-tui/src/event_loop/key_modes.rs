@@ -437,7 +437,16 @@ fn handle_global_action(
         | Action::SweepWorktrees
         | Action::CreatePullRequest
         | Action::MergePullRequest
-        | Action::FocusScope => super::verbs::run_on_selection(app, action, out),
+        | Action::FocusScope
+        // The menus' bulk verbs and the copies (lane/tui-menus): on the
+        // selection as its menu row runs them, with nothing selected on
+        // what the board shows.
+        | Action::MarkSeen
+        | Action::ArchiveDone
+        | Action::CopyPath
+        | Action::CopyRelativePath
+        | Action::CopyBranch
+        | Action::CopyPrUrl => super::verbs::run_on_selection(app, action, out),
         // The 0.54/0.55 verbs whose lanes have not landed yet: a word in
         // the footer, never a dead key.
         Action::OpenInVscode
@@ -446,17 +455,11 @@ fn handle_global_action(
         | Action::RevealInExplorer
         | Action::OpenWithDefault
         | Action::OpenFileInKete
-        | Action::CopyPath
-        | Action::CopyRelativePath
-        | Action::CopyBranch
         | Action::WakeAccount
         | Action::Critters => super::verbs::pending_verb(app, action),
-        // The menu matrix's verbs, for the menu lanes (and lane/wake's
-        // schedule) to route: their own arm, so each lane takes its ids
-        // out without touching the one above.
-        Action::MarkSeen | Action::CopyPrUrl | Action::ArchiveDone | Action::WakeSchedule => {
-            super::verbs::pending_verb(app, action)
-        }
+        // lane/wake's schedule: its own arm, so that lane takes the id out
+        // without touching the one above.
+        Action::WakeSchedule => super::verbs::pending_verb(app, action),
         // `Shift+←` / `Shift+→` on the board: the card onto the next lane.
         Action::MoveCardLeft => board::move_card(app, -1, out),
         Action::MoveCardRight => board::move_card(app, 1, out),

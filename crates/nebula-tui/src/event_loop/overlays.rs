@@ -24,7 +24,7 @@ pub(crate) fn handle_overlay_key(app: &mut App, key: KeyEvent, out: &mut Vec<Cli
     // overlay's verbs, each with its key, the overlay kept beneath.
     if key.code == KeyCode::Char('?')
         && !key.modifiers.contains(KeyModifiers::CONTROL)
-        && super::verbs::open_over_overlay(app)
+        && super::menus::open_over_overlay(app)
     {
         return;
     }
@@ -212,7 +212,7 @@ fn handle_menu_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) {
                     .any(|i| matches!(i.action, MenuAction::AllKeys)) =>
             {
                 let under = app.modals.verbs_under.take();
-                app.modals.overlay = under.filter(|_| menu.is_over_overlay()).map(|o| *o);
+                app.modals.overlay = under.map(|o| *o);
             }
             // Type-ahead in the MODEL / EFFORT submenus: letters narrow the
             // rows (so ↑/↓ move there, not j/k), Backspace widens, and Esc
@@ -248,7 +248,7 @@ fn handle_menu_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) {
                     // to it; any other menu leaves nothing behind.
                     _ => {
                         let under = app.modals.verbs_under.take();
-                        app.modals.overlay = under.filter(|_| menu.is_over_overlay()).map(|o| *o);
+                        app.modals.overlay = under.map(|o| *o);
                     }
                 },
             },
@@ -256,12 +256,11 @@ fn handle_menu_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) {
                 menu.hover = (menu.hover + 1).min(menu.items.len() - 1)
             }
             KeyCode::Char('k') | KeyCode::Up => menu.hover = menu.hover.saturating_sub(1),
-            // → expands a row marked ▸ into its submenu; ← returns.
+            // → expands a row marked ▸ into its submenu; ← returns. (In a
+            // menu that filters as you type, `l` and `h` are letters: the
+            // arrows alone open and close there.)
             KeyCode::Char('l') | KeyCode::Right => {
-                if let Some(mut sub) = build_submenu(&menu.items[menu.hover]) {
-                    sub.parent = Some(Box::new(menu.clone()));
-                    *menu = sub;
-                }
+                open_submenu(menu);
             }
             KeyCode::Char('h') | KeyCode::Left => {
                 if let Some(parent) = menu.parent.take() {
@@ -274,6 +273,20 @@ fn handle_menu_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) {
             // Claude MODEL / EFFORT lists behind it (`→`, or the box's
             // `^O`). Every other menu leaves it untouched.
             KeyCode::Tab if menu.toggle_hovered_claude_cloud() => {}
+            // Enter on a submenu's `▸` row opens it; it never runs
+            // anything. (A new-session harness or model row still
+            // launches with the defaults, as it always has.)
+            KeyCode::Enter
+                if matches!(
+                    menu.items.get(menu.hover).map(|i| &i.action),
+                    Some(MenuAction::Submenu { .. })
+                ) =>
+            {
+                open_submenu(menu);
+            }
+            // Home and End jump to the first and last row.
+            KeyCode::Home => menu.hover = 0,
+            KeyCode::End => menu.hover = menu.items.len().saturating_sub(1),
             KeyCode::Enter => {
                 let hover = menu.hover;
                 activate::menu_row(app, hover, out);
@@ -505,8 +518,12 @@ fn handle_confirm_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>
                     } => Some((*index, worktree.clone(), quick.clone())),
                     _ => None,
                 };
+                // A file's discard kept: back to the diff it was asked from.
+                let to_diff = matches!(confirm.action, PendingAction::DiscardFile { .. });
                 app.modals.overlay = None;
-                if to_settings {
+                if to_diff {
+                    app.modals.overlay = app.modals.verbs_under.take().map(|o| *o);
+                } else if to_settings {
                     reopen_settings(app);
                 } else if let Some((index, worktree, quick)) = to_presets {
                     crate::preset_overlays::reopen_presets_list(

@@ -191,8 +191,10 @@ fn legacy_repo(app: &App, p: &ProjectId) -> Vec<MenuAction> {
     items
 }
 
+/// Every row of `legacy` is still a row of `t`'s menu, at its top or in
+/// one of its submenus.
 fn assert_kept(app: &App, t: &Target, legacy: Vec<MenuAction>) {
-    let menu = verbs::menu_for(app, t);
+    let menu = verbs::flat(&verbs::menu_for(app, t));
     for want in legacy {
         assert!(
             menu.iter().any(|i| i.action == want),
@@ -264,12 +266,15 @@ fn menus_leave_out_what_means_nothing_there() {
 }
 
 /// The same verb says the same words in both apps: the registry's menu
-/// labels, the card's checkout rows named as the checkout's where the
-/// card has its own.
+/// labels, the card's checkout rows (in its `Worktree feat ▸`) named as
+/// the checkout's where the card has its own.
 #[test]
 fn menu_rows_take_the_registrys_words_and_show_their_keys() {
     let app = bench();
-    let menu = verbs::menu_for(&app, &Target::Session(AgentId("a3".into())));
+    let menu = verbs::flat(&verbs::menu_for(
+        &app,
+        &Target::Session(AgentId("a3".into())),
+    ));
     let label = |a: MenuAction| {
         menu.iter()
             .find(|i| i.action == a)
@@ -295,9 +300,11 @@ fn menu_rows_take_the_registrys_words_and_show_their_keys() {
         label(MenuAction::DeleteAgent(AgentId("a3".into()))),
         "Delete\u{2026}"
     );
+    // A terminal: Open, Copy path, Rename…, Close terminal…, its checkout.
     let term = verbs::menu_for(&app, &Target::Terminal(TerminalId("t1".into())));
-    assert_eq!(term[2].label, "Close terminal\u{2026}");
-    assert!(term[2].destructive);
+    assert_eq!(term[3].label, "Close terminal\u{2026}");
+    assert!(term[3].destructive);
+    assert_eq!(term[4].label, "Checkout main");
     let repo = verbs::menu_for(&app, &Target::Repo(ProjectId("p1".into())));
     assert!(repo.iter().any(|i| i.label == "Remove from Kete\u{2026}"));
     // Every registry row carries its verb, so the draw shows its key.
@@ -318,6 +325,7 @@ fn menu_rows_take_the_registrys_words_and_show_their_keys() {
         at: Some((2, 2)),
         hover: 0,
         area: ratatui::layout::Rect::default(),
+        scroll: 0,
         parent: None,
         filter: None,
     }));
@@ -359,10 +367,11 @@ fn question_mark_opens_the_selections_verbs() {
     assert!(menu.title.as_deref().unwrap().contains("agent-1"));
     assert!(menu.filter.is_some(), "type to narrow");
     assert!(menu.items.iter().any(|i| i.verb == Some(Action::Archive)));
-    // The rest of what applies, past the card's menu: a comment on its
-    // pull request, its subagents.
-    assert!(menu
-        .items
+    // The rest of what applies, past the card's menu, under one `More ▸`
+    // ahead of All keys: a comment on its pull request, its subagents.
+    let more = &menu.items[menu.items.len() - 2];
+    assert_eq!(more.label, "More");
+    assert!(verbs::flat(std::slice::from_ref(more))
         .iter()
         .any(|i| i.action == MenuAction::Run(Action::Subagents)));
     assert_eq!(menu.items.last().unwrap().action, MenuAction::AllKeys);
@@ -746,9 +755,11 @@ fn the_panels_footer_leads_with_the_registrys_verbs() {
     });
 }
 
-/// The 0.54/0.55 verbs ahead of their lanes: the editor and copy rows
-/// sit in a card's menu after its Open group, and running one (a key, a
-/// row, the palette) says it is coming rather than doing nothing.
+/// The 0.54/0.55 verbs ahead of their lanes: the editor rows sit in a
+/// card's `Open in ▸` after its own verbs, the copies in `Copy ▸` before
+/// its changes; an editor's, wake-up's and the critters' (a key, a row, the
+/// palette) still say they are coming, while the menus' own verbs and the
+/// copies now act.
 #[test]
 fn the_new_verbs_have_rows_and_say_they_are_coming() {
     let mut app = bench();
@@ -766,18 +777,20 @@ fn the_new_verbs_have_rows_and_say_they_are_coming() {
             .position(|x| *x == l)
             .unwrap_or_else(|| panic!("{l}: {labels:?}"))
     };
-    assert!(pos("Follow-up prompt\u{2026}") < pos("Open in VS Code"));
-    assert!(pos("Open in VS Code") < pos("Open in Visual Studio"));
-    assert!(pos("Copy branch name") < pos("Restart agent"));
-    assert_eq!(labels.iter().filter(|l| **l == "Copy path").count(), 1);
+    assert!(pos("Follow-up prompt\u{2026}") < pos("Open in"));
+    assert!(pos("Open in") < pos("Copy"));
+    assert!(pos("Copy") < pos("Restart agent"));
+    let flat = verbs::flat(&menu);
+    let words: Vec<&str> = flat.iter().map(|i| i.label.as_str()).collect();
+    assert!(words.contains(&"VS Code"), "{words:?}");
+    assert_eq!(
+        flat.iter()
+            .filter(|i| i.verb == Some(Action::CopyPath))
+            .count(),
+        1
+    );
     let mut out = Vec::new();
-    for action in [
-        Action::OpenInVscode,
-        Action::CopyPath,
-        Action::Critters,
-        Action::MarkSeen,
-        Action::ArchiveDone,
-    ] {
+    for action in [Action::OpenInVscode, Action::Critters, Action::WakeSchedule] {
         app.chrome.flash = None;
         run_action(&mut app, action, &mut out);
         let label = crate::keymap::spec_of(action).unwrap().label;
@@ -786,13 +799,18 @@ fn the_new_verbs_have_rows_and_say_they_are_coming() {
             Some(format!("{label}: coming in this release").as_str())
         );
     }
+    // The copy is the card's checkout's folder.
+    app.chrome.flash = None;
+    run_action(&mut app, Action::CopyPath, &mut out);
+    let path = verbs::native(&worktree(&app, "w1").path);
+    assert_eq!(app.chrome.flash, Some(format!("Copied {path}")));
     assert!(out.is_empty(), "nothing sent: {out:?}");
 }
 
 /// The menu matrix's rows show only where they can act: Mark seen on an
 /// unread card, a pull request's rows with one, the dev server while it
-/// listens, a repo's remote lists by host, Archive done with a finished
-/// session already read.
+/// listens, a repo's remote lists by host (its submenu titled by it),
+/// Archive done with a finished session already read.
 #[test]
 fn the_matrix_rows_follow_their_state() {
     let mut app = bench();
@@ -809,6 +827,16 @@ fn the_matrix_rows_follow_their_state() {
             .collect()
     };
     let has = |app: &App, t: &Target, l: &str| labels(app, t).iter().any(|x| x == l);
+    // A verb anywhere in the menu, folded or not: the card's own rows,
+    // not its checkout's submenu, for a card.
+    let has_verb = |app: &App, t: &Target, v: Action| {
+        let menu = verbs::menu_for(app, t);
+        let own: Vec<MenuItem> = match t {
+            Target::Session(_) => menu[..menu.len() - 1].to_vec(),
+            _ => menu,
+        };
+        verbs::flat(&own).iter().any(|i| i.verb == Some(v))
+    };
     let card = Target::Session(a1.clone());
     let root = Target::Worktree(WorktreeId("w1".into()));
     let repo = Target::Repo(ProjectId("p1".into()));
@@ -821,7 +849,7 @@ fn the_matrix_rows_follow_their_state() {
         }
     };
     set(&mut app, false);
-    assert!(!has(&app, &card, "Mark seen"));
+    assert!(!has_verb(&app, &card, Action::MarkSeen));
     assert!(!has(&app, &root, "Mark all seen"));
     assert!(
         has(&app, &root, "Archive done sessions\u{2026}"),
@@ -836,13 +864,13 @@ fn the_matrix_rows_follow_their_state() {
     // No pull request on the checkout: no link to copy, nothing to
     // comment on, no Open pull request in its menu.
     for t in [&card, &root] {
-        assert!(!has(&app, t, "Copy pull request link"), "{t:?}");
-        assert!(!has(&app, t, "Comment on pull request\u{2026}"), "{t:?}");
+        assert!(!has_verb(&app, t, Action::CopyPrUrl), "{t:?}");
+        assert!(!has_verb(&app, t, Action::CommentPullRequest), "{t:?}");
     }
-    assert!(!has(&app, &root, "Open pull request"));
+    assert!(!has_verb(&app, &root, Action::OpenPullRequest));
 
-    // The dev server only while something listens.
-    assert!(!has(&app, &card, "Open localhost in a browser"));
+    // The dev server only while something listens, by its port.
+    assert!(!has_verb(&app, &card, Action::OpenInBrowser));
     app.tree.ports.insert(
         WorktreeId("w1".into()),
         nebula_core::ports::WorktreePorts {
@@ -851,14 +879,25 @@ fn the_matrix_rows_follow_their_state() {
             live: vec![5173],
         },
     );
-    assert!(has(&app, &card, "Open localhost in a browser"));
-    assert!(has(&app, &root, "Open localhost in a browser"));
+    assert!(has_verb(&app, &card, Action::OpenInBrowser));
+    assert!(has_verb(&app, &root, Action::OpenInBrowser));
+    let browser = verbs::flat(&verbs::menu_for(&app, &root))
+        .into_iter()
+        .find(|i| i.verb == Some(Action::OpenInBrowser))
+        .unwrap();
+    assert_eq!(browser.label, "Browser \u{b7} localhost:5173");
 
-    // A repo's lists by host.
+    // A repo's lists by host, under its host's name.
     app.desk.ado_remote.insert(ProjectId("p1".into()), false);
-    assert!(!has(&app, &repo, "Azure DevOps"));
-    assert!(has(&app, &repo, "GitHub pull requests"));
+    assert!(!has_verb(&app, &repo, Action::Ado));
+    assert!(has_verb(&app, &repo, Action::PullRequests));
+    assert!(has(&app, &repo, "GitHub"), "{:?}", labels(&app, &repo));
     app.desk.ado_remote.insert(ProjectId("p1".into()), true);
-    assert!(has(&app, &repo, "Azure DevOps"));
-    assert!(!has(&app, &repo, "GitHub issues"));
+    assert!(has_verb(&app, &repo, Action::Ado));
+    assert!(!has_verb(&app, &repo, Action::Issues));
+    assert!(
+        has(&app, &repo, "Azure DevOps"),
+        "{:?}",
+        labels(&app, &repo)
+    );
 }

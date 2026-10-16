@@ -194,6 +194,7 @@ pub fn open_picker(app: &mut App, id: AgentId) {
         at: None,
         hover: 0,
         area: ratatui::layout::Rect::default(),
+        scroll: 0,
         parent: None,
         filter: None,
     }));

@@ -29,15 +29,35 @@ use nebula_core::{AgentId, ClientRequest, SessionRef, WorktreeId};
 
 /// A CONTEXT MENU row — Enter on the hovered row, a click on any: the menu
 /// goes and the row's action runs. A row that is not there (a click on a
-/// blank line) does nothing.
+/// blank line) does nothing. A `▸` row of a submenu opens it in the menu's
+/// place and runs nothing. A menu standing on an overlay (the diff's, the
+/// accounts'…) puts the overlay back first for a row that leaves the user
+/// where they were — a copy, a stage, the overlay's own key — and lets it
+/// go for a row that goes somewhere else.
 pub(super) fn menu_row(app: &mut App, index: usize, out: &mut Vec<ClientRequest>) {
-    let Some(Overlay::Menu(menu)) = &app.modals.overlay else {
+    let Some(Overlay::Menu(menu)) = &mut app.modals.overlay else {
         return;
     };
     let Some(action) = menu.items.get(index).map(|item| item.action.clone()) else {
         return;
     };
+    if matches!(action, crate::app::MenuAction::Submenu { .. }) {
+        menu.hover = index;
+        super::open_submenu(menu);
+        return;
+    }
     app.modals.overlay = None;
+    let under = app.modals.verbs_under.take();
+    match action {
+        // The overlay's own keys put it back themselves, then press.
+        crate::app::MenuAction::OverlayKey(..) | crate::app::MenuAction::OverlayKeys(_) => {
+            app.modals.verbs_under = under;
+        }
+        ref stays if super::menus::keeps_overlay(stays) => {
+            app.modals.overlay = under.map(|o| *o);
+        }
+        _ => {}
+    }
     run_menu_action(app, action, out);
 }
 
