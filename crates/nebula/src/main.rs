@@ -2,6 +2,7 @@ mod ado;
 mod browser;
 mod cli;
 mod desktop;
+mod editors;
 mod hook;
 mod profile;
 mod setup;
@@ -13,7 +14,8 @@ mod upgrade;
 
 use anyhow::Result;
 use cli::{
-    Command, ConfigCommand, OrchestratorCommand, ProfileCommand, SessionCommand, SetupCommand,
+    Command, ConfigCommand, EditorsCommand, OrchestratorCommand, ProfileCommand, SessionCommand,
+    SetupCommand,
 };
 use std::path::Path;
 
@@ -271,6 +273,12 @@ fn main() -> Result<()> {
             wt_settings,
         }),
         Some(Command::Desktop { args }) => desktop::run_desktop(&args),
+        Some(Command::Editors { command }) => match command {
+            EditorsCommand::List { json } => editors::run_list(json),
+            EditorsCommand::Open { path, with, line } => {
+                editors::run_open(&path, with.as_deref(), line)
+            }
+        },
         Some(Command::Upgrade { force }) => upgrade::run_upgrade(force),
         Some(Command::StaleDaemonNote) => {
             if nebula_daemon::lifecycle::daemon_is_stale() {

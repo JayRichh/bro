@@ -29,6 +29,9 @@ const VISIBLE: &[&[&str]] = &[
     &["ssh"],
     &["tunnel"],
     &["desktop"],
+    &["editors"],
+    &["editors", "list"],
+    &["editors", "open"],
     &["ado"],
     &["upgrade"],
     &["session"],
@@ -123,8 +126,8 @@ fn the_root_help_lists_one_line_per_command() {
     }
     assert_eq!(
         commands.lines().count(),
-        24,
-        "twenty-three commands plus `help`:\n{commands}"
+        25,
+        "twenty-four commands plus `help`:\n{commands}"
     );
 }
 

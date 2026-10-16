@@ -486,6 +486,18 @@ pub(crate) enum Command {
         #[arg(last = true, value_name = "ARGS")]
         args: Vec<String>,
     },
+    /// Your editors: list the ones Kete found, open a path in one.
+    ///
+    /// The same VS Code and Visual Studio the menus open: VS Code and its
+    /// forks (Insiders, VSCodium, Cursor, Windsurf…) found by their own
+    /// install, Visual Studio through its installer (Community,
+    /// Professional and Enterprise alike, previews too). Each is started
+    /// directly and detached, without Kete's own environment.
+    #[command(after_help = EDITORS_EXAMPLES)]
+    Editors {
+        #[command(subcommand)]
+        command: EditorsCommand,
+    },
     /// Install the latest published kete over this one.
     ///
     /// Runs the install script for the newest release, then moves a running
@@ -1005,6 +1017,15 @@ Examples:
                                  open it on the orchestrator
   kete desktop -- --theme light  force the light theme";
 
+const EDITORS_EXAMPLES: &str = "\
+Examples:
+  kete editors list                      what is installed, the default of each kind first
+  kete editors open .                    this checkout in VS Code
+  kete editors open src/main.rs --line 42
+  kete editors open . --with vs          its solution in Visual Studio
+  kete editors open Api.sln              a solution opens in Visual Studio
+  kete editors open . --with cursor      an install by its id from the list";
+
 const UPGRADE_EXAMPLES: &str = "\
 Examples:
   kete upgrade                   install the latest release
@@ -1023,6 +1044,36 @@ Examples:
   kete profile set-project . max2       max2 for Claude sessions in this repo
   kete profile set-project app --clear claude
   kete profile list              accounts, homes and last seen usage";
+
+#[derive(Subcommand)]
+pub(crate) enum EditorsCommand {
+    /// List VS Code, its forks and Visual Studio as Kete finds them: id,
+    /// name, version, edition and path, the default of each kind first.
+    #[command(after_help = EDITORS_EXAMPLES)]
+    List {
+        /// One JSON array instead of the table.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Open a folder, a file or a solution in an editor.
+    ///
+    /// A folder opens in VS Code (focusing a window already open on it);
+    /// with --with vs, its solution or project in Visual Studio. A file
+    /// opens in its checkout's VS Code window, at --line; in Visual Studio
+    /// it goes to the instance already running. A .sln, .slnx, .csproj or
+    /// .vcxproj opens in Visual Studio.
+    #[command(after_help = EDITORS_EXAMPLES)]
+    Open {
+        /// The folder, file or solution.
+        path: std::path::PathBuf,
+        /// vscode (the default), vs, or an install's id from `kete editors list`.
+        #[arg(long = "with", value_name = "EDITOR")]
+        with: Option<String>,
+        /// The line a file opens at (VS Code).
+        #[arg(long, value_name = "N")]
+        line: Option<u32>,
+    },
+}
 
 #[derive(Subcommand)]
 pub(crate) enum ProfileCommand {
