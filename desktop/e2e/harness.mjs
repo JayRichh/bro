@@ -58,6 +58,27 @@ function freePort() {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** The clipboard's text ('' when it holds none), read through PowerShell.
+ *  Base64 on the way out keeps any text whole: no console code page, no
+ *  trailing newline. */
+export function clipboardText() {
+  const out = execFileSync(
+    'powershell',
+    ['-NoProfile', '-Command', '$t = Get-Clipboard -Raw; if ($t) { [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($t)) }'],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+  return Buffer.from(out.trim(), 'base64').toString('utf8');
+}
+
+/** Put `text` on the clipboard. It goes through the environment, never the
+ *  command line, so no quoting can touch it. */
+export function setClipboard(text) {
+  execFileSync('powershell', ['-NoProfile', '-Command', 'Set-Clipboard -Value $env:KETE_E2E_CLIP'], {
+    env: { ...process.env, KETE_E2E_CLIP: text },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+}
+
 /** The PATH directories holding `gh`, for a window that must not find it. */
 export function ghDirs() {
   const out = spawnSync('where', ['gh'], { encoding: 'utf8' });
@@ -71,7 +92,9 @@ export function ghDirs() {
 
 export class Desktop {
   /**
-   * @param {{ script?: string, scripts?: Record<string,string>, stripPath?: string[], config?: object }} options
+   * @param {{ script?: string, scripts?: Record<string,string>, stripPath?: string[], config?: object, env?: Record<string,string> }} options
+   *   `env`: variables for the window and everything it starts, set after the
+   *   KETE_* strip (`{ KETE_BROWSER_KEYS: 'off' }` gives the release keys).
    */
   static async open(options = {}) {
     const d = new Desktop(options);
@@ -157,6 +180,9 @@ export class Desktop {
     for (const [word, script] of Object.entries(this.options.scripts ?? {})) {
       env[`${AGENT.SCRIPT}_${word.toUpperCase()}`] = script;
     }
+    // What a flow asks of its window (KETE_BROWSER_KEYS=off for the
+    // release keys): after the strip above, so it can set KETE_ ones.
+    Object.assign(env, this.options.env ?? {});
     const strip = (this.options.stripPath ?? []).map((d) => d.replace(/\\+$/, '').toLowerCase());
     if (strip.length) {
       const key = Object.keys(env).find((k) => k.toUpperCase() === 'PATH') ?? 'PATH';
@@ -304,6 +330,18 @@ export class Desktop {
     }
   }
 
+  /** Right-click it (`at`: offset from its centre, to land on a spot of
+   *  it); a node redrawn between the find and the click is found again. */
+  async contextClick(css, text, at) {
+    for (let i = 0; ; i++) {
+      try {
+        return await this.wd.contextClick(await this.el(css, text), at);
+      } catch (e) {
+        if (i >= 5 || !/stale element/.test(e.message)) throw e;
+      }
+    }
+  }
+
   async type(css, value) {
     const el = await this.el(css);
     await this.wd.click(el);
@@ -312,6 +350,27 @@ export class Desktop {
 
   press(key, ...mods) {
     return this.wd.press(key, ...mods);
+  }
+
+  /** Until Kete's menu named `label` is up and visible; resolves to its
+   *  rows as `{ label, disabled }`, read in the page. */
+  menu(label) {
+    return this.waitFor(`the ${JSON.stringify(label)} menu`, () =>
+      this.wd.exec(
+        `const label = arguments[0];
+         for (const m of document.querySelectorAll('[role="menu"]')) {
+           if (m.getAttribute('aria-label') !== label) continue;
+           const r = m.getBoundingClientRect();
+           if (!r.width || !r.height) continue;
+           return [...m.querySelectorAll('[role="menuitem"]')].map((b) => ({
+             label: (b.querySelector('span') ?? b).innerText,
+             disabled: b.disabled,
+           }));
+         }
+         return null;`,
+        label,
+      ),
+    );
   }
 
   /** Let a model the daemon just changed reach the window: src-tauri

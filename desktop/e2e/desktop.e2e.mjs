@@ -5,7 +5,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { Desktop, FEATURE, Key, git, ghDirs } from './harness.mjs';
+import path from 'node:path';
+import { Desktop, FEATURE, Key, clipboardText, git, ghDirs, setClipboard } from './harness.mjs';
 
 /** One window per test, closed (driver, daemon, temp root) however it ends. */
 function flow(name, options, body) {
@@ -33,6 +34,16 @@ async function leaveSession(d) {
   await d.waitFor('the board the place you are', async () =>
     (await d.wd.exec(`return document.querySelector('nav[aria-label="Where you are"] [aria-current="page"]')?.innerText;`)) === 'Board',
   );
+}
+
+/** Until no menu is up. */
+function menuGone(d) {
+  return d.waitFor('the menu closed', () => d.wd.exec(`return !document.querySelector('[role="menu"]');`));
+}
+
+/** The router's record of the last right-click (`kind`, `prevented`). */
+function lastRightClick(d) {
+  return d.wd.exec('return { ...window.__keteContextMenu };');
 }
 
 /** Reply from the board: the card's Follow-up, typed and sent. */
@@ -218,4 +229,122 @@ flow('? on a Review card lists Create pull request', { script: FEATURE }, async 
   await d.waitForText('Create pull request');
   await d.press(Key.Escape);
   await d.waitForGone('Create pull request');
+});
+
+flow("right-click a field opens Kete's Edit menu, never WebView2's; Paste fills it; Alt+Left goes back", { env: { KETE_BROWSER_KEYS: 'off' } }, async (d) => {
+  const repo = d.makeRepo('menu-proj');
+  await d.addRepo(repo);
+  const prompt = 'form[aria-label="Start a session"] textarea[aria-label="Prompt"]';
+  const inField = (js) => d.wd.exec(`const f = document.querySelector(arguments[0]); ${js}`, prompt);
+  await d.type(prompt, 'hello menus');
+  await inField('f.focus(); f.select();');
+  // On the text itself, so the right-click keeps the selection.
+  const width = await inField('return f.getBoundingClientRect().width;');
+  await d.contextClick(prompt, undefined, { x: 40 - width / 2 });
+  const rows = await d.menu('Edit');
+  assert.deepEqual(rows.map((r) => r.label), ['Undo', 'Cut', 'Copy', 'Paste', 'Select all']);
+  for (const verb of ['Cut', 'Copy']) assert.equal(rows.find((r) => r.label === verb).disabled, false, `${verb} works on the selection`);
+  const seen = await lastRightClick(d);
+  assert.equal(seen.prevented, true, "WebView2's own menu was stopped");
+  assert.equal(seen.kind, 'text');
+  // The menu left the focus in the field.
+  assert.equal(await inField('return document.activeElement === f;'), true);
+  await d.press(Key.Escape);
+  await menuGone(d);
+  assert.equal(await inField('return f.value;'), 'hello menus');
+  // Paste: the clipboard's text, as typed.
+  const saved = clipboardText();
+  try {
+    setClipboard('pasted by the menu');
+    await inField(`f.value = ''; f.dispatchEvent(new Event('input', { bubbles: true }));`);
+    await d.contextClick(prompt);
+    await d.menu('Edit');
+    await d.click('[role="menu"] [role="menuitem"]', 'Paste');
+    await d.waitFor('the pasted text in the field', async () => (await inField('return f.value;')) === 'pasted by the menu');
+  } finally {
+    // A clipboard that held no text (an image, files) is not put back.
+    if (saved) setClipboard(saved);
+  }
+  // Alt+Left and Alt+Right are Kete's back and forward: with the browser
+  // keys off, WebView2 no longer takes them.
+  const place = () => d.wd.exec(`return document.querySelector('nav[aria-label="Where you are"] [aria-current="page"]')?.innerText ?? null;`);
+  const blur = () => d.wd.exec('document.activeElement?.blur();');
+  await d.click('button', 'Settings');
+  await d.waitForText('Hotkeys');
+  await d.waitFor('Settings the place you are', async () => (await place()) === 'Settings');
+  await blur();
+  await d.press(Key.ArrowLeft, Key.Alt);
+  await d.waitFor('back out of Settings', async () => {
+    const p = await place();
+    return !!p && p !== 'Settings';
+  });
+  await d.el('[aria-label="Home view"]');
+  await blur();
+  await d.press(Key.ArrowRight, Key.Alt);
+  await d.waitFor('forward to Settings', async () => (await place()) === 'Settings');
+  await d.waitForText('Hotkeys');
+  // F5 doesn't reload. WebDriver's keys may not pass WebView2's accelerator
+  // layer, so this is a floor, not proof: real keys are checked by hand.
+  await d.wd.exec('window.__kete_e2e_no_reload = true;');
+  await blur();
+  await d.press(Key.F5);
+  await new Promise((r) => setTimeout(r, 1000));
+  assert.equal(await d.wd.exec('return window.__kete_e2e_no_reload === true;'), true, 'F5 reloaded the page');
+});
+
+flow("right-click a terminal, a board card and Shift+F10 open Kete's menus, one at a time", { script: 'stop;echo' }, async (d) => {
+  const repo = d.makeRepo('menu-board-proj');
+  await d.addRepo(repo);
+  await toBoard(d);
+  // Started, the window opens its session.
+  const id = await d.launch('tidy the docs');
+  await d.el('.xterm-helper-textarea');
+  await d.contextClick('.xterm-screen');
+  const rows = await d.menu('Terminal');
+  assert.deepEqual(rows.slice(0, 4).map((r) => r.label), ['Copy', 'Paste', 'Select all', 'Clear']);
+  assert.ok(rows.some((r) => r.label === 'Copy folder path'), "the session's folder is offered");
+  assert.equal((await lastRightClick(d)).kind, 'terminal');
+  // The menu left the focus in the terminal.
+  assert.equal(await d.wd.exec(`return document.activeElement?.classList.contains('xterm-helper-textarea') === true;`), true);
+  await d.press(Key.Escape);
+  await menuGone(d);
+  // Paste reaches the agent as Ctrl+V sends it: bracketed, once the agent
+  // has asked for that (its echo step).
+  await d.waitForAgent('step echo');
+  const echoed = () => {
+    try {
+      return fs.readFileSync(path.join(d.root, 'echo.log'), 'utf8');
+    } catch {
+      return '';
+    }
+  };
+  const saved = clipboardText();
+  try {
+    setClipboard('menu paste');
+    await d.contextClick('.xterm-screen');
+    const pasteRows = await d.menu('Terminal');
+    assert.equal(pasteRows.find((r) => r.label === 'Paste').disabled, false, 'Paste is on for a live session');
+    await d.click('[role="menu"] [role="menuitem"]', 'Paste');
+    await d.waitFor('the paste in the agent', () => echoed().includes('\x1b[200~menu paste\x1b[201~'));
+  } finally {
+    // A clipboard that held no text (an image, files) is not put back.
+    if (saved) setClipboard(saved);
+  }
+  // The card: the menu its Menu key opens, named for the session.
+  await leaveSession(d);
+  await d.waitForLane(id, 'done');
+  const { name } = (await d.agents()).find((a) => a.id === id);
+  await d.contextClick(`${card(id)} > button`);
+  await d.menu(name);
+  assert.equal((await lastRightClick(d)).kind, 'row');
+  await d.press(Key.Escape);
+  await menuGone(d);
+  // Shift+F10 on the focused card: one menu, not the key's and the router's.
+  await d.wd.exec(`document.querySelector(arguments[0] + ' > button').focus();`, card(id));
+  await d.press(Key.F10, Key.Shift);
+  await d.menu(name);
+  await new Promise((r) => setTimeout(r, 400));
+  assert.equal(await d.wd.exec(`return document.querySelectorAll('[role="menu"]').length;`), 1);
+  await d.press(Key.Escape);
+  await menuGone(d);
 });
