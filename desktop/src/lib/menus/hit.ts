@@ -13,15 +13,17 @@
 //      `terminal` / `viewer`, whatever wraps them.
 //   4. Selected page text under the pointer (a `select-text` error line, a
 //      review's history): `selection`.
-//   5. An element with a menu of its own (`ownMenu`): `own`. For a row
-//      whose box is wider than its `[data-target]` (a worktree band's PR
-//      chip, ports and kebab sit beside its title), so it beats a target
-//      inside it. Never put one on a container of other rows: the
-//      background is `none`'s builder.
-//   6. The nearest `[data-target]`: `row`, built by the target's kind (the
-//      part before the colon), so a new kind (`file:`, `folder:`) needs no
-//      change here.
-//   7. Anything else: `none`.
+//   5. The nearest of an element with a menu of its own (`ownMenu`) and a
+//      `[data-target]`, the innermost winning: `own` or `row`. An own menu
+//      covers a row whose box is wider than its `[data-target]` (a worktree
+//      band's ahead/behind and kebab sit beside its title), and a surface
+//      whose menu needs what only it knows (a diff file row's staging); a
+//      target inside it (the band's PR chip, `pr:`, and ports, `port:`)
+//      keeps its own menu. A `row` is built by the target's kind (the part
+//      before the colon), so a new kind needs no change here. An own menu
+//      on a container of rows (the orchestrator panel) covers its empty
+//      space; the rows inside keep theirs.
+//   6. Anything else: `none` (the background menu, menus/background.ts).
 
 /** As much of an element as the resolution reads. */
 export interface MenuNode {
@@ -109,10 +111,10 @@ export function resolveHit(path: readonly unknown[], ctx: HitContext = {}): Hit 
   if (viewer) return { kind: 'viewer', el: viewer };
   const at = els[0] ?? null;
   if (at && ctx.selected?.(at)) return { kind: 'selection', el: at };
-  const own = ctx.own && els.find((n) => ctx.own!(n));
-  if (own) return { kind: 'own', el: own, focus: focusWithin(els, own) };
-  const row = els.find((n) => !!attr(n, 'data-target'));
-  if (row) return { kind: 'row', el: row, target: attr(row, 'data-target')!, focus: focusWithin(els, row) };
+  // The innermost of the two; on one element, its own menu.
+  const n = els.find((x) => !!ctx.own?.(x) || !!attr(x, 'data-target'));
+  if (n && ctx.own?.(n)) return { kind: 'own', el: n, focus: focusWithin(els, n) };
+  if (n) return { kind: 'row', el: n, target: attr(n, 'data-target')!, focus: focusWithin(els, n) };
   return { kind: 'none', el: at };
 }
 

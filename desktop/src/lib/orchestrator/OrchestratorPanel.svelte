@@ -9,7 +9,11 @@
   import { flatten, type Node } from '../overview/tree';
   import { countWords, descendantCounts, elsewhere, orchestratorTree } from '../orchestrator';
   import { openReview } from '../orch.svelte';
-  // A row's right-click menu comes from its data-target (menus/router.ts).
+  // A row's right-click menu comes from its data-target (menus/router.ts):
+  // a subagent's row is its parent session's, said so (`subagent:`); the
+  // panel's empty space is the orchestrator's own menu.
+  import { ownMenu } from '../menus/router';
+  import { orchestratorMenu } from '../menus/targets';
   import OrchBadge from './OrchBadge.svelte';
 
   const root = $derived(orchestratorTree(app.model));
@@ -39,7 +43,7 @@
   <button
     class={ROW}
     data-row
-    data-target={agentId(n) ? `agent:${agentId(n)}` : undefined}
+    data-target={n.sub ? `subagent:${n.sub.parent_agent}` : n.agent ? `agent:${n.agent.id}` : undefined}
     onclick={() => review(n)}
     title="Review {n.label}"
   >
@@ -58,7 +62,7 @@
   </button>
 {/snippet}
 
-<section class="@container flex h-full min-h-0 flex-col" aria-label="The orchestrator's sessions">
+<section class="@container flex h-full min-h-0 flex-col" aria-label="The orchestrator's sessions" use:ownMenu={() => orchestratorMenu(false)}>
   <header class="flex flex-none flex-col gap-1.5 border-b border-rule px-4 py-3">
     <div class="flex items-center gap-2">
       <h1 class="m-0 text-[17px] font-semibold tracking-tight text-ink">{root?.label ?? 'Orchestrator'}</h1>

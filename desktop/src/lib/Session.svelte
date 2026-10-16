@@ -6,8 +6,9 @@
   import Terminal from './Terminal.svelte';
   import OrchBadge from './orchestrator/OrchBadge.svelte';
   import ContextBar from './accounts/ContextBar.svelte';
-  import { agentMenu, followUp, newTerminal, openEditor, restartAgent, terminalMenu, unarchiveAgent } from './actions';
+  import { followUp, newTerminal, openEditor, openTargetMenu, restartAgent, unarchiveAgent } from './actions';
   import { openMenu } from './ui/ui.svelte';
+  import { ownMenu } from './menus/router';
   import { toggleMaximize } from './commands';
   import { withKey } from './shortcuts';
   import IconButton from './ui/IconButton.svelte';
@@ -20,8 +21,8 @@
   }
 
   function actions(at: HTMLElement | { x: number; y: number }) {
-    const items = agent ? agentMenu(agent) : terminal ? terminalMenu(terminal) : [];
-    openMenu(items, at, agent?.name ?? terminal?.name ?? 'Session');
+    if (agent) openTargetMenu({ kind: 'agent', id: agent.id }, at);
+    else if (terminal) openTargetMenu({ kind: 'terminal', id: terminal.id }, at);
   }
 
   const s = $derived(app.session);
@@ -98,6 +99,7 @@
           <button
             class="inline-flex h-5 flex-none items-center gap-1 self-center border border-rule bg-transparent px-1.5 font-mono text-[11px] text-ink hover:border-rule-strong"
             aria-haspopup="menu"
+            use:ownMenu={() => (agent ? { items: accountMenu(agent.id), label: 'Account' } : null)}
             title={canSwitch(app.model)
               ? `Runs on ${agent.profile?.trim() || "its harness's own login"}. Move it to another account (restarts fresh in this worktree)`
               : `Runs on ${agent.profile?.trim() || "its harness's own login"}. Moving accounts needs a newer daemon`}
@@ -106,8 +108,14 @@
             ></button
           >
         {/if}
-        {#if where}
-          <span class="flex-none font-mono text-[12px]" title={where.path}>{where.project} / {where.branch}</span>
+        {#if where && wt}
+          <!-- Its place: the repo's and the checkout's own menus on a
+               right-click (the checkout's lists its sessions to open). -->
+          <span class="flex-none font-mono text-[12px]" title="{where.path}. Right-click the repo or the branch for its menu"
+            ><span data-target="project:{projectOf(wt) ?? ''}">{where.project}</span> / <span data-target="worktree:{wt}" data-menu-jump
+              >{where.branch}</span
+            ></span
+          >
         {/if}
         {#if agent}<ContextBar context={app.model.contexts?.[agent.id]} wide />{/if}
         {#if prompt}<span class="min-w-0 truncate" title={prompt}>{prompt}</span>{/if}

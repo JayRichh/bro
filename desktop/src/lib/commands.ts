@@ -22,13 +22,28 @@ import {
   type ThemePref,
 } from './store.svelte';
 import { keysOf, type ShortcutId } from './shortcuts';
-import { menuFor, newWorktree, parseTarget, refreshPrs, runRowKey, type Target } from './actions';
+import {
+  archiveDone,
+  closestTarget,
+  isDone,
+  localRow,
+  markAllSeen,
+  menuFor,
+  newWorktree,
+  openTargetMenu,
+  parseTarget,
+  refreshPrs,
+  registryRows,
+  runRowKey,
+  type MenuOpts,
+  type Target,
+  type VerbTable,
+} from './actions';
 import { pickBranchSwitch } from './worktrees/switcher.svelte';
 import { ask, openMenu, ui, type MenuEntry, type MenuItem } from './ui/ui.svelte';
 import { selection } from './selection.svelte';
 import { learn } from './learn.svelte';
-import { PRIMARY, type ActionId } from './actions.gen';
-import { deskKeysOf, menuLabel, verbKeys } from './verbs';
+import { menuLabel } from './verbs';
 import { attentionSessions, stepRing, type PaletteCommand } from './palette';
 import { askStartOrchestrator, openOrchestrator, orchestratorCommands } from './orch.svelte';
 import { orchestratorOf } from './orchestrator';
@@ -37,7 +52,9 @@ import { openWake } from './wake/state.svelte';
 import { openAddAccount } from './accounts/add.svelte';
 import { moveStep, rootOf, stepInFor } from './reorder.svelte';
 import { railOrder, repoRows } from './overview/repos';
-import { scopedRepo, scopedWorktree } from './scope';
+import { inScope, isEverything, scopedRepo, scopedWorktree } from './scope';
+import { leafItems } from './menus/model';
+import { insertRows, layout } from './menus/layout';
 import { exportSettings, importSettings } from './settings/io';
 
 /** F10: the orchestrator, or the Start form when there is none. */
@@ -74,11 +91,11 @@ export function currentRepo(): string | undefined {
   return nav.current.repo ?? scopedRepo(app.model) ?? projectOf(sessionWorktree(app.session));
 }
 
-/** The session row or card with the focus, if any. */
+/** The session row or card with the focus, if any (past a chip's own
+ *  target inside it: the row keys act on the row). */
 export function focusedTarget(): Target | null {
   if (typeof document === 'undefined') return null;
-  const el = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('[data-target]');
-  return parseTarget(el?.dataset.target);
+  return closestTarget(document.activeElement);
 }
 
 /** Still in the model: a remembered row that was deleted is none. */
@@ -234,19 +251,53 @@ export function allKeysItem(): MenuItem {
   return { label: 'All keys\u2026', run: () => ((ui.palette = false), (ui.help = true)), keys: keysOf('help_f1'), pinned: true };
 }
 
-/** The window's own verbs, with nothing selected: the registry's leading
- *  ones (new session, the palette, the board, Settings), as their keys. */
-export function globalVerbs(): MenuItem[] {
-  return (PRIMARY.global ?? []).flatMap((id: ActionId) => {
-    const key = deskKeysOf(id)[0];
-    return key ? [{ label: menuLabel(id, 'global'), run: () => void runShortcut(key), keys: verbKeys(id) }] : [];
-  });
+/** The sessions the board's scope admits, live ones. */
+function scopedSessions() {
+  return app.model.agents.filter((a) => !a.archived && inScope(app.model, a.id));
+}
+
+/** The background's menu (\u00a75.15): the window's own verbs, for a
+ *  right-click on empty space and `?` with nothing selected. View \u25b8 ticks
+ *  the home in use and the archived sessions shown; Mark all seen and
+ *  Archive done sessions work on the board's scope. */
+export function backgroundMenu(): MenuEntry[] {
+  const repo = currentRepo();
+  const view = nav.current.view;
+  const t: VerbTable = {
+    quick_prompt: { run: quickPrompt },
+    add_project: { run: () => addRepo() },
+    command_palette: { run: () => ((ui.help = false), (ui.palette = true)) },
+    home_overview: { run: () => setHome('overview', nav.current.repo), checked: app.home === 'overview', radio: true },
+    home_board: { run: () => setHome('board', nav.current.repo), checked: app.home === 'board', radio: true },
+    toggle_orchestrator_view: { run: orchestratorKey, checked: view === 'orchestrator', radio: true },
+    accounts: { run: openAccounts, checked: view === 'accounts', radio: true },
+    toggle_archived: { run: toggleArchived, checked: app.showArchived },
+    settings: { run: () => openSettings() },
+  };
+  const where = isEverything(app.model.scope) ? 'across every repo' : 'in the scope';
+  if (scopedSessions().some((a) => a.unseen)) t.mark_seen = { run: () => markAllSeen(scopedSessions()) };
+  if (scopedSessions().some(isDone)) t.archive_done = { run: () => archiveDone(scopedSessions, where) };
+  let rows = registryRows('global', t);
+  // The repo in view's Worktrees table, a view of its own in the window.
+  if (repo)
+    rows = insertRows(
+      rows,
+      localRow(
+        'local:view.worktrees',
+        'go',
+        { label: 'Worktrees', run: () => nav.go({ view: 'worktrees', repo }), checked: view === 'worktrees', radio: true },
+        { id: 'view', title: 'View', label: 'Worktrees' },
+      ),
+      { after: ['accounts', 'toggle_orchestrator_view', 'home_board'] },
+    );
+  return layout(rows);
 }
 
 /** `?`: the verbs of the focused row (or of what the view shows), each
  *  with its key, searchable, All keys last. */
 export function openVerbs(): boolean {
-  const { items, title } = verbsMenu(selectedTarget() ?? viewTarget());
+  const jump = !!document.activeElement?.closest('[data-menu-jump]');
+  const { items, title } = verbsMenu(selectedTarget() ?? viewTarget(), { jump });
   const row = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('[data-target], [data-verb-bar]');
   const at = row ?? { x: Math.max(8, Math.round(window.innerWidth / 2 - 180)), y: 96 };
   openMenu(items, at, title, { search: true });
@@ -255,8 +306,8 @@ export function openVerbs(): boolean {
 
 /** The verbs menu for `t` (the window's own verbs for none): its menu's
  *  rows, then All keys. */
-export function verbsMenu(t: Target | null): { items: MenuEntry[]; title: string } {
-  const items: MenuEntry[] = t ? menuFor(t) : globalVerbs();
+export function verbsMenu(t: Target | null, opts: MenuOpts = {}): { items: MenuEntry[]; title: string } {
+  const items: MenuEntry[] = t ? menuFor(t, opts) : backgroundMenu();
   return { items: [...items, 'sep', allKeysItem()], title: t ? targetName(t) : 'Verbs' };
 }
 
@@ -314,13 +365,21 @@ export function runShortcut(id: ShortcutId): boolean {
   };
   const f = go[id];
   if (f) return f() !== false;
+  // A chip with a menu of its own (a pull request, a port) under the Menu
+  // key: the key's own contextmenu follows, and the router opens the
+  // chip's menu, not its row's.
+  if (id === 'row_menu') {
+    const near = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('[data-target]');
+    if (near && !parseTarget(near.dataset.target)) return false;
+  }
   // Row keys act on the focused row or card.
   const t = focusedTarget();
   if (!t) return false;
   if (id === 'move_up' || id === 'move_down') return moveStep(t, id === 'move_up' ? -1 : 1, stepInFor(document.activeElement));
+  // The Menu key: the row's menu, named for it, as a right-click opens it.
   if (id === 'row_menu') {
     const el = document.activeElement as HTMLElement;
-    openMenu(menuFor(t), el);
+    openTargetMenu(t, el, { jump: !!el.closest('[data-menu-jump]') });
     return true;
   }
   return runRowKey(id, t);
@@ -368,6 +427,22 @@ export function paletteCommands(): Command[] {
     cmd('home', 'Home', 'Window', () => goHome(nav.current.repo), 'go_home', 'overview board view'),
     ...(app.session ? [cmd('session', 'Show the session', 'Window', () => app.session && openSession(app.session), ['open_session', 'go_session'], 'view')] : []),
     cmd('archived', app.showArchived ? 'Hide archived sessions' : 'Show archived sessions', 'Window', toggleArchived, 'toggle_archived'),
+    // The background's bulk verbs, on the board's scope.
+    ...(scopedSessions().some((a) => a.unseen)
+      ? [cmd('mark-all-seen', menuLabel('mark_seen', 'global'), 'Window', () => markAllSeen(scopedSessions()), undefined, 'read unread inbox triage')]
+      : []),
+    ...(scopedSessions().some(isDone)
+      ? [
+          cmd(
+            'archive-done',
+            menuLabel('archive_done', 'global'),
+            'Window',
+            () => archiveDone(scopedSessions, isEverything(app.model.scope) ? 'across every repo' : 'in the scope'),
+            undefined,
+            'finished clean up done lane',
+          ),
+        ]
+      : []),
     cmd('next-attention', 'Next session needing you', 'Window', () => jumpAttention(1), 'next_attention', 'attention jump feedback'),
     cmd('prev-attention', 'Previous session needing you', 'Window', () => jumpAttention(-1), 'prev_attention', 'attention jump feedback'),
     cmd('diff', 'Diff the worktree', 'Window', () => openDiff(diffTarget()), ['diff', 'open_diff']),
@@ -399,11 +474,9 @@ export function paletteCommands(): Command[] {
   const sel = selectedTarget();
   if (sel) {
     let i = 0;
-    for (const e of menuFor(sel)) {
-      if (typeof e !== 'object' || !('run' in e)) continue;
-      const it = e as MenuItem;
+    for (const it of leafItems(menuFor(sel))) {
       if (it.disabled) continue;
-      out.push({ id: `sel-${i++}`, label: it.label, group: targetName(sel), keys: it.keys, run: it.run, pinned: true });
+      out.push({ id: `sel-${i++}`, label: it.full ?? it.label, group: targetName(sel), keys: it.keys, run: it.run, pinned: true });
     }
   }
   const shown = currentTarget();
@@ -412,21 +485,18 @@ export function paletteCommands(): Command[] {
     const name =
       t.kind === 'agent' ? app.model.agents.find((a) => a.id === t.id)?.name : app.model.terminals.find((x) => x.id === t.id)?.name;
     let i = 0;
-    for (const e of menuFor(t)) {
-      if (typeof e !== 'object' || !('run' in e)) continue;
-      const it = e as MenuItem;
+    for (const it of leafItems(menuFor(t))) {
       if (it.disabled) continue;
-      out.push({ id: `session-${i++}`, label: it.label, group: `Session ${name ?? ''}`.trim(), keys: it.keys, run: it.run });
+      out.push({ id: `session-${i++}`, label: it.full ?? it.label, group: `Session ${name ?? ''}`.trim(), keys: it.keys, run: it.run });
     }
   }
   const repo = currentRepo();
   if (repo) {
     const name = app.model.projects.find((p) => p.id === repo)?.name ?? 'repo';
     let i = 0;
-    for (const e of menuFor({ kind: 'project', id: repo })) {
-      if (typeof e !== 'object' || !('run' in e)) continue;
-      const it = e as MenuItem;
-      out.push({ id: `repo-${i++}`, label: it.label, group: `Repo ${name}`, keys: it.keys, run: it.run });
+    for (const it of leafItems(menuFor({ kind: 'project', id: repo }))) {
+      if (it.disabled) continue;
+      out.push({ id: `repo-${i++}`, label: it.full ?? it.label, group: `Repo ${name}`, keys: it.keys, run: it.run });
     }
   }
   return out;

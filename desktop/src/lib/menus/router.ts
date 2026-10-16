@@ -16,7 +16,7 @@
 // selects the word under the pointer first (`rightClickSelectsWord`), and
 // nothing here stops the event, so that still happens.
 
-import { openMenu, ui, type MenuEntry } from '../ui/ui.svelte';
+import { closeMenu, openMenu, ui, type MenuEntry } from '../ui/ui.svelte';
 import { menuPoint, resolveHit, targetKind, type Hit, type HitKind, type MenuNode } from './hit';
 
 export type Point = { x: number; y: number };
@@ -95,8 +95,29 @@ export function openHit(hit: Hit, at: Point): boolean {
  *  (`window.__keteContextMenu`) to know WebView2's menu was stopped. */
 export const lastContextMenu = { count: 0, kind: '' as HitKind | '', prevented: false };
 
+type Walkable = MenuNode & { parentElement?: Walkable | null };
+
+/** `n` and the elements around it, innermost first: a path as
+ *  `composedPath()` gives one. */
+function ancestors(n: Walkable | null | undefined): Walkable[] {
+  const out: Walkable[] = [];
+  for (let at = n; at; at = at.parentElement) out.push(at);
+  return out;
+}
+
+/** The menu's own layers: its boxes and the scrim behind them. */
+const isLayer = (n: Walkable) => n.getAttribute?.('data-menu-scrim') != null || n.getAttribute?.('role') === 'menu';
+
+/** Where a menu the keys opened goes with no element to hang it under. */
+const MIDDLE = () => ({ x: Math.max(8, Math.round((globalThis.innerWidth ?? 800) / 2 - 180)), y: 96 });
+
 /** Listen on `doc`; returns the stop. */
-export function installMenuRouter(doc: Pick<Document, 'addEventListener' | 'removeEventListener' | 'getSelection'> = document): () => void {
+export function installMenuRouter(
+  doc: Pick<Document, 'addEventListener' | 'removeEventListener' | 'getSelection'> & {
+    elementsFromPoint?: (x: number, y: number) => Element[];
+    activeElement?: Element | null;
+  } = document,
+): () => void {
   // The page's selection covers `n` (hit.ts rule 4): a real selection,
   // not a caret.
   const selected = (n: MenuNode) => {
@@ -104,18 +125,62 @@ export function installMenuRouter(doc: Pick<Document, 'addEventListener' | 'remo
     if (!sel || sel.isCollapsed || !sel.toString().trim()) return false;
     return sel.containsNode(n as Node, true);
   };
+  const own = (n: MenuNode) => owned.has(n);
+  const note = (kind: HitKind, e: MouseEvent) => {
+    lastContextMenu.count++;
+    lastContextMenu.kind = kind;
+    lastContextMenu.prevented = e.defaultPrevented;
+  };
   const onMenu = (e: MouseEvent) => {
     e.preventDefault();
-    const hit = resolveHit(e.composedPath(), { menuOpen: !!ui.menu, selected, own: (n) => owned.has(n) });
-    lastContextMenu.count++;
-    lastContextMenu.kind = hit.kind;
-    lastContextMenu.prevented = e.defaultPrevented;
+    const path = e.composedPath();
+    // A right-click on the scrim behind an open menu (anywhere outside it):
+    // that menu goes and the one for what is under the pointer opens, in
+    // one click. The Menu key's late event lands on the focused element,
+    // not the scrim, so a keyboard open is never doubled.
+    const first = path[0] as Walkable | undefined;
+    if (ui.menu && first && first.getAttribute?.('data-menu-scrim') != null) {
+      const under = (doc.elementsFromPoint?.(e.clientX, e.clientY) as unknown as Walkable[] | undefined)?.find(
+        (n) => !ancestors(n).some(isLayer),
+      );
+      closeMenu();
+      const hit = resolveHit(ancestors(under), { selected, own });
+      note(hit.kind, e);
+      const at = menuPoint(e, 'el' in hit ? (hit.el as Element | null) : null);
+      setTimeout(() => openHit(hit, at), 0);
+      return;
+    }
+    const hit = resolveHit(path, { menuOpen: !!ui.menu, selected, own });
+    note(hit.kind, e);
     if (hit.kind === 'menu') return;
     const at = menuPoint(e, 'el' in hit ? (hit.el as Element | null) : null);
     setTimeout(() => openHit(hit, at), 0);
   };
+  // The Menu key and Shift+F10 open the focused thing's menu by themselves,
+  // not only through the browser's contextmenu for the key: a row with a
+  // menu of its own (a diff file row, an Azure DevOps row, an account) or a
+  // chip's (`pr:`) has it from the keys either way. After the key has run
+  // its course: the window's row key (`row_menu`, which opens a registry
+  // row's menu and takes the key) or the surface under the focus (the
+  // terminal's program) goes first, and a menu already up is left alone.
+  const onKey = (e: KeyboardEvent) => {
+    const menuKey = e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey);
+    if (!menuKey || ui.menu) return;
+    setTimeout(() => {
+      if (e.defaultPrevented || ui.menu) return;
+      const el = (doc.activeElement ?? null) as Walkable | null;
+      const hit = resolveHit(ancestors(el), { selected, own });
+      if (hit.kind === 'menu') return;
+      const at = hit.kind === 'none' ? MIDDLE() : menuPoint({ clientX: 0, clientY: 0 }, 'el' in hit ? (hit.el as Element | null) : null);
+      openHit(hit, at);
+    }, 0);
+  };
   doc.addEventListener('contextmenu', onMenu, true);
+  doc.addEventListener('keydown', onKey, true);
   (globalThis as { __keteContextMenu?: typeof lastContextMenu }).__keteContextMenu = lastContextMenu;
-  return () => doc.removeEventListener('contextmenu', onMenu, true);
+  return () => {
+    doc.removeEventListener('contextmenu', onMenu, true);
+    doc.removeEventListener('keydown', onKey, true);
+  };
 }
 

@@ -13,6 +13,8 @@ export const Key = {
   Escape: '\uE00C',
   ArrowLeft: '\uE012',
   ArrowRight: '\uE014',
+  ArrowUp: '\uE013',
+  ArrowDown: '\uE015',
   F2: '\uE032',
   F10: '\uE03A',
 };

@@ -8,6 +8,8 @@
   import { defineMonacoTheme, termFamily } from '../theme';
   import { closeFiles, filesApi, sheet, showFiles, stepTab, type FileText } from './files.svelte';
   import { registerViewer } from '../menus/surfaces';
+  import { ownMenu } from '../menus/router';
+  import { openedFileMenu } from '../menus/targets';
   import type * as Monaco from 'monaco-esm/editor/editor.api.js';
 
   let box = $state<HTMLElement>();
@@ -151,7 +153,8 @@
           <button
             role="tab"
             aria-selected={on}
-            title={t.path}
+            title="{t.path}. Right-click to copy its path or open it with its app"
+            use:ownMenu={() => openedFileMenu(t.path, sheet.root, () => void filesApi.openDefault(t.path).catch((e) => toast(`Could not open it: ${e}`)))}
             class="-mb-px inline-flex flex-none items-center gap-1.5 border-0 border-b-2 bg-transparent px-3 py-1.5 font-mono text-[12px] {on
               ? 'border-ink text-ink'
               : 'border-transparent text-muted hover:text-ink'}"

@@ -38,15 +38,25 @@ function rightClick(path: unknown[], at = { x: 40, y: 60 }) {
 }
 
 let listener: ((e: unknown) => void) | null = null;
+let keyListener: ((e: unknown) => void) | null = null;
 let stop: () => void;
 const doc = {
-  addEventListener: (_: string, f: (e: unknown) => void, capture?: boolean) => {
+  addEventListener: (type: string, f: (e: unknown) => void, capture?: boolean) => {
     expect(capture).toBe(true);
-    listener = f;
+    if (type === 'keydown') keyListener = f;
+    else listener = f;
   },
-  removeEventListener: () => (listener = null),
+  removeEventListener: (type: string) => (type === 'keydown' ? (keyListener = null) : (listener = null)),
   getSelection: () => null,
+  activeElement: null as unknown,
 };
+
+/** Press `key` (Shift with F10), let the timers run; `taken`: something
+ *  before the router took the key. */
+async function pressMenuKey(key: 'ContextMenu' | 'F10', taken = false) {
+  keyListener!({ key, shiftKey: key === 'F10', ctrlKey: false, altKey: false, metaKey: false, defaultPrevented: taken });
+  await new Promise((r) => setTimeout(r, 0));
+}
 
 /** Fire `e` and let the menu open (it opens a tick later). */
 async function fire(e: ReturnType<typeof rightClick>) {
@@ -92,17 +102,51 @@ describe('the right-click router', () => {
     expect(ui.menu).toBeNull();
   });
 
-  it("prefers an element's own menu over a target inside it, until it is destroyed", async () => {
-    router.setRowBuilder('band', () => ({ items: [{ label: 'Registry', run: () => {} }] }));
+  it("opens an element's own menu beside a target, and a target's inside it, until it is destroyed", async () => {
+    router.setRowBuilder('band', () => ({ items: [{ label: 'Registry', run: () => {} }], label: 'chip' }));
+    router.setRowBuilder('repo', () => ({ items: [{ label: 'Repo', run: () => {} }], label: 'repo' }));
     const box = el('div');
     const own = router.ownMenu(box as unknown as HTMLElement, () => ({ items: [{ label: 'Own', run: () => {} }], label: 'main' }));
-    const path = [el('span'), el('div', { 'data-target': 'band:1' }), box];
-    await fire(rightClick(path));
+    const outer = el('section', { 'data-target': 'repo:1' });
+    await fire(rightClick([el('span'), box, outer]));
     expect(ui.menu?.label).toBe('main');
     closeMenu();
+    // A target inside the own menu's box (a band's PR chip) has its own.
+    await fire(rightClick([el('span'), el('div', { 'data-target': 'band:1' }), box, outer]));
+    expect(ui.menu?.label).toBe('chip');
+    closeMenu();
     own.destroy();
-    await fire(rightClick(path));
-    expect(ui.menu?.items[0]).toMatchObject({ label: 'Registry' });
+    await fire(rightClick([el('span'), box, outer]));
+    expect(ui.menu?.items[0]).toMatchObject({ label: 'Repo' });
+  });
+
+  it('reopens on what is under the pointer when the right-click lands on the scrim', async () => {
+    router.setRowBuilder('card', (id) => ({ items: [{ label: `Card ${id}`, run: () => {} }], label: `card ${id}` }));
+    // Under the pointer: the scrim, the open menu's box, then the card.
+    const card = el('div', { 'data-target': 'card:2' }) as ReturnType<typeof el> & { parentElement?: unknown };
+    const label = el('span') as ReturnType<typeof el> & { parentElement?: unknown };
+    label.parentElement = card;
+    card.parentElement = null;
+    const scrim = el('div', { 'data-menu-scrim': '' });
+    const box = el('div', { role: 'menu' });
+    const stack = [scrim, box, label];
+    const d = { ...doc, elementsFromPoint: () => stack };
+    stop();
+    stop = router.installMenuRouter(d as never);
+    openMenu([{ label: 'Card 1', run: () => {} }], { x: 1, y: 1 }, 'card 1');
+    await fire(rightClick([scrim], { x: 70, y: 80 }));
+    expect(ui.menu).toMatchObject({ label: 'card 2', x: 70, y: 80 });
+    expect(router.lastContextMenu.kind).toBe('row');
+  });
+
+  it('closes the menu on a scrim right-click over nothing with a menu', async () => {
+    const scrim = el('div', { 'data-menu-scrim': '' });
+    const d = { ...doc, elementsFromPoint: () => [scrim] };
+    stop();
+    stop = router.installMenuRouter(d as never);
+    openMenu([{ label: 'First', run: () => {} }], { x: 1, y: 1 }, 'Row');
+    await fire(rightClick([scrim]));
+    expect(ui.menu).toBeNull();
   });
 
   it('never opens a second menu while one is up: the Menu key after Shift+F10', async () => {
@@ -168,9 +212,32 @@ describe('the right-click router', () => {
     expect(ui.menu?.items[0]).toMatchObject({ label: 'Other' });
   });
 
+  it('opens the focused row\'s own menu on the Menu key and Shift+F10', async () => {
+    const row = el('button') as ReturnType<typeof el> & { parentElement?: unknown; getBoundingClientRect?: () => { left: number; bottom: number } };
+    row.parentElement = null;
+    row.getBoundingClientRect = () => ({ left: 30, bottom: 40 });
+    router.ownMenu(row as unknown as HTMLElement, () => ({ items: [{ label: 'Copy path', run: () => {} }], label: 'src/a.ts' }));
+    doc.activeElement = row;
+    await pressMenuKey('F10');
+    expect(ui.menu).toMatchObject({ label: 'src/a.ts', x: 30, y: 40 });
+    closeMenu();
+    await pressMenuKey('ContextMenu');
+    expect(ui.menu?.label).toBe('src/a.ts');
+    closeMenu();
+    // The window's row key (or the terminal's program) took it: nothing more.
+    await pressMenuKey('F10', true);
+    expect(ui.menu).toBeNull();
+    // A menu already up stays the one.
+    openMenu([{ label: 'First', run: () => {} }], { x: 1, y: 1 }, 'Row');
+    await pressMenuKey('F10');
+    expect(ui.menu?.label).toBe('Row');
+    doc.activeElement = null;
+  });
+
   it('stops listening when stopped', () => {
     stop();
     expect(listener).toBeNull();
+    expect(keyListener).toBeNull();
     stop = () => {};
   });
 });

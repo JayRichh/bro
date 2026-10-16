@@ -6,11 +6,10 @@
   import { repoKey, worktreeGroups } from '../worktrees/groups';
   import { isCollapsed, rows, toggleCollapsed } from '../worktrees/rows.svelte';
   import RunButton from './RunButton.svelte';
-  import { newWorktree, openEditor, projectMenu } from '../actions';
+  import { newWorktree, openEditor, openTargetMenu } from '../actions';
   import { canSwitchBranch, openBranchSwitch } from '../worktrees/switcher.svelte';
   import { withKey } from '../shortcuts';
   import Icon from '../ui/Icon.svelte';
-  import { openMenu } from '../ui/ui.svelte';
   import { prWord } from '../status';
   import { drag, dropProject, endDrag, leftFor, offsetIn, startDrag } from '../reorder.svelte';
   import { dropZone, type Place } from '../order';
@@ -110,7 +109,8 @@
       {#each row.ports as port (port)}
         <button
           class="{label} border-0 bg-transparent p-0 hover:text-ink hover:underline hover:underline-offset-4"
-          title="Open http://localhost:{port}"
+          data-target="port:{row.portOf[port] ?? ''}:{port}"
+          title="Open http://localhost:{port}; right-click for its menu"
           onclick={() => api.openUrl(`http://localhost:${port}`).catch((e) => toast(String(e)))}>:{port}</button
         >
       {/each}
@@ -122,7 +122,8 @@
               : p.pr.state === 'closed'
                 ? 'text-muted line-through'
                 : 'text-ink'}"
-            title="{p.pr.title} ({p.branch}, {prWord(p.pr)})"
+            data-target="pr:{p.worktree}"
+            title="{p.pr.title} ({p.branch}, {prWord(p.pr)}). Open it; right-click for its menu."
             onclick={() => api.openUrl(p.pr.url).catch((e) => toast(String(e)))}
             >{prWord(p.pr).replace(/PR$/, '')}PR #{p.pr.number}</button
           >
@@ -155,7 +156,7 @@
       title="{withKey('Repo actions: open remote, refresh pull requests, rename, locate, remove, worktrees', 'row_menu')}; or right-click"
       aria-label="{row.name} actions"
       aria-haspopup="menu"
-      onclick={(e) => openMenu(projectMenu(row.project.id), e.currentTarget as HTMLElement, row.name)}
+      onclick={(e) => openTargetMenu({ kind: 'project', id: row.project.id }, e.currentTarget as HTMLElement)}
     >
       <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="5" width="2" height="2" fill="currentColor" /><rect x="5" y="5" width="2" height="2" fill="currentColor" /><rect x="9" y="5" width="2" height="2" fill="currentColor" /></svg>
     </button>

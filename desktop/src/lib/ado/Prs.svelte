@@ -1,12 +1,19 @@
 <script lang="ts">
   // The PRs view: Mine and To review on the left, the open PR on the
   // right; or the composer, when the place is `compose:<branch>`.
-  import { app } from '../store.svelte';
+  import { app, openDiff, openSession, toast } from '../store.svelte';
+  import { api } from '../api';
+  import { revealWorktree } from '../actions';
   import { nav } from '../shell/history.svelte';
+  import { copyText } from '../menus/clipboard';
+  import { ownMenu } from '../menus/router';
+  import { prItems, type PrStanding } from '../menus/rows';
+  import { openMerge } from '../ship/sheet.svelte';
   import Composer from './Composer.svelte';
   import Mark from './Mark.svelte';
   import Review from './Review.svelte';
-  import { composeItem, parseItem, prItem, prMark, prs, voteSquare, type PrSummary } from './prs-api';
+  import { branchesApi } from './branches-api';
+  import { composeItem, parseItem, prItem, prMark, prs, VOTES, voteSquare, type PrSummary } from './prs-api';
   import { prsState, type CreatedPr } from './prs-state.svelte';
   import { errKind, errText } from './errors';
   import { signin } from './signin.svelte';
@@ -91,6 +98,112 @@
 
   function open(pr: PrSummary) {
     nav.go({ view: 'prs', repo, item: prItem(pr.id) });
+  }
+
+  // ---- the row menu (menus/rows.ts prItems) ----
+
+  /** The review pane is read again (a new key) after a change made from a row. */
+  let reviewKey = $state(0);
+  /** A check-out in flight: a second one waits. */
+  let checkingOut = false;
+
+  /** Completed and abandoned first, so an abandoned draft is closed: it
+   *  offers neither Vote nor Publish. */
+  function standingOf(pr: PrSummary): PrStanding {
+    if (pr.status === 'completed') return 'merged';
+    if (pr.status === 'abandoned') return 'closed';
+    return pr.isDraft ? 'draft' : 'open';
+  }
+
+  /** The live sessions in checkout `w`, the one that changed last first. */
+  function sessionsIn(w: string) {
+    return app.model.agents
+      .filter((a) => a.worktree_id === w && !a.archived)
+      .sort((a, b) => b.status_changed_at - a.status_changed_at)
+      .map((a) => ({ id: a.id, name: a.name }));
+  }
+
+  /** What a vote or a publish from a row left behind: the list and an open
+   *  review read again. */
+  async function changed(pr: PrSummary) {
+    await load();
+    if (selected === pr.id) reviewKey++;
+  }
+
+  async function voteOn(pr: PrSummary, v: number) {
+    if (!worktree) return;
+    try {
+      await prs.vote(worktree, pr.id, v);
+    } catch (e) {
+      toast(`Could not vote on PR ${pr.id}: ${errText(e)}`);
+      return;
+    }
+    toast(v === 0 ? `Vote reset on PR ${pr.id}.` : `Voted on PR ${pr.id}: ${VOTES.find((x) => x.vote === v)?.label ?? v}.`);
+    await changed(pr);
+  }
+
+  async function publishPr(pr: PrSummary) {
+    if (!worktree) return;
+    try {
+      await prs.publish(worktree, pr.id);
+    } catch (e) {
+      toast(`Could not publish PR ${pr.id}: ${errText(e)}`);
+      return;
+    }
+    toast(`Published PR ${pr.id}.`);
+    await changed(pr);
+  }
+
+  /** A worktree on the PR's branch, as the Branches view cuts one, and
+   *  its diff to land in. */
+  async function checkoutBranch(branch: string) {
+    if (!worktree || checkingOut) return;
+    checkingOut = true;
+    try {
+      openDiff(await branchesApi.checkout(worktree, branch));
+    } catch (e) {
+      toast(`Could not check out ${branch}: ${errText(e)}`);
+    } finally {
+      checkingOut = false;
+    }
+  }
+
+  /** A PR row's right-click menu. */
+  function prMenu(pr: PrSummary) {
+    // The selection follows the click, as the arrow keys move it.
+    if (selected !== pr.id) nav.replace({ view: 'prs', repo, item: prItem(pr.id) });
+    const wt = app.model.worktrees.find((w) => w.project_id === repo && w.branch === pr.source) ?? null;
+    const items = prItems(
+      {
+        number: pr.id,
+        url: pr.url || null,
+        standing: standingOf(pr),
+        branch: pr.source || null,
+        sessions: wt ? sessionsIn(wt.id) : [],
+        worktree: wt ? { id: wt.id, branch: wt.branch } : null,
+        canCheckout: !wt && !!worktree,
+        ado: { mine: !!list?.data?.mine.some((p) => p.id === pr.id) },
+      },
+      {
+        review: () => open(pr),
+        open: () => void api.openUrl(pr.url).catch((e) => toast(`Could not open the pull request in the browser: ${errText(e)}`)),
+        goSession: (id) => openSession({ Agent: id }),
+        goWorktree: (id) => {
+          const w = app.model.worktrees.find((x) => x.id === id);
+          if (w) revealWorktree(w);
+        },
+        checkout: () => void checkoutBranch(pr.source),
+        copy: (text, said) => void copyText(text, said),
+        vote: (v) => void voteOn(pr, v),
+        publish: () => void publishPr(pr),
+        // The ship sheet merges in Azure DevOps too; it needs the checkout.
+        merge: () => {
+          if (wt) openMerge(wt.id, null);
+        },
+        refresh: load,
+      },
+    );
+    return { items, label: `PR ${pr.id}` };
   }
 
   /** Arrow keys walk the list, as the other lists do. */
@@ -194,6 +307,7 @@
           <li>
             <button
               data-pr-cur={cur || undefined}
+              use:ownMenu={() => prMenu(pr)}
               class="block w-full border-0 border-b border-rule px-6 py-3 text-left {cur ? 'bg-raised' : 'bg-transparent hover:bg-surface'}"
               onclick={() => open(pr)}
               aria-current={cur ? 'true' : undefined}
@@ -241,7 +355,9 @@
 
     <section class="min-h-0 min-w-0" aria-label="Pull request">
       {#if selected != null && worktree}
-        <Review {worktree} {repo} id={selected} onchanged={load} />
+        {#key reviewKey}
+          <Review {worktree} {repo} id={selected} onchanged={load} />
+        {/key}
       {:else}
         <p class="m-0 px-6 pt-8 text-[13px] text-muted">Pick a pull request to see its checklist, threads and diff.</p>
       {/if}

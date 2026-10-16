@@ -8,6 +8,7 @@
   // strip, the overview, the quick prompt and the diff all follow it.
   import { app, refreshAccounts, setScope } from '../store.svelte';
   import { openMenu, type MenuEntry } from '../ui/ui.svelte';
+  import { ownMenu } from '../menus/router';
   import { keyLabel, keysOf, type ShortcutId } from '../shortcuts';
   import { accountScope, isEverything, repoScope, scopeParts, upTo, worktreeScope, type ScopePart } from '../scope';
   import { railOrder, repoRows } from '../overview/repos';
@@ -24,14 +25,18 @@
     return k ? `${keyLabel(k)}\u20139` : '';
   });
 
-  function menu(at: HTMLElement) {
+  /** The picker's rows; a right-click anywhere on the chip opens them too. */
+  function scopeItems(): MenuEntry[] {
     refreshAccounts();
     const m = app.model;
-    const tick = (on: boolean, label: string) => (on ? `\u2713 ${label}` : label);
-    const items: MenuEntry[] = [{ label: tick(all, 'Everything'), run: () => setScope({}) }, { heading: 'repo' }];
+    // One of each set is ticked: the place (everything, a repo, a
+    // worktree) and the account.
+    const items: MenuEntry[] = [{ label: 'Everything', run: () => setScope({}), checked: all, radio: true }, { heading: 'repo' }];
     railOrder(repoRows(m)).forEach((r, i) =>
       items.push({
-        label: tick(s.repo === r.project.id && !s.worktree, r.name),
+        label: r.name,
+        checked: s.repo === r.project.id && !s.worktree,
+        radio: true,
         run: () => setScope(repoScope(s, r.project.id)),
         keys: i < 9 ? keysOf(`repo_${i + 1}` as ShortcutId) : undefined,
       }),
@@ -40,14 +45,19 @@
     const wts = repo ? m.worktrees.filter((w) => w.project_id === repo).sort((a, b) => Number(b.is_main) - Number(a.is_main) || a.sort_order - b.sort_order) : [];
     if (wts.length > 1) {
       items.push({ heading: 'worktree' });
-      for (const w of wts) items.push({ label: tick(s.worktree === w.id, w.branch), run: () => setScope(worktreeScope(m, s, w.id)) });
+      for (const w of wts) items.push({ label: w.branch, checked: s.worktree === w.id, radio: true, run: () => setScope(worktreeScope(m, s, w.id)) });
     }
     const accounts = app.accounts.filter((a) => !a.disabled);
     if (accounts.length) {
-      items.push({ heading: 'account' }, { label: tick(!s.account, 'Any account'), run: () => setScope(accountScope(s, null)) });
-      for (const a of accounts) items.push({ label: tick(s.account === a.key, a.name), run: () => setScope(accountScope(s, a.key)) });
+      items.push({ heading: 'account' }, { label: 'Any account', checked: !s.account, radio: true, run: () => setScope(accountScope(s, null)) });
+      for (const a of accounts) items.push({ label: a.name, checked: s.account === a.key, radio: true, run: () => setScope(accountScope(s, a.key)) });
     }
-    openMenu(items, at, 'Scope');
+    if (!all) items.push('sep', { label: 'Clear scope', run: () => setScope({}), title: 'Show every repo, worktree and account' });
+    return items;
+  }
+
+  function menu(at: HTMLElement) {
+    openMenu(scopeItems(), at, 'Scope');
   }
 
   function partTitle(p: ScopePart): string {
@@ -64,6 +74,7 @@
   class="flex h-6 max-w-[36cqw] min-w-0 flex-none items-center border {all ? 'border-rule' : 'border-ink'}"
   role="group"
   aria-label="Scope"
+  use:ownMenu={() => ({ items: scopeItems(), label: 'Scope' })}
 >
   {#if all}
     <button

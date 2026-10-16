@@ -7,14 +7,12 @@
   import { app, toast } from '../store.svelte';
   import { api } from '../api';
   import { nav } from '../shell/history.svelte';
-  import { openMenu } from '../ui/ui.svelte';
-  import { ownMenu } from '../menus/router';
   import { age } from '../status';
-  import { newWorktree } from '../actions';
+  import { newWorktree, openTargetMenu } from '../actions';
   import RunButton from '../overview/RunButton.svelte';
   import { firstDir, gitSignal, groupOf, prLabel, sortRows, tableRow, type SortDir, type SortKey } from './groups';
   import { refreshGit, rows, watchGit } from './rows.svelte';
-  import { sweepWorktrees, verbTitle, verbsFor, worktreeMenu } from './verbs';
+  import { sweepWorktrees, verbTitle, verbsFor } from './verbs';
   import VerbBar from '../VerbBar.svelte';
 
   let { repo }: { repo: string } = $props();
@@ -53,7 +51,7 @@
     const run = (v: string) => verbsFor(g.worktree).find((x) => x.id === v)?.run();
     if (e.key === 'j' || e.key === 'ArrowDown') all[Math.min(all.length - 1, i + 1)]?.focus();
     else if (e.key === 'k' || e.key === 'ArrowUp') all[Math.max(0, i - 1)]?.focus();
-    else if (e.key === 'Enter' || e.key === ' ') openMenu(worktreeMenu(g.worktree), e.currentTarget as HTMLElement, g.worktree.branch);
+    else if (e.key === 'Enter' || e.key === ' ') openTargetMenu({ kind: 'worktree', id }, e.currentTarget as HTMLElement, { jump: true });
     else if (e.key === 's' && !e.shiftKey) run('session');
     else if (e.key === 'd' && !e.shiftKey) run('diff');
     else if (e.key === 'Delete' && !g.worktree.is_main) run('delete');
@@ -133,7 +131,7 @@
         data-row
         data-target="worktree:{w.id}"
         title={w.path}
-        use:ownMenu={() => ({ items: worktreeMenu(w), label: w.branch })}
+        data-menu-jump
         onkeydown={(e) => onKey(e, w.id)}
       >
         <span class="flex min-w-0 items-center gap-2">
@@ -161,7 +159,8 @@
                 : pr.state === 'closed'
                   ? 'text-muted line-through'
                   : 'text-ink'}"
-              title="{pr.title}. Open it."
+              data-target="pr:{w.id}"
+              title="{pr.title}. Open it; right-click for its menu."
               onclick={() => api.openUrl(pr.url).catch((e) => toast(String(e)))}>{prLabel(pr)}</button
             >
           {:else}<span class="font-mono text-[12px] text-faint">none</span>{/if}
@@ -171,7 +170,8 @@
           {#each r.ports as port (port)}
             <button
               class="border-0 bg-transparent p-0 font-mono text-[12px] text-muted hover:text-ink hover:underline hover:underline-offset-4"
-              title="Open http://localhost:{port}"
+              data-target="port:{w.id}:{port}"
+              title="Open http://localhost:{port}; right-click for its menu"
               onclick={() => api.openUrl(`http://localhost:${port}`).catch((e) => toast(String(e)))}>:{port}</button
             >
           {/each}
@@ -195,7 +195,7 @@
             title="Worktree actions (Enter on the row, or right-click)"
             aria-label="{w.branch} actions"
             aria-haspopup="menu"
-            onclick={(e) => openMenu(worktreeMenu(w), e.currentTarget as HTMLElement, w.branch)}
+            onclick={(e) => openTargetMenu({ kind: 'worktree', id: w.id }, e.currentTarget as HTMLElement, { jump: true })}
           >
             <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"
               ><rect x="1" y="5" width="2" height="2" fill="currentColor" /><rect x="5" y="5" width="2" height="2" fill="currentColor" /><rect

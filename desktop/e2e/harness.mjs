@@ -352,8 +352,10 @@ export class Desktop {
     return this.wd.press(key, ...mods);
   }
 
-  /** Until Kete's menu named `label` is up and visible; resolves to its
-   *  rows as `{ label, disabled }`, read in the page. */
+  /** Until Kete's menu named `label` is up and visible (a submenu is
+   *  named for its row); resolves to its rows as `{ label, disabled,
+   *  submenu, checked }`, read in the page. A greyed row is
+   *  aria-disabled, so its tooltip still shows. */
   menu(label) {
     return this.waitFor(`the ${JSON.stringify(label)} menu`, () =>
       this.wd.exec(
@@ -361,16 +363,27 @@ export class Desktop {
          for (const m of document.querySelectorAll('[role="menu"]')) {
            if (m.getAttribute('aria-label') !== label) continue;
            const r = m.getBoundingClientRect();
-           if (!r.width || !r.height) continue;
-           return [...m.querySelectorAll('[role="menuitem"]')].map((b) => ({
-             label: (b.querySelector('span') ?? b).innerText,
-             disabled: b.disabled,
+           if (!r.width || !r.height || getComputedStyle(m).visibility === 'hidden') continue;
+           return [...m.querySelectorAll('[role^="menuitem"]')].map((b) => ({
+             label: (b.querySelector('[data-label]') ?? b).innerText,
+             disabled: b.disabled || b.getAttribute('aria-disabled') === 'true',
+             submenu: b.getAttribute('aria-haspopup') === 'menu',
+             checked: b.getAttribute('aria-checked'),
            }));
          }
          return null;`,
         label,
       ),
     );
+  }
+
+  /** The words of the menu row the keys are on (its menu's active
+   *  descendant), or null. */
+  activeRow() {
+    return this.wd.exec(`const m = [...document.querySelectorAll('[role="menu"][aria-activedescendant]')].pop();
+      const id = m && m.getAttribute('aria-activedescendant');
+      const b = id && document.getElementById(id);
+      return b ? (b.querySelector('[data-label]') ?? b).innerText : null;`);
   }
 
   /** Let a model the daemon just changed reach the window: src-tauri

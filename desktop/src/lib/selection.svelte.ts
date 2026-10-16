@@ -5,7 +5,7 @@
 // one that lands anywhere else (the header, a pane) lets it go, and the
 // verb bar keeps it.
 
-import { parseTarget, type Target } from './actions';
+import { closestTarget, type Target } from './actions';
 
 export const selection = $state({ target: null as Target | null });
 
@@ -15,7 +15,7 @@ export const VERB_BAR_SEL = '[data-verb-bar]';
 /** Note where the focus went (outside the layers). */
 export function noteFocus(el: Element | null) {
   if (!el || el.closest(VERB_BAR_SEL)) return;
-  const t = parseTarget(el.closest<HTMLElement>('[data-target]')?.dataset.target);
+  const t = closestTarget(el);
   const now = selection.target;
   if (t?.kind !== now?.kind || t?.id !== now?.id || (t?.kind === 'agent' && now?.kind === 'agent' && t.viaSub !== now.viaSub))
     selection.target = t;

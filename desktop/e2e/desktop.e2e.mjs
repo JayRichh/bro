@@ -36,6 +36,9 @@ async function leaveSession(d) {
   );
 }
 
+/** A row in any of Kete's menus (a plain row, a ticked one, a radio). */
+const ROW = '[role="menu"] [role^="menuitem"]';
+
 /** Until no menu is up. */
 function menuGone(d) {
   return d.waitFor('the menu closed', () => d.wd.exec(`return !document.querySelector('[role="menu"]');`));
@@ -88,6 +91,14 @@ flow('opens to the overview with a repo', {}, async (d) => {
   assert.equal(on, 'Overview');
   const s = await d.invoke('get_state');
   assert.deepEqual(s.projects.map((p) => p.name), ['life-proj']);
+  // A right-click on the repo in the rail: the repo's menu, named for it.
+  await d.contextClick('nav[aria-label="Repos"] [data-target^="project:"]', 'life-proj');
+  const rows = await d.menu('life-proj');
+  assert.equal(rows[0].label, 'New session\u2026');
+  for (const row of ['New worktree\u2026', 'Copy path', 'Locate folder\u2026', 'Remove from Kete\u2026']) assert.ok(rows.some((r) => r.label === row), `the repo's ${row}`);
+  assert.equal((await lastRightClick(d)).kind, 'row');
+  await d.press(Key.Escape);
+  await menuGone(d);
 });
 
 flow('a session runs, needs you, takes a reply in its pane and lands in Review with its commit', { script: `gate:asked;ask;gate:replied;${FEATURE.slice('ask;'.length)}` }, async (d) => {
@@ -157,7 +168,7 @@ flow('dragging a Done card onto Archived offers the worktree delete', { script: 
   assert.ok((await d.agents()).find((a) => a.id === id)?.archived, 'archived');
 });
 
-flow('a Review card opens the review split: the diff against base with its commit, Alt+A archives', { script: FEATURE }, async (d) => {
+flow('a Review card opens the review split: the diff against base with its commit, Alt+A archives', { script: FEATURE, env: { KETE_BROWSER_KEYS: 'off' } }, async (d) => {
   const repo = d.makeRepo('review-proj');
   await d.addRepo(repo);
   await toBoard(d);
@@ -177,12 +188,40 @@ flow('a Review card opens the review split: the diff against base with its commi
   const wt = st.worktrees.find((w) => w.id === st.agents.find((a) => a.id === id).worktree_id).path;
   const saved = clipboardText();
   try {
-    await d.click('[role="menu"] [role="menuitem"]', 'Copy path:line');
+    await d.click(ROW, 'Copy path:line');
     await d.waitFor('the path and line on the clipboard', () => clipboardText().endsWith('feature.txt:1'));
     assert.ok(clipboardText().startsWith(wt), 'the path is under the worktree');
   } finally {
     if (saved) setClipboard(saved);
   }
+  // A changed file's row in the list: its own menu, Copy path the file on
+  // disk. A diff against the base reads commits: no staging rows.
+  await d.contextClick('[aria-label="Changed files"] button', 'feature.txt');
+  const fileRows = await d.menu('src/feature.txt');
+  for (const row of ['Copy path', 'Copy relative path']) assert.ok(fileRows.some((r) => r.label === row), `the file's ${row}`);
+  assert.ok(!fileRows.some((r) => /Stage|Discard/.test(r.label)), 'no staging against the base');
+  assert.equal((await lastRightClick(d)).kind, 'own');
+  const before = clipboardText();
+  try {
+    await d.click(ROW, 'Copy path');
+    // The worktree's own separators (git may hand them over as slashes).
+    const slash = (x) => x.split(String.fromCharCode(92)).join('/');
+    await d.waitFor('the file path on the clipboard', () => slash(clipboardText()) === slash(wt) + '/src/feature.txt');
+    await d.waitForText(`Copied ${wt}`);
+  } finally {
+    if (before) setClipboard(before);
+  }
+  // The same menu from the keys: Shift+F10 on the focused file row (a row
+  // with a menu of its own, no registry target), one menu.
+  await d.wd.exec(
+    `for (const b of document.querySelectorAll('[aria-label="Changed files"] button')) if (b.innerText.includes('feature.txt')) return b.focus();`,
+  );
+  await d.press(Key.F10, Key.Shift);
+  await d.menu('src/feature.txt');
+  await new Promise((r) => setTimeout(r, 400));
+  assert.equal(await d.wd.exec(`return document.querySelectorAll('[role="menu"]').length;`), 1);
+  await d.press(Key.Escape);
+  await menuGone(d);
   await d.press('a', Key.Alt);
   await d.waitForText('Archive session');
   await d.click('[role="dialog"] button, [role="alertdialog"] button', 'Archive');
@@ -200,9 +239,9 @@ flow('the scope chip narrows the board and counts what is outside it', { script:
   const st = await d.invoke('get_state');
   const branch = st.worktrees.find((w) => w.id === st.agents.find((a) => a.id === done).worktree_id).branch;
   await d.click('[aria-label="Scope"] button', 'all');
-  await d.click('[role="menu"] [role="menuitem"]', 'scope-proj');
+  await d.click(ROW, 'scope-proj');
   await d.click('[aria-label="Change the scope"]');
-  await d.click('[role="menu"] [role="menuitem"]', branch);
+  await d.click(ROW, branch);
   await d.waitForText('1 more outside scope');
   assert.equal(await d.laneOf(review), null, 'the Review card is outside the scope');
   await d.waitFor('the chip naming the worktree', () =>
@@ -235,16 +274,22 @@ flow('Settings, Hotkeys: a rebound key saves to config.json and works after a re
   await d.waitFor('the shortcuts overlay on F2', () => d.wd.exec(help));
 });
 
-flow('? on a Review card lists Create pull request', { script: FEATURE }, async (d) => {
+flow('? on a Review card folds its pull request rows, and typing finds Create in them', { script: FEATURE }, async (d) => {
   const repo = d.makeRepo('verbs-proj');
   await d.addRepo(repo);
   await toBoard(d);
   const id = await toReview(d);
   await d.wd.exec(`document.querySelector(arguments[0] + ' > button').focus();`, card(id));
   await d.press('?');
-  await d.waitForText('Create pull request');
+  const { name } = (await d.agents()).find((a) => a.id === id);
+  const rows = await d.menu(`session ${name}`);
+  const pr = rows.find((r) => r.label === 'Pull request');
+  assert.ok(pr?.submenu, 'Review and Create fold into Pull request');
+  await d.wd.type(await d.el('[role="menu"] input[aria-label="Narrow the verbs"]'), 'create');
+  await d.waitForText('Pull request \u203a Create\u2026');
   await d.press(Key.Escape);
-  await d.waitForGone('Create pull request');
+  await d.press(Key.Escape);
+  await menuGone(d);
 });
 
 flow("right-click a field opens Kete's Edit menu, never WebView2's; Paste fills it; Alt+Left goes back", { env: { KETE_BROWSER_KEYS: 'off' } }, async (d) => {
@@ -286,7 +331,7 @@ flow("right-click a field opens Kete's Edit menu, never WebView2's; Paste fills 
     await inField(`f.value = ''; f.dispatchEvent(new Event('input', { bubbles: true }));`);
     await d.contextClick(prompt);
     await d.menu('Edit');
-    await d.click('[role="menu"] [role="menuitem"]', 'Paste');
+    await d.click(ROW, 'Paste');
     await d.waitFor('the pasted text in the field', async () => (await inField('return f.value;')) === 'pasted by the menu');
   } finally {
     // A clipboard that held no text (an image, files) is not put back.
@@ -347,7 +392,7 @@ flow("right-click a terminal, a board card and Shift+F10 open Kete's menus, one 
     await d.contextClick('.xterm-screen');
     const pasteRows = await d.menu('Terminal');
     assert.equal(pasteRows.find((r) => r.label === 'Paste').disabled, false, 'Paste is on for a live session');
-    await d.click('[role="menu"] [role="menuitem"]', 'Paste');
+    await d.click(ROW, 'Paste');
     await d.waitFor('the paste in the agent', () => echoed().includes('\x1b[200~menu paste\x1b[201~'));
   } finally {
     // A clipboard that held no text (an image, files) is not put back.
@@ -365,23 +410,70 @@ flow("right-click a terminal, a board card and Shift+F10 open Kete's menus, one 
   // Shift+F10 on the focused card: one menu, not the key's and the router's.
   await d.wd.exec(`document.querySelector(arguments[0] + ' > button').focus();`, card(id));
   await d.press(Key.F10, Key.Shift);
-  // The row key's menu (labelled Actions; the right-click's is named for the
-  // row), with the card's verbs.
-  await d.menu('Actions');
-  await d.el('[role="menu"] [role="menuitem"]', 'Archive');
+  // The row key's menu, named for the row as the right-click's is, with
+  // the card's verbs.
+  await d.menu(name);
+  await d.el(ROW, 'Archive');
   await new Promise((r) => setTimeout(r, 400));
   assert.equal(await d.wd.exec(`return document.querySelectorAll('[role="menu"]').length;`), 1);
   await d.press(Key.Escape);
   await menuGone(d);
-  // The session's worktree band on the overview: the band's own menu (Open
-  // folder, Copy path), over its title's data-target too.
+  // Empty board space: the background's menu. A right-click on a lane's
+  // header while it is up moves the menu there in one click.
+  await d.contextClick(`${lane('Needs you')} p`);
+  const bg = await d.menu('Kete');
+  assert.equal(bg[0].label, 'New session\u2026');
+  assert.ok(bg.find((r) => r.label === 'View')?.submenu, 'View folds the views');
+  assert.equal((await lastRightClick(d)).kind, 'none');
+  await d.contextClick(`${lane('Done')} header`);
+  const laneRows = await d.menu('Done');
+  assert.deepEqual(laneRows.map((r) => r.label), ['Archive done sessions\u2026']);
+  assert.equal(await d.wd.exec(`return document.querySelectorAll('[role="menu"]').length;`), 1);
+  await d.press(Key.Escape);
+  await menuGone(d);
+  // The session's worktree band on the overview: the checkout's one menu,
+  // the same from its title, its kebab and past its title. Open in > opens
+  // by the keys (Right), its rows inside; Left closes it, Esc the menu.
   await d.click('[aria-label="Home view"] button', 'Overview');
   const st = await d.invoke('get_state');
   const branch = st.worktrees.find((w) => w.id === st.agents.find((a) => a.id === id).worktree_id).branch;
   await d.contextClick(`[data-target^="worktree:"]`, branch);
   const band = await d.menu(branch);
-  for (const row of ['Open folder', 'Copy path']) assert.ok(band.some((r) => r.label === row), `the band's ${row}`);
-  assert.equal((await lastRightClick(d)).kind, 'own');
+  assert.ok(band.some((r) => r.label === 'Copy path'), "the band's Copy path");
+  assert.ok(band.find((r) => r.label === 'Open in')?.submenu, "the band's Open in");
+  assert.equal((await lastRightClick(d)).kind, 'row');
+  for (let i = 0; i < 30 && (await d.activeRow()) !== 'Open in'; i++) await d.press(Key.ArrowDown);
+  assert.equal(await d.activeRow(), 'Open in');
+  await d.press(Key.ArrowRight);
+  const openIn = await d.menu('Open in');
+  assert.equal(openIn[0].label, 'Open command');
+  assert.ok(openIn.some((r) => r.label === 'Explorer'), 'Open in > Explorer (the band\'s Open folder)');
+  assert.equal(await d.activeRow(), 'Open command');
+  await d.press(Key.ArrowDown);
+  assert.equal(await d.activeRow(), openIn[1].label);
+  await d.press(Key.ArrowLeft);
+  await d.waitFor('the submenu closed', () => d.wd.exec(`return ![...document.querySelectorAll('[role="menu"]')].some((m) => m.getAttribute('aria-label') === 'Open in');`));
+  assert.equal(await d.activeRow(), 'Open in');
+  await d.press(Key.Escape);
+  await menuGone(d);
+  // At 640px: the band's kebab at the right edge opens the same menu, kept
+  // inside the window, and Open in flips to the menu's left.
+  await d.wd.call('POST', '/window/rect', { width: 640, height: 760 });
+  await d.waitFor('a 640px window', () => d.wd.exec('return window.innerWidth <= 640;'));
+  await d.click(`[aria-label="${branch} actions"]`);
+  await d.menu(branch);
+  for (let i = 0; i < 30 && (await d.activeRow()) !== 'Open in'; i++) await d.press(Key.ArrowDown);
+  await d.press(Key.ArrowRight);
+  await d.menu('Open in');
+  const boxes = await d.wd.exec(`return [...document.querySelectorAll('[role="menu"]')].map((m) => {
+      const r = m.getBoundingClientRect();
+      return { label: m.getAttribute('aria-label'), left: r.left, right: r.right, top: r.top, bottom: r.bottom, w: innerWidth, h: innerHeight };
+    });`);
+  for (const b of boxes) assert.ok(b.left >= 0 && b.right <= b.w && b.top >= 0 && b.bottom <= b.h, `${b.label} inside the window: ${JSON.stringify(b)}`);
+  const top = boxes.find((b) => b.label === branch);
+  const sub = boxes.find((b) => b.label === 'Open in');
+  assert.ok(sub.right <= top.left + 2, 'Open in flips to the left of the menu at the window edge');
+  await d.press(Key.Escape);
   await d.press(Key.Escape);
   await menuGone(d);
 });
