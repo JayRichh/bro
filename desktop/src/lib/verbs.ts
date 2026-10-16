@@ -26,12 +26,13 @@ import { SHORTCUTS } from './keytable.svelte';
 export { PRIMARY_SHOWN };
 
 /** The registry's kind for a window target's. */
-export type TargetKind = 'agent' | 'terminal' | 'worktree' | 'project';
+export type TargetKind = 'agent' | 'terminal' | 'worktree' | 'project' | 'account';
 export const KIND_OF: Record<TargetKind, AppliesTo> = {
   agent: 'session',
   terminal: 'terminal',
   worktree: 'worktree',
   project: 'repo',
+  account: 'account',
 };
 
 /** What a menu row for verb `id` on a thing of kind `on` says: the

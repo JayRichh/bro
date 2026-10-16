@@ -51,6 +51,11 @@ pub const PERF_LOG: &str = "NEBULA_PERF_LOG";
 /// leaves the "daemon still running" note to the upgrade. `install.sh`
 /// reads it by this name.
 pub const UPGRADE_HANDOFF: &str = "NEBULA_UPGRADE_HANDOFF";
+/// Set (to anything) to keep `kete wake set` / `off` and the apps from
+/// installing or removing the Windows scheduled task (`wake::task`):
+/// tests, and any dev run against a throwaway data dir, since the Task
+/// Scheduler is the machine's own and no data dir isolates it.
+pub const WAKE_NO_TASK: &str = "NEBULA_WAKE_NO_TASK";
 /// Set on a WORKTREE HOOK script: which hook it is running as
 /// (`worktree-create` / `worktree-delete`), so one script can serve both.
 pub const HOOK: &str = "NEBULA_HOOK";

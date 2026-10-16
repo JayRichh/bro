@@ -20,6 +20,7 @@ import { canSwitchBranch, openBranchSwitch } from './worktrees/switcher.svelte';
 import { checkoutSessions, deleteAllSessions } from './checkout';
 import { moveToAccount, pickProjectAccount, SWITCH_UNAVAILABLE } from './accounts/actions';
 import { canSwitch } from './accounts/view';
+import { openWake, wake, wakeNowFor } from './wake/state.svelte';
 import { rows as gitRows, whileCutting } from './worktrees/rows.svelte';
 import { moveStep, stepInFor, type StepIn } from './reorder.svelte';
 import { openComposer, openMerge } from './ship/sheet.svelte';
@@ -33,7 +34,9 @@ export type Target =
   | { kind: 'agent'; id: string; viaSub?: boolean }
   | { kind: 'terminal'; id: string }
   | { kind: 'worktree'; id: string }
-  | { kind: 'project'; id: string };
+  | { kind: 'project'; id: string }
+  /** An ACCOUNT, by its key: a profile's name, or `@claude`. */
+  | { kind: 'account'; id: string };
 
 /** A target as a string, for `data-session` attributes. */
 export function targetKey(t: Target): string {
@@ -44,7 +47,7 @@ export function parseTarget(k: string | null | undefined): Target | null {
   const i = k.indexOf(':');
   const kind = k.slice(0, i);
   const id = k.slice(i + 1);
-  if (kind === 'agent' || kind === 'terminal' || kind === 'worktree' || kind === 'project') return { kind, id };
+  if (kind === 'agent' || kind === 'terminal' || kind === 'worktree' || kind === 'project' || kind === 'account') return { kind, id };
   if (kind === 'subagent') return { kind: 'agent', id, viaSub: true };
   return null;
 }
@@ -631,6 +634,8 @@ export function verbTable(t: Target): VerbTable {
     }
     case 'project':
       return projectVerbs(t.id);
+    case 'account':
+      return accountVerbs(t.id);
   }
 }
 
@@ -681,6 +686,67 @@ export function terminalMenu(t: TerminalTab): MenuEntry[] {
   return [...rows('terminal', terminalVerbs(t)), 'sep', ...worktreeItems(worktreeOf(t.worktree_id))];
 }
 
+/** Whakaoho runs Claude accounts only: `@claude`, or a profile on Claude. */
+function isClaudeAccount(key: string): boolean {
+  if (key === '@claude') return true;
+  if (key.startsWith('@')) return false;
+  const harness = app.accounts.find((r) => r.key === key)?.harness;
+  return harness === undefined || harness === 'claude';
+}
+
+/** What the window can do to an account: Wake up now, on a Claude
+ *  account that is signed in and not already waking. One whose window is
+ *  live says until when: a wake then starts nothing new. */
+function accountVerbs(key: string): VerbTable {
+  if (!isClaudeAccount(key)) {
+    return { wake_account: { run: () => {}, disabled: true, why: 'Wake-up runs Claude accounts only.' } };
+  }
+  return withSchedule(key, { wake_account: wakeNowVerb(key) });
+}
+
+/** Wake up now on a Claude account: disabled until it is signed in, and
+ *  while it is already waking; labelled with its live window's end. */
+function wakeNowVerb(key: string): VerbImpl {
+  const row = app.accounts.find((r) => r.key === key);
+  if (row?.login === 'needs_login') return { run: () => {}, disabled: true, why: `Log in first: ${row.loginHint ?? 'sign it in'}` };
+  if (wake.waking[key]) return { run: () => {}, disabled: true, why: 'Waking now: up to two minutes.' };
+  const live = m().accounts?.[key]?.windows.find((w) => w.kind === 'session' && (w.resets_at ?? 0) * 1000 > Date.now());
+  return {
+    run: () => wakeNowFor(key),
+    ...(live?.resets_at ? { label: `${menuLabel('wake_account', 'account')} (window live until ${clock(live.resets_at)})` } : {}),
+  };
+}
+
+/** The registry's id for "Wake-up schedule...": the Whakaoho view, on the
+ *  account. Keyed by name, as the row comes from the registry
+ *  (lane/menu-matrix's `wake_schedule`) and this table is ahead of it. */
+const WAKE_SCHEDULE = 'wake_schedule' as ActionId;
+
+function withSchedule(key: string, table: VerbTable): VerbTable {
+  return { ...table, [WAKE_SCHEDULE]: { run: () => openWake(key) } };
+}
+
+/** `HH:MM` on the local clock for an epoch second. */
+function clock(epoch: number): string {
+  const d = new Date(epoch * 1000);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+/** An account's menu: the registry's rows. "Wake-up schedule..." is the
+ *  registry's `wake_schedule` row; a registry without it yet gets the same
+ *  row from here, so there is always one, never two. */
+export function accountMenu(key: string): MenuEntry[] {
+  const out: MenuEntry[] = rows('account', accountVerbs(key));
+  if (isClaudeAccount(key) && !menuIds('account').includes(WAKE_SCHEDULE)) {
+    out.push({ label: 'Wake-up schedule\u2026', run: () => openWake(key) });
+  }
+  return out;
+}
+
+/** The registry's global `wake_schedule` ("Whakaoho..."), with no account
+ *  named: the view. */
+export const openWakeView = (): void => openWake();
+
 export function projectMenu(project: string): MenuEntry[] {
   const linked = m()
     .worktrees.filter((w) => w.project_id === project && !w.is_main)
@@ -717,6 +783,8 @@ export function menuFor(t: Target): MenuEntry[] {
       return worktreeItems(worktreeOf(t.id));
     case 'project':
       return projectMenu(t.id);
+    case 'account':
+      return accountMenu(t.id);
   }
 }
 

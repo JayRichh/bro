@@ -4,6 +4,7 @@
 
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import type { WakeNowResult, WakeOverview, WakeSchedule } from './wake/types';
 
 export type AgentStatus =
   | 'fresh'
@@ -614,6 +615,15 @@ export const api = {
   profileRename: (old: string, name: string) => invoke<ProfileRenamed>('profile_rename', { old, new: name }),
   profileSetDefault: (name: string) => invoke<ProfileRow[]>('profile_set_default', { name }),
   accounts: () => invoke<AccountRow[]>('accounts_list'),
+  /** Whakaoho: every Claude account's wake-up schedule, next run, usual
+   *  hours, suggestion, each anchor's preview and last decisions
+   *  (`kete wake status --json`). */
+  wakeOverview: () => invoke<WakeOverview>('wake_overview'),
+  /** Save an account's wake-up schedule and rewrite the scheduled task;
+   *  the line saying what the task now does. */
+  wakeSet: (account: string, schedule: WakeSchedule) => invoke<string>('wake_set', { account, schedule }),
+  /** Wake an account now, whatever its schedule (`kete wake <account> --force`). */
+  wakeNow: (account: string) => invoke<WakeNowResult[]>('wake_now', { account }),
   profileSetEnabled: (name: string, enabled: boolean) => invoke<null>('profile_set_enabled', { name, enabled }),
   /** A new terminal in `worktree` running the account's login command; its id. */
   accountLoginRun: (worktree: string, key: string) => invoke<string>('account_login_run', { worktree, key }),

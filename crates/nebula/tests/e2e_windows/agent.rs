@@ -24,6 +24,9 @@
 //! - `notify:<type>` — a `Notification` of that `notification_type`
 //!   (`quota_auto_resume_fired`, …).
 //! - `say:<text>` — prints a line.
+//! - `statusline:<resets_at>` — runs the status line command Kete's
+//!   `--settings` file names, as Claude does after a reply, with a
+//!   reading whose five-hour window resets at `<resets_at>` (epoch secs).
 //! - `echo` — the idle prompt: turns bracketed paste on and logs every
 //!   byte it is sent to [`ECHO_LOG`], printing `paste <n> bytes` for each
 //!   bracketed paste and `submit` for each Enter outside one.
@@ -68,6 +71,7 @@ pub fn run() {
         session_id: format!("fake-{}", std::process::id()),
         cwd: std::env::current_dir().unwrap_or_default(),
         input: std::io::stdin(),
+        settings: settings_of(&args),
     };
     agent.log(&format!(
         "agent {} args {args:?}",
@@ -153,12 +157,21 @@ pub fn run() {
                 serde_json::json!({ "notification_type": rest, "message": rest }),
             ),
             "say" => print_line(rest),
+            "statusline" => agent.statusline(rest),
             "echo" => agent.echo(),
             other => agent.log(&format!("unknown step {other}")),
         }
     }
     let mut buf = [0u8; 1024];
     while matches!(agent.input.read(&mut buf), Ok(n) if n > 0) {}
+}
+
+/// The file after `--settings`, if any.
+fn settings_of(args: &[String]) -> Option<PathBuf> {
+    args.iter()
+        .position(|a| a == "--settings")
+        .and_then(|i| args.get(i + 1))
+        .map(PathBuf::from)
 }
 
 /// The prompt: the last argument that is neither a flag nor a flag's
@@ -184,6 +197,8 @@ struct Agent {
     session_id: String,
     cwd: PathBuf,
     input: std::io::Stdin,
+    /// The `--settings` file Kete passed, which names its status line.
+    settings: Option<PathBuf>,
 }
 
 impl Agent {
@@ -252,6 +267,48 @@ impl Agent {
                 out.as_ref().map(|o| o.status.code())
             ));
         }
+    }
+
+    /// Run the status line command, as Claude does after a reply, with a
+    /// plan reading on stdin.
+    fn statusline(&self, resets_at: &str) {
+        let command = self
+            .settings
+            .as_ref()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .and_then(|v| v["statusLine"]["command"].as_str().map(str::to_string));
+        let Some(command) = command else {
+            self.log("statusline: no command passed");
+            return;
+        };
+        let reading = serde_json::json!({
+            "session_id": self.session_id,
+            "rate_limits": {
+                "five_hour": {"used_percentage": 2, "resets_at": resets_at.trim().parse::<i64>().unwrap_or(0)},
+                "seven_day": {"used_percentage": 10, "resets_at": 1_900_000_000},
+            },
+        });
+        use std::os::windows::process::CommandExt;
+        let child = Command::new("cmd")
+            .raw_arg(format!("/D /C {command}"))
+            .current_dir(&self.cwd)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn();
+        let Ok(mut child) = child else {
+            self.log("statusline: spawn failed");
+            return;
+        };
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(reading.to_string().as_bytes());
+        }
+        let out = child.wait_with_output();
+        self.log(&format!(
+            "statusline: {:?}",
+            out.as_ref().map(|o| o.status.code())
+        ));
     }
 
     /// One line of input: what is typed up to Enter, with a bracketed

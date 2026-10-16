@@ -260,6 +260,9 @@ pub struct Daemon {
     /// STOP NOTES and the usage-limit lines sessions' screens showed
     /// (`stops.rs`), taken alone.
     stops: Mutex<stops::StopBook>,
+    /// WHAKAOHO's hidden sessions in flight (`wake.rs`), by agent id;
+    /// taken alone. Never in `sessions`.
+    wakes: Mutex<HashMap<AgentId, wake::WakeSession>>,
 }
 
 mod exit;
@@ -276,6 +279,7 @@ mod stops;
 mod subagents;
 mod terminals;
 mod usage;
+mod wake;
 
 pub use subagents::{SubagentCarry, SubagentHookInfo};
 
@@ -310,6 +314,7 @@ impl Daemon {
             usage: Mutex::new(usage::UsageBook::default()),
             snapshots: snapshots::Snapshotter::default(),
             stops: Mutex::new(stops::StopBook::default()),
+            wakes: Mutex::new(HashMap::new()),
         })
     }
 

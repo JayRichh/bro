@@ -32,6 +32,9 @@
   import { runLogin, setProjectAccount } from './actions';
   import { openAddAccount } from './add.svelte';
   import { allKeysItem } from '../commands';
+  import { openWake, refreshWake, scheduleOf, wake } from '../wake/state.svelte';
+  import { accountMenu } from '../actions';
+  import { hhmm } from '../wake/timeline';
 
   const rows = $derived(viewRows(mergeRows(app.accounts, app.model.accounts ?? {}, ownLoginSessionHarnesses(app.model.agents))));
   const spread = $derived(app.launch.spread ?? 'manual');
@@ -43,8 +46,13 @@
 
   const GLYPH: Record<string, string> = { claude: 'C', codex: 'X', copilot: 'G', cursor: 'U', pi: 'P', opencode: 'O' };
 
+  /** An account's Whakaoho entry, for its Wake-up link (null until the overview is read). */
+  const wakeOf = (key: string) => wake.overview?.accounts.find((a) => a.account === key && a.known) ?? null;
+
   onMount(() => {
     refreshLaunchables();
+    // The Wake-up links name each account's hour: read the overview once if nothing has.
+    if (!wake.overview) void refreshWake();
     api
       .profileHarnesses()
       .then((h) => (harnesses = h))
@@ -200,11 +208,30 @@
     }
   }
 
-  /** The row's verbs, as its buttons run them: what `?` lists. */
+  /** A Claude account's wake-up rows (Wake up now, Wake-up schedule...),
+   *  set off by rules: the account menu's, from actions.ts. */
+  function wakeRows(r: AccountRow): MenuEntry[] {
+    if (r.harness !== 'claude' || r.problem) return [];
+    return ['sep', ...accountMenu(r.key), 'sep'];
+  }
+
+  /** `entries` with no rule first, last or twice in a row. */
+  const tidy = (entries: MenuEntry[]): MenuEntry[] =>
+    entries.reduce<MenuEntry[]>((out, e) => {
+      if (e === 'sep' && (!out.length || out[out.length - 1] === 'sep')) return out;
+      return [...out, e];
+    }, []).filter((e, i, all) => e !== 'sep' || i < all.length - 1);
+
+  /** The row's verbs, as its buttons run them: what `?` and a right-click
+   *  list. */
   function rowVerbs(r: AccountRow, at: HTMLElement): MenuEntry[] {
+    return tidy(rowEntries(r, at));
+  }
+
+  function rowEntries(r: AccountRow, at: HTMLElement): MenuEntry[] {
     const out: MenuEntry[] = [];
     if (r.loginHint && !r.problem) out.push({ label: r.login === 'logged_in' ? 'Re-sign in' : 'Sign in', run: () => void signIn(r) });
-    if (!r.profile) return [...out, { label: 'Add as account', run: () => openAddAccount({ harness: r.harness, adopt: true }) }];
+    if (!r.profile) return [...out, ...wakeRows(r), { label: 'Add as account', run: () => openAddAccount({ harness: r.harness, adopt: true }) }];
     if (!r.problem)
       out.push(
         { label: r.default ? 'The default' : 'Make default', run: () => void setDefault(r), disabled: r.default },
@@ -212,6 +239,7 @@
         { label: 'Edit\u2026', run: () => edit(r) },
         { label: 'Duplicate\u2026', run: () => void duplicate(r) },
         { label: 'Use for\u2026', run: () => useFor(r, at) },
+        ...wakeRows(r),
       );
     if (r.name !== '(no name)') out.push({ label: 'Rename\u2026', run: () => void rename(r), keys: ['r'] });
     out.push({ label: 'Remove\u2026', run: () => void remove(r), keys: ['delete'], danger: true });
@@ -337,6 +365,10 @@
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
             onkeydown={(e) => rowKey(e, r)}
+            oncontextmenu={(e) => {
+              e.preventDefault();
+              openMenu([...rowVerbs(r, e.currentTarget as HTMLElement), 'sep', allKeysItem()], { x: e.clientX, y: e.clientY }, `account ${r.name}`);
+            }}
             class="grid items-start gap-x-5 gap-y-2.5 lg:grid-cols-[minmax(200px,1.3fr)_minmax(150px,1fr)_minmax(220px,1.3fr)_minmax(250px,auto)] {r.disabled &&
             !r.problem
               ? 'opacity-60'
@@ -430,6 +462,15 @@
                   <span class="w-[92px] flex-none truncate font-mono text-[10px] text-faint">{resetLine(w)}</span>
                 </div>
               {/each}
+              {#if r.harness === 'claude' && !r.problem}
+                {@const w = wakeOf(r.key)}
+                <button
+                  class="w-fit border-0 bg-transparent p-0 text-left font-mono text-[11px] text-muted underline-offset-4 hover:text-ink hover:underline"
+                  onclick={() => openWake(r.key)}
+                  title="Whakaoho: send one tiny prompt at an hour you pick, so {r.name}'s 5-hour window starts earlier. Open its wake-up schedule"
+                  >{#if w}Wake-up {scheduleOf(w).enabled ? hhmm(scheduleOf(w).anchor_min) : 'off'}{:else}Wake-up&hellip;{/if}</button
+                >
+              {/if}
             </div>
 
             <!-- Verbs. -->

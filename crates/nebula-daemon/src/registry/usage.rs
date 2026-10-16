@@ -288,6 +288,10 @@ impl Daemon {
     /// data behind the hook token), so a reading only lands for a Claude
     /// session the daemon holds and has not archived.
     pub fn on_statusline(&self, agent_id: &AgentId, body: &Value) {
+        // A WHAKAOHO session has no row; its reading is its account's.
+        if self.wake_statusline(agent_id, body) {
+            return;
+        }
         let Ok(Some(agent)) = self.store.get_agent(agent_id) else {
             return;
         };

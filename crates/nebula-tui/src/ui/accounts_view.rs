@@ -1,9 +1,11 @@
-//! The ACCOUNTS OVERLAY's drawing (`crate::accounts_overlay`).
+//! The ACCOUNTS OVERLAY's drawing (`crate::accounts_overlay`): the
+//! Accounts view, and the Wake view (`crate::wake_tab`) beside it.
 
 use super::*;
 use crate::accounts_overlay::{
-    age, AccountForm, AccountRow, AccountsHit, AccountsView, FormKind, Mode,
+    age, AccountForm, AccountRow, AccountsHit, AccountsView, FormKind, Mode, Tab,
 };
+use crate::wake_tab::{self, WakeTab};
 use crossterm::event::KeyCode;
 use nebula_core::usage::{self, Tone, UsageWindow};
 
@@ -324,10 +326,36 @@ fn list_buttons(view: &AccountsView) -> Vec<Button> {
         };
     }
     out[4].danger = true;
+    // Wake-up runs Claude accounts only.
+    let claude = row.is_some_and(|r| r.harness == "claude" && r.problem.is_none());
+    let mut wake = button("w", "wake now", KeyCode::Char('w'));
+    wake.on = claude;
+    out.push(wake);
+    out.push(button("Tab", "wake-up", KeyCode::Tab));
     out
 }
 
+/// The header: the two views as tabs, in the SETTINGS OVERLAY's strip,
+/// the one up lit; a click on one turns to it.
+fn tab_lines(l: &mut Layout, view: &AccountsView, th: Theme) {
+    let tabs = [(Tab::Accounts, "Accounts"), (Tab::Wake, "Wake")];
+    let active = tabs.iter().position(|(t, _)| *t == view.tab).unwrap_or(0);
+    let (strip, hits) = tab_strip(
+        l.inner.x,
+        tabs.iter().map(|(_, name)| (*name, None)),
+        active,
+        false,
+        th,
+    );
+    for ((from, to), (tab, _)) in hits.into_iter().zip(tabs) {
+        l.hit(from - l.inner.x, to - from, AccountsHit::Tab(tab));
+    }
+    l.push(Line::from(strip));
+    l.push(strip_rule(l.inner.width, th));
+}
+
 fn draw_list(l: &mut Layout, view: &AccountsView, now: i64, th: Theme) {
+    tab_lines(l, view, th);
     spread_lines(l, view, th);
     l.buttons(list_buttons(view), th);
     l.push(Line::from(""));
@@ -349,6 +377,311 @@ fn draw_list(l: &mut Layout, view: &AccountsView, now: i64, th: Theme) {
         }
         l.push(Line::from(""));
     }
+}
+
+// ---- the Wake view ----
+
+/// How far in the strip and the lines under an account start.
+const WAKE_INDENT: usize = 4;
+/// The strip's widest: a cell of a quarter hour.
+const STRIP_MAX: usize = 96;
+/// Room for an account's name on its line.
+const WAKE_NAME: usize = 18;
+/// Room for the days it fires on.
+const WAKE_DAYS: usize = 13;
+
+/// `text` onto `spans`, `x` moved on by its width.
+fn put(spans: &mut Vec<Span<'static>>, x: &mut usize, text: impl Into<String>, style: Style) {
+    let text = text.into();
+    *x += text.chars().count();
+    spans.push(Span::styled(text, style));
+}
+
+/// One cell of the day strip. The windows are the upper half of a cell
+/// and the usual hours the lower, so both read on one line; a switched-off
+/// account shows what it would do in the quieter tones. Ember is not used:
+/// that is for what needs the user.
+fn cell_span(cell: wake_tab::Cell, on: bool, th: Theme) -> Span<'static> {
+    let tone = |index: usize| match (on, index % 2) {
+        (true, 0) => th.ok,
+        (true, _) => th.muted,
+        (false, 0) => th.muted,
+        (false, _) => th.dim,
+    };
+    match cell {
+        wake_tab::Cell::Idle => Span::styled("\u{b7}", Style::default().fg(th.dim)),
+        wake_tab::Cell::Usual => Span::styled("\u{2584}", Style::default().fg(th.dim)),
+        wake_tab::Cell::Window { index, usual } => {
+            let style = Style::default().fg(tone(index));
+            Span::styled("\u{2580}", if usual { style.bg(th.dim) } else { style })
+        }
+        wake_tab::Cell::Now => Span::styled(
+            "\u{2503}",
+            Style::default().fg(th.text).add_modifier(Modifier::BOLD),
+        ),
+        wake_tab::Cell::Anchor => Span::styled(
+            "\u{25c6}",
+            Style::default().fg(th.text).add_modifier(Modifier::BOLD),
+        ),
+    }
+}
+
+/// An account of the Wake view, in three lines: its switch, name, hour,
+/// days and next run; the day as a strip; and what the last heartbeat did
+/// (or what stops the next). Every line is the row's, for a click.
+fn wake_row(l: &mut Layout, tab: &WakeTab, i: usize, strip_w: usize, th: Theme) {
+    let row = &tab.rows()[i];
+    let selected = i == tab.cursor;
+    let on = row.schedule.enabled;
+    let anchor = row.schedule.anchor();
+    let (now, offset) = (tab.now(), tab.offset());
+    let width = l.inner.width;
+
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut x = 0usize;
+    put(&mut spans, &mut x, " ", Style::default());
+    let switch_at = x;
+    let switch = format!(
+        "{} {}",
+        if on { "[x]" } else { "[ ]" },
+        if on { "on " } else { "off" }
+    );
+    let switch_w = switch.chars().count();
+    put(
+        &mut spans,
+        &mut x,
+        switch,
+        Style::default().fg(if on { th.ok } else { th.dim }),
+    );
+    put(&mut spans, &mut x, " ", Style::default());
+    let name_style = if selected {
+        Style::default().fg(th.on_accent).bg(th.accent)
+    } else if row.disabled || !row.known {
+        Style::default().fg(th.dim)
+    } else {
+        Style::default().fg(th.text).add_modifier(Modifier::BOLD)
+    };
+    put(
+        &mut spans,
+        &mut x,
+        format!(" {:<w$} ", truncate(&row.label(), WAKE_NAME), w = WAKE_NAME),
+        name_style,
+    );
+    put(&mut spans, &mut x, "  ", Style::default());
+    let arrows_at = x;
+    let hour_style = if on {
+        Style::default().fg(th.text).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(th.muted)
+    };
+    put(
+        &mut spans,
+        &mut x,
+        "\u{2039} ",
+        Style::default().fg(th.muted),
+    );
+    put(
+        &mut spans,
+        &mut x,
+        nebula_core::wake::hhmm(anchor),
+        hour_style,
+    );
+    put(
+        &mut spans,
+        &mut x,
+        " \u{203a}",
+        Style::default().fg(th.muted),
+    );
+    put(&mut spans, &mut x, "  ", Style::default());
+    let days = nebula_core::wake::days_text(row.schedule.day_mask());
+    put(
+        &mut spans,
+        &mut x,
+        format!("{:<w$}", truncate(&days, WAKE_DAYS), w = WAKE_DAYS),
+        Style::default().fg(th.dim),
+    );
+    if let Some(next) = row.next_run(now, offset).filter(|_| on) {
+        put(
+            &mut spans,
+            &mut x,
+            format!("  next {}", wake_tab::day_clock(next, offset)),
+            Style::default().fg(th.muted),
+        );
+    }
+    // The most specific spots first: a click takes the first that holds it.
+    l.hit(
+        switch_at as u16,
+        switch_w as u16,
+        AccountsHit::WakeSwitch(i),
+    );
+    l.hit(arrows_at as u16, 2, AccountsHit::WakeAnchor(i, -1));
+    l.hit(arrows_at as u16 + 7, 2, AccountsHit::WakeAnchor(i, 1));
+    l.hit(0, width, AccountsHit::WakeRow(i));
+    l.push(Line::from(spans));
+
+    let minute = nebula_core::wake::LocalTime::at(now, offset).minute;
+    let cells = wake_tab::strip(strip_w, &row.windows_at(anchor), row.usual, anchor, minute);
+    let mut spans: Vec<Span<'static>> = vec![Span::raw(" ".repeat(WAKE_INDENT))];
+    spans.extend(cells.into_iter().map(|cell| cell_span(cell, on, th)));
+    l.hit(0, width, AccountsHit::WakeRow(i));
+    l.push(Line::from(spans));
+
+    // What needs the user first, then the last decision, then as much of
+    // the usual hours and the suggestion as the width holds.
+    let mut parts: Vec<(String, Color)> = Vec::new();
+    if let Some(problem) = row.problem() {
+        parts.push((problem, th.warn));
+    }
+    parts.push((
+        match row.last_summary.as_deref().filter(|s| !s.is_empty()) {
+            Some(summary) => format!("last {summary}"),
+            None => "no wake-ups yet".to_string(),
+        },
+        th.muted,
+    ));
+    if let Some(usual) = row.usual {
+        parts.push((format!("usual {}", usual.text()), th.dim));
+    }
+    if let Some(best) = row.suggested {
+        parts.push((
+            format!("suggested {}", nebula_core::wake::hhmm(best)),
+            th.dim,
+        ));
+    }
+    let room = (width as usize).saturating_sub(WAKE_INDENT + 1);
+    let mut spans: Vec<Span<'static>> = vec![Span::raw(" ".repeat(WAKE_INDENT))];
+    let mut used = 0usize;
+    for (n, (text, fg)) in parts.into_iter().enumerate() {
+        let sep = if n == 0 { 0 } else { 3 };
+        let w = text.chars().count();
+        if n > 0 && used + sep + w > room {
+            continue;
+        }
+        if sep > 0 {
+            spans.push(Span::styled(" \u{b7} ", Style::default().fg(th.dim)));
+        }
+        spans.push(Span::styled(text, Style::default().fg(fg)));
+        used += sep + w;
+    }
+    l.hit(0, width, AccountsHit::WakeRow(i));
+    l.push(Line::from(spans));
+}
+
+/// Under the accounts: what the wake-up does in plain words, where the
+/// trigger stands, what the marks mean, and the keys as buttons.
+fn wake_footer(l: &mut Layout, tab: &WakeTab, th: Theme) {
+    let width = l.inner.width as usize;
+    l.push(Line::from(""));
+    for line in wrap_words(wake_tab::explain(), width.saturating_sub(2).max(10)) {
+        l.push(Line::from(Span::styled(
+            format!(" {line}"),
+            Style::default().fg(th.muted),
+        )));
+    }
+    if let Some(status) = &tab.status {
+        if !status.task_line.is_empty() {
+            l.push(Line::from(Span::styled(
+                format!(" {}", status.task_line),
+                Style::default().fg(th.dim),
+            )));
+        }
+        // Where kete installs nothing, the line to add is the trigger.
+        if let Some(cron) = status.crontab.first().filter(|_| !status.on_windows) {
+            l.push(Line::from(Span::styled(
+                format!(" {cron}"),
+                Style::default().fg(th.dim),
+            )));
+        }
+        if status.daemon == Some(false) {
+            l.push(Line::from(Span::styled(
+                " The running daemon is older: wake-ups fall back to claude -p until you run kete kill.",
+                Style::default().fg(th.warn),
+            )));
+        }
+    }
+    l.push(Line::from(Span::styled(
+        " \u{25c6} wake-up hour  \u{2503} now  \u{2580} wake windows  \u{2584} your usual hours",
+        Style::default().fg(th.dim),
+    )));
+    let row = tab.selected();
+    let mut space = button("Space", "on/off", KeyCode::Char(' '));
+    space.on = row.is_some();
+    let mut earlier = button("\u{2190}", "earlier", KeyCode::Left);
+    earlier.on = row.is_some();
+    let mut later = button("\u{2192}", "later", KeyCode::Right);
+    later.on = row.is_some();
+    let mut best = button("s", "suggested", KeyCode::Char('s'));
+    best.on = row.is_some_and(|a| a.suggested.is_some());
+    let mut wake = button("w", "wake now", KeyCode::Char('w'));
+    wake.on = row.is_some();
+    l.buttons(
+        vec![
+            space,
+            earlier,
+            later,
+            best,
+            wake,
+            button("Tab", "accounts", KeyCode::Tab),
+            button("Esc", "close", KeyCode::Esc),
+        ],
+        th,
+    );
+}
+
+/// The Wake view: a scale for the strips, the accounts each in three
+/// lines (scrolled to keep the cursor's on screen), then the footer.
+fn draw_wake(l: &mut Layout, view: &AccountsView, th: Theme) {
+    tab_lines(l, view, th);
+    let tab = &view.wake;
+    let width = l.inner.width as usize;
+    let strip_w = width.saturating_sub(WAKE_INDENT + 2).clamp(1, STRIP_MAX);
+    // What the footer will take, so the accounts leave room for it.
+    let explained = wrap_words(wake_tab::explain(), width.saturating_sub(2).max(10)).len();
+    let extra = tab.status.as_ref().map_or(0, |s| {
+        usize::from(!s.task_line.is_empty())
+            + usize::from(!s.on_windows && !s.crontab.is_empty())
+            + usize::from(s.daemon == Some(false))
+    });
+    let reserve = 1 + explained + extra + 1 + 2;
+    match &tab.status {
+        None => {
+            let (text, fg) = match &tab.error {
+                Some(why) => (format!(" Couldn't read the wake-up status: {why}"), th.err),
+                None => (" Reading the wake-up status\u{2026}".to_string(), th.dim),
+            };
+            l.push(Line::from(Span::styled(text, Style::default().fg(fg))));
+        }
+        Some(status) => {
+            l.push(Line::from(Span::styled(
+                format!("{}{}", " ".repeat(WAKE_INDENT), wake_tab::scale(strip_w)),
+                Style::default().fg(th.dim),
+            )));
+            if status.accounts.is_empty() {
+                l.push(Line::from(Span::styled(
+                    " No Claude accounts yet: press a on the Accounts view to add one.",
+                    Style::default().fg(th.dim),
+                )));
+            }
+            // Each account takes three lines and a blank between.
+            let left = (l.inner.height as usize).saturating_sub(l.lines.len() + reserve);
+            let fit = ((left + 1) / 4).max(1);
+            let first = tab.cursor.saturating_sub(fit - 1);
+            for i in (first..status.accounts.len()).take(fit) {
+                if i > first {
+                    l.push(Line::from(""));
+                }
+                wake_row(l, tab, i, strip_w, th);
+            }
+            // A refresh that failed keeps the rows and says so.
+            if let Some(why) = &tab.error {
+                l.push(Line::from(Span::styled(
+                    format!(" Couldn't refresh: {why}"),
+                    Style::default().fg(th.warn),
+                )));
+            }
+        }
+    }
+    wake_footer(l, tab, th);
 }
 
 fn draw_form(l: &mut Layout, form: &AccountForm, th: Theme) {
@@ -541,13 +874,17 @@ fn fit_line(line: Line<'static>, width: u16) -> Line<'static> {
 }
 
 pub(super) fn draw(f: &mut Frame, app: &mut App, mut view: AccountsView) {
+    // What the Wake view's threads landed since the last frame: the loop
+    // redraws when one answers, and this is where the view takes it.
+    view.wake.absorb();
     let th = app.chrome.theme;
     let now = nebula_core::clock::now_ms();
     // Floor of 8 rows, but never taller than the terminal allows (a
     // plain clamp panics once the ceiling drops under the floor).
     let ceiling = f.area().height.saturating_sub(2);
     let want = match &view.mode {
-        Mode::List => view.rows.len() as u16 * 5 + 9,
+        Mode::List if view.tab == Tab::Wake => view.wake.rows().len().max(1) as u16 * 4 + 14,
+        Mode::List => view.rows.len() as u16 * 5 + 11,
         Mode::UseFor { .. } => view.projects.len() as u16 + 7,
         _ => 16,
     };
@@ -561,6 +898,7 @@ pub(super) fn draw(f: &mut Frame, app: &mut App, mut view: AccountsView) {
         hits: Vec::new(),
     };
     match &view.mode {
+        Mode::List if view.tab == Tab::Wake => draw_wake(&mut l, &view, th),
         Mode::List => draw_list(&mut l, &view, now, th),
         Mode::Form(form) => draw_form(&mut l, form, th),
         Mode::Remove { message, home, .. } => draw_remove(&mut l, message, home.is_some(), th),

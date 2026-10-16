@@ -1939,6 +1939,7 @@ name = "nebula-core"
 version = "0.53.1"
 dependencies = [
  "directories",
+ "libc",
  "rmp-serde",
  "serde",
  "serde_bytes",

@@ -835,6 +835,13 @@ const ACCOUNT_VERBS: &[(&str, KeyCode, KeyModifiers, bool)] = &[
         KeyModifiers::NONE,
         false,
     ),
+    ("Wake up now", KeyCode::Char('w'), KeyModifiers::NONE, false),
+    (
+        "Wake-up schedule\u{2026}",
+        KeyCode::Tab,
+        KeyModifiers::NONE,
+        false,
+    ),
     (
         "Rename\u{2026}",
         KeyCode::Char('r'),
@@ -869,6 +876,22 @@ const ACCOUNT_VERBS: &[(&str, KeyCode, KeyModifiers, bool)] = &[
     ("Close", KeyCode::Esc, KeyModifiers::NONE, false),
 ];
 
+/// The accounts overlay's Wake view: its keys, which are not the list's.
+const WAKE_VERBS: &[(&str, KeyCode, KeyModifiers, bool)] = &[
+    ("On or off", KeyCode::Char(' '), KeyModifiers::NONE, false),
+    ("Earlier", KeyCode::Left, KeyModifiers::NONE, false),
+    ("Later", KeyCode::Right, KeyModifiers::NONE, false),
+    (
+        "Suggested hour",
+        KeyCode::Char('s'),
+        KeyModifiers::NONE,
+        false,
+    ),
+    ("Wake up now", KeyCode::Char('w'), KeyModifiers::NONE, false),
+    ("Accounts", KeyCode::Tab, KeyModifiers::NONE, false),
+    ("Close", KeyCode::Esc, KeyModifiers::NONE, false),
+];
+
 /// `?` over the diff (its file list, nothing typed in its filter) or the
 /// accounts list: that overlay's verbs, the overlay kept to come back to.
 /// False where `?` is the overlay's own (a filter being typed, a form).
@@ -877,6 +900,13 @@ pub(crate) fn open_over_overlay(app: &mut App) -> bool {
         Some(Overlay::Diff(v)) if v.filter.is_empty() && v.confirm_discard.is_none() => {
             let file = v.selected_path().unwrap_or_default().to_string();
             (format!("diff {file}"), DIFF_VERBS)
+        }
+        Some(Overlay::Accounts(v))
+            if matches!(v.mode, crate::accounts_overlay::Mode::List)
+                && v.tab == crate::accounts_overlay::Tab::Wake =>
+        {
+            let name = v.wake.selected_key().unwrap_or_default();
+            (format!("wake-up {name}"), WAKE_VERBS)
         }
         Some(Overlay::Accounts(v)) if matches!(v.mode, crate::accounts_overlay::Mode::List) => {
             let name = v.selected().map(|r| r.key.clone()).unwrap_or_default();

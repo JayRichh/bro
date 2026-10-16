@@ -444,6 +444,9 @@ fn handle_global_action(
         | Action::CreatePullRequest
         | Action::MergePullRequest
         | Action::FocusScope => super::verbs::run_on_selection(app, action, out),
+        // Wake up now: on the account the accounts overlay has picked, else
+        // the overlay opens on its Wake view to pick one.
+        Action::WakeAccount => accounts::wake_account_verb(app),
         // The 0.54/0.55 verbs whose lanes have not landed yet: a word in
         // the footer, never a dead key.
         Action::OpenInVscode
@@ -454,13 +457,12 @@ fn handle_global_action(
         | Action::OpenFileInKete
         | Action::CopyPath
         | Action::CopyRelativePath
-        | Action::CopyBranch
-        | Action::WakeAccount => super::verbs::pending_verb(app, action),
+        | Action::CopyBranch => super::verbs::pending_verb(app, action),
         Action::Critters => crate::critters::toggle(app),
-        // The menu matrix's verbs, for the menu lanes (and lane/wake's
-        // schedule) to route: their own arm, so each lane takes its ids
-        // out without touching the one above.
-        Action::MarkSeen | Action::CopyPrUrl | Action::ArchiveDone | Action::WakeSchedule => {
+        Action::WakeSchedule => super::accounts::open_wake_tab(app),
+        // The menu matrix's verbs, for the menu lanes to route: their own
+        // arm, so each lane takes its ids out without touching the one above.
+        Action::MarkSeen | Action::CopyPrUrl | Action::ArchiveDone => {
             super::verbs::pending_verb(app, action)
         }
         // `Shift+←` / `Shift+→` on the board: the card onto the next lane.

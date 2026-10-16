@@ -365,6 +365,42 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: ProfileCommand,
     },
+    /// Start accounts' 5-hour windows early (Whakaoho).
+    ///
+    /// At the hour you pick, one tiny prompt to the cheapest model under an
+    /// account starts its five-hour window, so it resets earlier in your
+    /// day. It is off by default, set per account, and uses your own
+    /// subscription. A Windows scheduled task (`Kete\Whakaoho`) runs `kete
+    /// wake --all` at each switched-on hour, whether Kete is open or not. A
+    /// heartbeat goes out only when the account has no live window, is on
+    /// and logged in, and hasn't had one for that hour. `--dry-run` says
+    /// what would happen and runs nothing.
+    #[command(
+        after_help = WAKE_EXAMPLES,
+        args_conflicts_with_subcommands = true,
+        subcommand_negates_reqs = true
+    )]
+    Wake {
+        /// A profile name, or @claude for Claude's own login.
+        account: Option<String>,
+        /// Every switched-on account: what the scheduled task runs.
+        #[arg(long)]
+        all: bool,
+        /// Wake the account now, whatever its schedule says.
+        #[arg(long)]
+        force: bool,
+        /// Say what would happen; run nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// auto (interactive, print if the daemon can't), interactive, or print.
+        #[arg(long, value_name = "MODE")]
+        mode: Option<String>,
+        /// Print JSON instead of text.
+        #[arg(long)]
+        json: bool,
+        #[command(subcommand)]
+        action: Option<WakeAction>,
+    },
     /// Serve this TUI in a web browser via ttyd.
     ///
     /// Runs ttyd in front of a kete TUI and opens a tab on it, so a phone or
@@ -1023,6 +1059,73 @@ Examples:
   kete profile set-project . max2       max2 for Claude sessions in this repo
   kete profile set-project app --clear claude
   kete profile list              accounts, homes and last seen usage";
+
+const WAKE_EXAMPLES: &str = "\
+Examples:
+  kete wake set work --at 05:00        on, every day at 05:00
+  kete wake set work --at suggested    the hour that fits your usual day
+  kete wake set work --days mon-fri --keep-rolling
+  kete wake status               schedules, next and last wake-ups
+  kete wake work --dry-run       what would happen now
+  kete wake work --force         wake it now, whatever the schedule
+  kete wake off work             off; the hour is kept for next time
+  kete wake --all                what the scheduled task runs";
+
+#[derive(Subcommand)]
+pub(crate) enum WakeAction {
+    /// Switch an account's wake-up on, at an hour.
+    ///
+    /// Options left out keep their values. Saved in this machine's
+    /// `config.local.json` (never exported or sent to remotes), and the
+    /// scheduled task is rewritten to match.
+    Set {
+        /// A profile name, or @claude.
+        account: String,
+        /// HH:MM in 15-minute steps, or `suggested`.
+        #[arg(long, value_name = "HH:MM")]
+        at: Option<String>,
+        /// all, mon-fri, weekends, or a list such as mon,wed,fri.
+        #[arg(long)]
+        days: Option<String>,
+        /// Also start a window at each 5-hour step inside your usual hours.
+        #[arg(long, overrides_with = "no_keep_rolling")]
+        keep_rolling: bool,
+        /// Only the hour itself.
+        #[arg(long)]
+        no_keep_rolling: bool,
+        /// Skip it after N days without use (0: never skip).
+        #[arg(long, value_name = "N")]
+        skip_idle: Option<u32>,
+        /// auto (the default: interactive, falling back to print while the
+        /// daemon can't run it), interactive (never falls back), or print.
+        #[arg(long, value_name = "MODE")]
+        mode: Option<String>,
+        /// Let the scheduled task wake the PC from sleep.
+        #[arg(long, overrides_with = "no_wake_pc")]
+        wake_pc: bool,
+        /// Run only while the PC is awake (catching up when it wakes).
+        #[arg(long)]
+        no_wake_pc: bool,
+    },
+    /// Switch an account's wake-up off.
+    ///
+    /// Its hour and options are kept for the next `kete wake set`. The
+    /// scheduled task goes when no account is on.
+    Off {
+        /// A profile name, or @claude.
+        account: String,
+    },
+    /// Schedules, next and last wake-ups, and suggested hours.
+    ///
+    /// For each Claude account: its schedule, the next wake-up, its live
+    /// window, its usual hours from Kete's sessions with the suggested
+    /// hour, and the last decision from the wake log.
+    Status {
+        /// Print JSON instead of text.
+        #[arg(long)]
+        json: bool,
+    },
+}
 
 #[derive(Subcommand)]
 pub(crate) enum ProfileCommand {

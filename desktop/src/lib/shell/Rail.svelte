@@ -9,6 +9,7 @@
   import Status from '../Status.svelte';
   import AccountsSection from '../accounts/AccountsSection.svelte';
   import { openAccounts } from '../accounts/actions';
+  import { openWake } from '../wake/state.svelte';
   import VersionPlate from './VersionPlate.svelte';
   import { drag, dropProject, endDrag, leftFor, moveOnto, offsetIn, rootOf, startDrag } from '../reorder.svelte';
   import { dropZone, type Zone } from '../order';
@@ -26,6 +27,9 @@
   const digit = (i: number): ShortcutId[] => (i < 9 ? [`repo_${i + 1}` as ShortcutId] : []);
   const here = $derived(nav.current.repo);
   const inSettings = $derived(nav.current.view === 'settings');
+  const inWake = $derived(nav.current.view === 'whakaoho');
+  /** Whakaoho, a middle dot, Wake-up (the dot is built, not typed: sources stay ASCII). */
+  const WAKE_TITLE = `Whakaoho ${String.fromCharCode(0xb7)} Wake-up: start each account's 5-hour window earlier`;
   let adding = $state(false);
   let addPath = $state('');
 
@@ -106,6 +110,14 @@
   };
 </script>
 
+{#snippet sunrise()}
+  <!-- Whakaoho's mark: a half sun with three rays rising from behind a kete (a basket). -->
+  <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+    <path d="M5.2 10.5a2.8 2.8 0 0 1 5.6 0M8 4.7v1.8M3.9 6.4l1.3 1.3M12.1 6.4l-1.3 1.3" fill="none" stroke="currentColor" stroke-width="1.2" />
+    <path d="M3.5 10.5h9l-1.4 4H4.9zM4.2 12.5h7.6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="miter" />
+  </svg>
+{/snippet}
+
 <aside class="flex min-h-0 flex-col border-r border-rule bg-bg">
   {#if compact}
     <div class="flex h-10 flex-none items-center justify-center border-b border-rule" title={app.model.connected ? `kete: daemon pid ${app.model.daemon_pid}` : 'kete: not connected to the daemon'}>
@@ -176,6 +188,15 @@
         aria-current={nav.current.view === 'accounts' ? 'page' : undefined}
       >
         <span aria-hidden="true">Ac</span>
+      </button>
+      <button
+        class="{tile} {inWake ? 'bg-surface text-ink' : 'bg-transparent text-muted hover:text-ink'}"
+        onclick={() => openWake()}
+        title={WAKE_TITLE}
+        aria-label="Whakaoho, wake-up"
+        aria-current={inWake ? 'page' : undefined}
+      >
+        {@render sunrise()}
       </button>
       <button
         class="{tile} {inSettings ? 'bg-surface text-ink' : 'bg-transparent text-muted hover:text-ink'}"
@@ -327,6 +348,18 @@
     </div>
 
     <AccountsSection {heading} />
+    <!-- Whakaoho sits with the accounts it wakes. -->
+    <div class="pt-1">
+      <button
+        class="{item} text-[13px] {inWake ? 'bg-surface text-ink' : 'bg-transparent text-muted hover:text-ink'}"
+        onclick={() => openWake()}
+        title={WAKE_TITLE}
+        aria-current={inWake ? 'page' : undefined}
+      >
+        {@render sunrise()}
+        <span class="min-w-0 flex-1 truncate">Whakaoho</span>
+      </button>
+    </div>
   </nav>
 
   <VersionPlate />

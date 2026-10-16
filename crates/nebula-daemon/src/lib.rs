@@ -233,6 +233,11 @@ async fn serve(opts: DaemonOpts) -> Result<()> {
                 effort,
             }) = hook_rx.recv().await
             {
+                // A WHAKAOHO session's hooks are its own business
+                // (`registry::wake`): no row to move, no prompt to keep.
+                if daemon.wake_hook(&agent_id, &event) {
+                    continue;
+                }
                 let captures_session = event.captures_session();
                 // The effort Claude runs at now: a `/effort` or the model's
                 // cap, for the next spawn to pass on.

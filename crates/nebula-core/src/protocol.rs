@@ -59,6 +59,9 @@ impl ServerEvent {
             }
             ServerEvent::WorktreeBases { .. } => peer_version >= RECORDED_BASE_PROTOCOL,
             ServerEvent::SessionChanges { .. } => peer_version >= SESSION_CHANGES_PROTOCOL,
+            ServerEvent::WakeDone { .. } | ServerEvent::AccountActivity { .. } => {
+                peer_version >= WAKE_PROTOCOL
+            }
             ServerEvent::SessionStops { .. } => peer_version >= LIMITS_PROTOCOL,
             _ => true,
         }
@@ -98,6 +101,13 @@ pub const SESSION_CHANGES_PROTOCOL: u32 = 59;
 /// request and would drop the connection, so the rename keeps refusing
 /// while a session names the profile (`profiles::rename`).
 pub const RENAME_PROFILE_PROTOCOL: u32 = 60;
+
+/// The first protocol whose daemon takes [`ClientRequest::WakeAccount`]
+/// and [`ClientRequest::AccountActivity`] (WHAKAOHO, `crate::wake`), and
+/// whose clients decode their replies. A client checks the version the
+/// daemon said at Hello before it sends either: an older daemon drops the
+/// connection on the unknown variant.
+pub const WAKE_PROTOCOL: u32 = 61;
 
 /// The first protocol whose peers decode [`ServerEvent::SessionStops`]:
 /// why a Claude session's turn stopped short (a usage limit it is waiting
@@ -752,6 +762,24 @@ pub enum ClientRequest {
         old: String,
         new: String,
     },
+
+    // -- protocol 61, appended after 60's. --
+    /// WHAKAOHO: send one tiny prompt to the cheapest model under
+    /// `account` (a profile name, or `@claude`) in a hidden session — no
+    /// row, never listed, killed when its turn ends or after two minutes
+    /// — so its five-hour window starts. Whether it should is the
+    /// client's call (`wake::decide`). Answered by `ServerEvent::WakeDone`
+    /// once the turn is over. Sent only to a 61+ daemon (`WAKE_PROTOCOL`).
+    WakeAccount {
+        req_id: u64,
+        account: String,
+    },
+    /// Every account's turns over the last two weeks, as local
+    /// quarter-hour counts (`wake::activity`). Answered by
+    /// `ServerEvent::AccountActivity`. Sent only to a 61+ daemon.
+    AccountActivity {
+        req_id: u64,
+    },
 }
 
 /// What a [`ClientRequest::Reorder`] reorders, and the order rule every
@@ -1096,6 +1124,17 @@ pub enum ServerEvent {
         changes: crate::session_snapshot::SessionChanges,
     },
 
+    // -- protocol 61, appended; replies, so only ever to 61+ peers. --
+    /// Reply to `ClientRequest::WakeAccount`.
+    WakeDone {
+        req_id: u64,
+        report: crate::wake::WakeReport,
+    },
+    /// Reply to `ClientRequest::AccountActivity`.
+    AccountActivity {
+        req_id: u64,
+        accounts: Vec<crate::wake::AccountActivity>,
+    },
     // -- protocol 62, appended; pushed only to 62+ peers
     // (`ServerEvent::decodable_by`). --
     /// Why sessions' last turns stopped short (`crate::stop`): every known
@@ -1350,6 +1389,66 @@ mod tests {
             panic!("not a RenameProfileSessions");
         };
         assert_eq!((req_id, old.as_str(), new.as_str()), (4, "work", "max2"));
+    }
+
+    /// 61 appends `WakeAccount` and `AccountActivity` with their replies:
+    /// older peers stay in range, never hear the replies, and both
+    /// round-trip.
+    #[test]
+    fn protocol_61_wake_requests_and_replies_round_trip() {
+        assert_eq!(MIN_COMPATIBLE_PROTOCOL, 53, "61 is additive");
+        const { assert!(WAKE_PROTOCOL <= PROTOCOL_VERSION) };
+        let req = ClientRequest::WakeAccount {
+            req_id: 3,
+            account: "@claude".into(),
+        };
+        let back: ClientRequest = rmp_serde::from_slice(&encode(&req)).unwrap();
+        let ClientRequest::WakeAccount { req_id, account } = back else {
+            panic!("not a WakeAccount");
+        };
+        assert_eq!((req_id, account.as_str()), (3, "@claude"));
+        let back: ClientRequest =
+            rmp_serde::from_slice(&encode(&ClientRequest::AccountActivity { req_id: 5 })).unwrap();
+        assert!(matches!(back, ClientRequest::AccountActivity { req_id: 5 }));
+
+        let report = crate::wake::WakeReport {
+            resets_before: Some(10),
+            resets_after: Some(20),
+            error: None,
+            reason: "fired".into(),
+            submitted: true,
+            finished: true,
+            read: true,
+        };
+        let done = ServerEvent::WakeDone {
+            req_id: 3,
+            report: report.clone(),
+        };
+        assert!(!done.decodable_by(60) && done.decodable_by(61));
+        let ServerEvent::WakeDone {
+            req_id,
+            report: got,
+        } = rmp_serde::from_slice(&encode(&done)).unwrap()
+        else {
+            panic!("not a WakeDone");
+        };
+        assert_eq!((req_id, got), (3, report));
+        let activity = ServerEvent::AccountActivity {
+            req_id: 5,
+            accounts: vec![crate::wake::AccountActivity {
+                account: "work".into(),
+                bins: vec![1; crate::wake::activity::BINS],
+                last_turn_at: Some(99),
+            }],
+        };
+        assert!(!activity.decodable_by(60));
+        let ServerEvent::AccountActivity { accounts, .. } =
+            rmp_serde::from_slice(&encode(&activity)).unwrap()
+        else {
+            panic!("not an AccountActivity");
+        };
+        assert_eq!(accounts[0].bins.len(), 96);
+        assert_eq!(accounts[0].last_turn_at, Some(99));
     }
 
     /// 58 adds `profile` to the end of `SpawnSiblingAgent`. Without one the

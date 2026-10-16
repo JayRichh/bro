@@ -28,6 +28,7 @@ kete orchestrator <cmd>   start the one orchestrator; its own verbs   (see Orche
 kete ado <cmd>            Azure DevOps tasks, task worktrees, PRs     (see Azure DevOps)
 kete config <cmd>         back up, restore or locate this machine's settings
 kete profile <cmd>        several accounts per harness: add, sign in, rename, spread, remove
+kete wake <cmd>           start accounts' 5-hour windows early at an hour you pick (Whakaoho)
 kete setup terminal       install a Nerd Font and add a "Kete" Windows Terminal profile
 kete browser              serve this TUI in a web browser via ttyd
 kete ssh <host>           open kete on a remote host over ssh
@@ -229,6 +230,32 @@ kete session move-account <session> [<profile> | --own-login]
 ```
 
 See [Profiles](profiles.md).
+
+## Wake-up (Whakaoho)
+
+At the hour you pick, Kete sends one tiny prompt ("hi", to haiku) under an account, so its five-hour window starts then and resets earlier in your day: an anchor of 05:00 gives a window to 10:00, and you start at 09:00 with a fresh one an hour away. It uses your own subscription, is off by default, and is set per account (`@claude` is Claude's own login; any other name is a profile).
+
+```sh
+kete wake set <account> --at HH:MM [--days all|mon-fri|weekends|mon,wed,…]
+              [--keep-rolling] [--skip-idle N] [--mode auto|interactive|print] [--wake-pc]
+                                # switch it on; options left out keep their values.
+                                # --at suggested takes the hour that fits your usual day
+kete wake off <account>       # switch it off; the hour and options are kept
+kete wake status [--json]     # schedules, next wake-up, live window, usual hours,
+                                # the suggested hour, and the last decision
+kete wake <account> --dry-run # what would happen now; runs nothing
+kete wake <account> [--force] [--mode auto|interactive|print]
+                                # run it now if the rules allow (--force: whatever they say)
+kete wake --all [--dry-run]   # every switched-on account: what the scheduled task runs
+```
+
+A heartbeat goes out only when the switch is on, it's one of its days and the hour has come, the account is switched on and logged in, it has no live five-hour window, and that hour hasn't had one. If the PC slept through the hour, it still goes out on waking, but only while it's earlier than your usual start (an hour's grace while Kete doesn't know your usual hours yet). `--keep-rolling` also starts the next window at each 5-hour step inside your usual hours, so resets stay on the anchor's grid. `--skip-idle N` leaves an account alone after N days without use.
+
+- **Auto** (the default) runs interactive, and falls back to print when the daemon can't run it (one older than this kete, until `kete kill` lets it restart, or none to reach); the log says `fired (print fallback: old_daemon)`. Naming `--mode interactive` pins it: no fallback.
+- **Interactive** runs a hidden Claude session in the daemon, in Kete's empty `wake` folder under the data dir: never listed, killed when the reply lands or after two minutes. Kete's status line reads the new reset time off it.
+- **Print** runs `claude -p` instead. It needs no daemon, but it may bill your plan's API credits rather than start the window.
+
+On Windows, `kete wake set` and `off` keep one Task Scheduler task, `Kete\Whakaoho`, that runs `kete wake --all` at every switched-on hour (Kete open or not; `--wake-pc` lets it wake the PC). The task runs `kete-w.exe wake --all`: kete with no console window, installed beside `kete.exe`, so a wake-up never opens a window or takes the focus (without it, from an older install, each run shows a console and `kete wake status` says so). It is removed when no account is on. On macOS and Linux, `kete wake set` prints the crontab lines to add instead. Schedules live in this machine's `config.local.json` under `wake` (never exported or sent to remotes), and every decision is a line in `<data dir>/wake-log.jsonl`, with the reset time before and after, so a heartbeat that didn't start a window shows as one.
 
 ## Windows Terminal
 

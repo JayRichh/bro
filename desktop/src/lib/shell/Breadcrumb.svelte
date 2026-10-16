@@ -15,6 +15,7 @@
     settings: 'Settings',
     orchestrator: 'Orchestrator',
     accounts: 'Accounts',
+    whakaoho: 'Whakaoho',
     worktrees: 'Worktrees',
   };
 
