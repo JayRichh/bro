@@ -2,6 +2,7 @@
   import { app, goHome, openDiff, projectOf, sessionWorktree } from './store.svelte';
   import { toneOf, terminalTone, harnessLabel, placeOf, age, lastPrompt } from './status';
   import Status from './Status.svelte';
+  import StopBadge from './StopBadge.svelte';
   import Terminal from './Terminal.svelte';
   import OrchBadge from './orchestrator/OrchBadge.svelte';
   import ContextBar from './accounts/ContextBar.svelte';
@@ -51,6 +52,8 @@
         >
         {#if agent?.role === 'orchestrator'}<OrchBadge />{/if}
         <Status {tone} />
+        <!-- A usage limit it waits out, or why it stopped: "running, resumes 3:45pm". -->
+        <StopBadge note={agent ? app.model.stops?.[agent.id] : null} class="self-center" />
         <span class="flex-1"></span>
         <div class="flex flex-none items-center gap-1" role="toolbar" aria-label="Session">
           {#if agent?.archived}

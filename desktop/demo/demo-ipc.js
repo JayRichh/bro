@@ -227,6 +227,14 @@ model.contexts = {
     a5: { percent: 83, tokens: 166_000, window: 200_000, compactions: 1, last_compact_at: now - 3_600_000, source: 'transcript', at: now - 90_000 },
   } : {}),
 };
+// Why a session's last turn stopped short: a running one waiting out a
+// usage limit (resumes 3:45pm), and one that needs a login.
+model.stops = {
+  a1: { reason: 'rate_limit', waiting: true, resumes: '3:45pm', resets_at: nowS + 3 * H1 + 12 * 60, detail: null, at: now - 90_000 },
+  ...(W2 ? {
+    a2: { reason: 'authentication_failed', waiting: false, resumes: null, resets_at: null, detail: 'OAuth token has expired', at: now - 30_000 },
+  } : {}),
+};
 
 // ---- Tasks (synthetic sprint) ----
 const sprints = [

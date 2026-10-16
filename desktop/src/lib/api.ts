@@ -118,6 +118,25 @@ export interface ContextUsage {
   source: UsageSource;
   at: number;
 }
+/** Why a Claude session's last turn stopped short: waiting out a usage
+ *  limit, or needing you (logged out, billing, ...), or an API error.
+ *  Core's `StopNote`; `lib/stop.ts` turns it into words and a tone. */
+export interface StopNote {
+  /** Claude's `StopFailure` error (`rate_limit`, `billing_error`, ...) or
+   *  the notification behind the note (`quota_auto_resume_stale`). Free
+   *  text: a value this build has never heard of reads as an API error. */
+  reason: string;
+  /** Claude is waiting out a usage limit and continues on its own. */
+  waiting: boolean;
+  /** The reset as Claude printed it (`3:45pm`), already local time. */
+  resumes: string | null;
+  /** Epoch seconds the account's limit resets, when the screen said nothing. */
+  resets_at: number | null;
+  /** Claude's own words, for a tooltip. */
+  detail: string | null;
+  /** Epoch ms it was noted. */
+  at: number;
+}
 /** One account in the rail (`accounts_list`). */
 export interface AccountRow {
   key: string;
@@ -202,6 +221,9 @@ export interface Model {
   accounts?: Record<string, AccountUsage>;
   /** Context by agent id. */
   contexts?: Record<string, ContextUsage>;
+  /** Why a session's last turn stopped short, by agent id (a 62+ daemon
+   *  pushes it); a session with no entry has nothing to say. */
+  stops?: Record<string, StopNote>;
   /** Each session's lane and tier by agent id, archived ones too. */
   cards: Record<string, Card>;
   /** The board's cards by lane, in the order it shows them: live

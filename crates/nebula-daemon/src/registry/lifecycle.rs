@@ -444,6 +444,7 @@ impl Daemon {
         self.pending_moves.lock().remove(id);
         self.forget_subagents(id);
         self.forget_context(id);
+        self.forget_stop(id);
         let refs = self
             .store
             .get_agent(id)?

@@ -221,9 +221,41 @@ pub struct HookPayload {
     pub cwd: Option<String>,
     /// Cursor sends no `cwd`; its first workspace root plays the role.
     pub workspace_roots: Option<Vec<String>>,
+    /// `StopFailure`'s error kind (`rate_limit`, `authentication_failed`,
+    /// …). Untyped like every field below: a shape a later CLI changes must
+    /// lose that one field, never the whole payload and its session id.
+    pub error: Option<serde_json::Value>,
+    /// `StopFailure`'s "additional details about the error, when available".
+    pub error_details: Option<serde_json::Value>,
+    /// On `StopFailure`, the error line Claude showed ("API Error: Rate
+    /// limit reached"); on `Stop`, Claude's reply, which is not read.
+    pub last_assistant_message: Option<serde_json::Value>,
+}
+
+/// The most of Claude's error words a stop note carries: a tooltip's worth.
+const STOP_DETAIL_MAX: usize = 200;
+
+/// A payload field as non-blank text.
+fn text_of(value: Option<&serde_json::Value>) -> Option<String> {
+    value
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
 impl HookPayload {
+    /// `StopFailure`'s words for a tooltip: its details, else the error
+    /// line itself, cut to [`STOP_DETAIL_MAX`] characters.
+    fn stop_detail(&self) -> Option<String> {
+        let text = text_of(self.error_details.as_ref())
+            .or_else(|| text_of(self.last_assistant_message.as_ref()))?;
+        Some(match text.char_indices().nth(STOP_DETAIL_MAX) {
+            Some((cut, _)) => format!("{}…", &text[..cut]),
+            None => text,
+        })
+    }
+
     fn session_id(&self) -> Option<String> {
         self.session_id
             .clone()
@@ -253,6 +285,13 @@ pub fn parse_event(hook_event: &str, payload: &HookPayload) -> Option<HookEvent>
     Some(match hook_event {
         "UserPromptSubmit" => HookEvent::UserPromptSubmit,
         "Stop" => HookEvent::Stop,
+        // What the daemon knows of a limit's wait is filled in on the way
+        // to the status machine (`Daemon::apply_hook_event`).
+        "StopFailure" => HookEvent::StopFailure {
+            error: text_of(payload.error.as_ref()),
+            detail: payload.stop_detail(),
+            limit: crate::status::LimitOutlook::Unknown,
+        },
         "SessionStart" => HookEvent::SessionStart {
             source: payload.source.clone(),
         },
@@ -721,6 +760,84 @@ mod tests {
         .await;
         assert_eq!(status, 200);
         assert!(usage.try_recv().is_err(), "nothing queued for a bad body");
+    }
+
+    /// Claude's documented `StopFailure` payload, POSTed the way the hook
+    /// does: its error kind and details reach the status machine (the
+    /// wait's outlook is the daemon's to fill in), a missing detail falls
+    /// back to the error line, and a payload whose `error` is not text
+    /// still delivers the event and its session id.
+    #[tokio::test]
+    async fn a_stop_failure_post_carries_its_error_to_the_status_machine() {
+        use crate::status::LimitOutlook;
+        let store = seeded_store();
+        let (env, mut rx, _) = start_hook_server(store, None).await.unwrap();
+        let post = |body: &'static str| {
+            let (port, token) = (env.port, env.token.clone());
+            async move {
+                http_post(
+                    port,
+                    "/api/hooks/claude?agentId=titled&hookEvent=StopFailure",
+                    &token,
+                    body,
+                )
+                .await
+            }
+        };
+        let (status, body) = post(
+            r#"{"session_id":"abc123","hook_event_name":"StopFailure","error":"rate_limit","error_details":"429 Too Many Requests","last_assistant_message":"API Error: Rate limit reached"}"#,
+        )
+        .await;
+        assert_eq!((status, body.as_str()), (200, HOOK_OK));
+        let got = rx.recv().await.unwrap();
+        assert_eq!(got.session_id.as_deref(), Some("abc123"));
+        assert_eq!(
+            got.event,
+            HookEvent::StopFailure {
+                error: Some("rate_limit".into()),
+                detail: Some("429 Too Many Requests".into()),
+                limit: LimitOutlook::Unknown,
+            }
+        );
+
+        post(r#"{"session_id":"abc123","error":"authentication_failed","last_assistant_message":"Invalid API key · Please run /login"}"#).await;
+        let got = rx.recv().await.unwrap();
+        assert_eq!(
+            got.event,
+            HookEvent::StopFailure {
+                error: Some("authentication_failed".into()),
+                detail: Some("Invalid API key · Please run /login".into()),
+                limit: LimitOutlook::Unknown,
+            }
+        );
+
+        post(r#"{"session_id":"abc123","error":{"kind":"later"},"error_details":7}"#).await;
+        let got = rx.recv().await.unwrap();
+        assert_eq!(got.session_id.as_deref(), Some("abc123"));
+        assert_eq!(
+            got.event,
+            HookEvent::StopFailure {
+                error: None,
+                detail: None,
+                limit: LimitOutlook::Unknown,
+            }
+        );
+
+        // The usage-limit notifications ride the Notification route as is.
+        let (status, _) = http_post(
+            env.port,
+            "/api/hooks/claude?agentId=titled&hookEvent=Notification",
+            &env.token,
+            r#"{"session_id":"abc123","hook_event_name":"Notification","message":"Continuing","notification_type":"quota_auto_resume_fired"}"#,
+        )
+        .await;
+        assert_eq!(status, 200);
+        assert_eq!(
+            rx.recv().await.unwrap().event,
+            HookEvent::Notification {
+                notification_type: Some("quota_auto_resume_fired".into())
+            }
+        );
     }
 
     /// The reply's `sessionTitle` is how a nebula-side name reaches

@@ -65,12 +65,18 @@ pub(crate) const PRE_TOOL_USE_MATCHER: &str = "^(AskUserQuestion|Agent|Task)$";
 const CLAUDE_EVENTS: &[(&str, Option<&str>)] = &[
     ("UserPromptSubmit", None),
     ("Stop", None),
+    // Fired instead of Stop when the turn ends on an API error: a usage
+    // limit Claude waits out, a failed login, an overload. Unmatched, so
+    // every error kind reaches the status machine (see status.rs).
+    ("StopFailure", None),
     ("SessionStart", None),
     ("PermissionRequest", None),
     // No matcher: Claude filters Notification hooks by notification_type
     // before dispatch, and we need `idle_prompt` ("Claude is waiting for
     // your input") as well as `permission_prompt` — it is the only signal
-    // that arrives when a turn ends without a Stop. See status.rs.
+    // that arrives when a turn ends without a Stop — and the usage-limit
+    // wait's `quota_auto_resume_*` and the blocking dialogs' types too.
+    // See status.rs.
     ("Notification", None),
     // The question (the row goes red), and the call that starts a
     // subagent: its `description` is the task the overview shows on the
@@ -941,6 +947,15 @@ mod tests {
         assert!(notification[0].get("matcher").is_none());
         let pre = &settings["hooks"]["PreToolUse"];
         assert_eq!(pre[0]["matcher"], json!(PRE_TOOL_USE_MATCHER));
+        // StopFailure, unmatched: every error kind ends a turn somehow.
+        let failure = &settings["hooks"]["StopFailure"];
+        assert_eq!(failure.as_array().unwrap().len(), 1);
+        assert!(failure[0].get("matcher").is_none());
+        assert!(routes(
+            failure[0]["hooks"][0]["command"].as_str().unwrap(),
+            "claude",
+            "StopFailure"
+        ));
     }
 
     /// The tool names Claude's anchored PreToolUse matcher lets through,

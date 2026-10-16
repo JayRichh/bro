@@ -7,6 +7,7 @@
   import Status from '../Status.svelte';
   import RunButton from './RunButton.svelte';
   import ContextBar from '../accounts/ContextBar.svelte';
+  import StopBadge from '../StopBadge.svelte';
   import { flatten, type Node } from './tree';
   import { menuFor, type Target } from '../actions';
   import { openMenu } from '../ui/ui.svelte';
@@ -199,9 +200,12 @@
           >
         {/if}
         {#if n.agent && !n.agent.archived}
+          {@const stop = app.model.stops?.[n.agent.id]}
           <!-- The context rides the name, so the meta column keeps its
                harness and profile whole. -->
           <span class="ml-2 inline-flex flex-none"><ContextBar context={app.model.contexts?.[n.agent.id]} /></span>
+          <!-- Why the last turn stopped short: resumes at, logged out, ... -->
+          {#if stop}<span class="ml-2 inline-flex flex-none"><StopBadge note={stop} /></span>{/if}
         {/if}
       </span>
 

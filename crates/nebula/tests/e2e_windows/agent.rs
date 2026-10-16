@@ -18,6 +18,10 @@
 //! - `edit:<path>:<text>` — writes the file (relative to the worktree).
 //! - `commit:<message>` — `git add -A` and `git commit`.
 //! - `stop` — `Stop`: the turn is over.
+//! - `fail:<error>` — `StopFailure` with that `error` (`rate_limit`,
+//!   `authentication_failed`, …): the turn ended on an API error.
+//! - `notify:<type>` — a `Notification` of that `notification_type`
+//!   (`quota_auto_resume_fired`, …).
 //! - `say:<text>` — prints a line.
 //! - `echo` — the idle prompt: turns bracketed paste on and logs every
 //!   byte it is sent to [`ECHO_LOG`], printing `paste <n> bytes` for each
@@ -132,6 +136,21 @@ pub fn run() {
                 agent.hook("Stop", serde_json::json!({}));
                 print_line("fake agent finished");
             }
+            "fail" => {
+                agent.hook(
+                    "StopFailure",
+                    serde_json::json!({
+                        "error": rest,
+                        "error_details": "429 Too Many Requests",
+                        "last_assistant_message": "API Error: Rate limit reached",
+                    }),
+                );
+                print_line(&format!("fake agent failed: {rest}"));
+            }
+            "notify" => agent.hook(
+                "Notification",
+                serde_json::json!({ "notification_type": rest, "message": rest }),
+            ),
             "say" => print_line(rest),
             "echo" => agent.echo(),
             other => agent.log(&format!("unknown step {other}")),

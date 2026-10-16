@@ -191,6 +191,28 @@ impl Daemon {
         });
     }
 
+    /// When the limit `agent`'s account most likely stopped on resets
+    /// (epoch seconds): of its plan windows still running, the fullest —
+    /// one at or past its limit first — and of equals the later reset.
+    /// None with no running window: an API-billed account has none, and
+    /// neither has one nothing has read yet. A stop note's fallback when
+    /// the session's screen gave no time (`registry::stops`).
+    pub(crate) fn account_limit_reset(&self, agent: &AgentId) -> Option<i64> {
+        let agent = self.store.get_agent(agent).ok().flatten()?;
+        let key = usage::account_key(agent.profile.as_deref(), &harness_of(&agent));
+        let now = nebula_core::clock::now_secs() as i64;
+        self.with_usage(|book| {
+            book.accounts
+                .get(&key)?
+                .windows
+                .iter()
+                .filter(|w| w.kind != usage::WindowKind::Monthly)
+                .filter_map(|w| Some((w.percent, w.resets_at.filter(|at| *at > now)?)))
+                .max_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+                .map(|(_, at)| at)
+        })
+    }
+
     /// Feed `agent`'s log scan at `path` (a new scan when the path moved)
     /// and hand back a copy.
     fn scan_log(&self, agent: &AgentId, path: PathBuf) -> Option<TranscriptScan> {

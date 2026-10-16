@@ -257,6 +257,9 @@ pub struct Daemon {
     pub(crate) usage: Mutex<usage::UsageBook>,
     /// The SESSION SNAPSHOTS worker (`snapshots.rs`), taken alone.
     snapshots: snapshots::Snapshotter,
+    /// STOP NOTES and the usage-limit lines sessions' screens showed
+    /// (`stops.rs`), taken alone.
+    stops: Mutex<stops::StopBook>,
 }
 
 mod exit;
@@ -269,6 +272,7 @@ mod sessions;
 mod snapshots;
 mod spawn;
 mod status;
+mod stops;
 mod subagents;
 mod terminals;
 mod usage;
@@ -305,6 +309,7 @@ impl Daemon {
             provision_gate: tokio::sync::Mutex::new(()),
             usage: Mutex::new(usage::UsageBook::default()),
             snapshots: snapshots::Snapshotter::default(),
+            stops: Mutex::new(stops::StopBook::default()),
         })
     }
 

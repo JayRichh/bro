@@ -2586,6 +2586,22 @@ fn draw_card(
         }
     }
 
+    // Why its last turn stopped short — `resumes 3:45pm`, `logged out` —
+    // takes that same spot ahead of the issue number and the context: it
+    // is the fact on the card that says whether to wait or to come back.
+    // A card mark too, and a card too narrow for it keeps what it had.
+    if let Some((label, fg)) = card_stop(app, a, width, th) {
+        let label_w = label.chars().count();
+        let room = width - label_w - 1;
+        let harness = truncate(&harness, room);
+        let pad = width - label_w - harness.chars().count();
+        second = vec![
+            Span::styled(harness, Style::default().fg(quiet_or(dim))),
+            Span::raw(" ".repeat(pad)),
+            Span::styled(label, Style::default().fg(quiet_or(fg))),
+        ];
+    }
+
     // The ORCHESTRATOR BADGE: the machine's one orchestrator says so ahead
     // of what it runs on (F10 opens it).
     if a.role.is_orchestrator() {
@@ -2803,6 +2819,44 @@ fn card_issue_label(app: &App, a: &nebula_core::Agent) -> Option<String> {
     a.issue_number().map(|n| format!("#{n}"))
 }
 
+/// The color a stop note's words go in: a wait the session carries out
+/// by itself is the running color, never the needs-you one; a note that
+/// needs the user is the needs-you color; a turn that ended on an error
+/// is the stopped color.
+fn stop_color(tone: nebula_core::stop::StopTone, th: Theme) -> Color {
+    use nebula_core::stop::StopTone;
+    match tone {
+        StopTone::Waiting => th.warn,
+        StopTone::NeedsYou => th.err,
+        StopTone::Error => th.special,
+    }
+}
+
+/// What session `a`'s last stop note says, and the color to say it in:
+/// `resumes 3:45pm`, `logged out`. None while it has no note.
+fn stop_look(app: &App, a: &nebula_core::Agent, th: Theme) -> Option<(String, Color)> {
+    let note = app.launcher.session_stops.get(&a.id)?;
+    let now = nebula_core::clock::now_secs() as i64;
+    Some((note.label(now), stop_color(note.tone(), th)))
+}
+
+/// The stop note a card of inner `width` columns says at the right end
+/// of its second row ([`stop_look`]). None with the card marks hidden,
+/// and on a card too narrow to hold it with the harness text and a cell
+/// to spare.
+fn card_stop(
+    app: &App,
+    a: &nebula_core::Agent,
+    width: usize,
+    th: Theme,
+) -> Option<(String, Color)> {
+    if app.launcher.hide_card_marks {
+        return None;
+    }
+    let (label, fg) = stop_look(app, a, th)?;
+    (width > label.chars().count() + 4).then_some((label, fg))
+}
+
 /// Where a card drawn whole at `area` puts its issue number `label_w`
 /// cells wide: the right end of the row saying what it runs on, inside
 /// the border and its cell of air (`draw_card`). None on a card too
@@ -2839,6 +2893,12 @@ fn card_issue_hit(
         return None;
     };
     let label = card_issue_label(app, &row.agent)?;
+    // A stop note drawn over the chip leaves nothing there to click; the
+    // card's inner width is its own less the border and its cell of air.
+    let inner_w = usize::from(placed.rect.width).saturating_sub(4);
+    if card_stop(app, &row.agent, inner_w, app.chrome.theme).is_some() {
+        return None;
+    }
     // The chip on the whole card laid out from row 0, then its row moved
     // to the screen — kept only while the window shows that row.
     let full = Rect {
@@ -3461,6 +3521,9 @@ fn status_word(status: nebula_core::AgentStatus, unseen: bool) -> &'static str {
 #[derive(Debug, Clone, PartialEq)]
 struct PaneFacts {
     status: (&'static str, Color),
+    /// Why its last turn stopped short, `resumes 3:45pm`, in its tone:
+    /// it explains the status, so it comes right after it.
+    stop: Option<(String, Color)>,
     /// `claude@max2 opus high`: [`runs_on_line`].
     runs_on: String,
     /// `⌂ ` or `↳ `, and `project / branch`, in the checkout's SCOPE COLOR.
@@ -3477,6 +3540,7 @@ struct PaneFacts {
 fn pane_facts(app: &App, row: &LauncherRow, is_main: bool, now_ms: i64) -> PaneFacts {
     let th = app.chrome.theme;
     let a = &row.agent;
+    let stop = stop_look(app, a, th);
     let ctx = app.launcher.session_contexts.get(&a.id).and_then(|c| {
         let label = crate::accounts_overlay::context_label(c)?;
         let fg = match nebula_core::usage::tone(c.percent?) {
@@ -3505,6 +3569,7 @@ fn pane_facts(app: &App, row: &LauncherRow, is_main: bool, now_ms: i64) -> PaneF
             status_word(a.status, a.unseen),
             crate::ui::rows::status_color(Some(a.status), a.unseen, th),
         ),
+        stop,
         runs_on: runs_on_line(a, &mut None),
         place: (glyph, format!("{} / {}", row.project, row.branch), scope),
         ctx,
@@ -3521,10 +3586,11 @@ fn pane_facts(app: &App, row: &LauncherRow, is_main: bool, now_ms: i64) -> PaneF
 const PROMPT_MIN: usize = 12;
 
 /// [`PaneFacts`] laid out in `room` columns, most telling first: the
-/// status word, what it runs on, where, its context, its pull request,
-/// its age — each whole or not at all, and once one has not fitted
-/// nothing after it is tried, so a narrowing pane only takes words away
-/// — then the last prompt, cut to whatever is left.
+/// status word, why it stopped short, what it runs on, where, its
+/// context, its pull request, its age — each whole or not at all, and
+/// once one has not fitted nothing after it is tried, so a narrowing
+/// pane only takes words away — then the last prompt, cut to whatever
+/// is left.
 #[cfg(test)]
 fn fact_spans(facts: &PaneFacts, room: usize, th: Theme) -> Vec<Span<'static>> {
     fact_groups(facts, room, th)
@@ -3616,6 +3682,12 @@ fn fact_pieces(facts: &PaneFacts, room: usize, th: Theme) -> Vec<Span<'static>> 
             Span::styled(facts.place.1.clone(), Style::default().fg(facts.place.2)),
         ],
     ];
+    if let Some((label, fg)) = &facts.stop {
+        pieces.insert(
+            1,
+            vec![Span::styled(label.clone(), Style::default().fg(*fg))],
+        );
+    }
     if let Some((label, fg)) = &facts.ctx {
         pieces.push(vec![Span::styled(label.clone(), Style::default().fg(*fg))]);
     }
@@ -5012,6 +5084,161 @@ mod tests {
         assert!(!lines.iter().any(|l| l.contains("ctx 42%")));
     }
 
+    /// WHY ITS TURN STOPPED takes the right end of the card's second row
+    /// ahead of the context and the issue number, in the tone's color:
+    /// the running color for a wait the session carries out itself, the
+    /// needs-you color for a login it cannot, the stopped color for an
+    /// error. The issue number gives up its click target with its place,
+    /// and HIDE CARD MARKS leaves the note off.
+    #[test]
+    fn a_session_card_says_why_its_turn_stopped_ahead_of_its_context() {
+        use nebula_core::stop::{StopNote, AUTHENTICATION_FAILED, RATE_LIMIT};
+        let mut app = a_tree();
+        select(&mut app, "api");
+        let th = app.chrome.theme;
+        let id = app.tree.agents[0].id.clone();
+        app.launcher.session_contexts.insert(
+            id.clone(),
+            nebula_core::usage::ContextUsage {
+                percent: Some(42.0),
+                tokens: Some(84_000),
+                window: Some(200_000),
+                compactions: 2,
+                last_compact_at: None,
+                source: nebula_core::usage::UsageSource::Statusline,
+                at: 0,
+            },
+        );
+        let note = |reason: &str| StopNote {
+            reason: reason.into(),
+            waiting: reason == RATE_LIMIT,
+            resumes: (reason == RATE_LIMIT).then(|| "3:45pm".into()),
+            resets_at: None,
+            detail: None,
+            at: 0,
+        };
+        let body = Rect::new(0, 0, 100, 40);
+        // The color the first drawn `text` is in.
+        let fg_of = |app: &mut App, text: &str| -> Option<Color> {
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(body.width, body.height))
+                    .unwrap();
+            terminal.draw(|f| draw(f, app, body)).unwrap();
+            let buf = terminal.backend().buffer().clone();
+            (0..body.height).find_map(|y| {
+                let cells: Vec<&str> = (0..body.width)
+                    .map(|x| buf.cell((x, y)).map_or(" ", |c| c.symbol()))
+                    .collect();
+                (0..cells.len())
+                    .find(|&x| cells[x..].concat().starts_with(text))
+                    .map(|x| buf[(x as u16, y)].fg)
+            })
+        };
+
+        let lines = drawn_lines(&mut app, body);
+        assert!(lines.iter().any(|l| l.contains("ctx 42%")), "{lines:#?}");
+
+        // Waiting out a limit: the screen's words, in the running color,
+        // and the context steps aside for them.
+        app.launcher
+            .session_stops
+            .insert(id.clone(), note(RATE_LIMIT));
+        let lines = drawn_lines(&mut app, body);
+        assert!(
+            lines.iter().any(|l| l.contains("resumes 3:45pm")),
+            "{lines:#?}"
+        );
+        assert!(!lines.iter().any(|l| l.contains("ctx 42%")), "{lines:#?}");
+        assert_eq!(fg_of(&mut app, "resumes 3:45pm"), Some(th.warn));
+
+        // Logged out: the user has to act, the needs-you color.
+        app.launcher
+            .session_stops
+            .insert(id.clone(), note(AUTHENTICATION_FAILED));
+        let lines = drawn_lines(&mut app, body);
+        assert!(lines.iter().any(|l| l.contains("logged out")), "{lines:#?}");
+        assert!(!lines.iter().any(|l| l.contains("resumes")), "{lines:#?}");
+        assert_eq!(fg_of(&mut app, "logged out"), Some(th.err));
+
+        // An error nobody need act on: the stopped color.
+        app.launcher
+            .session_stops
+            .insert(id.clone(), note("overloaded"));
+        assert_eq!(fg_of(&mut app, "overloaded"), Some(th.special));
+
+        // The marks hidden, the note goes with them; with the note
+        // cleared the context is back.
+        app.launcher.hide_card_marks = true;
+        let lines = drawn_lines(&mut app, body);
+        assert!(
+            !lines.iter().any(|l| l.contains("overloaded")),
+            "{lines:#?}"
+        );
+        app.launcher.hide_card_marks = false;
+        app.launcher.session_stops.remove(&id);
+        let lines = drawn_lines(&mut app, body);
+        assert!(lines.iter().any(|l| l.contains("ctx 42%")), "{lines:#?}");
+
+        // On an issue session the note covers the number, and the number's
+        // click target goes with it.
+        app.tree.agents[0].issue_url = Some("https://github.com/o/demo/issues/15".into());
+        app.launcher.card_issue_number = true;
+        let has_link = |app: &App| {
+            app.chrome
+                .hits
+                .iter()
+                .any(|(_, h)| matches!(h, HitTarget::LauncherCardIssue(_)))
+        };
+        app.chrome.hits.clear();
+        let runs_row = |lines: &[String]| {
+            let row = lines
+                .iter()
+                .position(|l| l.contains("s0"))
+                .expect("the session's card drawn");
+            lines[row + 1].clone()
+        };
+        let lines = drawn_lines(&mut app, body);
+        assert!(runs_row(&lines).contains("#15"), "{lines:#?}");
+        assert!(has_link(&app), "the number is a link while it shows");
+        app.launcher
+            .session_stops
+            .insert(id, note(AUTHENTICATION_FAILED));
+        app.chrome.hits.clear();
+        let lines = drawn_lines(&mut app, body);
+        assert!(runs_row(&lines).contains("logged out"), "{lines:#?}");
+        assert!(!runs_row(&lines).contains("#15"), "{lines:#?}");
+        assert!(!has_link(&app), "nothing to click where the note is");
+    }
+
+    /// The note needs the card to hold its words, a cell to spare, beside
+    /// the harness text; a narrower card keeps what it had.
+    #[test]
+    fn a_card_too_narrow_for_the_stop_note_keeps_what_it_had() {
+        use nebula_core::stop::{StopNote, RATE_LIMIT};
+        let mut app = a_tree();
+        let th = app.chrome.theme;
+        let a = app.tree.agents[0].clone();
+        app.launcher.session_stops.insert(
+            a.id.clone(),
+            StopNote {
+                reason: RATE_LIMIT.into(),
+                waiting: true,
+                resumes: Some("3:45pm".into()),
+                resets_at: None,
+                detail: None,
+                at: 0,
+            },
+        );
+        // `resumes 3:45pm` is fourteen cells.
+        assert_eq!(card_stop(&app, &a, 18, th), None);
+        assert_eq!(
+            card_stop(&app, &a, 19, th),
+            Some(("resumes 3:45pm".into(), th.warn))
+        );
+        app.launcher.hide_card_marks = true;
+        assert_eq!(card_stop(&app, &a, 40, th), None);
+    }
+
     #[test]
     fn hide_card_marks_drops_the_mark_before_the_name_and_the_prompt() {
         use nebula_core::{TerminalId, TerminalTab, WorktreeId};
@@ -5467,6 +5694,7 @@ mod tests {
         let th = App::new().chrome.theme;
         let facts = PaneFacts {
             status: ("running", th.warn),
+            stop: None,
             runs_on: "claude@max2 opus".into(),
             place: ("↳ ", "api / feat".into(), th.worktree),
             ctx: Some(("ctx 42%".into(), th.muted)),
@@ -5498,6 +5726,72 @@ mod tests {
             assert!(!has("ctx") || has("api / feat"), "{room}: {t}");
             assert!(!has("#12") || has("ctx"), "{room}: {t}");
             assert!(!has("› ") || has("3m"), "{room}: {t}");
+        }
+    }
+
+    /// The pane header's STOP NOTE comes right after the status word it
+    /// explains and gives way after the facts behind it, before the
+    /// status itself; a session with a note carries it into its facts in
+    /// the tone's color.
+    #[test]
+    fn the_pane_facts_put_a_stop_note_right_after_the_status() {
+        use nebula_core::stop::{StopNote, RATE_LIMIT};
+        let mut app = a_tree();
+        let th = app.chrome.theme;
+        let id = app.tree.agents[0].id.clone();
+        let row = crate::launcher::row(&app, &id).expect("a row for the session");
+        assert_eq!(pane_facts(&app, &row, false, 0).stop, None);
+        app.launcher.session_stops.insert(
+            id,
+            StopNote {
+                reason: RATE_LIMIT.into(),
+                waiting: true,
+                resumes: Some("3:45pm".into()),
+                resets_at: None,
+                detail: None,
+                at: 0,
+            },
+        );
+        assert_eq!(
+            pane_facts(&app, &row, false, 0).stop,
+            Some(("resumes 3:45pm".into(), th.warn))
+        );
+
+        let facts = PaneFacts {
+            status: ("running", th.warn),
+            stop: Some(("resumes 3:45pm".into(), th.warn)),
+            runs_on: "claude@max2 opus".into(),
+            place: ("↳ ", "api / feat".into(), th.worktree),
+            ctx: None,
+            pr: None,
+            age: Some("3m".into()),
+            prompt: None,
+        };
+        let text = |room| -> String {
+            let spans = fact_spans(&facts, room, th);
+            let used: usize = spans.iter().map(Span::width).sum();
+            assert!(used <= room, "{room}: overruns");
+            spans.iter().map(|s| s.content.as_ref()).collect()
+        };
+        assert_eq!(
+            text(200),
+            "  running  resumes 3:45pm  claude@max2 opus  ↳ api / feat  3m"
+        );
+        assert_eq!(
+            text(42),
+            "  running  resumes 3:45pm",
+            "what it runs on is next, and whole or not at all"
+        );
+        assert_eq!(text(25), "  running  resumes 3:45pm");
+        assert_eq!(text(24), "  running", "the note goes before the status");
+        assert_eq!(text(8), "");
+        for room in 0..200 {
+            let t = text(room);
+            let has = |s: &str| t.contains(s);
+            assert!(!has("resumes") || has("running"), "{room}: {t}");
+            assert!(!has("claude") || has("resumes"), "{room}: {t}");
+            assert!(!has("api / feat") || has("claude"), "{room}: {t}");
+            assert!(!has("3m") || has("api / feat"), "{room}: {t}");
         }
     }
 

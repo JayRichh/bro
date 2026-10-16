@@ -5,6 +5,7 @@
   import { verbKeys } from './verbs';
   import { LANES, lanes, toneOf, harnessLabel, lastPrompt, age, placeOf, type Lane } from './status';
   import Status from './Status.svelte';
+  import StopBadge from './StopBadge.svelte';
   import { retract } from './motion';
   import Empty from './Empty.svelte';
   import type { Agent, DropTarget } from './api';
@@ -272,6 +273,7 @@
             {@const prompt = lastPrompt(a)}
             {@const pr = app.model.prs[a.worktree_id]}
             {@const commits = commitsWord(rows.git[a.worktree_id]?.ahead_of_base)}
+            {@const stop = app.model.stops?.[a.id]}
             {@const sel = cursor !== null && LANES[cursor.lane].id === lane.id && cursor.row === ri}
             {@const alert = lane.id === 'needs'}
             <!-- The card's verbs show on hover or focus; the card keys (Space, A,
@@ -313,8 +315,9 @@
               <Status tone={lane.id === 'pr' ? 'pr' : lane.id === 'done' && pr?.state === 'merged' ? 'merged' : toneOf(a)} />
               <span class="truncate text-[13px] text-muted">{harnessLabel(a)}{a.profile ? ` \u00B7 ${a.profile}` : ''}</span>
               <span class="truncate font-mono text-[12px] text-muted">{where.project} / {where.branch}</span>
-              {#if commits || pr}
+              {#if stop || commits || pr}
                 <span class="flex min-w-0 flex-wrap items-center gap-1.5">
+                  <StopBadge note={stop} />
                   {#if commits}<span class="{chip} border-rule text-muted" title="Commits on this branch since its base">{commits}</span>{/if}
                   {#if pr}
                     {@const c = prChip(pr)}
