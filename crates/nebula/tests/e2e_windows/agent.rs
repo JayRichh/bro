@@ -2,7 +2,8 @@
 //! suite. It reports what it does through the hooks the daemon installed
 //! in the worktree's `.claude/settings.local.json` — the same
 //! `kete _hook claude <event>` commands Claude Code runs, run the way it
-//! runs them (a shell line, the JSON payload on stdin) — so Running, Needs
+//! runs them (exec form: `kete.exe` with `_hook claude <event>` as its
+//! arguments, the JSON payload on stdin) — so Running, Needs
 //! you and Finished come from the daemon's real hook path, not from
 //! anything test-only.
 //!
@@ -199,9 +200,10 @@ impl Agent {
         }
     }
 
-    /// Run every command the installed settings file hooks `event` to,
-    /// under cmd the way a CLI's hook runner would, with the payload on
-    /// stdin.
+    /// Run every command the installed settings file hooks `event` to the
+    /// way Claude Code runs it, with the payload on stdin: an exec-form
+    /// hook (`command` + `args`) spawned directly, a shell-form one under
+    /// cmd.
     fn hook(&self, event: &str, extra: serde_json::Value) {
         let mut payload = serde_json::json!({
             "session_id": self.session_id,
@@ -217,10 +219,21 @@ impl Agent {
         if commands.is_empty() {
             self.log(&format!("hook {event}: no command installed"));
         }
-        for command in commands {
+        for hook in commands {
             use std::os::windows::process::CommandExt;
-            let child = Command::new("cmd")
-                .raw_arg(format!("/D /C {command}"))
+            let mut command = match hook {
+                Hook::Exec { program, args } => {
+                    let mut command = Command::new(program);
+                    command.args(args);
+                    command
+                }
+                Hook::Shell(line) => {
+                    let mut command = Command::new("cmd");
+                    command.raw_arg(format!("/D /C {line}"));
+                    command
+                }
+            };
+            let child = command
                 .current_dir(&self.cwd)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
@@ -307,8 +320,16 @@ impl Agent {
     }
 }
 
-/// The commands the worktree's Claude settings file hooks `event` to.
-fn hook_commands(cwd: &Path, event: &str) -> Vec<String> {
+/// One installed hook, in the form Claude Code would run it.
+enum Hook {
+    /// `command` + `args`: spawned directly, no shell.
+    Exec { program: String, args: Vec<String> },
+    /// `command` alone: a line for the shell.
+    Shell(String),
+}
+
+/// The hooks the worktree's Claude settings file runs for `event`.
+fn hook_commands(cwd: &Path, event: &str) -> Vec<Hook> {
     let path = cwd.join(".claude").join("settings.local.json");
     let Ok(text) = std::fs::read_to_string(path) else {
         return Vec::new();
@@ -321,7 +342,19 @@ fn hook_commands(cwd: &Path, event: &str) -> Vec<String> {
         .into_iter()
         .flatten()
         .flat_map(|group| group["hooks"].as_array().cloned().unwrap_or_default())
-        .filter_map(|hook| hook["command"].as_str().map(str::to_string))
+        .filter_map(|hook| {
+            let command = hook["command"].as_str()?.to_string();
+            Some(match hook["args"].as_array() {
+                Some(args) => Hook::Exec {
+                    program: command,
+                    args: args
+                        .iter()
+                        .filter_map(|a| a.as_str().map(str::to_string))
+                        .collect(),
+                },
+                None => Hook::Shell(command),
+            })
+        })
         .collect()
 }
 

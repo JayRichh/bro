@@ -1,6 +1,8 @@
 //! `nebula _hook <endpoint> <event>`: the agent-CLI hook command on Windows,
 //! where a CLI may run hooks under cmd, PowerShell or Git Bash and the unix
 //! `curl … ${NEBULA_API_TOKEN}` one-liner cannot be relied on.
+//! Claude runs it in exec form (this binary, `_hook claude <event>` as its
+//! argument vector, no shell at all); the other CLIs as a shell line.
 //!
 //! It does exactly what that one-liner does (see `hooks::installer`): exit
 //! quietly when `NEBULA_AGENT_ID` / `NEBULA_API_URL` are unset (a bare

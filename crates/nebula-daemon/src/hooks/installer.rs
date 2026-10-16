@@ -208,14 +208,47 @@ fn copilot_hook_command(event: &str) -> String {
     hook_subcommand("copilot", event)
 }
 
+/// One Claude hook in EXEC FORM (Claude Code 2.1.139+): `command` is this
+/// binary, spawned directly with `args` as its argument vector — no Git
+/// Bash, cmd or PowerShell in between, so no shell process per hook, no
+/// path quoting to survive three shells, and nothing for a machine without
+/// Git for Windows to fail on (2.1.299 blocks a guard hook that fails).
+/// Codex, Cursor and Copilot keep their shell form: their exec form is
+/// unverified.
 #[cfg(windows)]
-fn is_nebula_command(cmd: Option<&Value>) -> bool {
-    cmd.and_then(Value::as_str)
-        .map(|c| {
+fn claude_exec_hook(event: &str) -> Value {
+    let exe = std::env::current_exe()
+        .map(|p| {
+            let path = p.display().to_string();
+            path.strip_prefix(r"\\?\").unwrap_or(&path).to_string()
+        })
+        .unwrap_or_else(|_| "kete".into());
+    json!({
+        "type": "command",
+        "command": exe,
+        "args": [HOOK_SUBCOMMAND, "claude", event],
+    })
+}
+
+/// A hook command that is nebula's: the curl one-liner's signature, the
+/// `_hook` subcommand in shell form, or (a Claude hook in exec form) an
+/// argument vector opening with `_hook`.
+#[cfg(windows)]
+fn is_nebula_hook(hook: &Value) -> bool {
+    let shell_form = hook
+        .get("command")
+        .and_then(Value::as_str)
+        .is_some_and(|c| {
             (c.contains("/api/hooks/") && c.contains(AGENT_ID))
                 || c.contains(&format!(" {HOOK_SUBCOMMAND} "))
-        })
-        .unwrap_or(false)
+        });
+    let exec_form = hook
+        .get("args")
+        .and_then(Value::as_array)
+        .and_then(|args| args.first())
+        .and_then(Value::as_str)
+        == Some(HOOK_SUBCOMMAND);
+    shell_form || exec_form
 }
 
 /// The shell test every hook opens with. Outside nebula (a bare `claude`
@@ -261,7 +294,9 @@ fn hook_command(endpoint: &str, event: &str) -> String {
 /// permission prompt: the auto-title `nebula rename`, and the `nebula
 /// worktree` relocation, `nebula spawn` sibling and `nebula open` file tabs
 /// its appended system prompt tells it to use (codex/cursor run with their
-/// skip-permissions flags).
+/// skip-permissions flags). The same commands as PowerShell rules too,
+/// for Claude's PowerShell tool — what a Windows machine without Git Bash
+/// runs commands with — in the documented `PowerShell(cmd *)` form.
 const CLAUDE_ALLOW_RULES: &[&str] = &[
     "Bash(kete rename:*)",
     "Bash(kete worktree:*)",
@@ -277,6 +312,20 @@ const CLAUDE_ALLOW_RULES: &[&str] = &[
     "Bash(bro sessions:*)",
     "Bash(bro read:*)",
     "Bash(bro ask:*)",
+    "PowerShell(kete rename *)",
+    "PowerShell(kete worktree *)",
+    "PowerShell(kete spawn *)",
+    "PowerShell(kete open *)",
+    "PowerShell(kete sessions *)",
+    "PowerShell(kete read *)",
+    "PowerShell(kete ask *)",
+    "PowerShell(bro rename *)",
+    "PowerShell(bro worktree *)",
+    "PowerShell(bro spawn *)",
+    "PowerShell(bro open *)",
+    "PowerShell(bro sessions *)",
+    "PowerShell(bro read *)",
+    "PowerShell(bro ask *)",
 ];
 
 /// Cursor variant: the payload arrives on stdin like Claude's, but cursor
@@ -303,11 +352,12 @@ fn copilot_hook_command(event: &str) -> String {
     )
 }
 
+/// A hook command that is nebula's: the curl one-liner's signature.
 #[cfg(unix)]
-fn is_nebula_command(cmd: Option<&Value>) -> bool {
-    cmd.and_then(Value::as_str)
-        .map(|c| c.contains("/api/hooks/") && c.contains(AGENT_ID))
-        .unwrap_or(false)
+fn is_nebula_hook(hook: &Value) -> bool {
+    hook.get("command")
+        .and_then(Value::as_str)
+        .is_some_and(|c| c.contains("/api/hooks/") && c.contains(AGENT_ID))
 }
 
 fn is_nebula_group(group: &Value) -> bool {
@@ -316,14 +366,25 @@ fn is_nebula_group(group: &Value) -> bool {
     }
     // Legacy/untagged detection by command signature — nested Claude/Codex
     // shape and flat Cursor shape both.
-    if is_nebula_command(group.get("command")) {
+    if is_nebula_hook(group) {
         return true;
     }
     group
         .get("hooks")
         .and_then(Value::as_array)
-        .map(|hooks| hooks.iter().any(|h| is_nebula_command(h.get("command"))))
+        .map(|hooks| hooks.iter().any(is_nebula_hook))
         .unwrap_or(false)
+}
+
+/// The hook a managed group runs for `event` on `endpoint`: on Windows a
+/// Claude hook goes in exec form ([`claude_exec_hook`]); every other one,
+/// and every hook elsewhere, is a shell command.
+fn managed_hook(endpoint: &str, event: &str) -> Value {
+    #[cfg(windows)]
+    if endpoint == "claude" {
+        return claude_exec_hook(event);
+    }
+    json!({ "type": "command", "command": hook_command(endpoint, event) })
 }
 
 fn managed_group(endpoint: &str, event: &str, matcher: Option<&str>) -> Value {
@@ -331,10 +392,7 @@ fn managed_group(endpoint: &str, event: &str, matcher: Option<&str>) -> Value {
     if let Some(m) = matcher {
         group.insert("matcher".into(), json!(m));
     }
-    group.insert(
-        "hooks".into(),
-        json!([{ "type": "command", "command": hook_command(endpoint, event) }]),
-    );
+    group.insert("hooks".into(), json!([managed_hook(endpoint, event)]));
     group.insert("_nebulaManaged".into(), json!(true));
     Value::Object(group)
 }
@@ -873,6 +931,22 @@ mod tests {
         }
     }
 
+    /// Whether a Claude-dialect `hook` object posts `event` to `endpoint`:
+    /// [`routes`] on its command, or — a Claude hook on Windows, in exec
+    /// form — this binary's path, bare, run with `_hook <endpoint> <event>`.
+    fn routes_hook(hook: &Value, endpoint: &str, event: &str) -> bool {
+        #[cfg(windows)]
+        if let Some(args) = hook.get("args") {
+            let exe = std::env::current_exe().unwrap().display().to_string();
+            let exe = exe.strip_prefix(r"\\?\").unwrap_or(&exe).to_string();
+            return hook["command"] == json!(exe)
+                && *args == json!([HOOK_SUBCOMMAND, endpoint, event]);
+        }
+        hook["command"]
+            .as_str()
+            .is_some_and(|cmd| routes(cmd, endpoint, event))
+    }
+
     fn read_json(dir: &Path, rel: &str) -> Value {
         let text = std::fs::read_to_string(dir.join(rel)).unwrap();
         serde_json::from_str(&text).unwrap()
@@ -937,11 +1011,7 @@ mod tests {
         let stop = &settings["hooks"]["Stop"];
         assert_eq!(stop.as_array().unwrap().len(), 1);
         assert_eq!(stop[0]["_nebulaManaged"], json!(true));
-        assert!(routes(
-            stop[0]["hooks"][0]["command"].as_str().unwrap(),
-            "claude",
-            "Stop"
-        ));
+        assert!(routes_hook(&stop[0]["hooks"][0], "claude", "Stop"));
         // Notification carries no matcher: idle_prompt has to reach us too.
         let notification = &settings["hooks"]["Notification"];
         assert!(notification[0].get("matcher").is_none());
@@ -951,8 +1021,8 @@ mod tests {
         let failure = &settings["hooks"]["StopFailure"];
         assert_eq!(failure.as_array().unwrap().len(), 1);
         assert!(failure[0].get("matcher").is_none());
-        assert!(routes(
-            failure[0]["hooks"][0]["command"].as_str().unwrap(),
+        assert!(routes_hook(
+            &failure[0]["hooks"][0],
             "claude",
             "StopFailure"
         ));
@@ -995,11 +1065,7 @@ mod tests {
         assert_eq!(groups.len(), 1, "{groups:?}");
         let matcher = groups[0]["matcher"].as_str().unwrap();
         assert!(pre_tool_use_tools(matcher).contains(&"Agent"));
-        assert!(routes(
-            groups[0]["hooks"][0]["command"].as_str().unwrap(),
-            "claude",
-            "PreToolUse"
-        ));
+        assert!(routes_hook(&groups[0]["hooks"][0], "claude", "PreToolUse"));
     }
 
     #[test]
@@ -1034,11 +1100,7 @@ mod tests {
         assert_eq!(groups.len(), 1, "{groups:?}");
         assert!(groups[0].get("matcher").is_none());
         assert_eq!(groups[0]["_nebulaManaged"], json!(true));
-        assert!(routes(
-            groups[0]["hooks"][0]["command"].as_str().unwrap(),
-            "claude",
-            "PostToolUse"
-        ));
+        assert!(routes_hook(&groups[0]["hooks"][0], "claude", "PostToolUse"));
     }
 
     /// Windows: the hook is this binary's `_hook` subcommand, the endpoint
@@ -1068,10 +1130,97 @@ mod tests {
             format!("{exe} _hook cursor Stop")
         );
         assert!(!hook_command("codex", "Stop").contains('\\'));
-        assert!(is_nebula_command(Some(&json!(hook_command(
-            "codex", "Stop"
-        )))));
-        assert!(!is_nebula_command(Some(&json!("my-own-hook Stop"))));
+        assert!(is_nebula_hook(
+            &json!({ "command": hook_command("codex", "Stop") })
+        ));
+        assert!(!is_nebula_hook(&json!({ "command": "my-own-hook Stop" })));
+
+        // Claude's hook in exec form: the binary's own path, bare — no
+        // shell strips quotes from it — and the subcommand as its words.
+        let hook = claude_exec_hook("Stop");
+        let path = std::env::current_exe().unwrap().display().to_string();
+        assert_eq!(
+            hook,
+            json!({
+                "type": "command",
+                "command": path.strip_prefix(r"\\?\").unwrap_or(&path),
+                "args": ["_hook", "claude", "Stop"],
+            })
+        );
+        assert!(is_nebula_hook(&hook));
+        assert!(!is_nebula_hook(
+            &json!({ "command": "node", "args": ["lint.js", "_hook"] })
+        ));
+    }
+
+    /// On Windows the Claude groups go in exec form, replacing what an
+    /// older Kete wrote — a tagged shell-form group, an untagged one, an
+    /// untagged exec-form one — and a reinstall writes the file
+    /// byte for byte the same. The user's own hook stays, and Codex keeps
+    /// its shell form.
+    #[cfg(windows)]
+    #[test]
+    fn claude_hooks_move_to_exec_form_and_stay_there() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join(".claude");
+        std::fs::create_dir_all(&dir).unwrap();
+        let old_shell = |event: &str| {
+            json!({ "hooks": [{
+                "type": "command",
+                "command": format!(r#"C:"/old/kete.exe" _hook claude {event}"#),
+            }] })
+        };
+        let mut tagged = old_shell("Stop");
+        tagged["_nebulaManaged"] = json!(true);
+        let untagged_exec = json!({ "hooks": [{
+            "type": "command",
+            "command": r"C:\old\kete.exe",
+            "args": ["_hook", "claude", "Notification"],
+        }] });
+        let mine = json!({ "hooks": [{ "type": "command", "command": "my-own-hook" }] });
+        std::fs::write(
+            dir.join("settings.local.json"),
+            serde_json::to_string(&json!({ "hooks": {
+                "Stop": [tagged, mine.clone()],
+                "SessionStart": [old_shell("SessionStart")],
+                "Notification": [untagged_exec],
+            } }))
+            .unwrap(),
+        )
+        .unwrap();
+        install_claude_hooks(tmp.path()).unwrap();
+        let settings = read_settings(tmp.path());
+        for (event, _) in CLAUDE_EVENTS {
+            let groups = settings["hooks"][event].as_array().unwrap();
+            let ours: Vec<&Value> = groups.iter().filter(|g| is_nebula_group(g)).collect();
+            assert_eq!(ours.len(), 1, "{event}: {groups:?}");
+            assert!(
+                routes_hook(&ours[0]["hooks"][0], "claude", event),
+                "{event}: {:?}",
+                ours[0]
+            );
+            assert!(ours[0]["hooks"][0].get("args").is_some(), "{event}");
+        }
+        assert!(
+            settings["hooks"]["Stop"]
+                .as_array()
+                .unwrap()
+                .contains(&mine),
+            "the user's hook stays"
+        );
+        let first = std::fs::read(dir.join("settings.local.json")).unwrap();
+        install_claude_hooks(tmp.path()).unwrap();
+        assert_eq!(
+            std::fs::read(dir.join("settings.local.json")).unwrap(),
+            first,
+            "a reinstall changes nothing"
+        );
+
+        let codex = tempfile::tempdir().unwrap();
+        install_codex_hooks(codex.path()).unwrap();
+        let hook = &read_json(codex.path(), "hooks.json")["hooks"]["Stop"][0]["hooks"][0];
+        assert!(hook.get("args").is_none(), "Codex keeps its shell form");
+        assert!(routes(hook["command"].as_str().unwrap(), "codex", "Stop"));
     }
 
     #[cfg(unix)]
@@ -1127,6 +1276,15 @@ mod tests {
             );
         }
         assert_eq!(settings["permissions"]["deny"][0], json!("WebFetch"));
+        // Every Bash rule has its PowerShell twin, for Claude's PowerShell
+        // tool on a machine without Git Bash.
+        for bash in CLAUDE_ALLOW_RULES
+            .iter()
+            .filter_map(|r| r.strip_prefix("Bash("))
+        {
+            let twin = format!("PowerShell({} *)", bash.trim_end_matches(":*)"));
+            assert!(CLAUDE_ALLOW_RULES.contains(&twin.as_str()), "{twin}");
+        }
     }
 
     /// Codex hooks land in its home dir, not the worktree — that stable
@@ -1621,10 +1779,8 @@ mod tests {
         let claude = read_settings(tmp.path());
         let codex = read_json(codex_dir.path(), "hooks.json");
         let cursor = read_json(tmp.path(), ".cursor/hooks.json");
-        assert!(routes(
-            claude["hooks"]["Stop"][0]["hooks"][0]["command"]
-                .as_str()
-                .unwrap(),
+        assert!(routes_hook(
+            &claude["hooks"]["Stop"][0]["hooks"][0],
             "claude",
             "Stop"
         ));

@@ -19,6 +19,14 @@ use std::path::Path;
 
 fn main() -> Result<()> {
     let cli = cli::parse_as_invoked();
+    // A Claude Code too old for exec-form hooks (before 2.1.139) ignores a
+    // hook's `args` and runs its `command` — this binary — bare, with the
+    // payload on a pipe. Inside a session that is never someone asking for
+    // the TUI, which would sit on the hook until it timed out: exit quietly,
+    // as `_hook` does where it has nothing to do (`hooks::installer`).
+    if cli.command.is_none() && cli.dir.is_none() && run_bare_by_a_hook() {
+        return Ok(());
+    }
     // Kete was Bro: carry Bro's data and runtime dirs over before anything
     // opens a file in them. A no-op once moved, so the note shows once.
     if opens_state(&cli.command) {
@@ -319,6 +327,14 @@ fn main() -> Result<()> {
             }
         },
     }
+}
+
+/// Run with no arguments from inside a Kete session with stdin a pipe:
+/// what an exec-form hook looks like to a CLI that drops its `args`.
+fn run_bare_by_a_hook() -> bool {
+    use std::io::IsTerminal;
+    nebula_core::env::non_empty(nebula_core::env::AGENT_ID).is_some()
+        && !std::io::stdin().is_terminal()
 }
 
 /// Whether `command` reads or writes the data or runtime dirs itself, so
