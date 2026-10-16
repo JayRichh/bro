@@ -209,7 +209,7 @@ fn quick_prompt_session_runs_needs_you_and_lands_in_review() {
     pane_shows_the_feature(&tui);
 }
 
-/// On a Review card: `?` offers Create pull request and Focus here; `d`
+/// On a Review card: `?` offers Create pull request and Worktree; `d`
 /// diffs the worktree against its base with the agent's committed file;
 /// Focus here narrows the board to the card's worktree, and the lanes
 /// count what that leaves outside.
@@ -227,7 +227,7 @@ fn review_card_verbs_focus_scope_and_diff() {
 
     tui.send(b"?");
     tui.wait_for_text("Create pull request");
-    tui.wait_for_text("Focus here");
+    tui.wait_for_text("Worktree");
     tui.send(ESC);
     tui.wait_for_gone("Create pull request");
 
@@ -245,8 +245,9 @@ fn review_card_verbs_focus_scope_and_diff() {
     tui.wait_for_text("● 1 Done");
 
     tui.send(b"?");
-    tui.wait_for_text("Focus here");
+    tui.wait_for_text("Worktree");
     tui.type_str("focus");
+    tui.wait_for_text("Focus here");
     tui.wait_for_text("⌕ focus");
     tui.send(ENTER);
     tui.wait_for_text("● 0 Review");
