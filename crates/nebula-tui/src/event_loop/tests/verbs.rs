@@ -1154,3 +1154,42 @@ fn azure_devops_rows_have_their_own_menus() {
         Some("voting approve on !7\u{2026}")
     );
 }
+
+/// A session stopped short (lane/limits' stop notes) says why in its
+/// menu's title, and one stopped on its login leads with the way back in.
+#[test]
+fn a_stopped_sessions_menu_says_why_and_leads_with_its_login() {
+    use nebula_core::stop::{StopNote, AUTHENTICATION_FAILED, RATE_LIMIT};
+    let mut app = bench();
+    let a1 = AgentId("a1".into());
+    let note = |reason: &str, waiting: bool| StopNote {
+        reason: reason.into(),
+        waiting,
+        resumes: Some("3:45pm".into()),
+        resets_at: None,
+        detail: None,
+        at: crate::app::now_ms(),
+    };
+    let t = Target::Session(a1.clone());
+    app.launcher
+        .session_stops
+        .insert(a1.clone(), note(RATE_LIMIT, true));
+    assert_eq!(
+        verbs::banner(&app, &t).as_deref(),
+        Some("limited \u{b7} resumes 3:45pm")
+    );
+    assert!(!verbs::menu_for(&app, &t)[0].label.starts_with("Log in"));
+
+    app.launcher
+        .session_stops
+        .insert(a1.clone(), note(AUTHENTICATION_FAILED, false));
+    let account = nebula_core::accounts::session_account(&agent(&app, "a1"));
+    let name = account.trim_start_matches('@').to_string();
+    assert_eq!(
+        verbs::banner(&app, &t),
+        Some(format!("needs you \u{b7} log in again ({name})"))
+    );
+    let first = &verbs::menu_for(&app, &t)[0];
+    assert_eq!(first.label, format!("Log in to {name}\u{2026}"));
+    assert_eq!(first.action, MenuAction::LogIn(account));
+}

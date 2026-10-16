@@ -850,6 +850,10 @@ pub(crate) fn menu_for(app: &App, t: &Target) -> Vec<MenuItem> {
                 .map_or(0, |i| i + 1);
             items.insert(at, parent);
         }
+        // A login to renew comes first: nothing else runs until it is.
+        if let Some(login) = login_row(app, id) {
+            items.insert(0, login);
+        }
     }
     let mut items = fold(app, t, items);
     // The connections the go-to rows end on (matrix §6): a checkout's
@@ -916,6 +920,51 @@ fn worktrees_row(app: &App, p: &ProjectId) -> Option<MenuItem> {
         })
         .collect();
     (!rows.is_empty()).then(|| submenu("Worktrees", rows))
+}
+
+/// What a session's stop note (lane/limits) puts in its menu's banner:
+/// `limited · resumes 3:45pm` while Claude waits a limit out, `needs you ·
+/// log in again (work)` for a login to renew, `needs you · billing` or
+/// `error · overloaded` for the rest.
+fn stop_words(note: &nebula_core::stop::StopNote, a: &nebula_core::Agent) -> String {
+    use nebula_core::stop::StopTone;
+    let now = crate::app::now_ms() / 1000;
+    match note.tone() {
+        StopTone::Waiting => format!("limited \u{b7} {}", note.label(now)),
+        StopTone::NeedsYou if logs_in(note) => format!(
+            "needs you \u{b7} log in again ({})",
+            nebula_core::accounts::session_account(a).trim_start_matches('@')
+        ),
+        StopTone::NeedsYou => format!("needs you \u{b7} {}", note.label(now)),
+        StopTone::Error => format!("error \u{b7} {}", note.label(now)),
+    }
+}
+
+/// Did the turn stop on credentials only a fresh login renews?
+fn logs_in(note: &nebula_core::stop::StopNote) -> bool {
+    matches!(
+        note.reason.as_str(),
+        nebula_core::stop::AUTHENTICATION_FAILED | "cloud_credential_error"
+    )
+}
+
+/// **Log in to ‹account›…** on a session whose turn stopped on its login
+/// (matrix §5.1, state-only, ahead of Open): the account's sign-in, in a
+/// terminal, as the accounts overlay's `l` runs it.
+fn login_row(app: &App, id: &AgentId) -> Option<MenuItem> {
+    let a = app
+        .tree
+        .agents
+        .iter()
+        .find(|a| &a.id == id && !a.archived)?;
+    if !app.launcher.session_stops.get(id).is_some_and(logs_in) {
+        return None;
+    }
+    let account = nebula_core::accounts::session_account(a);
+    Some(MenuItem::new(
+        format!("Log in to {}\u{2026}", account.trim_start_matches('@')),
+        MenuAction::LogIn(account),
+    ))
 }
 
 /// **Open parent session ‹name›** on a session another one spawned, while
@@ -1003,12 +1052,18 @@ pub(crate) fn banner(app: &App, t: &Target) -> Option<String> {
             if a.archived {
                 words.push("archived".into());
             } else {
-                match a.status {
-                    S::NeedsFeedback => words.push("needs you".into()),
-                    S::Running => words.push("running".into()),
-                    S::Finished if a.unseen => words.push("done \u{b7} unread".into()),
-                    S::Disconnected => words.push("disconnected \u{b7} restart to resume".into()),
-                    S::Terminated => words.push("stopped".into()),
+                // Why its last turn stopped short says more than its dot:
+                // a limit it waits out, a login to renew, an API error.
+                let stop = app.launcher.session_stops.get(id);
+                match (stop, a.status) {
+                    (Some(note), _) => words.push(stop_words(note, &a)),
+                    (None, S::NeedsFeedback) => words.push("needs you".into()),
+                    (None, S::Running) => words.push("running".into()),
+                    (None, S::Finished) if a.unseen => words.push("done \u{b7} unread".into()),
+                    (None, S::Disconnected) => {
+                        words.push("disconnected \u{b7} restart to resume".into())
+                    }
+                    (None, S::Terminated) => words.push("stopped".into()),
                     _ => {}
                 }
                 if a.role.is_orchestrator() {

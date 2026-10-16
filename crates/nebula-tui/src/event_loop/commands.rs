@@ -889,6 +889,7 @@ pub(crate) fn run_menu_action(app: &mut App, action: MenuAction, out: &mut Vec<C
                 view.set_subtree(open);
             }
         }
+        MenuAction::LogIn(account) => super::accounts::sign_in(app, &account, out),
         MenuAction::DiffThisFile(rel) => {
             // Asked for before the diff opens: a list read off the loop
             // lands its cursor there (`land_diff_listing`).

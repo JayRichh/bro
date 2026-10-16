@@ -545,6 +545,9 @@ pub enum MenuAction {
     /// A file's **Diff this file** from the tree browser or a finder: the
     /// DIFF VIEWER on the selected checkout, landed on this file.
     DiffThisFile(String),
+    /// **Log in to ‹account›…** on a session stopped on its login: the
+    /// account's sign-in, in a terminal (`accounts::sign_in`).
+    LogIn(String),
 }
 
 /// What a diff file row's git row does to the file.
