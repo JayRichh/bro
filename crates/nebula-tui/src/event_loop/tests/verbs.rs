@@ -1299,6 +1299,91 @@ fn wake_account_wakes_the_picked_account_or_opens_the_wake_view() {
     );
 }
 
+/// An account's own menu rows act on that account, whatever the cursor is
+/// on: Wake up now wakes it, Wake-up schedule… turns the overlay it stood
+/// on to the Wake view on it; from the background the schedule opens the
+/// Wake view with no account named. A switched-off account's menu has
+/// the schedule but not Wake up now.
+#[test]
+fn an_account_rows_wake_verbs_act_on_that_account() {
+    use crate::accounts_overlay::Tab;
+    with_config_json(
+        r#"{"profiles":[{"name":"work","harness":"claude"},{"name":"home","harness":"claude"},{"name":"off","harness":"claude","disabled":true}]}"#,
+        || {
+            let mut app = bench();
+            let mut out = Vec::new();
+            accounts::open(&mut app);
+            let Some(Overlay::Accounts(v)) = &mut app.modals.overlay else {
+                panic!("closed");
+            };
+            v.cursor = v.rows.iter().position(|r| r.key == "off").unwrap();
+            handle_overlay_key(
+                &mut app,
+                KeyEvent::new(KeyCode::Char('?'), KeyModifiers::SHIFT),
+                &mut out,
+            );
+            let Some(Overlay::Menu(menu)) = &app.modals.overlay else {
+                panic!("no menu: {:?}", app.modals.overlay);
+            };
+            let labels: Vec<&str> = menu.items.iter().map(|i| i.label.as_str()).collect();
+            assert!(labels.contains(&"Wake-up schedule\u{2026}"), "{labels:?}");
+            assert!(!labels.contains(&"Wake up now"), "{labels:?}");
+            handle_overlay_key(
+                &mut app,
+                KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+                &mut out,
+            );
+            let Some(Overlay::Accounts(v)) = &mut app.modals.overlay else {
+                panic!("closed");
+            };
+            v.cursor = v.rows.iter().position(|r| r.key == "work").unwrap();
+            let home = Target::Account("home".into());
+            verbs::run_verb(&mut app, Action::WakeAccount, &home, &mut out);
+            assert_eq!(app.chrome.flash.as_deref(), Some("waking home\u{2026}"));
+            // The row's menu over the list, its Wake-up schedule… row
+            // picked: the same overlay back, on its Wake view.
+            let Some(Overlay::Accounts(v)) = &mut app.modals.overlay else {
+                panic!("closed");
+            };
+            v.cursor = v.rows.iter().position(|r| r.key == "work").unwrap();
+            handle_overlay_key(
+                &mut app,
+                KeyEvent::new(KeyCode::Char('?'), KeyModifiers::SHIFT),
+                &mut out,
+            );
+            let Some(Overlay::Menu(menu)) = &mut app.modals.overlay else {
+                panic!("no menu: {:?}", app.modals.overlay);
+            };
+            menu.hover = menu
+                .items
+                .iter()
+                .position(|i| i.label == "Wake-up schedule\u{2026}")
+                .expect("the schedule row");
+            handle_overlay_key(
+                &mut app,
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                &mut out,
+            );
+            match &app.modals.overlay {
+                Some(Overlay::Accounts(v)) => {
+                    assert_eq!(v.tab, Tab::Wake);
+                    assert_eq!(v.rows[v.cursor].key, "work");
+                }
+                other => panic!("no Wake view: {other:?}"),
+            }
+            assert!(app.modals.verbs_under.is_none());
+            app.modals.overlay = None;
+            verbs::run_verb(&mut app, Action::WakeSchedule, &Target::Global, &mut out);
+            assert!(
+                matches!(&app.modals.overlay, Some(Overlay::Accounts(v)) if v.tab == Tab::Wake),
+                "{:?}",
+                app.modals.overlay
+            );
+            assert!(out.is_empty(), "nothing sent to the daemon: {out:?}");
+        },
+    );
+}
+
 /// `?` over the Wake view lists the Wake view's own keys, not the
 /// Accounts list's, and over the list it names the wake-up ones too.
 #[test]

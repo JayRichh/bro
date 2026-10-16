@@ -1389,9 +1389,17 @@ pub(crate) fn run_verb(app: &mut App, action: Action, t: &Target, out: &mut Vec<
         | Action::DockEditor
         | Action::RevealInExplorer
         | Action::OpenWithDefault => pending_verb(app, action),
-        // lane/wake's: Wake up now on an account, its schedule on one or
-        // all of them.
-        Action::WakeAccount | Action::WakeSchedule => pending_verb(app, action),
+        // lane/wake's: Wake up now on the row's own account (the picked
+        // one, else the Wake view to pick one), its schedule on that
+        // account or, from the background, on all of them.
+        Action::WakeAccount => match t {
+            Target::Account(key) => super::accounts::wake_account_key(app, key),
+            _ => super::accounts::wake_account_verb(app),
+        },
+        Action::WakeSchedule => match t {
+            Target::Account(key) => super::accounts::open_wake_tab_on(app, key),
+            _ => super::accounts::open_wake_tab(app),
+        },
         _ => flash_nothing(app, action),
     }
 }

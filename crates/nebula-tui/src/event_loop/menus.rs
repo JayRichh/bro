@@ -195,6 +195,9 @@ pub(crate) fn overlay_right_click(app: &mut App, pos: Position) -> bool {
         Some(Overlay::Tree(_)) => tree_row_menu(app, pos),
         Some(Overlay::Files(_)) => files_row_menu(app, pos),
         Some(Overlay::Grep(_)) => grep_row_menu(app, pos),
+        Some(Overlay::Accounts(v)) if v.tab == crate::accounts_overlay::Tab::Wake => {
+            wake_row_menu(app, Some(pos))
+        }
         Some(Overlay::Accounts(_)) => accounts_row_menu(app, Some(pos)),
         Some(Overlay::Ado(_)) => ado_row_menu(app, Some(pos)),
         Some(Overlay::PullRequests(_)) => pr_modal_row_menu(app, pos),
@@ -310,6 +313,8 @@ pub(crate) fn keeps_overlay(action: &MenuAction) -> bool {
                 | Action::OpenWithDefault
                 | Action::DockEditor
                 | Action::WakeAccount
+                // The accounts overlay turned to its Wake view, not a new one.
+                | Action::WakeSchedule
         ),
         _ => false,
     }
@@ -916,8 +921,17 @@ fn account_items(
         }
         items.push(press(&checked(!row.disabled(), "Switch on"), key(' ')));
     }
+    // Wake-up runs Claude accounts. Wake up now waits for a login and for
+    // the switch (the desktop greys it with why, matrix §5.9); the
+    // schedule is always there to read.
     if row.harness == "claude" && row.problem.is_none() {
-        items.extend(verbs::rows(app, &["wake_account", "wake_schedule"], &t));
+        let wakes = !needs_login && !row.disabled();
+        let ids: &[&str] = if wakes {
+            &["wake_account", "wake_schedule"]
+        } else {
+            &["wake_schedule"]
+        };
+        items.extend(verbs::rows(app, ids, &t));
     }
     // The session under the grid's cursor, onto this account: same
     // harness, another account.

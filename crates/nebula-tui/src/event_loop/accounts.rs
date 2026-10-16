@@ -131,6 +131,54 @@ pub(crate) fn open_wake_tab(app: &mut App) {
     show_tab(app, Tab::Wake);
 }
 
+/// **Wake-up schedule…** on an account's menu: the Wake view, its cursor
+/// on that account (once the status read lists it).
+pub(crate) fn open_wake_tab_on(app: &mut App, key: &str) {
+    if !matches!(app.modals.overlay, Some(Overlay::Accounts(_))) {
+        open(app);
+    }
+    if let Some(Overlay::Accounts(view)) = &mut app.modals.overlay {
+        view.mode = Mode::List;
+        if let Some(i) = view.rows.iter().position(|r| r.key == key) {
+            view.cursor = i;
+        }
+    }
+    show_tab(app, Tab::Wake);
+}
+
+/// **Wake up now** on an account's menu: that account picked on the view
+/// the overlay shows (opened if it is not up), then woken as `w` wakes it.
+/// Never another account: one the view can't pick yet says why instead.
+pub(crate) fn wake_account_key(app: &mut App, key: &str) {
+    if !matches!(app.modals.overlay, Some(Overlay::Accounts(_))) {
+        open(app);
+    }
+    let Some(Overlay::Accounts(view)) = &mut app.modals.overlay else {
+        return;
+    };
+    view.mode = Mode::List;
+    let picked = match view.tab {
+        Tab::Accounts => match view.rows.iter().position(|r| r.key == key) {
+            Some(i) => {
+                view.cursor = i;
+                true
+            }
+            None => false,
+        },
+        Tab::Wake => {
+            view.wake.focus = Some(key.to_string());
+            view.wake.select_focus();
+            view.wake.selected_key().as_deref() == Some(key)
+        }
+    };
+    if picked {
+        wake_selected(app);
+    } else {
+        app.chrome.flash = Some(format!("no account {key} to wake yet"));
+        app.chrome.dirty = true;
+    }
+}
+
 /// The registry's `wake_account` verb: Wake now on the account the open
 /// overlay has picked, else the overlay opened on its Wake view to pick one.
 pub(crate) fn wake_account_verb(app: &mut App) {
