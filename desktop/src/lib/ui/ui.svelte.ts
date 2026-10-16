@@ -63,8 +63,10 @@ export type DialogSpec =
 
 export const ui = $state({
   /** `search`: a field over the rows narrows them as you type (the
-   *  verbs menu, `?`). */
-  menu: null as { x: number; y: number; items: MenuEntry[]; label: string; search?: boolean } | null,
+   *  verbs menu, `?`). `keep`: the focus stays where it was (a field, the
+   *  terminal, an editor) and the menu takes the keys from the window, as
+   *  a native menu does (menus/router.ts). */
+  menu: null as { x: number; y: number; items: MenuEntry[]; label: string; search?: boolean; keep?: boolean } | null,
   dialog: null as DialogSpec | null,
   palette: false,
   help: false,
@@ -80,7 +82,12 @@ export type ReviewTab = 'terminal' | 'diff' | 'history' | 'pr';
 export type ReviewSheet = { sessions: string[]; at: number; tab: ReviewTab };
 
 /** Open a context menu at the pointer (or under an element). */
-export function openMenu(items: MenuEntry[], at: { x: number; y: number } | HTMLElement, label = 'Actions', opts: { search?: boolean } = {}) {
+export function openMenu(
+  items: MenuEntry[],
+  at: { x: number; y: number } | HTMLElement,
+  label = 'Actions',
+  opts: { search?: boolean; keep?: boolean } = {},
+) {
   if (!items.length) return;
   let x: number, y: number;
   if (at instanceof HTMLElement) {
@@ -88,7 +95,7 @@ export function openMenu(items: MenuEntry[], at: { x: number; y: number } | HTML
     x = r.left;
     y = r.bottom;
   } else ({ x, y } = at);
-  ui.menu = { x, y, items, label, ...(opts.search ? { search: true } : {}) };
+  ui.menu = { x, y, items, label, ...(opts.search ? { search: true } : {}), ...(opts.keep ? { keep: true } : {}) };
 }
 
 export function closeMenu() {

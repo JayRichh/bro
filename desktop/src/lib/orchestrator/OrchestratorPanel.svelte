@@ -9,8 +9,7 @@
   import { flatten, type Node } from '../overview/tree';
   import { countWords, descendantCounts, elsewhere, orchestratorTree } from '../orchestrator';
   import { openReview } from '../orch.svelte';
-  import { menuFor } from '../actions';
-  import { openMenu } from '../ui/ui.svelte';
+  // A row's right-click menu comes from its data-target (menus/router.ts).
   import OrchBadge from './OrchBadge.svelte';
 
   const root = $derived(orchestratorTree(app.model));
@@ -24,12 +23,6 @@
   function review(n: Node) {
     const id = agentId(n);
     if (id) openReview([id]);
-  }
-  function menu(e: MouseEvent, n: Node) {
-    const id = agentId(n);
-    if (!id) return;
-    e.preventDefault();
-    openMenu(menuFor({ kind: 'agent', id }), { x: e.clientX, y: e.clientY });
   }
   function chip(n: Node): string {
     if (!n.agent) return '';
@@ -48,7 +41,6 @@
     data-row
     data-target={agentId(n) ? `agent:${agentId(n)}` : undefined}
     onclick={() => review(n)}
-    oncontextmenu={(e) => menu(e, n)}
     title="Review {n.label}"
   >
     {#if needs}<span class="absolute inset-y-0 left-0 w-[3px] bg-ember" aria-hidden="true"></span>{/if}

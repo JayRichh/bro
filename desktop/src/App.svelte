@@ -42,6 +42,7 @@
   import { loadCollapsed } from './lib/worktrees/rows.svelte';
   import { listenAlerts } from './lib/alerts';
   import { noteFocus } from './lib/selection.svelte';
+  import { installMenus } from './lib/menus/builtin';
   import VerbBar from './lib/VerbBar.svelte';
   import TipBar from './lib/TipBar.svelte';
   import WhatsNew from './lib/WhatsNew.svelte';
@@ -241,11 +242,14 @@
   }
 
   onMount(() => {
+    // Every right-click: Kete's menu for what is under it, never WebView2's.
+    const stopMenus = installMenus();
     api.onReview(onReviewOpened).catch(() => {});
     listenAlerts().catch(() => {});
     boot();
     applyStartup();
     loadLearn();
+    return stopMenus;
   });
 </script>
 

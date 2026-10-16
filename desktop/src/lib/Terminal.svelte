@@ -8,7 +8,8 @@
   import '@xterm/xterm/css/xterm.css';
   import { api, Channel, decodeB64, type PtyEvent, type SessionRef } from './api';
   import { termFamily, xtermTheme } from './theme';
-  import { app, sessionKey } from './store.svelte';
+  import { app, sessionKey, sessionWorktree, toast } from './store.svelte';
+  import { registerTerminal } from './menus/surfaces';
 
   let { session, dark }: { session: SessionRef; dark: boolean } = $props();
 
@@ -23,6 +24,9 @@
   let lastSize = { cols: 0, rows: 0 };
   /** Bumped per attach, so a late event from the previous session is dropped. */
   let generation = 0;
+  /** The URL under the pointer (the web-links addon's hover). */
+  let link: string | null = null;
+  let unregister: (() => void) | undefined;
 
   function send(data: string, binary = false) {
     if (!attached || replaying) return;
@@ -122,9 +126,13 @@
     term.loadAddon(new Unicode11Addon());
     term.unicode.activeVersion = '11';
     term.loadAddon(
-      new WebLinksAddon((_e, uri) => {
-        api.openUrl(uri).catch(() => {});
-      }),
+      new WebLinksAddon(
+        (_e, uri) => {
+          api.openUrl(uri).catch(() => {});
+        },
+        // The link under the pointer, for the menu's Open link.
+        { hover: (_e, uri) => (link = uri), leave: () => (link = null) },
+      ),
     );
     // The daemon answers DA1, DSR and the kitty keyboard query for every
     // session; a second answer from here would land in the CLI as input.
@@ -152,6 +160,24 @@
     term.onData((d) => send(d));
     term.onBinary((d) => send(d, true));
     term.open(host);
+    // Its right-click menu (menus/builtin.ts). Paste goes through
+    // `term.paste`, the same path as Ctrl+V's paste event.
+    unregister = registerTerminal(host, {
+      live: () => phase === 'live' && !!attached,
+      hasSelection: () => !!term?.hasSelection(),
+      selection: () => term?.getSelection() ?? '',
+      clearSelection: () => term?.clearSelection(),
+      paste: (text) => term?.paste(text),
+      selectAll: () => term?.selectAll(),
+      clear: () => term?.clear(),
+      focus: () => term?.focus(),
+      folder: () => {
+        const w = sessionWorktree(attached ?? session);
+        return app.model.worktrees.find((x) => x.id === w)?.path ?? null;
+      },
+      link: () => link,
+      openLink: (url) => void api.openUrl(url).catch((e) => toast(String(e))),
+    });
     try {
       const gl = new WebglAddon();
       gl.onContextLoss(() => gl.dispose());
@@ -195,6 +221,7 @@
   });
 
   onDestroy(() => {
+    unregister?.();
     ro?.disconnect();
     generation++;
     if (attached) api.detach(attached).catch(() => {});

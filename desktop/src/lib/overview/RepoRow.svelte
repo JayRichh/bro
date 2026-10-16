@@ -78,7 +78,6 @@
     ondragover={over}
     ondragleave={(e) => leftFor(e) && (mark = null)}
     ondrop={drop}
-    oncontextmenu={(e) => (e.preventDefault(), openMenu(projectMenu(row.project.id), { x: e.clientX, y: e.clientY }, row.name))}
   >
     <button
       class="-mr-3.5 grid size-4 flex-none place-items-center self-center border-0 bg-transparent p-0 text-muted hover:text-ink"
