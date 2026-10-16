@@ -321,6 +321,54 @@ pub fn xml_path() -> std::path::PathBuf {
     crate::paths::data_dir().join("wake-task.xml")
 }
 
+/// Save `account`'s schedule (None removes it) and bring the scheduled
+/// task in line with every schedule: what `kete wake set` / `off` and both
+/// apps run. `exe` is kete's binary, which the task runs. On macOS and
+/// Linux nothing is installed (the task half is a no-op). The schedule is
+/// saved even when the task can't be written; the Err then says so.
+pub fn save(account: &str, schedule: Option<&WakeSchedule>, exe: &str) -> Result<Synced, String> {
+    super::set(account, schedule)?;
+    let schedules = super::load();
+    sync(
+        &*system_runner(),
+        &schedules,
+        exe,
+        current_user().as_deref(),
+        &xml_path(),
+    )
+    .map_err(|e| format!("the schedule is saved, but the scheduled task couldn't be updated: {e}"))
+}
+
+/// One line on where things stand with the trigger, for a person:
+/// `Task Scheduler: Kete\Whakaoho runs kete wake --all at 05:00, 10:00`.
+pub fn status_line(schedules: &BTreeMap<String, WakeSchedule>) -> String {
+    let times: Vec<String> = triggers(schedules)
+        .keys()
+        .map(|m| super::hhmm(*m))
+        .collect();
+    if times.is_empty() {
+        return "Nothing scheduled.".into();
+    }
+    if cfg!(windows) {
+        let mut line = format!(
+            "Task Scheduler: {TASK_NAME} runs `kete {TASK_ARGS}` at {}",
+            times.join(", ")
+        );
+        if crate::env::non_empty(crate::env::WAKE_NO_TASK).is_some() {
+            line.push_str(&format!(
+                " (not registered: {} is set)",
+                crate::env::WAKE_NO_TASK
+            ));
+        }
+        line
+    } else {
+        format!(
+            "Kete installs nothing here: add `kete {TASK_ARGS}` to crontab at {}",
+            times.join(", ")
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

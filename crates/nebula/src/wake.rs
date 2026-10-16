@@ -990,23 +990,45 @@ fn status(as_json: bool) -> Result<()> {
         rows.push((account, schedule, act, usual, suggested, last, session));
     }
     if as_json {
+        // What both apps draw from (the desktop's Whakaoho view, the TUI's
+        // Wake tab): one shape, worked out here once.
         let list: Vec<Value> = rows
             .iter()
             .map(
                 |(account, schedule, act, usual, suggested, last, session)| {
+                    let recent: Vec<Value> = history
+                        .iter()
+                        .rev()
+                        .filter(|e| e.account == account.key)
+                        .take(5)
+                        .map(|e| json!({ "entry": e, "summary": e.summary(offset) }))
+                        .collect();
                     json!({
                         "account": account.key,
                         "known": account.key == "@claude" || account.profile.is_some(),
                         "disabled": account.disabled(),
                         "logged_in": account.logged_in(),
+                        "login_hint": account.login_hint(),
                         "schedule": schedule,
+                        "mode": schedule.mode_word(),
+                        "days_text": wake::days_text(schedule.day_mask()),
+                        "slots": schedule.slots(),
                         "next": decide::next_slot(now, offset, schedule, *usual),
                         "usual": usual,
                         "suggested": suggested,
                         "preview": wake::preview(schedule.anchor(), *usual),
+                        // Every anchor's preview, by anchor / 15 minutes,
+                        // so a slider shows its effect without asking again.
+                        "previews": usual.map(|u| {
+                            (0..wake::DAY_MIN / wake::STEP_MIN)
+                                .map(|i| wake::preview(i * wake::STEP_MIN, Some(u)))
+                                .collect::<Vec<_>>()
+                        }),
                         "bins": act.map(|a| a.bins.clone()),
                         "last_turn_at": act.and_then(|a| a.last_turn_at),
                         "last": last,
+                        "last_summary": last.as_ref().map(|e| e.summary(offset)),
+                        "recent": recent,
                         "session": session,
                     })
                 },
@@ -1016,8 +1038,14 @@ fn status(as_json: bool) -> Result<()> {
             "now": now,
             "offset": offset,
             "daemon": daemon_up,
+            "windows": cfg!(windows),
+            "task_name": task::TASK_NAME,
+            "task_line": task::status_line(&schedules),
             "task": task::triggers(&schedules).keys().map(|m| wake::hhmm(*m)).collect::<Vec<_>>(),
+            "crontab": task::crontab_lines(&schedules, &own_exe()?),
             "log": wake::log_path(),
+            "wake_dir": wake::wake_dir(),
+            "model": wake::MODEL,
             "accounts": list,
         });
         println!("{}", serde_json::to_string_pretty(&out)?);
