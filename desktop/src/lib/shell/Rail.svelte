@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { app, openSettings, revealRepo, setThemePref, toast, type ThemePref } from '../store.svelte';
+  import { app, openSettings, revealRepo, setThemePref, toast } from '../store.svelte';
+  import { nextTheme, themeLabel } from '../look';
+  import { look } from '../look.svelte';
   import { api } from '../api';
   import { nav, type View } from './history.svelte';
   import { railOrder, repoRows, tally } from '../overview/repos';
@@ -93,10 +95,11 @@
   }
 
   function cycleTheme() {
-    const order: ThemePref[] = ['system', 'light', 'dark'];
-    setThemePref(order[(order.indexOf(app.themePref) + 1) % order.length]);
+    setThemePref(nextTheme(app.themePref));
   }
-  const THEME_WORD: Record<ThemePref, string> = { system: 'System', light: 'Light', dark: 'Dark' };
+  /** What the theme tile says: the theme worn, and that it cycles Workshop's three. */
+  const themeWord = $derived(themeLabel(app.themePref, look.prefs.themes));
+  const themeTip = $derived(`Theme: ${themeWord}. Press to cycle Workshop: system, light, dark (more themes in Settings, Desktop, Appearance)`);
 
   // The critters' secret: five quick clicks on the kete mark, and a kiwi
   // climbs out of the basket (and the critters turn on).
@@ -232,14 +235,14 @@
       <button
         class="{tile} bg-transparent text-muted hover:text-ink"
         onclick={cycleTheme}
-        title={withKey(`Theme: ${THEME_WORD[app.themePref]}. Press to cycle system, light, dark`, 'cycle_theme')}
-        aria-label="Theme: {THEME_WORD[app.themePref]}"
+        title={withKey(themeTip, 'cycle_theme')}
+        aria-label="Theme: {themeWord}"
       >
         <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
           <rect x="2.5" y="2.5" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.3" />
           {#if app.themePref === 'system'}
             <path d="M8 2.5v11h5.5v-11z" fill="currentColor" />
-          {:else if app.themePref === 'dark'}
+          {:else if app.dark}
             <rect x="2.5" y="2.5" width="11" height="11" fill="currentColor" />
           {/if}
         </svg>
@@ -406,17 +409,17 @@
     <button
       class="inline-flex h-7 items-center gap-2 border-0 bg-transparent px-2 text-[13px] text-muted hover:bg-surface hover:text-ink"
       onclick={cycleTheme}
-      title={withKey(`Theme: ${THEME_WORD[app.themePref]}. Press to cycle system, light, dark`, 'cycle_theme')}
+      title={withKey(themeTip, 'cycle_theme')}
     >
       <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
         <rect x="2.5" y="2.5" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.3" />
         {#if app.themePref === 'system'}
           <path d="M8 2.5v11h5.5v-11z" fill="currentColor" />
-        {:else if app.themePref === 'dark'}
+        {:else if app.dark}
           <rect x="2.5" y="2.5" width="11" height="11" fill="currentColor" />
         {/if}
       </svg>
-      Theme: {THEME_WORD[app.themePref]}
+      <span class="min-w-0 truncate">Theme: {themeWord}</span>
     </button>
   </div>
   {/if}

@@ -301,6 +301,8 @@ pub(crate) fn keeps_overlay(action: &MenuAction) -> bool {
     match action {
         MenuAction::Copy(_)
         | MenuAction::OpenLink(_)
+        // A theme picked: the settings it was picked from come back.
+        | MenuAction::PickTheme(_)
         | MenuAction::OverlayKey(..)
         | MenuAction::OverlayKeys(_)
         | MenuAction::FileGit { .. }

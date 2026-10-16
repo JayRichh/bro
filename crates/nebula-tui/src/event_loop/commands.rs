@@ -908,6 +908,7 @@ pub(crate) fn run_menu_action(app: &mut App, action: MenuAction, out: &mut Vec<C
             }
         }
         MenuAction::Editor(act) => crate::editors::run(app, act),
+        MenuAction::PickTheme(name) => pick_theme(app, &name),
     }
 }
 

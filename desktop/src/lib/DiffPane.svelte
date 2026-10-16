@@ -39,6 +39,7 @@
   import { fileIcon, languageOf } from './icons';
   import { blockLine, replacementModel, type ReplacementModel } from './replacement';
   import { defineMonacoTheme, termFamily, token } from './theme';
+  import { editorOptions, look } from './look.svelte';
   import { joinPath, registerViewer, type ViewerSurface } from './menus/surfaces';
   import { ownMenu, type Opened } from './menus/router';
   import { diffFileMenu } from './menus/targets';
@@ -597,7 +598,7 @@
     const m = (await import('./monaco')) as typeof import('./monaco');
     monaco = m.monaco;
     defineMonacoTheme(monaco, app.dark);
-    const base = m.readingOptions(termFamily());
+    const base = m.readingOptions(termFamily(), editorOptions());
     diffEditor = monaco.editor.createDiffEditor(diffHost, {
       ...base,
       originalEditable: false,
@@ -667,11 +668,17 @@
       syncStops();
     });
   });
+  // The look moved (a theme, a family, a size): re-theme both editors and
+  // give them the font.
   $effect(() => {
     const dark = app.dark;
+    void look.seq;
     requestAnimationFrame(() => {
       if (!monaco) return;
       defineMonacoTheme(monaco, dark);
+      const font = { fontFamily: termFamily(), ...editorOptions() };
+      diffEditor?.updateOptions(font);
+      repEditor?.updateOptions(font);
       decorateReplacement();
     });
   });

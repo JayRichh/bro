@@ -745,7 +745,7 @@ pub const SETTINGS_TABS: &[SettingsTab] = &[
             SettingSpec {
                 kind: SettingKind::Theme,
                 label: "Color theme",
-                hint: "Colors across the grid, overlays, previews and diffs. one-dark / one-light paint their own canvas; auto follows the OS light or dark; vscode reads the theme VS Code is set to",
+                hint: "Colors across the grid, overlays, previews and diffs. one-dark / one-light paint their own canvas; auto follows the OS light or dark; vscode reads the theme VS Code is set to; Enter picks any installed VS Code theme (vscode:<name>)",
                 group: "",
             },
             SettingSpec {
@@ -916,6 +916,13 @@ pub const SETTINGS_TABS: &[SettingsTab] = &[
 ];
 
 /// Index of the Hotkeys tab, which the overlay special-cases.
+/// Is `tab` the Appearance tab, where `⇧D` puts Kete's own look back?
+pub fn is_appearance_tab(tab: usize) -> bool {
+    SETTINGS_TABS
+        .get(tab)
+        .is_some_and(|t| t.title == "Appearance")
+}
+
 pub fn hotkeys_tab() -> usize {
     SETTINGS_TABS
         .iter()
@@ -1893,6 +1900,16 @@ impl Config {
         let mut layers = Layers::read(path, local)?;
         self.patch_layers(&mut layers, None);
         layers.commit(path, local, false)
+    }
+
+    /// Kete's own look for the terminal app: the Workshop theme, file
+    /// icons picked by the terminal's font, the black background. The
+    /// Appearance tab's other rows are layout, and stay.
+    pub fn reset_look(&mut self) {
+        let fresh = Config::default();
+        self.theme = fresh.theme;
+        self.icons = fresh.icons;
+        self.black_background = fresh.black_background;
     }
 
     /// Put every setting back to its default and return the result.

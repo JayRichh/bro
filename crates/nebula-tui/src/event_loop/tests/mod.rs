@@ -13399,6 +13399,106 @@ fn settings_hl_cycles_session_idle_timeout_and_persists() {
     });
 }
 
+/// A VS Code made of fixtures, with one extension theme: what the theme
+/// picker lists, instead of the developer's own.
+fn fixture_vscode(dir: &std::path::Path) -> nebula_config::vscode::Install {
+    let ext = dir.join("extensions").join("acme.theme-1.0.0");
+    std::fs::create_dir_all(ext.join("themes")).unwrap();
+    std::fs::write(
+        ext.join("package.json"),
+        r#"{ "contributes": { "themes": [
+            { "label": "Acme Night", "uiTheme": "vs-dark", "path": "./themes/night.json" }
+        ] } }"#,
+    )
+    .unwrap();
+    std::fs::write(
+        ext.join("themes/night.json"),
+        r##"{ "colors": { "editor.background": "#1E1E2E", "editor.foreground": "#CDD6F4" } }"##,
+    )
+    .unwrap();
+    let settings = dir.join("User").join("settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    std::fs::write(&settings, "{}").unwrap();
+    nebula_config::vscode::Install {
+        name: "VS Code",
+        settings,
+        extensions: dir.join("extensions"),
+        builtin: None,
+    }
+}
+
+/// Enter on the theme row lists every theme, the installed VS Code ones
+/// as `vscode:<label>`, the one worn ticked; picking one saves it, wears
+/// it and puts the settings back on the row. Esc puts them back too.
+#[test]
+fn enter_on_the_theme_row_picks_from_every_theme_installed_vs_code_ones_too() {
+    let dir = tempfile::tempdir().unwrap();
+    let install = fixture_vscode(dir.path());
+    nebula_config::vscode::with_installs(vec![install], || {
+        crate::config::with_config_path(dir.path().join("config.json"), || {
+            let mut app = App::new();
+            let mut out = Vec::new();
+            let (tab, row) = crate::config::locate(crate::config::SettingKind::Theme).unwrap();
+            open_settings_on(&mut app, tab, &mut out);
+            for _ in 0..row {
+                press(&mut app, KeyCode::Char('j'), KeyModifiers::NONE, &mut out);
+            }
+            press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
+            let Some(Overlay::Menu(menu)) = &app.modals.overlay else {
+                panic!("a picker, not {:?}", app.modals.overlay.is_some());
+            };
+            let labels: Vec<&str> = menu.items.iter().map(|i| i.label.as_str()).collect();
+            assert!(labels.contains(&"kete-dark ✓"), "{labels:?}");
+            assert!(labels.contains(&"vscode"));
+            assert_eq!(labels.last(), Some(&"vscode:Acme Night"));
+            assert_eq!(menu.items[menu.hover].label, "kete-dark ✓");
+
+            press(&mut app, KeyCode::Esc, KeyModifiers::NONE, &mut out);
+            assert!(matches!(app.modals.overlay, Some(Overlay::Settings(_))));
+            assert_eq!(crate::config::Config::load().theme, "kete-dark");
+
+            press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
+            if let Some(Overlay::Menu(menu)) = &mut app.modals.overlay {
+                menu.hover = menu.items.len() - 1;
+            }
+            press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
+            assert_eq!(crate::config::Config::load().theme, "vscode:Acme Night");
+            let Some(Overlay::Settings(view)) = &app.modals.overlay else {
+                panic!("the settings back");
+            };
+            assert_eq!((view.tab, view.selected), (tab, row));
+            assert_eq!(
+                app.chrome.theme.bg,
+                Some(ratatui::style::Color::Rgb(0x1e, 0x1e, 0x2e)),
+                "worn at once"
+            );
+        })
+    });
+}
+
+/// `⇧D` on the Appearance tab puts Kete's own look back — the theme, the
+/// file icons, the black background — and leaves the tab's layout rows.
+#[test]
+fn shift_d_on_appearance_puts_kete_s_look_back() {
+    with_config_json(
+        r#"{"theme": "forest", "icons": "ascii", "black_background": false, "animations": false}"#,
+        || {
+            let mut app = App::new();
+            let mut out = Vec::new();
+            let (tab, _) = crate::config::locate(crate::config::SettingKind::Theme).unwrap();
+            assert!(crate::config::is_appearance_tab(tab));
+            open_settings_on(&mut app, tab, &mut out);
+            press(&mut app, KeyCode::Char('D'), KeyModifiers::SHIFT, &mut out);
+            let cfg = crate::config::Config::load();
+            assert_eq!(cfg.theme, "kete-dark");
+            assert_eq!(cfg.icons_word(), "auto");
+            assert!(cfg.black_background, "Kete's own canvas is black");
+            assert!(!cfg.animations, "a layout row stays");
+            assert_eq!(app.chrome.theme, crate::theme::KETE_DARK);
+        },
+    );
+}
+
 /// The WORKTREE BASE BRANCH row is typed, not cycled: Enter opens a
 /// prompt in the overlay's place, pre-filled with the stored value;
 /// Enter there saves the name and lands back on the same row, Esc

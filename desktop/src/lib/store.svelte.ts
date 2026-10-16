@@ -10,8 +10,12 @@ import { nav, type Place } from './shell/history.svelte';
 import { applyOverrides } from './shortcuts';
 import { diffItem, isDiffMode, parseDiffItem, type DiffMode, type DiffRange } from './diff-api';
 import type { Against, ReviewBase } from './diff-base';
+import { knownTheme } from './look';
+import { look, setLookPrefs } from './look.svelte';
 
-export type ThemePref = 'system' | 'light' | 'dark';
+/** Workshop's `system`, `light` or `dark`, `one-dark`, `one-light`,
+ *  `vscode`, or `import:<id>` (lib/look.ts). */
+export type ThemePref = string;
 /** What the main column shows when no view is open: the overview or the board. */
 export type Home = 'overview' | 'board';
 /** What the quick prompt should switch to, once (a rail pick, a duplicate). */
@@ -132,7 +136,8 @@ export async function loadDesktopPrefs() {
     .catch(() => {});
   const p = await api.desktopPrefs().catch(() => null);
   if (!p) return null;
-  if (p.theme === 'system' || p.theme === 'light' || p.theme === 'dark') app.themePref = p.theme;
+  setLookPrefs(p);
+  if (knownTheme(p.theme, look.prefs.themes)) app.themePref = p.theme;
   if (isDiffMode(p.diff_mode)) app.diffMode = p.diff_mode;
   if (p.home === 'overview' || p.home === 'board') {
     app.home = p.home;

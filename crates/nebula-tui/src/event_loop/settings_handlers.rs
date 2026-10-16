@@ -50,6 +50,8 @@ pub(crate) fn handle_settings_key(app: &mut App, key: KeyEvent) {
         // Shift+E / Shift+I: the settings to a file, or a file's in.
         KeyCode::Char('E') => SettingsCmd::Export,
         KeyCode::Char('I') => SettingsCmd::Import,
+        // Shift+D on the Appearance tab: Kete's own look back.
+        KeyCode::Char('D') if crate::config::is_appearance_tab(tab) => SettingsCmd::LookDefaults,
         // Shift+L on a CRITTERS row: the collection log.
         KeyCode::Char('L') if !on_tabs && crate::critters::is_critters_row(tab, selected) => {
             crate::critters::open_log(app);
@@ -153,6 +155,7 @@ pub(crate) fn run_settings_cmd(app: &mut App, cmd: SettingsCmd) {
                 view.info("Enter: rebind   a: add another key   ⌫: default   x: unbind");
             }
         }
+        SettingsCmd::LookDefaults => look_defaults(app),
         SettingsCmd::Export => open_prompt(app, PromptKind::ExportSettings),
         SettingsCmd::Import => open_prompt(app, PromptKind::ImportSettings),
         SettingsCmd::ResetAll => {
@@ -196,13 +199,18 @@ pub(crate) enum SettingsCmd {
     EnterList,
     Move(usize),
     Apply(usize, i32),
-    Capture { add: bool },
+    Capture {
+        add: bool,
+    },
     ResetHotkey,
     ClearHotkey,
     Nudge,
     ResetAll,
     Export,
     Import,
+    /// The Appearance tab's `⇧D`: theme, file icons and black background
+    /// back to Kete's own.
+    LookDefaults,
 }
 
 /// The keystroke that lands while the Hotkeys tab is waiting for one.
@@ -434,6 +442,13 @@ pub(crate) fn apply_setting_at(app: &mut App, tab: usize, index: usize, delta: i
         }
     }
     if let Some(spec) = crate::config::setting_at(tab, index) {
+        // Enter (and a second click) on the theme row lists every theme to
+        // pick from, the installed VS Code ones too; ←/→ still step
+        // through the presets.
+        if spec.kind == crate::config::SettingKind::Theme && delta == 0 {
+            open_theme_picker(app);
+            return;
+        }
         // A PROJECT TAB row edits the selected project's entry — every
         // one of them typed. With no project to edit — an empty tree —
         // say so rather than open a prompt with nowhere to write.
@@ -482,6 +497,98 @@ pub(crate) fn apply_setting_at(app: &mut App, tab: usize, index: usize, delta: i
         return;
     }
     apply_config(app, &cfg);
+}
+
+/// The THEME PICKER, over the settings overlay: the presets and the two
+/// machine-read names, then every installed VS Code theme as
+/// `vscode:<label>` (read now: a theme installed since shows up), the one
+/// worn ticked and hovered, letters filtering. Esc, or a click outside it,
+/// puts the overlay back.
+pub(crate) fn open_theme_picker(app: &mut App) {
+    let current = crate::config::Config::load().theme;
+    let mut names: Vec<String> = crate::theme::THEMES.iter().map(|t| t.to_string()).collect();
+    names.extend(
+        crate::vscode_theme::installed_names()
+            .into_iter()
+            .map(|(name, _)| name),
+    );
+    let items: Vec<MenuItem> = names
+        .into_iter()
+        .map(|name| {
+            let label = if name.eq_ignore_ascii_case(current.trim()) {
+                format!("{name} ✓")
+            } else {
+                name.clone()
+            };
+            MenuItem::new(label, MenuAction::PickTheme(name))
+        })
+        .collect();
+    let hover = items
+        .iter()
+        .position(|i| i.label.ends_with(" ✓"))
+        .unwrap_or(0);
+    let Some(settings) = app.modals.overlay.take() else {
+        return;
+    };
+    app.modals.verbs_under = Some(Box::new(settings));
+    app.modals.overlay = Some(Overlay::Menu(crate::app::ContextMenu {
+        title: Some("Color theme".into()),
+        items: items.clone(),
+        at: None,
+        hover,
+        area: ratatui::layout::Rect::default(),
+        scroll: 0,
+        parent: None,
+        filter: Some(crate::app::MenuFilter {
+            query: String::new(),
+            all: items,
+        }),
+    }));
+}
+
+/// A row of the THEME PICKER: the settings back on screen, the theme
+/// saved and worn at once.
+pub(crate) fn pick_theme(app: &mut App, name: &str) {
+    // The settings the picker stood on, put back (by the menu, or here);
+    // reopened on the remembered row if they were let go.
+    if let Some(under) = app.modals.verbs_under.take() {
+        app.modals.overlay = Some(*under);
+    }
+    if !matches!(app.modals.overlay, Some(Overlay::Settings(_))) {
+        reopen_settings(app);
+    }
+    let mut cfg = crate::config::Config::load();
+    if cfg.theme == name {
+        return;
+    }
+    cfg.theme = name.to_string();
+    if !save_config(app, &cfg) {
+        return;
+    }
+    apply_config(app, &cfg);
+    if let Some(view) = settings_mut(app) {
+        view.info(format!("color theme: {name}"));
+    }
+}
+
+/// `⇧D` on the Appearance tab, or its button: the color theme, the file
+/// icons and the black background back to Kete's own (`kete-dark`, auto,
+/// on). The other rows on the tab are layout, not look, and stay.
+pub(crate) fn look_defaults(app: &mut App) {
+    let mut cfg = crate::config::Config::load();
+    cfg.reset_look();
+    if !save_config(app, &cfg) {
+        return;
+    }
+    apply_config(app, &cfg);
+    if let Some(view) = settings_mut(app) {
+        view.info(format!(
+            "Kete's own look: {}, file icons {}, black background {}",
+            cfg.theme,
+            cfg.icons_word(),
+            if cfg.black_background { "on" } else { "off" }
+        ));
+    }
 }
 
 /// LIGHT/DARK AWARENESS: with `auto` or `vscode` picked, look at the

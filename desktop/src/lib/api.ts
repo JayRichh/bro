@@ -380,7 +380,9 @@ export type SettingTarget =
 export type SettingControl =
   | { type: 'toggle' }
   | { type: 'choice'; options: string[]; labels: string[] }
-  | { type: 'text'; placeholder: string };
+  | { type: 'text'; placeholder: string }
+  /** A font family: an installed one, or empty for Kete's own (`placeholder`). */
+  | { type: 'font'; placeholder: string; mono: boolean };
 export interface SettingRow {
   target: SettingTarget;
   label: string;
@@ -454,6 +456,46 @@ export interface DesktopPrefs {
   editor_folder?: string;
   /** What opens a file: `auto`, `vscode`, `visual-studio` or `kete`. */
   editor_file?: string;
+  /** Font families; absent or empty: Kete's own (Geist, Geist Mono, JetBrains Mono). */
+  font_ui?: string;
+  font_mono?: string;
+  font_term?: string;
+  /** Sizes, as the words their rows store: `14`, `13`, `12.5`, `1.12` by default. */
+  ui_size?: string;
+  term_size?: string;
+  editor_size?: string;
+  term_line?: string;
+  /** Imported themes by id, as their derived palettes (`theme` = `import:<id>`). */
+  themes?: Record<string, Palette>;
+}
+/** A theme mapped onto the window's colour tokens (nebula-config look.rs):
+ *  each token is a CSS custom property minus its `--`. */
+export interface Palette {
+  label: string;
+  light: boolean;
+  tokens: Record<string, string>;
+}
+/** `look_vscode`: what VS Code's current theme maps to. */
+export interface VsCodeLook {
+  stamp: number | null;
+  changed: boolean;
+  palette: Palette | null;
+  problem: string | null;
+}
+/** An installed VS Code theme, for the import list. */
+export interface InstalledTheme {
+  name: string;
+  label: string;
+  light: boolean;
+  extension: string;
+  builtin: boolean;
+  /** Canvas, text and four syntax colours. */
+  swatch: string[];
+}
+/** An installed font family (src-tauri fonts.rs). */
+export interface FontFamily {
+  name: string;
+  mono: boolean;
 }
 export interface Startup {
   view: string | null;
@@ -652,6 +694,23 @@ export const api = {
   settingsImportPreview: () => invoke<ImportPreview | null>('settings_import_preview'),
   settingsImport: (path: string) => invoke<string>('settings_import', { path }),
   desktopPrefs: () => invoke<DesktopPrefs>('desktop_prefs'),
+  /** The installed font families, sorted; empty where they can't be listed. */
+  systemFonts: () => invoke<FontFamily[]>('system_fonts'),
+  /** VS Code's current theme as a palette, unless `known` is still its stamp. */
+  lookVscode: (osLight: boolean, known: number | null) => invoke<VsCodeLook>('look_vscode', { osLight, known }),
+  /** Which VS Code the look reads (`VS Code`, `VS Code Insiders`); null: none found. */
+  lookVscodeInstall: () => invoke<string | null>('look_vscode_install'),
+  lookInstalledThemes: () => invoke<InstalledTheme[]>('look_installed_themes'),
+  /** Import an installed theme and wear it. */
+  lookImportInstalled: (name: string) => invoke<DesktopPrefs>('look_import_installed', { name }),
+  /** Open dialog, then import that theme file and wear it; null: cancelled. */
+  lookImportFile: () => invoke<DesktopPrefs | null>('look_import_file'),
+  lookRemoveTheme: (id: string) => invoke<DesktopPrefs>('look_remove_theme', { id }),
+  /** Kete's own look back; the imported themes stay. */
+  lookReset: () => invoke<DesktopPrefs>('look_reset'),
+  lookUseVscodeFonts: () => invoke<{ prefs: DesktopPrefs; said: string }>('look_use_vscode_fonts'),
+  /** Scale the whole window (the Interface size over 14). */
+  lookZoom: (scale: number) => invoke<void>('look_zoom', { scale }),
   /** The verb registry and the window's own key bindings. */
   actionsList: () => invoke<ActionsList>('actions_list'),
   /** Bind one of the window's keys (an empty list unbinds it), or with

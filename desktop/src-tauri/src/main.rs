@@ -14,9 +14,11 @@ mod critters;
 mod daemon;
 mod editors;
 mod files;
+mod fonts;
 mod git;
 mod launch;
 mod learn;
+mod look;
 mod orchestrator;
 mod order;
 mod pr_poll;
@@ -976,6 +978,16 @@ fn main() {
             settings_io::settings_import_preview,
             settings_io::settings_import,
             settings::desktop_prefs,
+            fonts::system_fonts,
+            look::look_vscode,
+            look::look_vscode_install,
+            look::look_installed_themes,
+            look::look_import_installed,
+            look::look_import_file,
+            look::look_remove_theme,
+            look::look_reset,
+            look::look_use_vscode_fonts,
+            look::look_zoom,
             settings::desktop_set_collapsed,
             learn::learn_state,
             learn::learn_seen,

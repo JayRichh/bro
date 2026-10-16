@@ -610,3 +610,44 @@ flow('critters: the verb turns them on, a click pets, a right-click opens the cr
   for (const key of [ARROW.up, ARROW.up, ARROW.down, ARROW.down, ARROW.left, ARROW.right, ARROW.left, ARROW.right, 'b', 'a']) await d.press(key);
   await d.waitFor('critters on again', on);
 });
+
+// Settings, Desktop, Appearance in the narrowest window at the largest
+// interface size (the window zoomed to 16/14, so 640 px holds 560 of the
+// page's): One Dark worn from its theme.css block, the terminal font row
+// naming its family, the actions and every row inside the page with no
+// sideways scroll. Then Reset appearance, confirmed, puts Kete's own look
+// back and leaves the imported themes alone.
+flow(
+  'Settings, Appearance fits a 640px window at the largest interface size and resets',
+  { config: { desktop: { theme: 'one-dark', ui_size: '16', font_term: 'Consolas' } } },
+  async (d) => {
+    await d.wd.call('POST', '/window/rect', { width: 640, height: 760 });
+    // The rail is the compact one at this width: Settings is its gear.
+    await d.click('button[aria-label="Settings"]');
+    await d.waitForText('Interface font');
+    assert.equal(await d.wd.exec('return document.documentElement.dataset.palette ?? null;'), 'one-dark');
+    assert.equal(await d.wd.exec('return document.documentElement.dataset.theme;'), 'dark');
+    await d.el('button', 'Consolas');
+    const fits = `const page = document.documentElement;
+      const panel = document.querySelector('[role="tabpanel"]');
+      const out = [];
+      if (page.scrollWidth > page.clientWidth + 1) out.push('page ' + page.scrollWidth + ' > ' + page.clientWidth);
+      if (panel && panel.scrollWidth > panel.clientWidth + 1) out.push('panel ' + panel.scrollWidth + ' > ' + panel.clientWidth);
+      for (const b of document.querySelectorAll('[role="tabpanel"] button')) {
+        const r = b.getBoundingClientRect();
+        if (r.width && r.right > innerWidth + 1) out.push((b.innerText || b.getAttribute('aria-label')) + ' ends at ' + Math.round(r.right) + ' of ' + innerWidth);
+      }
+      return out;`;
+    assert.deepEqual(await d.wd.exec(fits), []);
+    assert.ok((await d.wd.exec('return innerWidth;')) < 600, 'the interface size zooms the page');
+
+    await d.click('button', 'Reset appearance to Kete defaults');
+    await d.click('[role="dialog"] button', 'Reset appearance');
+    await d.waitFor('Workshop back', async () => (await d.wd.exec('return document.documentElement.dataset.palette ?? null;')) === null);
+    await d.waitFor('the look reset in config.json', () => {
+      const desk = d.config().desktop ?? {};
+      return desk.theme === 'system' && desk.font_term === undefined && desk.ui_size === undefined;
+    });
+    await d.waitFor('the zoom back to 1', async () => (await d.wd.exec('return innerWidth;')) > 600);
+  },
+);

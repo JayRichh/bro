@@ -718,6 +718,12 @@ fn handle_settings_mouse(
                 view.is_hotkeys(),
             );
             let tab_hits = view.tab_hits.clone();
+            // The Appearance tab's Kete look button: its key, pressed.
+            if view.look_hit.is_some_and(|r| r.contains(mouse_pos)) {
+                run_settings_cmd(app, SettingsCmd::LookDefaults);
+                app.chrome.dirty = true;
+                return true;
+            }
             // The bottom row's Export / Import: their keys, pressed.
             if let Some(import) = view
                 .io_hits

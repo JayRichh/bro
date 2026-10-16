@@ -1,0 +1,26 @@
+{
+	"$schema": "vscode://schemas/color-theme",
+	"name": "Dark (Visual Studio)",
+	"type": "dark",
+	"colors": {
+		"editor.background": "#1E1E1E",
+		"editor.foreground": "#D4D4D4",
+		"editor.inactiveSelectionBackground": "#3A3D41",
+		"sideBar.background": "#252526",
+		"focusBorder": "#007FD4"
+	},
+	"tokenColors": [
+		{
+			"scope": ["comment"],
+			"settings": { "foreground": "#6A9955" }
+		},
+		{
+			"scope": "keyword",
+			"settings": { "foreground": "#569CD6" }
+		},
+		{
+			"scope": "string",
+			"settings": { "foreground": "#CE9178" }
+		}
+	]
+}

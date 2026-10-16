@@ -552,6 +552,9 @@ pub enum MenuAction {
     /// Dock editor beside Kete, Open with default app, Open in Kete
     /// (`crate::editors`).
     Editor(crate::editors::EditorAct),
+    /// A row of the THEME PICKER (Enter on Settings → Appearance → Color
+    /// theme): this theme saved and worn, the settings put back.
+    PickTheme(String),
 }
 
 /// What a diff file row's git row does to the file.
@@ -2891,6 +2894,8 @@ pub struct SettingsView {
     /// The bottom row's Export and Import buttons, written during draw;
     /// `true` is Import.
     pub io_hits: Vec<(Rect, bool)>,
+    /// The Appearance tab's `[⇧D Kete look]` button, written during draw.
+    pub look_hit: Option<Rect>,
     /// Transient line under the body: duplicate warnings, host-terminal
     /// warnings, "reset to default".
     pub notice: Option<(String, NoticeLevel)>,

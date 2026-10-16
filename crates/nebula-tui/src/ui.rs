@@ -841,6 +841,11 @@ fn settings_keys_hint(view: &crate::app::SettingsView) -> &'static str {
     if view.is_hotkeys() {
         return "Enter: rebind  a: add  ⌫: default  x: unbind  R: reset all  Tab: next  ↑: tabs";
     }
+    if crate::config::setting_at(view.tab, view.selected)
+        .is_some_and(|s| s.kind == crate::config::SettingKind::Theme)
+    {
+        return "↑/↓: move  Enter: pick a theme  ←/→: cycle  ⇧D: Kete's look  Tab: next tab";
+    }
     if crate::config::setting_at(view.tab, view.selected).is_some_and(|s| s.kind.is_text()) {
         return "↑/↓: move  Enter: type a value (empty = default)  R: reset all  Tab: next tab";
     }

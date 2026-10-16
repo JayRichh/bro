@@ -8,7 +8,10 @@
 //!    `.ttf`s copied into `%LOCALAPPDATA%\Microsoft\Windows\Fonts` and
 //!    registered under `HKCU\Software\Microsoft\Windows NT\CurrentVersion\
 //!    Fonts`, which needs no administrator. Skipped when it is there
-//!    (per user or for the machine), or with `--no-font`.
+//!    (per user or for the machine), or with `--no-font`. When the
+//!    terminal font picked in the desktop window's Appearance settings is
+//!    a Nerd Font already, the profile draws with that one instead and
+//!    nothing is downloaded ([`chosen_nerd_font`]).
 //! 2. **The icon.** The `kete.ico` beside `kete.exe` when the install put
 //!    one there; else Kete's 256px PNG, carried in the binary, written into
 //!    Kete's data dir — Windows Terminal wants a file path.
@@ -60,8 +63,11 @@ pub(crate) fn run_terminal(opts: Options) -> Result<()> {
     if opts.dry_run {
         println!("dry run: nothing is downloaded, installed or written.\n");
     }
+    let chosen = chosen_nerd_font();
     if opts.no_font {
         println!("font: skipped (--no-font)");
+    } else if let Some(face) = &chosen {
+        println!("font: {face}, the terminal font picked in Kete's settings, is a Nerd Font: the profile uses it");
     } else if !cfg!(windows) {
         println!("font: skipped (not Windows)");
     } else {
@@ -72,7 +78,15 @@ pub(crate) fn run_terminal(opts: Options) -> Result<()> {
         None => bail!("couldn't find Windows Terminal's settings.json"),
     };
     let icon = profile_icon(opts.dry_run, say)?;
-    let wrote = add_profile(&path, &commandline(), icon.as_deref(), opts.dry_run, say)?;
+    let font = chosen.as_deref().unwrap_or(wt_settings::FONT_FACE);
+    let wrote = add_profile(
+        &path,
+        &commandline(),
+        icon.as_deref(),
+        font,
+        opts.dry_run,
+        say,
+    )?;
     if !opts.dry_run && wrote {
         println!(
             "\ndone: restart Windows Terminal and open a tab on the \"{}\" profile; Kete's file \
@@ -82,6 +96,19 @@ pub(crate) fn run_terminal(opts: Options) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// The terminal font picked in the desktop window (Settings, Desktop,
+/// Appearance), when it is a Nerd Font: the one the profile should draw
+/// with. None when none is picked or it is not a Nerd Font, and the
+/// profile keeps JetBrainsMono Nerd Font.
+fn chosen_nerd_font() -> Option<String> {
+    nerd_font_of(&nebula_config::desktop::DesktopPrefs::load().font_term)
+}
+
+fn nerd_font_of(face: &str) -> Option<String> {
+    let face = face.trim();
+    (!face.is_empty() && nebula_tui::icons::is_nerd_font(face)).then(|| face.to_string())
 }
 
 /// The `kete` the profile runs: this binary, by its full path.
@@ -253,6 +280,7 @@ fn add_profile(
     path: &Path,
     commandline: &str,
     icon: Option<&str>,
+    font: &str,
     dry_run: bool,
     say: &str,
 ) -> Result<bool> {
@@ -261,7 +289,7 @@ fn add_profile(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
     };
-    let plan = wt_settings::plan(&text, commandline, icon)
+    let plan = wt_settings::plan_with_font(&text, commandline, icon, font)
         .map_err(|e| anyhow::anyhow!("{}: {e}; left it as it is", path.display()))?;
     if plan.changes.is_empty() {
         println!(
@@ -337,13 +365,29 @@ mod tests {
             "{\n    // mine\n    \"profiles\": { \"list\": [ { \"name\": \"pwsh\" }, ] },\n}\n";
         std::fs::write(&path, original).unwrap();
         let kete = r"C:\bin\kete.exe";
-        assert!(add_profile(&path, kete, Some(r"C:\bin\kete.ico"), true, "would").unwrap());
+        assert!(add_profile(
+            &path,
+            kete,
+            Some(r"C:\bin\kete.ico"),
+            wt_settings::FONT_FACE,
+            true,
+            "would"
+        )
+        .unwrap());
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             original,
             "a dry run writes nothing"
         );
-        assert!(add_profile(&path, kete, Some(r"C:\bin\kete.ico"), false, "will").unwrap());
+        assert!(add_profile(
+            &path,
+            kete,
+            Some(r"C:\bin\kete.ico"),
+            wt_settings::FONT_FACE,
+            false,
+            "will"
+        )
+        .unwrap());
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("// mine"), "comments kept:\n{text}");
         let written = nebula_tui::jsonc::parse(&text).unwrap();
@@ -362,8 +406,37 @@ mod tests {
             std::fs::read_to_string(backups[0].path()).unwrap(),
             original
         );
-        assert!(!add_profile(&path, kete, Some(r"C:\bin\kete.ico"), false, "will").unwrap());
+        assert!(!add_profile(
+            &path,
+            kete,
+            Some(r"C:\bin\kete.ico"),
+            wt_settings::FONT_FACE,
+            false,
+            "will"
+        )
+        .unwrap());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+    }
+
+    /// A terminal font picked in Kete's settings that is a Nerd Font is the
+    /// one the profile draws with; any other leaves JetBrainsMono Nerd Font.
+    #[test]
+    fn the_chosen_terminal_font_is_offered_when_it_is_a_nerd_font() {
+        assert_eq!(
+            nerd_font_of(" CaskaydiaCove NF ").as_deref(),
+            Some("CaskaydiaCove NF")
+        );
+        assert_eq!(nerd_font_of("JetBrains Mono"), None);
+        assert_eq!(nerd_font_of(""), None);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, "{}").unwrap();
+        assert!(add_profile(&path, "kete", None, "CaskaydiaCove NF", false, "will").unwrap());
+        let written = nebula_tui::jsonc::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(
+            written["profiles"]["list"][0]["font"]["face"],
+            "CaskaydiaCove NF"
+        );
     }
 
     /// A file that is not JSONC is left alone, with an error that says so.
@@ -372,7 +445,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
         std::fs::write(&path, "{ broken").unwrap();
-        assert!(add_profile(&path, "kete", None, false, "will").is_err());
+        assert!(add_profile(&path, "kete", None, wt_settings::FONT_FACE, false, "will").is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ broken");
     }
 }

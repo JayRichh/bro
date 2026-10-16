@@ -37,7 +37,9 @@ pub mod icons;
 pub mod icons_table;
 pub mod ipc;
 pub mod issues;
-pub mod jsonc;
+// The JSONC reader lives with the settings now, so the desktop window
+// reads VS Code's files with the same one; this path stays for callers.
+pub use nebula_config::jsonc;
 pub mod key_combo;
 pub mod keymap;
 pub mod keys;

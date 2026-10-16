@@ -6,6 +6,7 @@
   import { app, toast } from '../store.svelte';
   import { languageOf, fileIcon } from '../icons';
   import { defineMonacoTheme, termFamily } from '../theme';
+  import { editorOptions, look } from '../look.svelte';
   import { closeFiles, filesApi, openTabDefault, readTab, sheet, showFiles, stepTab, type FileText } from './files.svelte';
   import { registerViewer } from '../menus/surfaces';
   import { ownMenu } from '../menus/router';
@@ -61,7 +62,7 @@
     }
     if (shown.path !== path || !sheet.open) return;
     // The sheet's body is new each time it opens: the editor goes with it.
-    if (!editor) editor = monaco.editor.create(el, { ...m.readingOptions(termFamily()), renderLineHighlight: 'line' });
+    if (!editor) editor = monaco.editor.create(el, { ...m.readingOptions(termFamily(), editorOptions()), renderLineHighlight: 'line' });
     const old = editor.getModel();
     editor.setModel(monaco.editor.createModel(text, languageOf(path)));
     old?.dispose();
@@ -69,7 +70,10 @@
 
   $effect(() => {
     const dark = app.dark;
-    if (monaco) defineMonacoTheme(monaco, dark);
+    void look.seq;
+    if (!monaco) return;
+    defineMonacoTheme(monaco, dark);
+    editor?.updateOptions({ fontFamily: termFamily(), ...editorOptions() });
   });
 
   function dropEditor() {

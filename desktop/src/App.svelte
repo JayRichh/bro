@@ -54,21 +54,50 @@
   import { isEverything } from './lib/scope';
   import Critters from './lib/critters/Critters.svelte';
   import CritterLog from './lib/critters/CritterLog.svelte';
+  import { look, paint, refreshLive } from './lib/look.svelte';
+  import { knownTheme, zoomOf } from './lib/look';
 
   const media = window.matchMedia('(prefers-color-scheme: dark)');
   let osDark = $state(media.matches);
   media.addEventListener('change', (e) => (osDark = e.matches));
 
+  // The look: Workshop's blocks, One's, or an inline palette (VS Code's,
+  // an imported one), and the fonts, on <html>; then the terminals and
+  // the diff editor re-read it (`look.seq`).
   $effect(() => {
-    app.dark = app.themePref === 'system' ? osDark : app.themePref === 'dark';
-    document.documentElement.dataset.theme = app.dark ? 'dark' : 'light';
+    app.dark = paint(app.themePref, osDark);
+    void look.prefs;
+    void look.live;
+    untrack(() => look.seq++);
   });
-  // The native title bar follows an override too, not only the OS.
+  // The native title bar follows the theme too, not only the OS: the OS
+  // itself while Workshop follows it, else the theme's own light or dark.
   $effect(() => {
-    const pref = app.themePref;
+    const follow = app.themePref === 'system';
+    const dark = app.dark;
     getCurrentWindow()
-      .setTheme(pref === 'system' ? null : pref)
+      .setTheme(follow ? null : dark ? 'dark' : 'light')
       .catch(() => {});
+  });
+  // `vscode` follows VS Code: its settings.json is stat'ed every few
+  // seconds and whenever the window takes focus, and read again when the
+  // OS flips light or dark (VS Code's auto-detect follows that).
+  $effect(() => {
+    if (app.themePref !== 'vscode') return;
+    const osLight = !osDark;
+    void refreshLive(osLight, true);
+    const beat = setInterval(() => void refreshLive(osLight), 2500);
+    const onFocus = () => void refreshLive(osLight);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      clearInterval(beat);
+      window.removeEventListener('focus', onFocus);
+    };
+  });
+  // The Interface size scales the whole window (every size in it is px).
+  $effect(() => {
+    const scale = zoomOf(look.prefs.sizes);
+    api.lookZoom(scale).catch(() => {});
   });
 
   // Back and forward land on a place; the selection follows it.
@@ -215,7 +244,7 @@
     loadCollapsed(prefs?.collapsed);
     const s = await api.startup().catch(() => null);
     // Flags that need no daemon apply at once.
-    if (s?.theme === 'light' || s?.theme === 'dark' || s?.theme === 'system') app.themePref = s.theme;
+    if (s?.theme && knownTheme(s.theme, look.prefs.themes)) app.themePref = s.theme;
     if (isDiffMode(s?.diff_mode)) app.diffMode = s.diff_mode;
     if (s?.view === 'board') {
       app.home = 'board';

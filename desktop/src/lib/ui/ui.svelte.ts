@@ -79,9 +79,25 @@ export type DialogSpec =
   | {
       kind: 'pick';
       title: string;
-      items: { id: string; label: string; hint?: string }[];
+      /** A line above the list. */
+      note?: string;
+      items: PickItem[];
+      /** The row the cursor starts on, by id. */
+      selected?: string;
+      /** A button beside Cancel that answers its own id (From a file). */
+      extra?: { id: string; label: string };
       resolve: (id: string | null) => void;
     };
+
+export type PickItem = {
+  id: string;
+  label: string;
+  hint?: string;
+  /** Colour squares after the label: a theme's canvas, text and syntax. */
+  swatch?: string[];
+  /** A font family: the row under the cursor shows a sample in it. */
+  font?: string;
+};
 
 export const ui = $state({
   /** `search`: a field over the rows narrows them as you type (the
@@ -139,7 +155,7 @@ export const ask = {
     settle<Record<string, string> | null>((resolve) => ({ kind: 'prompt', confirm: 'Save', ...o, resolve })),
   confirm: (o: { title: string; message: string; detail?: string[]; confirm: string; danger?: boolean; check?: string; checked?: boolean }) =>
     settle<{ ok: boolean; checked: boolean }>((resolve) => ({ kind: 'confirm', ...o, resolve })),
-  pick: (o: { title: string; items: { id: string; label: string; hint?: string }[] }) =>
+  pick: (o: { title: string; note?: string; items: PickItem[]; selected?: string; extra?: { id: string; label: string } }) =>
     settle<string | null>((resolve) => ({ kind: 'pick', ...o, resolve })),
 };
 

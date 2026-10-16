@@ -1,0 +1,55 @@
+{
+	"name": "Atom One Dark",
+	"colors": {
+		"editor.background": "#282C34",
+		"editor.foreground": "#ABB2BF",
+		"focusBorder": "#528BFF",
+		"sideBar.background": "#21252B",
+		"list.activeSelectionBackground": "#2C313A",
+		"list.hoverBackground": "#2C313A66",
+		"editorLineNumber.foreground": "#636D83",
+		"diffEditor.insertedTextBackground": "#00809B33"
+	},
+	"tokenColors": [
+		{
+			"name": "Comments",
+			"scope": ["comment", "punctuation.definition.comment"],
+			"settings": { "foreground": "#5C6370", "fontStyle": "italic" }
+		},
+		{
+			"name": "Keywords",
+			"scope": "keyword",
+			"settings": { "foreground": "#C678DD" }
+		},
+		{
+			"name": "Strings",
+			"scope": "string",
+			"settings": { "foreground": "#98C379" }
+		},
+		{
+			"name": "Numbers",
+			"scope": "constant.numeric",
+			"settings": { "foreground": "#D19A66" }
+		},
+		{
+			"name": "Functions",
+			"scope": "entity.name.function",
+			"settings": { "foreground": "#61AFEF" }
+		},
+		{
+			"name": "Types",
+			"scope": "entity.name.type",
+			"settings": { "foreground": "#E5C07B" }
+		},
+		{
+			"name": "Tags",
+			"scope": "entity.name.tag",
+			"settings": { "foreground": "#E06C75" }
+		},
+		{
+			"name": "Support",
+			"scope": "support",
+			"settings": { "foreground": "#56B6C2" }
+		}
+	]
+}

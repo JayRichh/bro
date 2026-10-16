@@ -150,6 +150,13 @@ pub enum Control {
     Text {
         placeholder: String,
     },
+    /// A font family: one of the installed families the window lists, or
+    /// empty for Kete's own (`placeholder` names it). `mono` puts the
+    /// fixed-pitch families first.
+    Font {
+        placeholder: String,
+        mono: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -658,23 +665,69 @@ fn project_groups(cfg: &Config, projects: &[ProjectRef]) -> Vec<Group> {
         .collect()
 }
 
+/// The window's theme choices, labelled: Workshop's three, One Dark and
+/// One Light, VS Code (live), then the imported themes by their names.
+pub fn theme_choices(prefs: &DesktopPrefs) -> (Vec<String>, Vec<String>) {
+    let mut options = strs(crate::desktop::THEMES);
+    let mut labels = strs(&[
+        "Workshop, follow system",
+        "Workshop light",
+        "Workshop dark",
+        "One Dark",
+        "One Light",
+        "VS Code (live)",
+    ]);
+    for (id, palette) in &prefs.themes {
+        options.push(format!("{}{id}", crate::desktop::IMPORT_PREFIX));
+        labels.push(palette.label.clone());
+    }
+    (options, labels)
+}
+
 fn desktop_tab(prefs: &DesktopPrefs) -> Tab {
+    let fresh = DesktopPrefs::default();
+    let make = |key: &str, label: &str, hint: &str, control: Control, is_new: bool| Row {
+        target: Target::Desktop { key: key.into() },
+        label: label.into(),
+        hint: hint.into(),
+        control,
+        value: Value::String(prefs.get(key).into()),
+        default: Value::String(fresh.get(key).into()),
+        restart: None,
+        is_new,
+    };
     let row = |key: &str, label: &str, hint: &str, labels: &[&str]| {
         let options = strs(crate::desktop::choices(key).unwrap_or(&[]));
-        Row {
-            target: Target::Desktop { key: key.into() },
-            label: label.into(),
-            hint: hint.into(),
-            control: Control::Choice {
-                options,
-                labels: strs(labels),
-            },
-            value: Value::String(prefs.get(key).into()),
-            default: Value::String(DesktopPrefs::default().get(key).into()),
-            restart: None,
-            is_new: false,
-        }
+        let control = Control::Choice {
+            options,
+            labels: strs(labels),
+        };
+        make(key, label, hint, control, false)
     };
+    // The look's rows: new in 0.56.
+    let look = |key: &str, label: &str, hint: &str| {
+        let options = strs(crate::desktop::choices(key).unwrap_or(&[]));
+        let control = Control::Choice {
+            labels: options.clone(),
+            options,
+        };
+        make(key, label, hint, control, true)
+    };
+    let font = |key: &str, label: &str, hint: &str, placeholder: &str, mono: bool| {
+        let control = Control::Font {
+            placeholder: placeholder.into(),
+            mono,
+        };
+        make(key, label, hint, control, true)
+    };
+    let (options, labels) = theme_choices(prefs);
+    let theme = make(
+        "theme",
+        "Theme",
+        "Workshop follows the system or pins light or dark; VS Code (live) wears the theme VS Code is set to and follows it; Import adds any installed VS Code theme (Ctrl+Shift+L cycles Workshop's three; --theme overrides for one run)",
+        Control::Choice { options, labels },
+        false,
+    );
     Tab {
         id: "desktop".into(),
         title: "Desktop".into(),
@@ -685,10 +738,24 @@ fn desktop_tab(prefs: &DesktopPrefs) -> Tab {
                 subtitle: None,
                 terminal: false,
                 rows: vec![
-                    row("theme", "Theme", "Follow the system's light or dark mode, or pin one (Ctrl+Shift+L cycles; --theme overrides for one run)", &["System", "Light", "Dark"]),
                     row("home", "Home view", "What the main column shows with nothing open: the overview of repos, or the board of lanes (Shift+K switches)", &["Overview", "Board"]),
                     row("startup", "Open on", "What the window shows when it opens: its home view, or the orchestrator (its start form when there is none yet)", &["Home view", "Orchestrator"]),
                     row("diff_mode", "Diff layout", "How the Diff view lays out a repo that has no layout saved yet (--diff overrides for one run)", &["Side by side", "Inline", "Replacement"]),
+                ],
+            },
+            Group {
+                title: "Appearance".into(),
+                subtitle: None,
+                terminal: false,
+                rows: vec![
+                    theme,
+                    font("font_ui", "Interface font", "The window's own text: any installed family; empty is Geist", "Geist", false),
+                    look("ui_size", "Interface size", "Scales the whole window, 14 its own size; the terminal and diff sizes below keep what they say"),
+                    font("font_mono", "Code font", "Paths, ports, branches and counts in the window; empty is Geist Mono", "Geist Mono", true),
+                    font("font_term", "Terminal font", "Terminals and the diff and file viewers; empty is JetBrains Mono", "JetBrains Mono", true),
+                    look("term_size", "Terminal size", "The terminals' font size, in pixels"),
+                    look("term_line", "Terminal line height", "Space between terminal lines, times the font size"),
+                    look("editor_size", "Diff and file size", "The diff and file viewers' font size, in pixels"),
                 ],
             },
             Group {
@@ -917,9 +984,12 @@ pub fn reset_config(cfg: &mut Config) {
 /// in one read and one write.
 pub fn reset_in(path: &Path, local: &Path) -> Result<(), String> {
     Config::update_in_with_raw(path, local, reset_config, crate::desktop::KEY, |stored| {
-        let other = DesktopPrefs::from_raw(stored.cloned()).other;
+        // Keys a newer window wrote stay, and so do the imported themes:
+        // they are a library to pick from, not a setting.
+        let held = DesktopPrefs::from_raw(stored.cloned());
         let prefs = DesktopPrefs {
-            other,
+            other: held.other,
+            themes: held.themes,
             ..DesktopPrefs::default()
         };
         serde_json::to_value(&prefs).map_err(std::io::Error::other)
