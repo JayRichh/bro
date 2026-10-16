@@ -38,6 +38,8 @@ import { moveStep, rootOf, stepInFor } from './reorder.svelte';
 import { railOrder, repoRows } from './overview/repos';
 import { scopedRepo, scopedWorktree } from './scope';
 import { exportSettings, importSettings } from './settings/io';
+import { bringBack, critters, hiddenNow, hideUntilTomorrow, toggleCritters } from './critters/state.svelte';
+import { openCritterLog } from './critters/sheet.svelte';
 
 /** F10: the orchestrator, or the Start form when there is none. */
 function orchestratorKey() {
@@ -346,6 +348,22 @@ export function diffAgainstCommand(
   return [cmd('diff-against', label, 'Window', () => (app.diffAgainst = toBase ? 'base' : 'head'), undefined, 'merge-base base head against branch committed')];
 }
 
+/** The `critters` verb (on or off, the one shared setting), and while
+ *  they're on, the way to hide them for the day (or bring them back) and
+ *  the log: the critter menu's rows for the keyboard. */
+function critterCommands(cmd: (id: string, label: string, group: string, run: () => unknown, key?: ShortcutId, words?: string) => Command): Command[] {
+  const words = 'critters easter egg pixel visitors animals';
+  const out = [cmd('critters', critters.prefs.on ? 'Turn critters off' : 'Turn critters on', 'Window', toggleCritters, undefined, words)];
+  if (!critters.prefs.on) return out;
+  out.push(
+    hiddenNow()
+      ? cmd('critters-back', 'Bring the critters back today', 'Window', bringBack, undefined, words)
+      : cmd('critters-hide', 'Hide critters until tomorrow', 'Window', hideUntilTomorrow, undefined, words),
+    cmd('critter-log', 'Critter log\u2026', 'Window', openCritterLog, undefined, `${words} collection log seen`),
+  );
+  return out;
+}
+
 /** Everything the palette offers besides jumping: the window's actions,
  *  then the shown session's own verbs. */
 export function paletteCommands(): Command[] {
@@ -381,6 +399,7 @@ export function paletteCommands(): Command[] {
     cmd('help', 'Keyboard shortcuts', 'Window', () => (ui.help = true), 'help_f1', 'help keys'),
     cmd('whats-new', "What's new", 'Window', () => (learn.whatsNew = true), 'whats_new', 'changes release notes changelog keys moved'),
     cmd('add-repo', 'Add a repo\u2026', 'Window', () => addRepo(), undefined, 'project folder'),
+    ...critterCommands(cmd),
     ...orchestratorCommands(),
     // With a repo in view these come from its menu, below.
     ...(currentRepo()

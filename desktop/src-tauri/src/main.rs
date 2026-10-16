@@ -10,6 +10,7 @@ mod ado;
 mod alerts;
 mod board;
 mod branches;
+mod critters;
 mod daemon;
 mod files;
 mod git;
@@ -969,6 +970,9 @@ fn main() {
             settings::actions_list,
             settings::desktop_key_set,
             settings::run_commands,
+            critters::critters_log,
+            critters::critters_log_update,
+            critters::critters_prefs,
             diff_files,
             diff_review,
             diff_session,

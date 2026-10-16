@@ -48,6 +48,8 @@
   import { loadLearn, offerTip } from './lib/learn.svelte';
   import { selection } from './lib/selection.svelte';
   import { isEverything } from './lib/scope';
+  import Critters from './lib/critters/Critters.svelte';
+  import CritterLog from './lib/critters/CritterLog.svelte';
 
   const media = window.matchMedia('(prefers-color-scheme: dark)');
   let osDark = $state(media.matches);
@@ -423,6 +425,9 @@
 <FileSheet />
 <AddAccount />
 <ShipSheet />
+<CritterLog />
+<!-- The critters: over the window and the toast, under the scrims. -->
+<Critters />
 
 {#if app.toast}
   <div

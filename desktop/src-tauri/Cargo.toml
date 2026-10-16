@@ -15,6 +15,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 nebula-core = { path = "../../crates/nebula-core" }
 nebula-config = { path = "../../crates/nebula-config" }
+kete-critters = { path = "../../crates/kete-critters" }
 kete-ado = { path = "../../crates/kete-ado" }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"

@@ -253,7 +253,7 @@
         ondragleave={(e) => leftFor(e) && target?.lane === lane.id && (target = null)}
         ondrop={(e) => dropOn(e, lane.id)}
       >
-        <header class="flex h-10 flex-none items-center gap-2 border-b border-rule-strong px-4">
+        <header class="flex h-10 flex-none items-center gap-2 border-b border-rule-strong px-4" data-perch>
           <h2 class="m-0 text-[15px] font-semibold {lane.id === 'needs' && cards.length ? 'text-ember-ink' : 'text-ink'}">{lane.title}</h2>
           <span class="ml-auto font-mono text-[12px] font-bold {cards.length ? 'text-ink' : 'text-muted'}">{cards.length}</span>
         </header>
