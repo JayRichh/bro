@@ -90,10 +90,15 @@ export function startEditors(): () => void {
     .list()
     .then(applyEditors)
     .catch(() => (editors.loaded = true));
+  // The model is pushed on every change of any session: ask only when the
+  // worktrees themselves change.
+  let asked = '';
   return $effect.root(() => {
     $effect(() => {
       const ids = app.model.worktrees.map((w) => `${w.id}:${w.path}`).join('|');
-      if (ids) untrack(() => refreshTargets());
+      if (!ids || ids === asked) return;
+      asked = ids;
+      untrack(() => refreshTargets());
     });
   });
 }
