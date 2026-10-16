@@ -61,7 +61,7 @@ What Kete does instead:
 
 ## Release map
 
-The releases are ordered by dependency. Up to four lanes run at once, each in its own worktree. Each release ships when its lanes land, with the same gates as before: per-crate tests locally, then CI on three OSes.
+**Update, same day:** Jay asked for everything to be planned now, built in parallel, then merged, tested and released together at the end. So the groups below are **waves inside one release, 0.54.0**, not separate releases. The plan doc docs/superpowers/plans/2026-10-16-kete-054-plan.md holds the waves, the lane dependencies and the release steps. Up to four lanes run at once, each in its own worktree.
 
 1. **0.54 Whakaoho.** Foundation commit, then three lanes:
    - **wake-up:** the runner, the conditions, Task Scheduler, the hour slider and the windows timeline in both apps
