@@ -113,9 +113,20 @@ pub struct Release {
     pub items: &'static [&'static str],
 }
 
-/// The page, newest first: 0.49 to 0.52, rewritten from CHANGELOG.md for
+/// The page, newest first, rewritten from CHANGELOG.md for
 /// reading in the app.
 pub const WHATS_NEW: &[Release] = &[
+    Release {
+        version: "0.54",
+        title: "Your tools, your menus, your day",
+        items: &[
+            "Open files and checkouts in installed VS Code or Visual Studio, or dock an editor beside Kete.",
+            "Right-click for contextual actions and searchable submenus; browse Files and drag paths onto sessions.",
+            "Choose Workshop, One Dark, One Light or VS Code themes, with your own fonts and sizes.",
+            "Whakaoho schedules optional account wake-ups beside usage windows; cards show limits and sign-in needs.",
+            "Discover optional critters in Settings or the palette; pet, feed, name and collect visitors.",
+        ],
+    },
     Release {
         version: "0.52",
         title: "Learn in place",
