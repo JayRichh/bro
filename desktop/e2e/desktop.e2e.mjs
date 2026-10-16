@@ -443,16 +443,16 @@ flow("right-click a terminal, a board card and Shift+F10 open Kete's menus, one 
   const branch = st.worktrees.find((w) => w.id === st.agents.find((a) => a.id === id).worktree_id).branch;
   await d.contextClick(`[data-target^="worktree:"]`, branch);
   const band = await d.menu(branch);
-  assert.ok(band.some((r) => r.label === 'Copy path'), "the band's Copy path");
+  assert.ok(band.find((r) => r.label === 'Copy')?.submenu, "the band's copies fold into Copy");
   assert.ok(band.find((r) => r.label === 'Open in')?.submenu, "the band's Open in");
   assert.equal((await lastRightClick(d)).kind, 'row');
   for (let i = 0; i < 30 && (await d.activeRow()) !== 'Open in'; i++) await d.press(Key.ArrowDown);
   assert.equal(await d.activeRow(), 'Open in');
   await d.press(Key.ArrowRight);
   const openIn = await d.menu('Open in');
-  assert.equal(openIn[0].label, 'Open command');
+  assert.ok(!openIn.some((r) => r.label === 'Open command'), 'no Open command without a configured command');
   assert.ok(openIn.some((r) => r.label === 'Explorer'), 'Open in > Explorer (the band\'s Open folder)');
-  assert.equal(await d.activeRow(), 'Open command');
+  assert.equal(await d.activeRow(), openIn[0].label);
   await d.press(Key.ArrowDown);
   assert.equal(await d.activeRow(), openIn[1].label);
   await d.press(Key.ArrowLeft);
@@ -544,6 +544,8 @@ flow('critters: the verb turns them on, a click pets, a right-click opens the cr
     fs.writeFileSync(path.join(process.env.KETE_E2E_SHOTS, 'critters.png'), Buffer.from(await d.wd.screenshot(), 'base64'));
   }
 
+  // Toasts sit above critters; let discovery finish before clicking the visitor.
+  await d.waitFor('the discovery toast gone', () => d.wd.exec(`return ![...document.querySelectorAll('[role=\"alert\"]')].some((e) => e.innerText.includes('Critters are on'));`));
   // A click pets it (a heart), and the quick prompt keeps the focus.
   await d.wd.exec(`document.querySelector('form[aria-label="Start a session"] textarea').focus();`);
   const focused = `return document.activeElement?.getAttribute('aria-label') ?? null;`;
