@@ -540,6 +540,9 @@ pub enum MenuAction {
     /// opened (`true`) or folded: a folder's **Expand all** / **Collapse
     /// all**.
     FoldTree(bool),
+    /// A file's **Diff this file** from the tree browser or a finder: the
+    /// DIFF VIEWER on the selected checkout, landed on this file.
+    DiffThisFile(String),
 }
 
 /// What a diff file row's git row does to the file.
@@ -4886,6 +4889,10 @@ pub struct ModalState {
     /// goes (Esc, a click off it, a row chosen, the unlock), so it never
     /// comes back under a later menu.
     pub verbs_under: Option<Box<Overlay>>,
+    /// The file a menu's **Diff this file** asked for (the tree browser's, a
+    /// finder's): the DIFF VIEWER's cursor lands there once its list is
+    /// read (`event_loop::land_diff_listing`), and lets it go.
+    pub diff_land_on: Option<String>,
     /// When a modal's BUTTON was last clicked (a confirm's `[Enter/y]`, a
     /// prompt's `[Esc]`). A button click inside the double-click window
     /// after it is dropped: the answer can put another dialog up in the
@@ -4956,6 +4963,7 @@ impl Default for ModalState {
         Self {
             overlay: None,
             verbs_under: None,
+            diff_land_on: None,
             button_clicked_at: None,
             button_hover: None,
             follow_up: None,

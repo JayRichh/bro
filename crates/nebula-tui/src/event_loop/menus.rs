@@ -646,6 +646,22 @@ struct FileState {
     reviewed: Option<bool>,
     /// A pull request's prefetched diff: no checkout of its own on disk.
     remote_only: bool,
+    /// Found from the tree or a finder in a checkout with changes (or not
+    /// yet counted): **Diff this file** opens the diff on it.
+    diffable: bool,
+}
+
+/// What a file row found from the tree or a finder knows: no git status
+/// of its own, but whether its checkout (the one under the cursor, the
+/// one the overlay lists) has changes to diff — unknown counts as yes.
+fn found(app: &App, root: &std::path::Path) -> FileState {
+    let diffable = app
+        .selected_worktree()
+        .is_some_and(|w| w.path == root && app.worktree_changes(&w.id) != Some(0));
+    FileState {
+        diffable,
+        ..FileState::default()
+    }
 }
 
 /// A file's menu: the registry's rows less what its state rules out (a
@@ -674,6 +690,14 @@ fn file_items(app: &App, root: &std::path::Path, rel: &str, state: &FileState) -
         .filter(|i| !(deleted && opens(i.verb)))
         .filter(|i| !state.remote_only || i.verb == Some(Action::CopyRelativePath))
         .collect();
+    if state.diffable {
+        // Beside Open in Kete, ahead of the other apps.
+        let at = usize::from(items.first().and_then(|i| i.verb) == Some(Action::OpenFileInKete));
+        items.insert(
+            at,
+            MenuItem::new("Diff this file", MenuAction::DiffThisFile(rel.to_string())),
+        );
+    }
     let file_git = |label: &str, op: FileOp| {
         let item = MenuItem::new(
             label,
@@ -759,6 +783,8 @@ fn diff_row_menu(app: &mut App, pos: Option<Position>) -> Option<(String, Vec<Me
             stages: view.prefetched.is_none() && view.diff_base().is_none(),
             reviewed: Some(view.reviewed.contains_key(&file.path)),
             remote_only: view.prefetched.is_some(),
+            // Already its diff.
+            diffable: false,
         };
         let rel = file.path.clone();
         return Some((format!("diff {rel}"), file_items(app, &root, &rel, &state)));
@@ -792,7 +818,7 @@ fn tree_row_menu(app: &mut App, pos: Position) -> Option<(String, Vec<MenuItem>)
         }
         items
     } else {
-        file_items(app, &root, &node.path, &FileState::default())
+        file_items(app, &root, &node.path, &found(app, &root))
     };
     Some((node.path, items))
 }
@@ -806,7 +832,7 @@ fn files_row_menu(app: &mut App, pos: Position) -> Option<(String, Vec<MenuItem>
     finder.list.select(row as i64);
     let rel = finder.list.selected()?.clone();
     let root = finder.root.clone();
-    let items = file_items(app, &root, &rel, &FileState::default());
+    let items = file_items(app, &root, &rel, &found(app, &root));
     Some((rel, items))
 }
 
@@ -819,7 +845,7 @@ fn grep_row_menu(app: &mut App, pos: Position) -> Option<(String, Vec<MenuItem>)
     view.list.select(row as i64);
     let hit = view.list.selected()?.clone();
     let root = view.root.clone();
-    let items = file_items(app, &root, &hit.path, &FileState::default());
+    let items = file_items(app, &root, &hit.path, &found(app, &root));
     Some((format!("{}:{}", hit.path, hit.line), items))
 }
 

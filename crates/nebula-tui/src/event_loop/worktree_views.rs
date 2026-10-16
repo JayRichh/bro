@@ -727,6 +727,7 @@ pub(crate) fn land_diff_listing(
                 }
             }
         }
+        super::land_diff_on_file(app);
         return;
     }
     // A list read again for the against toggle keeps the modal up even
@@ -757,6 +758,8 @@ pub(crate) fn land_diff_listing(
             app.chrome.flash = Some(msg);
         }
     }
+    // A **Diff this file** waiting on this list: its cursor onto the file.
+    super::land_diff_on_file(app);
 }
 
 /// Enter on a grep hit: spawn the editor at `path:line` inside the modal

@@ -887,6 +887,20 @@ pub(crate) fn run_menu_action(app: &mut App, action: MenuAction, out: &mut Vec<C
                 view.set_subtree(open);
             }
         }
+        MenuAction::DiffThisFile(rel) => {
+            // Asked for before the diff opens: a list read off the loop
+            // lands its cursor there (`land_diff_listing`).
+            app.modals.diff_land_on = Some(rel);
+            open_diff_view(app);
+            // Opened at once (its list in hand, or on its way): land now
+            // or when the list does. Not opened yet: the probe's answer
+            // opens it and lands.
+            if matches!(app.modals.overlay, Some(Overlay::Diff(_))) {
+                land_diff_on_file(app);
+            } else if app.jobs.diff_probe.is_none() {
+                app.modals.diff_land_on = None;
+            }
+        }
     }
 }
 
@@ -919,6 +933,28 @@ fn file_git(app: &mut App, root: std::path::PathBuf, rel: String, op: crate::app
     app.chrome.flash = Some(done.unwrap_or_else(|e| e));
     if let Some(Overlay::Diff(view)) = &mut app.modals.overlay {
         reread_diff(view);
+    }
+}
+
+/// The DIFF VIEWER's cursor onto the file **Diff this file** asked for, once
+/// its list is in: the file's diff read, or a word that it has none. A
+/// list still being read keeps the ask for when it lands; a diff that
+/// never opened (nothing changed, a read that failed) lets it go.
+pub(crate) fn land_diff_on_file(app: &mut App) {
+    let Some(Overlay::Diff(view)) = &mut app.modals.overlay else {
+        app.modals.diff_land_on = None;
+        return;
+    };
+    if view.listing.is_some() {
+        return;
+    }
+    let Some(rel) = app.modals.diff_land_on.take() else {
+        return;
+    };
+    if view.select_path(&rel) {
+        crate::git_diff::load_selected_diff(view);
+    } else {
+        app.chrome.flash = Some(format!("no changes in {rel}"));
     }
 }
 
