@@ -277,9 +277,10 @@ export function backgroundMenu(): MenuEntry[] {
     wake_schedule: { run: openWakeView, checked: view === 'whakaoho', radio: true },
     toggle_archived: { run: toggleArchived, checked: app.showArchived },
     settings: { run: () => openSettings() },
-    // The critters' own toggle (the shared `critters` setting), ticked while on.
-    critters: { run: () => void toggleCritters(), checked: critters.prefs.on },
   };
+  // The critters' own toggle (the shared `critters` setting), ticked while
+  // on, once they have been found (menu matrix 5.15).
+  if (critters.found) t.critters = { run: () => void toggleCritters(), checked: critters.prefs.on };
   const where = isEverything(app.model.scope) ? 'across every repo' : 'in the scope';
   if (scopedSessions().some((a) => a.unseen)) t.mark_seen = { run: () => markAllSeen(scopedSessions()) };
   if (scopedSessions().some(isDone)) t.archive_done = { run: () => archiveDone(scopedSessions, where) };

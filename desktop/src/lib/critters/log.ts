@@ -39,7 +39,8 @@ export interface CrittersPrefs {
   size: string;
   /** `rare`, `normal` or `busy`. */
   often: string;
-  /** Off means no critters at all. */
+  /** The terminal app's Animations switch. The window doesn't follow it:
+   *  reduced motion is the window's (held poses, no particles). */
   animations: boolean;
   /** A debug build (the e2e test hook). */
   debug?: boolean;

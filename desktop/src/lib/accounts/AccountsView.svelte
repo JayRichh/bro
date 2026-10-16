@@ -7,7 +7,7 @@
   // duplicate, remove, make default, make it a project's account. The
   // account spread sits on top, said in words. Shift+U opens it, as the
   // terminal app's accounts overlay.
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { api, type AccountRow, type ProfileForm, type UsageWindow } from '../api';
   import { app, openSession, refreshAccounts, refreshLaunchables, toast } from '../store.svelte';
   import { openMenu, type MenuEntry } from '../ui/ui.svelte';
@@ -44,6 +44,7 @@
   import { editRequest } from './edit.svelte';
   import { openAddAccount } from './add.svelte';
   import { allKeysItem } from '../commands';
+  import { nav } from '../shell/history.svelte';
   import { openWake, refreshWake, scheduleOf, wake } from '../wake/state.svelte';
   import { hhmm } from '../wake/timeline';
 
@@ -121,6 +122,13 @@
     }
     editRequest.key = null;
     if (editing?.key !== key) openEditor(r);
+  });
+
+  // Account details... from elsewhere (a Whakaoho card's menu): that row in view.
+  $effect(() => {
+    const key = nav.current.view === 'accounts' ? nav.current.item : undefined;
+    if (!key || !rows.some((r) => r.key === key)) return;
+    void tick().then(() => document.querySelector(`[data-account="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'nearest' }));
   });
 
   // A row that goes (removed, renamed) takes its editor with it, whether
@@ -244,7 +252,7 @@
         {@const st = stateWord(r)}
         {@const projects = r.profile ? projectsDefaultingTo(app.launch, app.model.projects, r.harness, r.name) : []}
         {@const dimStar = !r.default && !!r.flaggedDefault && r.disabled}
-        <li class="border-b border-rule py-3" use:ownMenu={() => menuOf(r)}>
+        <li class="border-b border-rule py-3" data-account={r.key} use:ownMenu={() => menuOf(r)}>
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
             onkeydown={(e) => rowKey(e, r)}

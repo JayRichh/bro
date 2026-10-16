@@ -22,6 +22,10 @@ export const critters = $state({
   /** The local date "Hide critters until tomorrow" was chosen (the log's
    *  `hidden_on`, which the terminal app shares). */
   hiddenOn: null as string | null,
+  /** Found: on now, or once, by a visitor in the log (either app's). The
+   *  background menu lists Critters from then on (menu matrix 5.15); before
+   *  that the palette's verb, the Konami code and the kete mark find them. */
+  found: false,
 });
 
 let engine: Engine | null = null;
@@ -63,6 +67,7 @@ export async function loadCritters() {
     // An older backend: the critters stay off.
   }
   critters.loaded = true;
+  if (critters.prefs.on) critters.found = true;
   try {
     applyLog(await critterApi.log());
   } catch {}
@@ -70,6 +75,7 @@ export async function loadCritters() {
 
 function applyLog(log: CritterLog) {
   critters.hiddenOn = log.hidden_on ?? null;
+  if (Object.values(log.species).some((s) => s.seen > 0)) critters.found = true;
   if (logSheet.open) logSheet.log = log;
   if (engine) engine.world.names = names(log);
 }
@@ -113,6 +119,7 @@ async function setOn(on: boolean): Promise<boolean> {
   try {
     await api.settingsSet({ scope: 'global', key: 'critters' }, on);
     critters.prefs = { ...critters.prefs, on };
+    if (on) critters.found = true;
     return true;
   } catch (e) {
     toast(`Could not save the setting: ${e}`);

@@ -5,7 +5,8 @@
 // app's do: delete always, archive when Confirm on archive is on or the
 // session has sessions nested under it (they go with it).
 
-import { api, type AccountRow, type Agent, type Model, type TerminalTab, type Worktree } from './api';
+import { api, type AccountRow, type Agent, type Model, type StopNote, type TerminalTab, type Worktree } from './api';
+import { stopLabel, stopTone } from './stop';
 import { app, focusQuickPrompt, markSeen, openDiff, openSession, projectOf, revealRepo, setScope, toast } from './store.svelte';
 import { ask, openMenu, type MenuEntry, type MenuHeading, type MenuIcon, type MenuItem } from './ui/ui.svelte';
 import type { ShortcutId } from './shortcuts';
@@ -883,6 +884,12 @@ export interface MenuOpts {
 function sessionBanner(a: Agent): MenuHeading | null {
   const orch = isOrchestrator(a) ? 'orchestrator \u00b7 ' : '';
   if (a.archived) return { heading: 'archived' };
+  // Why its last turn stopped short says more than its status.
+  const stop = m().stops?.[a.id];
+  if (stop) {
+    const s = stopBanner(stop, a);
+    return { ...s, heading: orch + s.heading };
+  }
   const login = loginAccount(a);
   if (login) return { heading: `${orch}needs you \u00b7 log in again (${login.name})`, ember: true };
   if (a.status === 'needs_feedback') return { heading: `${orch}needs you`, ember: true };
@@ -890,6 +897,24 @@ function sessionBanner(a: Agent): MenuHeading | null {
   if (a.status === 'running') return { heading: `${orch}running` };
   if (a.status === 'finished' && a.unseen) return { heading: `${orch}done \u00b7 unread` };
   return orch ? { heading: 'orchestrator' } : null;
+}
+
+/** A stop note (lane/limits) in a session's banner, in the terminal app's
+ *  words (tui-menus' `stop_words`): `limited \u00b7 resumes 3:45pm` while Claude
+ *  waits a limit out, `needs you \u00b7 log in again (work)` for a login to
+ *  renew, `needs you \u00b7 billing`, `error \u00b7 overloaded`. */
+function stopBanner(n: StopNote, a: Agent): MenuHeading {
+  const words = stopLabel(n, app.now);
+  switch (stopTone(n)) {
+    case 'waiting':
+      return { heading: `limited \u00b7 ${words}` };
+    case 'needs':
+      return n.reason === 'authentication_failed' || n.reason === 'cloud_credential_error'
+        ? { heading: `needs you \u00b7 log in again (${accountKey(a.profile, sessionHarness(a) ?? '').replace(/^@/, '')})`, ember: true }
+        : { heading: `needs you \u00b7 ${words}`, ember: true };
+    case 'error':
+      return { heading: `error \u00b7 ${words}` };
+  }
 }
 
 /** The account a session runs on, when it needs signing in again. */

@@ -14,6 +14,7 @@ const actions = await import('../actions');
 const { backgroundMenu } = await import('../commands');
 const { rows: gitRows } = await import('../worktrees/rows.svelte');
 const { nav } = await import('../shell/history.svelte');
+const { critters } = await import('../critters/state.svelte');
 import type { MenuEntry, MenuItem } from '../ui/ui.svelte';
 
 /** A menu as lines: `---` a rule, `# words` a heading, `Words >` a
@@ -150,6 +151,22 @@ describe('the session menu (\u00a75.1)', () => {
       '  Delete all sessions\u2026',
       '  Delete worktree\u2026',
     ]);
+  });
+
+  it("names a stop note up top in the terminal app's words", () => {
+    const note = (reason: string, extra: object = {}) => ({ reason, waiting: false, resumes: null, resets_at: null, detail: null, at: Date.now(), ...extra });
+    const banner = (n: ReturnType<typeof note>, a: Partial<Agent> = {}) => {
+      app.model = model({ agents: [agent('a', a)], stops: { a: n } });
+      return dump(actions.menuFor({ kind: 'agent', id: 'a' }))[0];
+    };
+    expect(banner(note('rate_limit', { waiting: true, resumes: '3:45pm' }))).toBe('# limited \u00b7 resumes 3:45pm');
+    expect(banner(note('authentication_failed'), { profile: 'work' })).toBe('# needs you \u00b7 log in again (work)');
+    expect(banner(note('authentication_failed'))).toBe('# needs you \u00b7 log in again (claude)');
+    expect(banner(note('billing_error'))).toBe('# needs you \u00b7 billing');
+    expect(banner(note('overloaded'))).toBe('# error \u00b7 overloaded');
+    expect(banner(note('overloaded'), { role: 'orchestrator' })).toBe('# orchestrator \u00b7 error \u00b7 overloaded');
+    // The model helper keeps what it is not given: no note for the tests after.
+    app.model = model({ stops: {} });
   });
 
   it('offers Mark seen on an unread one, says so up top, and leaves Make orchestrator off while another is pinned', () => {
@@ -337,19 +354,19 @@ describe('the background menu (\u00a75.15)', () => {
     expect(lines[lines.length - 1]).toBe('Archive done sessions\u2026');
   });
 
-  it('lists Whakaoho in View after Accounts, and Critters ticked once its shared setting is read', async () => {
-    const critters = (value: boolean) => ({
-      tabs: [{ id: 't', title: 'T', note: null, hotkeys: [], groups: [{ title: 'g', subtitle: null, terminal: true, rows: [{ target: { scope: 'global', key: 'critters' }, value }] }] }],
-      problem: null,
-    });
+  it('lists Whakaoho in View after Accounts, and Critters once they are found, ticked while on', async () => {
     const settingsSet = vi.fn(() => Promise.resolve());
-    Object.assign(api, { settingsSchema: vi.fn(() => Promise.resolve(critters(false))), settingsSet });
+    Object.assign(api, { settingsSet });
     nav.go({ view: 'overview' });
+    critters.found = false;
+    critters.prefs = { ...critters.prefs, on: false };
     const first = dump(backgroundMenu());
     const view = first.slice(first.indexOf('View >') + 1);
     expect(view.indexOf('  [ ] Whakaoho')).toBe(view.indexOf('  [ ] Accounts') + 1);
     expect(view.indexOf('  [ ] Archived sessions')).toBeGreaterThan(view.indexOf('  [ ] Whakaoho'));
-    await vi.waitFor(() => expect(dump(backgroundMenu())).toContain('[ ] Critters'));
+    // An easter egg: no row until the palette, the Konami code or the kete mark found them.
+    expect(first).not.toContain('[ ] Critters');
+    critters.found = true;
     const lines = dump(backgroundMenu());
     expect(lines.indexOf('[ ] Critters')).toBe(lines.indexOf('Mark all seen') + 1);
     find(backgroundMenu(), 'Whakaoho')!.run();
@@ -357,6 +374,7 @@ describe('the background menu (\u00a75.15)', () => {
     expect(dump(backgroundMenu())).toContain('  [v] Whakaoho');
     find(backgroundMenu(), 'Critters')!.run();
     await vi.waitFor(() => expect(settingsSet).toHaveBeenCalledWith({ scope: 'global', key: 'critters' }, true));
+    expect(dump(backgroundMenu())).toContain('[v] Critters');
   });
 
   it('leaves the bulk rows off with nothing to take', () => {

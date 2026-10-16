@@ -7,6 +7,10 @@
   // saves after a quiet spell; nothing here talks to the Rust side but
   // through that file.
   import { openAccounts } from '../accounts/actions';
+  import { copyText } from '../menus/clipboard';
+  import { ownMenu } from '../menus/router';
+  import { nav } from '../shell/history.svelte';
+  import { wakeCardItems } from './card-menu';
   import { editWake, scheduleOf, wake, wakeEdit, wakeNowFor } from './state.svelte';
   import {
     DAY_LABELS,
@@ -62,11 +66,27 @@
   ];
   const SKIP = [1, 2, 3, 5, 7];
 
+  /** A right-click anywhere on the card (menu matrix 5.21): its own rows,
+   *  never the account row's keys. */
+  const cardMenu = () => ({
+    label: name,
+    items: wakeCardItems(
+      { a, sched, waking },
+      {
+        wakeNow: () => void wakeNowFor(key),
+        setEnabled: (on) => editWake(a, { enabled: on }, 0),
+        setHour: (min) => editWake(a, { anchor_min: min }, 0),
+        copyLogin: (hint) => void copyText(hint, `${hint}. Run it in a terminal to sign in.`),
+        details: () => nav.go({ view: 'accounts', item: key }),
+      },
+    ),
+  });
+
   const btn = 'h-6 border border-rule bg-transparent px-2 text-[12px] text-ink hover:border-rule-strong disabled:text-faint disabled:hover:border-rule';
   const check = 'inline-flex items-center gap-2 text-[12px] text-ink';
 </script>
 
-<section id="wake-card-{dom}" class="border border-rule" aria-label="Wake-up for {name}">
+<section id="wake-card-{dom}" class="border border-rule" aria-label="Wake-up for {name}" use:ownMenu={cardMenu}>
   <div class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-rule px-3 py-2">
     <h2 class="m-0 min-w-0 truncate text-[14px] font-medium text-ink" title={name}>{name}</h2>
     <span class="min-w-0 flex-1 truncate font-mono text-[11px] text-muted">
