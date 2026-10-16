@@ -766,6 +766,7 @@ pub fn open_menu(app: &mut App, id: u32, at: (u16, u16)) {
         at: Some(at),
         hover: 0,
         area: Rect::default(),
+        scroll: 0,
         parent: None,
         filter: None,
     }));

@@ -52,6 +52,15 @@ fn handle_overlay_mouse(
     {
         return true;
     }
+    // The right button on an overlay's row (a diff's file, the tree's,
+    // an account, an Azure DevOps row…): that row's menu, standing on the
+    // overlay. Off its rows the overlay's own handling swallows it.
+    if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Right))
+        && !matches!(app.modals.overlay, Some(Overlay::Menu(_)))
+        && super::menus::overlay_right_click(app, mouse_pos)
+    {
+        return true;
+    }
     let Some(overlay) = &app.modals.overlay else {
         return false;
     };
@@ -203,44 +212,71 @@ fn handle_menu_mouse(
     mouse_pos: ratatui::layout::Position,
     out: &mut Vec<ClientRequest>,
 ) -> bool {
-    let _ = &mut *out;
-    let _ = mouse_pos;
-    // An open context menu owns the rest of the mouse: a click on a row
-    // activates it, a right- or middle-click off the rows closes and lands
-    // its focus like the left click above (the left button never gets here
-    // — the pre-check took it), and everything is swallowed either way.
-    if let Some(Overlay::Menu(menu)) = &app.modals.overlay {
-        if let MouseEventKind::Down(_) = mouse.kind {
-            let area = menu.area;
-            let inside = mouse.column > area.x
-                && mouse.column < area.x + area.width
-                && mouse.row > area.y
-                && mouse.row < area.y + area.height.saturating_sub(1);
-            let skip = crate::app::menu_scroll(
-                menu.hover,
-                menu.items.len(),
-                area.height.saturating_sub(2) as usize,
-            );
-            let hit = inside
-                .then(|| (mouse.row - area.y - 1) as usize + skip)
-                .filter(|index| *index < menu.items.len());
-            match hit {
-                // Enter on that row, whichever row the hover was on.
-                Some(index) => activate::menu_row(app, index, out),
-                // A click on the menu's own border or a blank row is inert.
-                None if inside => {}
-                None => {
-                    crate::overlay_close::click_outside(app, out);
-                    if app.modals.overlay.is_none() {
-                        land_click_focus(app, mouse.column, mouse.row, out);
-                    }
-                }
+    // An open context menu owns the rest of the mouse: the pointer lights
+    // the row it rests on, the wheel walks a long list, a left click on a
+    // row chooses it (Enter on it, a `▸` row opening its submenu). A
+    // right-click off the menu closes it — the whole stack, any overlay it
+    // stood on put back — and is dispatched again, so the menu reopens
+    // for the thing under the new spot; a middle click off it only closes.
+    // On the menu itself the other buttons are inert: only the left one
+    // or Enter runs a row. (A left click off it never gets here: the
+    // pre-check took it.)
+    let Some(Overlay::Menu(menu)) = &mut app.modals.overlay else {
+        return false;
+    };
+    let area = menu.area;
+    let inside = mouse.column > area.x
+        && mouse.column < area.x + area.width
+        && mouse.row > area.y
+        && mouse.row < area.y + area.height.saturating_sub(1);
+    let on_menu = area.contains(mouse_pos);
+    let skip = crate::app::menu_window(
+        menu.scroll,
+        menu.hover,
+        menu.items.len(),
+        area.height.saturating_sub(2) as usize,
+    );
+    let hit = inside
+        .then(|| (mouse.row - area.y - 1) as usize + skip)
+        .filter(|index| *index < menu.items.len());
+    let last = menu.items.len().saturating_sub(1);
+    match mouse.kind {
+        MouseEventKind::Moved => {
+            if let Some(index) = hit.filter(|i| *i != menu.hover) {
+                menu.hover = index;
+                app.chrome.dirty = true;
+            }
+        }
+        MouseEventKind::ScrollDown if on_menu => {
+            menu.hover = (menu.hover + 1).min(last);
+            app.chrome.dirty = true;
+        }
+        MouseEventKind::ScrollUp if on_menu => {
+            menu.hover = menu.hover.saturating_sub(1);
+            app.chrome.dirty = true;
+        }
+        // Enter on that row, whichever row the hover was on.
+        MouseEventKind::Down(MouseButton::Left) => {
+            if let Some(index) = hit {
+                activate::menu_row(app, index, out);
             }
             app.chrome.dirty = true;
         }
-        return true;
+        MouseEventKind::Down(button) if !on_menu => {
+            crate::overlay_close::click_outside(app, out);
+            // Whatever is up now is what the menu stood on: the click
+            // belongs to it, or to the grid.
+            if button == MouseButton::Right && !matches!(app.modals.overlay, Some(Overlay::Menu(_)))
+            {
+                handle_mouse(app, mouse, out);
+            } else if app.modals.overlay.is_none() {
+                land_click_focus(app, mouse.column, mouse.row, out);
+            }
+            app.chrome.dirty = true;
+        }
+        _ => {}
     }
-    false
+    true
 }
 
 fn handle_prompt_mouse(
@@ -1322,33 +1358,7 @@ fn scroll_columns(app: &mut App, focus: Focus, up: bool) {
 }
 
 fn handle_right_click(app: &mut App, mouse: MouseEvent, out: &mut Vec<ClientRequest>) {
-    // The right button is two steps: the cursor moves onto the row
-    // as a left click moves it (`select_clicked_row`), then the
-    // row's own CONTEXT MENU opens, from the one builder
-    // (`context_menu_items`). A panel's
-    // background has no row and no cursor, so its menu is the
-    // mouse's alone.
-    let at = (mouse.column, mouse.row);
-    match app.hit_at(mouse.column, mouse.row) {
-        // A PROJECT TAB has no cursor to move, but it is the
-        // project's own handle: the right button opens it, with
-        // the project's menu hung under the tab.
-        Some(HitTarget::LauncherTab(id)) => launcher::tab_menu(app, &id, out),
-        // The MORE CHIP has no menu but its list: either button
-        // drops it.
-        Some(HitTarget::LauncherTabMore) => launcher::open_more_tabs_menu(app),
-        Some(HitTarget::PanelBg(focus)) => {
-            app.nav.focus = focus;
-            let items = panel_menu_items(app, focus);
-            open_menu(app, items, at);
-        }
-        Some(target) if select_clicked_row(app, &target, out) => {
-            if let Some(items) = context_menu_items(app, app.nav.focus) {
-                open_menu(app, items, at);
-            }
-        }
-        Some(_) => {}
-        None => {}
-    }
-    app.chrome.dirty = true;
+    // The menu of the thing under the pointer, the cursor moved onto it
+    // (`menus::right_click`).
+    super::menus::right_click(app, mouse, out);
 }

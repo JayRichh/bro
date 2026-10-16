@@ -548,6 +548,7 @@ pub(crate) fn open_menu(app: &mut App, items: Vec<MenuItem>, at: (u16, u16)) {
         at: Some(at),
         hover: 0,
         area: ratatui::layout::Rect::default(),
+        scroll: 0,
         parent: None,
         filter: None,
     }));
@@ -596,39 +597,24 @@ pub(crate) fn open_pr_agent_picker(app: &mut App) {
     agent_picker::open_kind_picker(app, KindPicker::pr_session(worktree, &pr));
 }
 
-/// The CONTEXT MENU for a PROJECT ISSUES GROUP row: the browser. The
-/// launches are the row's keys (`p`, `e`), as the footer says.
-pub(crate) fn issue_row_menu_items(issue: &crate::issues::Issue) -> Vec<MenuItem> {
-    vec![
-        MenuItem::new("Open in browser", MenuAction::OpenLink(issue.url.clone()))
-            .keyed(crate::keymap::Action::Activate),
-    ]
-}
-
-/// The CONTEXT MENU for a PROJECT OPEN PRS GROUP row: a PR SESSION row per
-/// enabled harness (none when the PROJECT has no ROOT WORKTREE to launch
-/// in), then the row's browser and diff verbs.
-pub(crate) fn pr_row_menu_items(app: &App, pr: &crate::pull_request::OpenPr) -> Vec<MenuItem> {
-    let mut items = match selected_project_main_worktree(app) {
-        Some(worktree) => agent_picker::pr_session_menu_rows(worktree, pr),
-        None => Vec::new(),
-    };
-    items.extend([
-        MenuItem::new("Open in browser", MenuAction::OpenLink(pr.url.clone()))
-            .keyed(crate::keymap::Action::Activate),
-        MenuItem::new("View diff", MenuAction::ViewPrDiff).keyed(crate::keymap::Action::GitDiff),
-        MenuItem::new("Comment…", MenuAction::CommentPullRequest)
-            .keyed(crate::keymap::Action::CommentPullRequest),
-    ]);
-    items
-}
-
 /// Build the submenu a menu row expands into: the model list for a
 /// new-session kind row, or the effort list for a model row. Rows carry the
 /// full choice so Enter works the same at any depth; the row matching the
 /// configured default starts highlighted.
 pub(crate) fn build_submenu(item: &MenuItem) -> Option<ContextMenu> {
     let sub = item.action.submenu()?;
+    if let MenuAction::Submenu { title, items } = &item.action {
+        return Some(ContextMenu {
+            title: Some(title.clone()),
+            items: items.clone(),
+            at: None,
+            hover: 0,
+            area: ratatui::layout::Rect::default(),
+            scroll: 0,
+            parent: None,
+            filter: None,
+        });
+    }
     let MenuAction::NewAgentOfKind {
         worktree,
         kind,
@@ -669,6 +655,8 @@ pub(crate) fn build_submenu(item: &MenuItem) -> Option<ContextMenu> {
                 .and_then(|l| l.effort.clone())
                 .or_else(|| cfg.default_effort(*kind)),
         ),
+        // A generic submenu was built above.
+        SubmenuKind::Rows => return None,
     };
     let configured = configured.unwrap_or_else(|| crate::config::DEFAULT_CHOICE.into());
     let items: Vec<MenuItem> = choices
@@ -686,11 +674,11 @@ pub(crate) fn build_submenu(item: &MenuItem) -> Option<ContextMenu> {
                     custom: custom.clone(),
                     model: match sub {
                         SubmenuKind::Models => Some((*choice).to_string()),
-                        SubmenuKind::Efforts => model.clone(),
+                        _ => model.clone(),
                     },
                     effort: match sub {
                         SubmenuKind::Models => None,
-                        SubmenuKind::Efforts => Some((*choice).to_string()),
+                        _ => Some((*choice).to_string()),
                     },
                     cloud: *cloud,
                     pr: pr.clone(),
@@ -712,9 +700,34 @@ pub(crate) fn build_submenu(item: &MenuItem) -> Option<ContextMenu> {
         at: None,
         hover,
         area: ratatui::layout::Rect::default(),
+        scroll: 0,
         parent: None,
         filter,
     })
+}
+
+/// Drill into the hovered row's submenu in the menu's place: → (and `l`
+/// with no filter), Enter or a click on a `▸` row. A generic submenu
+/// hangs where its parent did, titled with the way down (`Parent ›
+/// Child`); ← or Esc goes back up. False on a row with none.
+pub(crate) fn open_submenu(menu: &mut ContextMenu) -> bool {
+    let Some(item) = menu.items.get(menu.hover) else {
+        return false;
+    };
+    let Some(mut sub) = build_submenu(item) else {
+        return false;
+    };
+    if matches!(item.action, MenuAction::Submenu { .. }) {
+        sub.at = menu.at;
+        let child = sub.title.take().unwrap_or_default();
+        sub.title = Some(match &menu.title {
+            Some(parent) => format!("{parent} \u{203a} {child}"),
+            None => child,
+        });
+    }
+    sub.parent = Some(Box::new(menu.clone()));
+    *menu = sub;
+    true
 }
 
 /// The QUICK PROMPT box a picker menu owes back, read off any of its rows
@@ -873,6 +886,23 @@ pub(crate) fn select_clicked_row(
         | HitTarget::LauncherBandFold(i) => launcher::select_band_row(app, i, out),
         HitTarget::LauncherBandPr(ref wid) => launcher::select_band_of(app, wid, out),
         HitTarget::LauncherCardIssue(ref id) => launcher::select_issue_card(app, id, out),
+        // A board card, its buttons and its `⋯`: the cursor onto the card
+        // and the keys on the cards, as the buttons' left click leaves them.
+        HitTarget::KanbanCard(ref id)
+        | HitTarget::KanbanButton(ref id, _)
+        | HitTarget::KanbanMenu(ref id) => {
+            launcher::select(app, id.clone(), out);
+            launcher::keys_to_cards(app);
+            true
+        }
+        // A band card's buttons and `⋯`, and a band's `+`: the card or the
+        // band under the cursor.
+        HitTarget::CardButton(at, _) | HitTarget::CardMenu(at) => {
+            let moved = launcher::select_card_row(app, at, out);
+            launcher::keys_to_cards(app);
+            moved
+        }
+        HitTarget::LauncherBandNew(i) => launcher::select_band_row(app, i, out),
         _ => false,
     }
 }

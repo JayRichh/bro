@@ -649,10 +649,12 @@ fn archiving_a_done_card_offers_its_linked_worktree_only() {
 }
 
 /// The registry's verbs are on a card's menu where they mean something:
-/// Create pull request without one open, Merge with one, Focus here
-/// always; `?` lists them too.
+/// Create pull request without one open, standing alone; Merge with one,
+/// in the card's `Pull request ▸` beside the browser and a comment; Focus
+/// here always, in its checkout's `Worktree feat ▸`.
 #[test]
 fn the_ship_verbs_are_on_the_cards_menus() {
+    use crate::keymap::Action;
     with_default_config(|| {
         let mut app = bench();
         let t = verbs::Target::Session(AgentId("a2".into()));
@@ -662,19 +664,22 @@ fn the_ship_verbs_are_on_the_cards_menus() {
                 .map(|i| i.label)
                 .collect()
         };
+        let flat = |app: &App| verbs::flat(&verbs::menu_for(app, &t));
+        let has = |app: &App, a: Action| flat(app).iter().any(|i| i.verb == Some(a));
         let l = labels(&app);
         assert!(l.iter().any(|s| s == "Create pull request…"), "{l:?}");
-        assert!(!l.iter().any(|s| s == "Merge pull request…"), "{l:?}");
-        assert!(l.iter().any(|s| s == "Focus here"), "{l:?}");
+        assert!(!has(&app, Action::MergePullRequest), "{l:?}");
+        assert!(flat(&app).iter().any(|i| i.label == "Focus here"), "{l:?}");
         with_open_pr(&mut app);
         let l = labels(&app);
-        assert!(!l.iter().any(|s| s == "Create pull request…"), "{l:?}");
-        assert!(l.iter().any(|s| s == "Merge pull request…"), "{l:?}");
+        assert!(!has(&app, Action::CreatePullRequest), "{l:?}");
+        assert!(l.iter().any(|s| s == "Pull request"), "{l:?}");
         // The menu row runs the verb.
-        let item = verbs::menu_for(&app, &t)
+        let item = flat(&app)
             .into_iter()
-            .find(|i| i.label == "Merge pull request…")
+            .find(|i| i.verb == Some(Action::MergePullRequest))
             .unwrap();
+        assert_eq!(item.label, "Merge\u{2026}");
         let mut out = Vec::new();
         run_menu_action(&mut app, item.action, &mut out);
         assert!(matches!(ship_view(&app).form, Form::Merge(_)));

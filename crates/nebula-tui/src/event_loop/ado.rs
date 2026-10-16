@@ -207,21 +207,40 @@ fn activate(app: &mut App, out: &mut Vec<ClientRequest>) {
         return;
     };
     app.modals.overlay = None;
-    if let Some(w) = app
-        .tree
-        .worktrees
-        .iter()
-        .find(|w| w.project_id == project && w.branch == branch.name)
-    {
-        let id = w.id.clone();
-        jump_to_target(app, PaletteTarget::Worktree(id), Landing::FocusOnly, out);
-        return;
-    }
     // A remote-only branch is cut from the remote's, so it tracks it.
     let base = if branch.local {
         None
     } else {
         branch.remote.clone()
+    };
+    checkout_branch(app, project, branch.name, base, out);
+}
+
+/// Branch `name` of `project` in a worktree of its own — the one it is
+/// already checked out in, or one cut on it now (from `base`, the
+/// remote's, when only the remote has it): Enter on a branch, and **Check
+/// out in new worktree…** in a pull request's or a branch's menu.
+pub(super) fn checkout_branch(
+    app: &mut App,
+    project: ProjectId,
+    name: String,
+    base: Option<String>,
+    out: &mut Vec<ClientRequest>,
+) {
+    if let Some(w) = app
+        .tree
+        .worktrees
+        .iter()
+        .find(|w| w.project_id == project && w.branch == name)
+    {
+        let id = w.id.clone();
+        jump_to_target(app, PaletteTarget::Worktree(id), Landing::FocusOnly, out);
+        return;
+    }
+    let branch = crate::ado::AdoBranch {
+        name,
+        local: base.is_none(),
+        remote: base.clone(),
     };
     let focus = app.nav.focus;
     app.bring_tab_forward(&project);

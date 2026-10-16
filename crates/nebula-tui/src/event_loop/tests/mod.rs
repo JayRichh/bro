@@ -6520,6 +6520,7 @@ fn question_mark_ignores_menus_without_session_rows() {
             at: None,
             hover: 0,
             area: ratatui::layout::Rect::default(),
+            scroll: 0,
             parent: None,
             filter: None,
         }));
@@ -22623,6 +22624,7 @@ mod buttons;
 mod critters;
 mod dispatch;
 mod learn;
+mod menus;
 mod orch_view;
 mod pane_stream;
 mod paste_speed;

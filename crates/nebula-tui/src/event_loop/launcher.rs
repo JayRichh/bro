@@ -1131,15 +1131,26 @@ pub(super) fn click_kanban_button(
     super::run_action(app, action, out);
 }
 
+/// The menu of the card under the cursor hung at `anchor`: the one a
+/// right-click on the card opens, its state in the title — a `⋯`'s.
+fn open_card_menu(app: &mut App, anchor: (u16, u16)) {
+    match super::verbs::selection(app) {
+        Some(t) => super::menus::open_target_menu(app, &t, anchor),
+        None => {
+            if let Some(items) = super::context_menu_items(app, Focus::Sessions) {
+                super::open_menu(app, items, anchor);
+            }
+        }
+    }
+}
+
 /// A click on a board card's `⋯`: the cursor onto it, then its menu hung
 /// under the button.
 pub(super) fn click_kanban_menu(app: &mut App, id: &AgentId, out: &mut Vec<ClientRequest>) {
     let anchor = crumb_anchor(app, &HitTarget::KanbanMenu(id.clone()));
     select(app, id.clone(), out);
     keys_to_cards(app);
-    if let Some(items) = super::context_menu_items(app, Focus::Sessions) {
-        super::open_menu(app, items, anchor);
-    }
+    open_card_menu(app, anchor);
 }
 
 /// Space on a card, and **Follow-up prompt** in its menu: the FOLLOW-UP
@@ -2100,6 +2111,7 @@ pub(super) fn open_project_menu(app: &mut App) {
         at,
         hover,
         area: ratatui::layout::Rect::default(),
+        scroll: 0,
         parent: None,
     }));
     app.chrome.dirty = true;
@@ -2743,7 +2755,7 @@ pub(super) fn click_band_more(app: &mut App, index: usize, out: &mut Vec<ClientR
 /// The keys back on the cards for a button that acts on one: a LOCKED
 /// PANE lets go of them (`leave_terminal_lock`), and the grid takes FOCUS,
 /// since `a` and `d` act on the card only from there.
-fn keys_to_cards(app: &mut App) {
+pub(super) fn keys_to_cards(app: &mut App) {
     if app.nav.focus == Focus::Terminal || app.pane.term_locked {
         super::leave_terminal_lock(app);
     }
@@ -2776,9 +2788,7 @@ pub(super) fn click_card_menu(app: &mut App, at: CardRef, out: &mut Vec<ClientRe
         return;
     }
     keys_to_cards(app);
-    if let Some(items) = super::context_menu_items(app, Focus::Sessions) {
-        super::open_menu(app, items, anchor);
-    }
+    open_card_menu(app, anchor);
 }
 
 /// A click on the PANE header's `⋯` (`HitTarget::LauncherPaneMenu`): the
@@ -2786,9 +2796,7 @@ pub(super) fn click_card_menu(app: &mut App, at: CardRef, out: &mut Vec<ClientRe
 pub(super) fn click_pane_menu(app: &mut App) {
     let anchor = crumb_anchor(app, &HitTarget::LauncherPaneMenu);
     keys_to_cards(app);
-    if let Some(items) = super::context_menu_items(app, Focus::Sessions) {
-        super::open_menu(app, items, anchor);
-    }
+    open_card_menu(app, anchor);
 }
 
 /// A click on the `+` at a BAND's rule (`HitTarget::LauncherBandNew`):
@@ -3431,6 +3439,7 @@ pub(super) fn open_move_picker(app: &mut App, id: AgentId) {
         at: None,
         hover: 0,
         area: ratatui::layout::Rect::default(),
+        scroll: 0,
         parent: None,
         filter: Some(MenuFilter {
             query: String::new(),
@@ -3533,6 +3542,7 @@ fn open_worktree_picker(app: &mut App, back: QuickReturn) {
         at: None,
         hover,
         area: ratatui::layout::Rect::default(),
+        scroll: 0,
         parent: None,
         filter: Some(crate::app::MenuFilter {
             query: String::new(),
@@ -4864,8 +4874,8 @@ mod tests {
     /// An EMPTY BAND whose checkout has a detected pull request is still
     /// an empty band (#104): `d` opens the worktree's confirm its hint
     /// promises, not the flash that the pull request's link can't be
-    /// deleted, and a right-click — on the band, or on the `#7` on its
-    /// rule — opens the worktree's menu, not the link's.
+    /// deleted, and a right-click on the band opens the worktree's menu,
+    /// not the link's; on the `#7` on its rule, the pull request's own.
     #[test]
     fn an_empty_band_on_a_pull_request_still_deletes_the_worktree() {
         with_default_config(|| {
@@ -4910,7 +4920,26 @@ mod tests {
                 .find(|(_, hit)| *hit == HitTarget::LauncherBandPr(WorktreeId("w3".into())))
                 .map(|(rect, _)| *rect)
                 .expect("the pull request on the empty band's rule");
-            for (x, y) in [(band.x + 4, band.y + 1), (pr.x, pr.y)] {
+            // The pull request on the rule is the pull request's own: its
+            // menu (the menu matrix, §5.10); the rest of the rule is the
+            // worktree's.
+            let mut on_pr = with_empty_band_on_a_pull_request();
+            draw_tall(&mut on_pr);
+            mouse(
+                &mut on_pr,
+                MouseEventKind::Down(MouseButton::Right),
+                pr.x,
+                pr.y,
+            );
+            match &on_pr.modals.overlay {
+                Some(Overlay::Menu(menu)) => assert!(
+                    menu.items.iter().any(|i| i.label == "Open in browser"),
+                    "{menu:?}"
+                ),
+                other => panic!("expected the pull request's menu, got {other:?}"),
+            }
+            {
+                let (x, y) = (band.x + 4, band.y + 1);
                 let mut by_click = with_empty_band_on_a_pull_request();
                 draw_tall(&mut by_click);
                 mouse(
@@ -9888,13 +9917,47 @@ mod tests {
     /// it is there at all.
     fn pr_menu_row(app: &mut App) -> Option<usize> {
         right_click_card(app);
-        match &app.modals.overlay {
-            Some(Overlay::Menu(menu)) => menu
-                .items
-                .iter()
-                .position(|i| i.label == "Open pull request"),
+        walk_menu_to(app, &["Open pull request", "Open in browser"])
+    }
+
+    /// Walk the open menu's cursor onto the row one of `want` labels, by
+    /// the keys, into the submenu it is folded into first when it is
+    /// (`Pull request ▸`): the steps left to take from there, none.
+    fn walk_menu_to(app: &mut App, want: &[&str]) -> Option<usize> {
+        let (top, child) = match &app.modals.overlay {
+            Some(Overlay::Menu(menu)) => {
+                match menu
+                    .items
+                    .iter()
+                    .position(|i| want.contains(&i.label.as_str()))
+                {
+                    Some(i) => (i, None),
+                    None => {
+                        menu.items
+                            .iter()
+                            .enumerate()
+                            .find_map(|(i, item)| match &item.action {
+                                crate::app::MenuAction::Submenu { items, .. } => items
+                                    .iter()
+                                    .position(|c| want.contains(&c.label.as_str()))
+                                    .map(|c| (i, Some(c))),
+                                _ => None,
+                            })?
+                    }
+                }
+            }
             other => panic!("expected the card's menu, got {other:?}"),
+        };
+        for _ in 0..top {
+            key(app, KeyCode::Down, KeyModifiers::NONE);
         }
+        if let Some(c) = child {
+            key(app, KeyCode::Enter, KeyModifiers::NONE);
+            for _ in 0..c {
+                key(app, KeyCode::Down, KeyModifiers::NONE);
+            }
+        }
+        Some(0)
     }
 
     /// `⇧V` on a card opens the pull request its `#42 title` line names,
@@ -10188,12 +10251,18 @@ mod tests {
                 line.x,
                 line.y,
             );
+            // Folded into the card's `Pull request ▸` with its other rows.
             let labels: Vec<String> = match &app.modals.overlay {
-                Some(Overlay::Menu(menu)) => menu.items.iter().map(|i| i.label.clone()).collect(),
+                Some(Overlay::Menu(menu)) => crate::event_loop::verbs::flat(&menu.items)
+                    .into_iter()
+                    .map(|i| i.label)
+                    .collect(),
                 other => panic!("expected the card's menu, got {other:?}"),
             };
             assert!(
-                labels.iter().any(|l| l == "Open pull request"),
+                labels
+                    .iter()
+                    .any(|l| l == "Open pull request" || l == "Open in browser"),
                 "{labels:?}"
             );
         });
@@ -10502,10 +10571,7 @@ mod tests {
     /// there.
     fn issue_menu_row(app: &mut App) -> Option<usize> {
         right_click_card(app);
-        match &app.modals.overlay {
-            Some(Overlay::Menu(menu)) => menu.items.iter().position(|i| i.label == "Open issue"),
-            other => panic!("expected the card's menu, got {other:?}"),
-        }
+        walk_menu_to(app, &["Open issue", "Open the issue"])
     }
 
     /// `⇧I` on a card opens the issue its session was started from — and,
@@ -10641,7 +10707,9 @@ mod tests {
             );
             match &app.modals.overlay {
                 Some(Overlay::Menu(menu)) => assert!(
-                    menu.items.iter().any(|i| i.label == "Open issue"),
+                    crate::event_loop::verbs::flat(&menu.items)
+                        .iter()
+                        .any(|i| i.label == "Open issue" || i.label == "Open the issue"),
                     "{:?}",
                     menu.items.iter().map(|i| &i.label).collect::<Vec<_>>()
                 ),
@@ -14306,13 +14374,11 @@ mod tests {
                 let Some(Overlay::Menu(menu)) = &app.modals.overlay else {
                     panic!("the card's menu");
                 };
-                let labels: Vec<&str> = menu.items.iter().map(|i| i.label.as_str()).collect();
-                for want in [
-                    "Move up",
-                    "Move down",
-                    "Move worktree up",
-                    "Move worktree down",
-                ] {
+                // The card's own in its `Move ▸`, its worktree's in its
+                // `Worktree feat ▸`.
+                let flat = crate::event_loop::verbs::flat(&menu.items);
+                let labels: Vec<&str> = flat.iter().map(|i| i.label.as_str()).collect();
+                for want in ["Up", "Down", "Move worktree up", "Move worktree down"] {
                     assert!(labels.contains(&want), "{labels:?}");
                 }
             });
