@@ -114,6 +114,11 @@ Within the Open in group:
   - the repo: 15 in D.
   Every row beyond 12 is a frequent verb or appears only in a state, and the sections keep the menu scannable. Trimming further would put Restart, Rename or Archive behind another click.
 - Registry rows, folded, with every one meaning something at once: at most 16 for session and worktree, and 14 for repo. `menus_follow_their_sections_and_fold_into_groups` enforces this per kind.
+- If the 12-row rule has to hold, the cheapest trims, in order:
+  1. D's Review… moves into Pull request ▸.
+  2. Make orchestrator is left off a card while another session is pinned. The palette and the orchestrator rail still have it.
+  3. Account ▸ folds into Move ▸ as "To another account…".
+  Together these bring the common session card to 13 in D and 14 in T.
 
 **1.10 Type-ahead.**
 - Every menu filters as you type (desk-menus adds it to the desktop's non-search menus).
@@ -133,7 +138,7 @@ All are in `crates/nebula-config/src/actions.rs`, regenerated into `desktop/src/
 |---|---|---|---|---|---|
 | `mark_seen` | Mark seen (worktree, repo, background: Mark all seen) | session, worktree, repo, global (the board's scope) | Ch | Inbox triage across many projects without opening each card. Conductor and cmux have it. | D `markSeen`/`seeAgent` (store.svelte.ts:209); T `ClientRequest::MarkAgentSeen` |
 | `copy_pr_url` | Copy pull request link | session, worktree | C | Sharing a PR in chat is the most common copy after the path | D `model.prs[worktree].url`; T `launcher::worktree_pr(..).url`; T copies through `copy_and_flash` (OSC 52-aware) |
-| `archive_done` | Archive done sessions… | worktree, repo, global (the board's scope) | W | Clears the Done lane with many projects open. One confirm lists the sessions; U brings any back. | the existing archive per session (D `archiveAgent`, T `ClientRequest::Archive`), over finished + seen + unarchived sessions, not the orchestrator, not with live subagents |
+| `archive_done` | Archive done sessions… | worktree, repo, global (the board's scope) | W | Clears the Done lane with many projects open. One confirm lists the sessions; U brings any back. | the existing archive per session (D `archiveAgent`, T `ClientRequest::Archive`), over finished, seen, unarchived sessions, not the orchestrator. A session still waiting on its subagents reads Running, not finished. |
 | `wake_schedule` | Wake-up schedule… (background: Whakaoho…) | account, global | G (Ch on an account) | Reaches the Whakaoho view from Ctrl+K, the background View ▸ and an account row in both apps | lane/wake's view: D `whakaoho` view; T accounts overlay Wake tab |
 
 **Applies-to widened** (no ids renamed or moved):
@@ -178,7 +183,7 @@ All are in `crates/nebula-config/src/actions.rs`, regenerated into `desktop/src/
 This lane added rows to T's flat menus before tui-menus folds them. So that T shows no dead row in the meantime, it applies the §5 rules for those rows now:
 - comment only with an open pull request;
 - the pull request link and the worktree's Open pull request only with a pull request;
-- Browser only while a port listens;
+- Browser only while a port listens. Never on a T repo menu yet: `w` opens the grid's checkout, not the repo's, so the repo row waits for a row-addressed form (tui-menus);
 - Mark seen / Mark all seen only with an unread session;
 - Archive done sessions only with a finished, read session;
 - on a repo, Azure DevOps only on Azure DevOps remotes, and Pull requests and Issues only elsewhere.
@@ -777,8 +782,8 @@ Every candidate considered, BUILD (0.54), LATER, or CUT, with the reason.
 |---|---|
 | **desk-menus** (0.55) | Menu primitive (§3.1); every D surface in §5 (worktree unification §8.1; `menus/rows.ts` for PR, branch, task, port, lane header, attention, background, orchestrator); folding with `sectionOf`/`groupOf`; checked rows; D implementations of `mark_seen`, `copy_pr_url`, `archive_done`, `copy_path` (terminal), `open_in_browser`, `scope_account` (account), `accounts` (account and background), the state banner and the Log in row; defects 1-5, 13, 14 |
 | **tui-menus** (0.55) | Generic submenu and drill-in (§3.2); `hit_to_target`; File/Folder/Account targets; overlay right-clicks; `More ▸`; folding; T implementations of `mark_seen`, `copy_pr_url`, `archive_done`; lane header and background menus; defects 6, 7, 9-12. It removes those ids from the matrix's `pending_verb` arm in key_modes.rs. |
-| **editors** (0.55) | `open_in_vscode`, `open_in_visual_studio`, `dock_editor`, `reveal_in_explorer`, `open_with_default` (with the executable refusal), `open_file_in_kete`, `copy_path`, `copy_relative_path`, `copy_branch` in both apps; editor icons, checked default, instance dot on menu open |
-| **wake** (0.54) | `wake_account`, `wake_schedule` in both apps; the Whakaoho row menu (§5.21) |
+| **editors** (0.55) | `open_in_vscode`, `open_in_visual_studio`, `dock_editor`, `reveal_in_explorer`, `open_with_default` (with the executable refusal), `open_file_in_kete` in both apps; the copy verbs (`copy_path`, `copy_relative_path`, `copy_branch`) in D. The TUI's copy verbs belong to tui-menus (its brief, item 6), through `copy_and_flash`. Also editor icons, the checked default, and the instance dot on menu open. |
+| **wake** (0.54) | `wake_account` and `wake_schedule` in both apps. The account menu's "Wake-up schedule…" row is the `wake_schedule` verb, not a local row, so the palette and View ▸ reach the same view. Also the Whakaoho row menu (§5.21). |
 | **limits** (0.54) | `limit_until`/`stop_reason` that the banner and the Log in row read |
 | **desk-quiet** (0.54) | §5.22, §5.23, §5.4 (D) |
 | **files** (0.56) | D Files tree with the §5.7 and §5.8 menus; Add to session (LATER row) |
@@ -786,6 +791,13 @@ Every candidate considered, BUILD (0.54), LATER, or CUT, with the reason.
 | **consolidate** (0.56) | Hover words from PRIMARY; one accounts component (it carries §5.9 in both places) |
 
 Each lane's report lists the rows it added, the rows it considered and rejected, and why (brief.md "Menus are critical").
+
+**Release gate.** No verb may ship on `pending_verb`, which shows "coming in this release". Before 0.54 is tagged, each one below is either routed by its lane or taken out of `MENUS` and the palette:
+- `mark_seen`, `copy_pr_url`, `archive_done`: desk-menus (D) and tui-menus (T)
+- `wake_account`, `wake_schedule`: wake
+- the editor verbs: editors
+- the copy verbs: editors (D) and tui-menus (T)
+- `critters`: critters
 
 ---
 

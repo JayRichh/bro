@@ -343,7 +343,9 @@ pub(crate) fn menu_action(app: &App, action: Action, t: &Target) -> Option<MenuA
                 // listens, the bulk verbs with something to take.
                 Action::Ado if !on_ado(app, id) => None,
                 Action::PullRequests | Action::Issues if on_ado(app, id) => None,
-                Action::OpenInBrowser if !checkout().is_some_and(|w| serves(app, &w)) => None,
+                // `w` reads the grid's checkout, not this repo's: no row
+                // until the menus give it the checkout to open (tui-menus).
+                Action::OpenInBrowser => None,
                 Action::MarkSeen if !in_project(app, id, unread) => None,
                 Action::ArchiveDone if !in_project(app, id, done) => None,
                 _ => keyed(app),
