@@ -388,6 +388,40 @@ pub fn set(account: &str, schedule: Option<&WakeSchedule>) -> Result<(), String>
     )
 }
 
+/// One account's turns, as the daemon counts them (`AccountActivity`,
+/// protocol 61). Positional on the wire: fields are only ever appended.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountActivity {
+    /// The profile name, or `@<harness>` for a default login.
+    pub account: String,
+    /// [`activity::BINS`] quarter-hour counts of the local day over the
+    /// last [`activity::DAYS`] days.
+    pub bins: Vec<u32>,
+    /// Epoch seconds of the account's latest turn, however old.
+    pub last_turn_at: Option<i64>,
+}
+
+/// What a hidden wake-up session did (`WakeDone`, protocol 61).
+/// Positional on the wire: fields are only ever appended.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WakeReport {
+    /// The five-hour reset (epoch seconds) before the prompt went in…
+    pub resets_before: Option<i64>,
+    /// …and after the turn, from the reading Kete's status line took.
+    pub resets_after: Option<i64>,
+    /// Why it didn't run, or None.
+    pub error: Option<String>,
+    /// A short code for the log: `fired`, or what went wrong
+    /// (`no_prompt`, `timeout`, `spawn`, `account`, `busy`).
+    pub reason: String,
+    /// The CLI took the prompt (its UserPromptSubmit hook came).
+    pub submitted: bool,
+    /// The turn ended (its Stop hook came, or the CLI went idle).
+    pub finished: bool,
+    /// A status line reading came in during the session.
+    pub read: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

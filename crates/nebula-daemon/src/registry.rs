@@ -257,6 +257,9 @@ pub struct Daemon {
     pub(crate) usage: Mutex<usage::UsageBook>,
     /// The SESSION SNAPSHOTS worker (`snapshots.rs`), taken alone.
     snapshots: snapshots::Snapshotter,
+    /// WHAKAOHO's hidden sessions in flight (`wake.rs`), by agent id;
+    /// taken alone. Never in `sessions`.
+    wakes: Mutex<HashMap<AgentId, wake::WakeSession>>,
 }
 
 mod exit;
@@ -272,6 +275,7 @@ mod status;
 mod subagents;
 mod terminals;
 mod usage;
+mod wake;
 
 pub use subagents::{SubagentCarry, SubagentHookInfo};
 
@@ -305,6 +309,7 @@ impl Daemon {
             provision_gate: tokio::sync::Mutex::new(()),
             usage: Mutex::new(usage::UsageBook::default()),
             snapshots: snapshots::Snapshotter::default(),
+            wakes: Mutex::new(HashMap::new()),
         })
     }
 

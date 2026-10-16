@@ -903,7 +903,7 @@ impl Daemon {
 /// The kete-owned statusLine settings file a Claude spawn passes with
 /// `--settings`, written when missing: None when Settings → Usage status
 /// line is off, or the file cannot be written (the spawn goes on without).
-fn statusline_settings() -> Option<std::path::PathBuf> {
+pub(super) fn statusline_settings() -> Option<std::path::PathBuf> {
     if !crate::config::Config::load().usage_statusline {
         return None;
     }
@@ -919,7 +919,7 @@ fn statusline_settings() -> Option<std::path::PathBuf> {
 
 /// `--settings <path>` at the front of a Claude argv, ahead of any resume
 /// pair and the trailing prompt.
-fn insert_settings_flag(args: &mut Vec<String>, path: &std::path::Path) {
+pub(super) fn insert_settings_flag(args: &mut Vec<String>, path: &std::path::Path) {
     args.insert(0, path.to_string_lossy().into_owned());
     args.insert(0, "--settings".into());
 }

@@ -261,6 +261,24 @@ pub fn decide(input: Inputs<'_>) -> Decision {
     }
 }
 
+/// The slot `now` falls in — the latest one reached today on one of the
+/// schedule's days — as (epoch seconds, minute of the day). None before
+/// the first, on a day off, or when the switch is off. What a skip is
+/// logged against, so a slot's skip is logged once however often the
+/// task runs.
+pub fn current_slot(now: i64, offset_secs: i32, schedule: &WakeSchedule) -> Option<(i64, u16)> {
+    let local = LocalTime::at(now, offset_secs);
+    if !schedule.enabled || !schedule.on_day(local.weekday) {
+        return None;
+    }
+    let slot_min = schedule
+        .slots()
+        .into_iter()
+        .rev()
+        .find(|&s| s <= local.minute)?;
+    Some((local.epoch_of(slot_min, offset_secs), slot_min))
+}
+
 /// When the next slot comes, epoch seconds: the first one after `now` on
 /// one of the schedule's days, within a week. None when it is off or has
 /// no days. Usual hours leave out keep-rolling steps outside them.
@@ -684,5 +702,17 @@ mod tests {
         assert_eq!(next_slot(at(16, 0), NZ, &s, None), Some(at(20, 0)));
         s.enabled = false;
         assert_eq!(next_slot(at(4, 0), NZ, &s, None), None);
+    }
+
+    #[test]
+    fn the_current_slot_is_the_latest_reached_today() {
+        let mut s = schedule();
+        assert_eq!(current_slot(at(4, 59), NZ, &s), None);
+        assert_eq!(current_slot(at(5, 0), NZ, &s), Some((at(5, 0), 300)));
+        assert_eq!(current_slot(at(23, 0), NZ, &s), Some((at(5, 0), 300)));
+        s.keep_rolling = true;
+        assert_eq!(current_slot(at(11, 0), NZ, &s), Some((at(10, 0), 600)));
+        s.days = WEEKDAYS;
+        assert_eq!(current_slot(at(11, 0), NZ, &s), None, "Saturday");
     }
 }

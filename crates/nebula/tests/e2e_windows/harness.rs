@@ -166,6 +166,36 @@ impl Tui {
         }
     }
 
+    /// The harness's home: what `HOME` is for the TUI, its daemon and
+    /// [`Tui::kete`].
+    pub fn home(&self) -> PathBuf {
+        self.launch.base.join("home")
+    }
+
+    /// `kete <args>` run from the command line beside this TUI: its dirs
+    /// and home, the fake agent's environment (a daemon it has to start
+    /// runs the fake too), and never the machine's Task Scheduler.
+    pub fn kete(&self, args: &[&str]) -> std::process::Output {
+        let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_kete"));
+        cmd.args(args)
+            .env(nebula_core::env::RUNTIME_DIR, &self.runtime_dir)
+            .env(nebula_core::env::DATA_DIR, &self.data_dir)
+            .env(nebula_core::env::WAKE_NO_TASK, "1")
+            .env("HOME", self.home())
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GCM_INTERACTIVE", "never")
+            .env_remove(nebula_core::env::CLAUDE_CONFIG_DIR)
+            .env(agent::ROLE, "1")
+            .stdin(std::process::Stdio::null());
+        for var in nebula_core::env::AGENT_SESSION_VARS {
+            cmd.env_remove(var);
+        }
+        for (key, value) in &self.launch.options_env {
+            cmd.env(key, value);
+        }
+        cmd.output().unwrap()
+    }
+
     /// Quit this TUI (its daemon stays up, as it does when a user quits)
     /// and start a fresh one in the same dirs: the next launch after an
     /// upgrade.

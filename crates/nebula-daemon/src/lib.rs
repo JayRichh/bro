@@ -232,6 +232,11 @@ async fn serve(opts: DaemonOpts) -> Result<()> {
                 subagent,
             }) = hook_rx.recv().await
             {
+                // A WHAKAOHO session's hooks are its own business
+                // (`registry::wake`): no row to move, no prompt to keep.
+                if daemon.wake_hook(&agent_id, &event) {
+                    continue;
+                }
                 let captures_session = event.captures_session();
                 // A turn's edges are when a session log has news: Codex's
                 // rollout limits, every harness's context (`registry::usage`).

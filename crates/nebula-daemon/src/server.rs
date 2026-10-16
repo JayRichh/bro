@@ -673,6 +673,30 @@ impl ClientConnection {
                 reply_done(&self.out_tx, req_id, result).await;
                 Ok(true)
             }
+            // Up to two minutes: off the request loop, so the rest of this
+            // connection's frames keep flowing.
+            ClientRequest::WakeAccount { req_id, account } => {
+                let daemon = self.daemon.clone();
+                let out_tx = self.out_tx.clone();
+                tokio::spawn(async move {
+                    let report = daemon.wake_account(account).await;
+                    let _ = out_tx.send(ServerEvent::WakeDone { req_id, report }).await;
+                });
+                Ok(true)
+            }
+            ClientRequest::AccountActivity { req_id } => {
+                let result = self
+                    .blocking_daemon(|daemon| daemon.account_activity())
+                    .await;
+                match result {
+                    Ok(accounts) => {
+                        self.send(ServerEvent::AccountActivity { req_id, accounts })
+                            .await
+                    }
+                    Err(err) => reply_done(&self.out_tx, req_id, Err(err)).await,
+                }
+                Ok(true)
+            }
             ClientRequest::MoveAgent {
                 req_id,
                 id,

@@ -10,10 +10,12 @@ mod ssh;
 mod statusline;
 mod tunnel;
 mod upgrade;
+mod wake;
 
 use anyhow::Result;
 use cli::{
     Command, ConfigCommand, OrchestratorCommand, ProfileCommand, SessionCommand, SetupCommand,
+    WakeAction,
 };
 use std::path::Path;
 
@@ -118,6 +120,45 @@ fn main() -> Result<()> {
             ProfileCommand::Enable { name } => profile::ProfileOp::Enable { name, on: true },
             ProfileCommand::Disable { name } => profile::ProfileOp::Enable { name, on: false },
             ProfileCommand::Login { name, args } => profile::ProfileOp::Login { name, args },
+        }),
+        Some(Command::Wake {
+            account,
+            all,
+            force,
+            dry_run,
+            mode,
+            json,
+            action,
+        }) => wake::run(match action {
+            Some(WakeAction::Set {
+                account,
+                at,
+                days,
+                keep_rolling,
+                no_keep_rolling,
+                skip_idle,
+                mode,
+                wake_pc,
+                no_wake_pc,
+            }) => wake::WakeOp::Set(wake::SetArgs {
+                account,
+                at,
+                days,
+                keep_rolling: flag(keep_rolling, no_keep_rolling),
+                skip_idle,
+                mode,
+                wake_pc: flag(wake_pc, no_wake_pc),
+            }),
+            Some(WakeAction::Off { account }) => wake::WakeOp::Off { account },
+            Some(WakeAction::Status { json }) => wake::WakeOp::Status { json },
+            None => wake::WakeOp::Run {
+                account,
+                all,
+                force,
+                dry_run,
+                mode,
+                json,
+            },
         }),
         Some(Command::Kill) => nebula_tui::run_kill(),
         Some(Command::Rename { title, force }) => {
@@ -318,6 +359,15 @@ fn main() -> Result<()> {
                 }
             }
         },
+    }
+}
+
+/// A `--x` / `--no-x` pair as a change: None when neither was given.
+fn flag(on: bool, off: bool) -> Option<bool> {
+    match (on, off) {
+        (true, _) => Some(true),
+        (_, true) => Some(false),
+        _ => None,
     }
 }
 
