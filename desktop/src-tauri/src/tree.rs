@@ -607,7 +607,7 @@ mod tests {
 
     #[test]
     fn ls_files_kinds_and_stages_are_read() {
-        let raw = b"100644 aaaa 0\tsrc/a.rs\0120000 bbbb 0\tlink\0160000 cccc 0\tvendor/lib\0100644 dddd 1\tboth.rs\0100644 eeee 2\tboth.rs\0";
+        let raw = b"100644 aaaa 0\tsrc/a.rs\x00120000 bbbb 0\tlink\x00160000 cccc 0\tvendor/lib\x00100644 dddd 1\tboth.rs\x00100644 eeee 2\tboth.rs\0";
         let got = parse_ls_files(raw);
         assert_eq!(
             got,
