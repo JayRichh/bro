@@ -1,7 +1,7 @@
 // The critters' view of the app: which daemon changes the world should react
-// to. The model is narrowed by the scope and pushed whole, so an event is a
-// difference between two snapshots, and only for sessions and PRs both
-// snapshots hold: one that appears because the scope widened is not news.
+// to. The model is pushed whole, so an event is a difference between two
+// snapshots, and only for sessions and PRs both snapshots hold: one that
+// just appeared (a new session, a reconnect's first snapshot) is not news.
 // Pure (no Tauri), so the node tests can run it.
 
 import type { Model } from '../api';

@@ -298,7 +298,12 @@ flow('critters: the verb turns them on, a click pets, a right-click opens the cr
       return null;
     }
   };
-  await d.waitFor('critters.json counts the kiwi', () => log()?.species?.kiwi?.seen >= 1 && log().species.kiwi.pets >= 1);
+  // (The world hands its notes over as it ticks: step it along.)
+  await d.waitFor('critters.json counts the kiwi', async () => {
+    await k('k.step(0.05);');
+    const l = log();
+    return l?.species?.kiwi?.seen >= 1 && l.species.kiwi.pets >= 1;
+  });
 
   // A drag picks it up; letting go drops it, and it lands on its feet.
   const q = await k('return k.point(arguments[0]);', id);

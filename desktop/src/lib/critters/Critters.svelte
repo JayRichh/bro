@@ -12,7 +12,7 @@
   import { allIdle, changes, snap, type Change, type Snap } from './events';
   import { konami, typingTarget } from './konami';
   import { today } from './log';
-  import { attachEngine, critterMenuAt, critters, discover, flushQueued, loadCritters, logNotes, sizeOf } from './state.svelte';
+  import { attachEngine, critterMenuAt, critters, discover, flushNow, flushQueued, loadCritters, logNotes, sizeOf } from './state.svelte';
   import { parseOften, type AppEvent } from './world';
 
   let canvas: HTMLCanvasElement;
@@ -39,7 +39,9 @@
       loadCritters();
     };
     window.addEventListener('focus', onFocus);
+    window.addEventListener('pagehide', flushNow);
     return () => {
+      window.removeEventListener('pagehide', flushNow);
       motion.removeEventListener('change', onMotion);
       window.removeEventListener('focus', onFocus);
       attachEngine(null);
@@ -163,7 +165,8 @@
       /** Step the world `secs` at once. */
       step: (secs: number) => e.step(secs),
       list: () =>
-        e.world.critters.map((c) => ({ id: c.id, species: c.species, name: c.name, entered: c.entered, mode: c.mode, pose: c.pose, x: c.x, lift: c.lift })),
+        e.world.critters.map((c) => ({ id: c.id, species: c.species, name: c.name, entered: c.entered, mode: c.mode, pose: c.pose, x: c.x, lift: c.lift, perch: c.perch })),
+      perches: () => e.perches(),
       particles: () => e.world.particles.map((p) => (p.kind === 'icon' ? `icon:${p.icon}` : p.kind)),
       /** A point (client px) on a drawn pixel of critter `id`. */
       point: (id: number) => {

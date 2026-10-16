@@ -82,11 +82,18 @@ let flushTimer: ReturnType<typeof setTimeout> | undefined;
  *  read-apply-write (both apps write the file). */
 export function logNotes(notes: Note[]) {
   pending.push(...notes);
-  clearTimeout(flushTimer);
-  flushTimer = setTimeout(flushNotes, 800);
+  // At most a moment after the first note: steady petting still lands.
+  flushTimer ??= setTimeout(flushNotes, 800);
+}
+
+/** Write what's waiting now (the window is going away). */
+export function flushNow() {
+  if (pending.length) void flushNotes();
 }
 
 async function flushNotes(hide?: boolean) {
+  clearTimeout(flushTimer);
+  flushTimer = undefined;
   const notes = pending;
   pending = [];
   try {
@@ -121,7 +128,7 @@ async function turnOn(): Promise<boolean> {
   toast(
     critters.prefs.animations
       ? `Critters are on: little visitors along the bottom of the window. ${offHint()}`
-      : 'Critters are on, but Animations is off (Settings, General), so none will come until it is on.',
+      : 'Critters are on, but Animations is off (Settings, Appearance), so none will come until it is on.',
   );
   return true;
 }
@@ -138,7 +145,9 @@ export async function toggleCritters() {
 export async function discover(via: 'konami' | 'mark', from?: DOMRect) {
   if (!(await turnOn())) return;
   withEngine((e) => {
-    if (via === 'mark' && from) e.summonAt('kiwi', from.left + from.width / 2, from.top + from.height * 0.6);
+    // Under reduced motion the kiwi simply appears: no hop, no fall.
+    if (via === 'mark' && from && !e.reduced) e.summonAt('kiwi', from.left + from.width / 2, from.top + from.height * 0.6);
+    else if (via === 'mark') e.summon('kiwi');
     else e.summon(pickVisitor(e));
   });
 }
@@ -161,7 +170,6 @@ export async function hideUntilTomorrow() {
   critters.hiddenOn = today();
   engine?.world.scatter();
   engine?.poke();
-  clearTimeout(flushTimer);
   await flushNotes(true);
   toast(`The critters are hiding until tomorrow. Critters in the palette (${paletteKey()}) brings them back now.`);
 }
@@ -169,7 +177,6 @@ export async function hideUntilTomorrow() {
 /** Back today after all. */
 export async function bringBack() {
   critters.hiddenOn = null;
-  clearTimeout(flushTimer);
   await flushNotes(false);
   if (engine && !engine.world.spawning) {
     engine.world.resume();
@@ -188,6 +195,15 @@ function busy(c: Critter): string | null {
   return null;
 }
 
+/** A notable state for the menu's heading (menu matrix 1.7). */
+function state(c: Critter): string {
+  if (c.mode === 'held') return ' \u00b7 held';
+  if (c.offering) return ' \u00b7 offering a lamp';
+  if (c.exiting) return ' \u00b7 leaving';
+  if (c.pose === 'sleep') return ' \u00b7 asleep';
+  return '';
+}
+
 /** The critter menu's rows for `c`, by its state. */
 export function critterRows(c: Critter, run: { pet(): void; feed(): void; name(): void; shoo(): void }): MenuEntry[] {
   const s = speciesOf(c);
@@ -201,7 +217,7 @@ export function critterRows(c: Critter, run: { pet(): void; feed(): void; name()
     ...(no ? { disabled: true, title: no } : title ? { title } : {}),
   });
   return [
-    { heading: `${c.name}, ${s.name.toLowerCase()}` },
+    { heading: `${c.name}, ${s.name.toLowerCase()}${state(c)}` },
     item(petLabel, run.pet, why, 'Or click it'),
     item('Feed', run.feed, feedWhy, 'Or double-click it'),
     item('Name\u2026', run.name, null, `Every ${s.name.toLowerCase()} that visits keeps the name`),

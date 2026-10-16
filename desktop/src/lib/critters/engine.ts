@@ -60,6 +60,10 @@ export class Engine {
   private view = { w: 160, h: 60, floor: 56, perches: [] as Rect[] };
   private dirty = true;
   private drag: { id: number; pointer: number; x: number; y: number; grabbed: boolean } | null = null;
+  /** The pointer (client px) while any hit box is up: a box takes events
+   *  only over its critter's drawn pixels, never its transparent corners. */
+  private hoverAt: { x: number; y: number } | null = null;
+  private sensing = false;
   private dragged = false;
 
   constructor(
@@ -232,10 +236,13 @@ export class Engine {
     const dt = Math.max((now - this.last) / 1000, 0);
     this.last = now;
     this.stats.ticks++;
+    const steps = this.world.steps;
+    const hover = this.world.hover;
     this.world.tick(dt, this.input());
     const notes = this.world.drainNotes();
     if (notes.length) this.hooks.notes(notes);
-    this.draw();
+    // A frame between two steps changes nothing on screen.
+    if (this.world.steps !== steps || this.world.hover !== hover || this.dirty) this.draw();
   }
 
   /** Steps the world by `secs` at once (tests). */
@@ -270,8 +277,9 @@ export class Engine {
     this.css = devicePerSprite(this.size, dpr) / dpr;
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    // The highest marked bar in the bottom of the window (the quick
-    // prompt's top edge), else a bar's height above the bottom.
+    // The highest marked bar in the bottom of the window: the verb bar
+    // when the list shows one, else the quick prompt (there is no status
+    // bar), else a bar's height above the bottom.
     let floorCss = Infinity;
     for (const el of document.querySelectorAll<HTMLElement>('[data-critter-floor]')) {
       const r = el.getBoundingClientRect();
@@ -285,11 +293,14 @@ export class Engine {
     const perches: Rect[] = [];
     for (const el of document.querySelectorAll<HTMLElement>('[data-perch]')) {
       const r = el.getBoundingClientRect();
-      if (r.width < 24 || r.top <= 0 || r.top >= floorCss - 8) continue;
+      // The top edge, or the bottom one for `data-perch="bottom"` (a rule
+      // under a header that sits too near the top of the window).
+      const edge = el.dataset.perch === 'bottom' ? r.bottom : r.top;
+      if (r.width < 24 || edge <= 0 || edge >= floorCss - 8) continue;
       // In view and on top: not scrolled away under another pane.
-      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + 1);
+      const hit = document.elementFromPoint(r.left + r.width / 2, el.dataset.perch === 'bottom' ? edge - 1 : edge + 1);
       if (!hit || !(el.contains(hit) || hit.closest('[data-critter]'))) continue;
-      perches.push({ x: r.left / this.css, y: Math.round(r.top / this.css), w: r.width / this.css, h: r.height / this.css });
+      perches.push({ x: r.left / this.css, y: Math.round(edge / this.css), w: r.width / this.css, h: r.height / this.css });
     }
     this.view = { w, h, floor, perches };
     if (this.canvas.width !== w || this.canvas.height !== floor) {
@@ -365,13 +376,53 @@ export class Engine {
       box.el.remove();
       this.boxes.delete(id);
     }
+    this.sense(this.boxes.size > 0);
+    this.aim();
+  }
+
+  /** Follows the pointer while any hit box is up (whatever the clock is
+   *  doing), so each box knows whether its critter is under it. */
+  private sense(on: boolean) {
+    if (on === this.sensing) return;
+    this.sensing = on;
+    const root = document.documentElement;
+    if (on) {
+      window.addEventListener('pointermove', this.onSense, { passive: true, capture: true });
+      root.addEventListener('pointerleave', this.onSenseLeave);
+    } else {
+      window.removeEventListener('pointermove', this.onSense, { capture: true });
+      root.removeEventListener('pointerleave', this.onSenseLeave);
+      this.hoverAt = null;
+    }
+  }
+
+  private onSense = (e: PointerEvent) => {
+    this.hoverAt = { x: e.clientX, y: e.clientY };
+    this.aim();
+  };
+
+  private onSenseLeave = () => {
+    this.hoverAt = null;
+    this.aim();
+  };
+
+  /** Only the box whose critter's drawn pixel is under the pointer (or the
+   *  one being dragged) takes events: a transparent corner over a button
+   *  leaves the button its click. */
+  private aim() {
+    const p = this.hoverAt ? this.toSprite(this.hoverAt.x, this.hoverAt.y) : null;
+    const under = p ? this.world.hit(p.x, p.y) : null;
+    for (const [id, box] of this.boxes) {
+      const v = id === under || this.drag?.id === id ? 'auto' : 'none';
+      if (box.el.style.pointerEvents !== v) box.el.style.pointerEvents = v;
+    }
   }
 
   private makeBox(id: number): HTMLDivElement {
     const el = document.createElement('div');
     el.className = 'critter-box';
     // Over the canvas, which takes no events: only this box catches the mouse.
-    el.style.cssText = 'position:absolute;left:0;top:0;pointer-events:auto;touch-action:none;user-select:none;cursor:grab';
+    el.style.cssText = 'position:absolute;left:0;top:0;pointer-events:none;touch-action:none;user-select:none;cursor:grab';
     el.dataset.critter = String(id);
     el.dataset.target = `critter:${id}`;
     el.setAttribute('aria-hidden', 'true');
@@ -460,6 +511,12 @@ export class Engine {
     return this.floorCss;
   }
 
+  /** The perches as last measured, in sprite px (tests). */
+  perches(): Rect[] {
+    if (this.dirty) this.measure();
+    return this.view.perches;
+  }
+
   /** How many hit boxes are up (tests). */
   boxCount(): number {
     return this.boxes.size;
@@ -467,6 +524,7 @@ export class Engine {
 
   destroy() {
     this.stop();
+    this.sense(false);
     for (const b of this.boxes.values()) b.el.remove();
     this.boxes.clear();
   }
