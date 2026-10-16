@@ -1056,7 +1056,7 @@ pub(crate) fn banner(app: &App, t: &Target) -> Option<String> {
                 // a limit it waits out, a login to renew, an API error.
                 let stop = app.launcher.session_stops.get(id);
                 match (stop, a.status) {
-                    (Some(note), _) => words.push(stop_words(note, &a)),
+                    (Some(note), _) => words.push(stop_words(note, a)),
                     (None, S::NeedsFeedback) => words.push("needs you".into()),
                     (None, S::Running) => words.push("running".into()),
                     (None, S::Finished) if a.unseen => words.push("done \u{b7} unread".into()),
