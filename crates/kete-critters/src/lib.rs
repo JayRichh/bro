@@ -11,10 +11,12 @@
 //! - [`paint`]: drawing the world into an RGBA buffer.
 //! - [`font`]: the 3×5 pixel font and emote icons.
 //! - [`log`]: the collection log both apps share.
+//! - [`gen`] writes `desktop/src/lib/critters/cast.gen.ts`.
 
 pub mod art;
 pub mod cast;
 pub mod font;
+pub mod gen;
 pub mod log;
 pub mod paint;
 pub mod rng;

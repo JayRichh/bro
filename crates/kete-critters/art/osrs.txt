@@ -312,48 +312,47 @@ PdmmmmmmmmMd
 
 == pet_rock
 size 8 6
-pal H #dcdae4
-pal h #b9b6c6
+pal H #e2e0ea
+pal h #bdbacb
 pal r #8f8ca2
-pal s #6e6a86
-pal d #4c4864
+pal s #6a6682
 pal e #18121e
-lid s
+lid h
 -- idle
 ........
-..Hhhh..
-.hhhrrrs
-hhrrerer
-hrrrrdrs
-.ssdssss
+..HHhh..
+.Hhhhhr.
+hhehhehs
+hrrrrrrs
+.ssssss.
 -- walk
 ........
-...Hhhh.
-..hhhrrs
-hhrrerer
-hrrrrdrs
-.ssdssss
+...HHhh.
+..Hhhhhr
+hhehhehs
+hrrrrrrs
+.ssssss.
 -- sit
 ........
 ........
-.Hhhhrrs
-hhrrerer
-hrrrrdrs
-ssssdsss
+.HHhhhr.
+hhehhehs
+hrrrrrrs
+ssssssss
 -- eat
 ........
-..Hhhh..
-.hhhrrrs
-hhrrrrrr
-hrrrerer
-.ssdssss
+..HHhh..
+.Hhhhhr.
+hhhhhhhs
+hrerrers
+.ssssss.
 -- held
 ........
-..Hhhh..
-.hhhrrrs
-hhrrerer
-hrrrrdrs
-.ssdssss
+..HHhh..
+.Hhhhhr.
+hhehhehs
+hrrrrrrs
+.ssssss.
 
 == genie
 size 14 16
