@@ -153,11 +153,16 @@ fn a_110_kb_paste_is_one_input_in_a_few_turns() {
         other => panic!("expected one Input request, got {} of them", other.len()),
     }
 
-    // Typed afterwards: a lone key, never held.
+    // Typed afterwards: a lone key. Straight after, it is held a moment in
+    // case it is the paste's tail, and comes back as the key it is (no
+    // release with it); after that, never held.
     out.clear();
     let x = typed("x");
+    let now = std::time::Instant::now();
+    assert!(burst.feed(x[..1].to_vec(), now).is_empty());
+    assert_eq!(burst.settle(), x[..1]);
     assert_eq!(
-        burst.feed(x[..1].to_vec(), std::time::Instant::now()),
+        burst.feed(x[..1].to_vec(), now + std::time::Duration::from_secs(2)),
         x[..1]
     );
     handle_terminal_event(&mut app, x[0].clone(), &mut out);
