@@ -4,6 +4,7 @@ pub mod branch_name;
 pub mod clock;
 pub mod codec;
 pub mod crashlog;
+pub mod editors;
 pub mod entities;
 pub mod env;
 pub mod harness;
