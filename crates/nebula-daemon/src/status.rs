@@ -13,13 +13,21 @@
 //!   must not drive status.
 //! - An `idle_prompt` notification is Claude reporting it is parked at the
 //!   input box; it is what un-sticks a turn that ended without a `Stop`
-//!   (rejected prompt, escape mid-turn). But since Claude Code 2.1 the Agent
-//!   tool runs subagents in the *background*: the foreground turn ends, the
-//!   input box comes back, and `idle_prompt` fires ~60 s later while the
-//!   workers are still going. So with subagents tracked it is a hold, not a
-//!   finish — the same hold a gated `Stop` gets — and only a quiet set
-//!   (no subagent hook traffic for `SUBAGENT_QUIET_GRACE`) is presumed
+//!   (rejected prompt, escape mid-turn). Since Claude Code 2.1 the Agent
+//!   tool runs subagents in the *background*: the foreground turn ends and
+//!   the input box comes back while the workers go on. Before 2.1.288
+//!   `idle_prompt` fired ~60 s in regardless; since then it waits for them.
+//!   Older CLIs are still about, so with subagents tracked it is a hold,
+//!   not a finish — the same hold a gated `Stop` gets — and only a quiet
+//!   set (no subagent hook traffic for `SUBAGENT_QUIET_GRACE`) is presumed
 //!   orphaned and finished anyway.
+//! - Since 2.1.145 a `Stop` (and each `SubagentStop`) lists the session's
+//!   tasks still in flight (`background_tasks`). With that list the guess
+//!   is unneeded: none that carry the work on (subagents, workflows,
+//!   teammates; never a shell or a monitor left running) finishes the turn
+//!   at once, any holds it, and a `SubagentStop` whose list is empty
+//!   releases a held turn without the drain grace. Without a list (an
+//!   older CLI, another harness) the timers decide as before.
 //! - `Progress` is the same end-of-turn news read straight off the PTY
 //!   (OSC 9;4, see `pty::progress`). It is the only signal that survives a
 //!   user cancel — no hook fires at all there, and Claude suppresses
@@ -117,10 +125,38 @@ pub enum LimitOutlook {
     Menu,
 }
 
+/// What a `Stop` or `SubagentStop` payload's `background_tasks` (Claude
+/// 2.1.145+) says of the session's work still in flight as it lands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Background {
+    /// Tasks that keep the session's work going past the foreground
+    /// turn's end ([`holds_turn`]): subagents, workflows, teammates.
+    pub holders: usize,
+}
+
+/// Does a background task of this `type` keep the session working once
+/// the foreground turn ends? Subagents, workflows and agent-team
+/// teammates do — Claude's work goes on in them. A shell or a monitor
+/// left running (a dev server, `tail -f`), an MCP server's task and a
+/// cloud session the turn handed off never do: nothing more comes back
+/// into this turn from them. A label this build has never heard of holds,
+/// as a tracked subagent always has.
+pub fn holds_turn(task_type: &str) -> bool {
+    !matches!(
+        task_type.trim().to_ascii_lowercase().as_str(),
+        "shell" | "monitor" | "mcp task" | "cloud session"
+    )
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum HookEvent {
     UserPromptSubmit,
-    Stop,
+    /// The foreground turn ended. `background` is what its payload's
+    /// `background_tasks` said; None when it had no list (an older CLI,
+    /// another harness), and today's timers decide.
+    Stop {
+        background: Option<Background>,
+    },
     /// The turn ended on an API error instead of a `Stop` (Claude's
     /// `StopFailure`, 2.1.78+): `error` is its kind (`rate_limit`,
     /// `authentication_failed`, `overloaded`, …), `detail` Claude's words.
@@ -166,6 +202,9 @@ pub enum HookEvent {
     },
     SubagentStop {
         subagent_id: Option<String>,
+        /// The parent session's in-flight tasks as this one ended, as on
+        /// [`HookEvent::Stop`].
+        background: Option<Background>,
     },
     /// Synthetic: the agent's PTY died.
     SessionEnded {
@@ -461,7 +500,7 @@ impl AgentStatusMachine {
         // prompt whose submit hook never fired, and so does the
         // `StopFailure` that ends such a turn instead.
         if let (
-            HookEvent::UserPromptSubmit | HookEvent::Stop | HookEvent::StopFailure { .. },
+            HookEvent::UserPromptSubmit | HookEvent::Stop { .. } | HookEvent::StopFailure { .. },
             Some(sid),
         ) = (&event, payload_session_id)
         {
@@ -485,9 +524,29 @@ impl AgentStatusMachine {
             // a task up after a usage-limit wait — starts a turn, and with
             // it any stop note is history.
             HookEvent::UserPromptSubmit => self.start_turn(&mut effects),
-            HookEvent::Stop => {
+            HookEvent::Stop { background } => {
                 self.clear_stop(&mut effects);
-                self.end_turn(now, &mut effects);
+                match background {
+                    // Claude's own word that nothing still in flight
+                    // carries the work on: whatever subagents nebula still
+                    // tracks are done (their SubagentStops raced this, or
+                    // never came), so the turn is over now — no drain.
+                    Some(Background { holders: 0 }) => {
+                        self.subagents.clear();
+                        self.end_turn(now, &mut effects);
+                    }
+                    // Subagents, workflows or teammates still working: held
+                    // at running as a Stop with tracked subagents always
+                    // was, even when nebula tracks none of them (a workflow
+                    // fires no SubagentStart). The usual timers, or a later
+                    // payload saying they are done, release it.
+                    Some(_) => {
+                        if !self.hold_for_relocation(&mut effects) {
+                            self.hold_for_subagents(now, &mut effects);
+                        }
+                    }
+                    None => self.end_turn(now, &mut effects),
+                }
             }
             HookEvent::StopFailure {
                 error,
@@ -639,9 +698,27 @@ impl AgentStatusMachine {
                     }
                 }
             }
-            HookEvent::SubagentStop { subagent_id } => {
+            HookEvent::SubagentStop {
+                subagent_id,
+                background,
+            } => {
                 self.subagents.stop(subagent_id);
                 self.note_subagent_alive(now);
+                // The last of a held turn's workers ended and the parent's
+                // list says nothing else carries the work on: finished now,
+                // not a drain grace later. While the stopping subagent is
+                // still listed it counts as a holder, and the hold stands.
+                if background == Some(Background { holders: 0 })
+                    && self.stop_held
+                    && self.status == AgentStatus::Running
+                {
+                    self.subagents.clear();
+                    self.stop_held = false;
+                    self.drain_idle_since = None;
+                    self.subagent_alive_at = None;
+                    self.finished_at = Some(now);
+                    self.set_status(AgentStatus::Finished, &mut effects);
+                }
             }
             HookEvent::Progress { busy } => {
                 if busy {
@@ -1010,12 +1087,14 @@ impl AgentStatusMachine {
     /// permission prompt still waiting on the user suppresses it, so this
     /// can't green out an agent that genuinely needs feedback.
     ///
-    /// It is *not* proof that the turn's work is over: the Agent tool runs
-    /// its subagents in the background, the foreground loop parks at the
-    /// input box while they work, and this fires ~60 s in. With subagents
-    /// still tracked the agent stays at running exactly as a gated `Stop`
-    /// would — `tick` finishes it once they drain, or once they have been
-    /// quiet for `SUBAGENT_QUIET_GRACE`.
+    /// Before Claude Code 2.1.288 it is *not* proof that the turn's work is
+    /// over: the Agent tool runs its subagents in the background, the
+    /// foreground loop parks at the input box while they work, and an
+    /// older CLI fires this ~60 s in regardless (2.1.288 holds it back
+    /// while background agents run). With subagents still tracked the agent
+    /// stays at running exactly as a gated `Stop` would — `tick` finishes
+    /// it once they drain, or once they have been quiet for
+    /// `SUBAGENT_QUIET_GRACE`.
     fn mark_idle(&mut self, now: Instant, effects: &mut Vec<Effect>) {
         if !matches!(
             self.status,
@@ -1095,7 +1174,11 @@ mod tests {
         let fx = m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
         assert_eq!(status_of(&fx), Some(AgentStatus::Running));
         assert!(fx.contains(&Effect::SaveSessionId("s1".into())));
-        let fx = m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(10));
+        let fx = m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(10),
+        );
         assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
     }
 
@@ -1108,7 +1191,7 @@ mod tests {
     fn a_pending_relocation_holds_every_turn_end_at_running() {
         let now = t0();
         let ends = [
-            HookEvent::Stop,
+            HookEvent::Stop { background: None },
             HookEvent::Notification {
                 notification_type: Some("idle_prompt".into()),
             },
@@ -1138,14 +1221,18 @@ mod tests {
             now,
         );
         m.set_relocating(true);
-        let fx = m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(10));
+        let fx = m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(10),
+        );
         assert_eq!(status_of(&fx), Some(AgentStatus::Running));
 
         // A row that already finished is not revived by a late Stop, and
         // the process dying is still the end of it.
         let mut m = AgentStatusMachine::new(AgentStatus::Finished, None);
         m.set_relocating(true);
-        let fx = m.handle(HookEvent::Stop, Some("s1"), now);
+        let fx = m.handle(HookEvent::Stop { background: None }, Some("s1"), now);
         assert_eq!(status_of(&fx), None);
         assert_eq!(m.status(), AgentStatus::Finished);
         let mut m = AgentStatusMachine::new(AgentStatus::Fresh, None);
@@ -1200,7 +1287,7 @@ mod tests {
             now,
         );
         assert_eq!(status_of(&fx), Some(AgentStatus::Running));
-        let fx = m.handle(HookEvent::Stop, Some("ses_1"), now);
+        let fx = m.handle(HookEvent::Stop { background: None }, Some("ses_1"), now);
         assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
     }
 
@@ -1216,7 +1303,7 @@ mod tests {
         assert_eq!(status_of(&fx), Some(AgentStatus::NeedsFeedback));
         let fx = m.handle(HookEvent::Question { open: false }, None, now);
         assert_eq!(status_of(&fx), Some(AgentStatus::Running));
-        let fx = m.handle(HookEvent::Stop, Some("c1"), now);
+        let fx = m.handle(HookEvent::Stop { background: None }, Some("c1"), now);
         assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
         let fx = m.handle(HookEvent::Question { open: false }, None, now);
         assert_eq!(status_of(&fx), None, "a late close does not revive it");
@@ -1224,7 +1311,7 @@ mod tests {
         // A turn that ends with the dialog up (a cancel) finishes as usual.
         m.handle(HookEvent::UserPromptSubmit, Some("c1"), now);
         m.handle(HookEvent::Question { open: true }, None, now);
-        let fx = m.handle(HookEvent::Stop, Some("c1"), now);
+        let fx = m.handle(HookEvent::Stop { background: None }, Some("c1"), now);
         assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
 
         let mut m = AgentStatusMachine::new(AgentStatus::Terminated, None);
@@ -1640,7 +1727,7 @@ mod tests {
         let mut m = AgentStatusMachine::new(AgentStatus::Fresh, None);
         let now = t0();
         m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
-        m.handle(HookEvent::Stop, Some("s1"), now);
+        m.handle(HookEvent::Stop { background: None }, Some("s1"), now);
         let fx = idle(&mut m, now);
         assert!(fx.is_empty(), "already finished: {fx:?}");
         assert_eq!(m.status(), AgentStatus::Finished);
@@ -1684,6 +1771,7 @@ mod tests {
         } else {
             HookEvent::SubagentStop {
                 subagent_id: Some(id.into()),
+                background: None,
             }
         };
         m.handle(ev, Some("s1"), now)
@@ -1699,7 +1787,7 @@ mod tests {
         let now = t0();
         m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
         subagent(&mut m, true, "sub1", now);
-        m.handle(HookEvent::Stop, Some("s1"), now);
+        m.handle(HookEvent::Stop { background: None }, Some("s1"), now);
         assert_eq!(m.status(), AgentStatus::Running, "stop held open");
         let fx = idle(&mut m, now + Duration::from_secs(60));
         assert!(fx.is_empty(), "idle with live subagents is a hold: {fx:?}");
@@ -1715,7 +1803,11 @@ mod tests {
             now + Duration::from_secs(96),
         );
         assert_eq!(m.status(), AgentStatus::Running);
-        let fx = m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(100));
+        let fx = m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(100),
+        );
         assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
     }
 
@@ -1725,7 +1817,7 @@ mod tests {
         let now = t0();
         m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
         subagent(&mut m, true, "sub1", now);
-        m.handle(HookEvent::Stop, Some("s1"), now);
+        m.handle(HookEvent::Stop { background: None }, Some("s1"), now);
         idle(&mut m, now + Duration::from_secs(60));
         subagent(&mut m, false, "sub1", now + Duration::from_secs(120));
         let t = now + Duration::from_secs(121);
@@ -1761,7 +1853,11 @@ mod tests {
         let now = t0();
         m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
         subagent(&mut m, true, "sub1", now);
-        m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(5));
+        m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(5),
+        );
         idle(&mut m, now + Duration::from_secs(65));
         assert_eq!(m.status(), AgentStatus::Running);
         // The quiet clock runs from the last sign of life — the
@@ -1788,7 +1884,7 @@ mod tests {
         let now = t0();
         m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
         subagent(&mut m, true, "sub1", now);
-        m.handle(HookEvent::Stop, Some("s1"), now);
+        m.handle(HookEvent::Stop { background: None }, Some("s1"), now);
         idle(&mut m, now + Duration::from_secs(60));
 
         // Twenty minutes in, the worker runs a Bash call (agent_id stamped).
@@ -1967,7 +2063,7 @@ mod tests {
         let fx = m.handle(notification("quota_auto_resume_fired"), Some("s1"), now);
         assert_eq!(stop_of(&fx), Some(None), "cleared");
         assert_eq!(m.status(), AgentStatus::Running);
-        let fx = m.handle(HookEvent::Stop, Some("s1"), now);
+        let fx = m.handle(HookEvent::Stop { background: None }, Some("s1"), now);
         assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
 
         // The progress-clear first: finished for a moment, then running.
@@ -2090,7 +2186,7 @@ mod tests {
     fn the_screen_never_starts_a_wait_on_its_own() {
         let now = t0();
         let mut m = running(now);
-        m.handle(HookEvent::Stop, Some("s1"), now);
+        m.handle(HookEvent::Stop { background: None }, Some("s1"), now);
         assert!(m
             .handle(HookEvent::LimitWaiting { until: None }, None, now)
             .is_empty());
@@ -2239,6 +2335,82 @@ mod tests {
         assert_eq!(stop_of(&fx), None, "nothing left to clear");
     }
 
+    fn stop_listing(holders: usize) -> HookEvent {
+        HookEvent::Stop {
+            background: Some(Background { holders }),
+        }
+    }
+
+    fn subagent_stop_listing(id: &str, holders: usize) -> HookEvent {
+        HookEvent::SubagentStop {
+            subagent_id: Some(id.into()),
+            background: Some(Background { holders }),
+        }
+    }
+
+    /// A Stop whose `background_tasks` lists nothing that carries the work
+    /// on is the end, whatever nebula still tracks (a SubagentStop lost or
+    /// still on its way): finished at once, no drain grace.
+    #[test]
+    fn a_stop_listing_no_working_task_finishes_at_once() {
+        let now = t0();
+        let mut m = running(now);
+        subagent(&mut m, true, "sub1", now);
+        let fx = m.handle(stop_listing(0), Some("s1"), now);
+        assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
+        assert!(m.tick(now + DRAIN_GRACE).is_empty(), "nothing held");
+    }
+
+    /// One that lists a subagent, workflow or teammate holds the row at
+    /// running even when nebula tracks none of them (a workflow fires no
+    /// SubagentStart); the drain grace still lets go of it in the end.
+    #[test]
+    fn a_stop_listing_a_working_task_holds_running_even_untracked() {
+        let now = t0();
+        let mut m = running(now);
+        let fx = m.handle(stop_listing(1), Some("s1"), now);
+        assert_eq!(status_of(&fx), None, "held at running");
+        assert_eq!(m.status(), AgentStatus::Running);
+        assert!(m.tick(now + Duration::from_secs(1)).is_empty());
+        let fx = m.tick(now + Duration::from_secs(1) + DRAIN_GRACE);
+        assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
+    }
+
+    /// A held turn's SubagentStop whose list still names a worker keeps
+    /// the hold; the one whose list is empty releases it at once. One that
+    /// lands mid-turn, nothing held, changes nothing.
+    #[test]
+    fn a_subagent_stop_with_nothing_left_listed_releases_the_hold() {
+        let now = t0();
+        let mut m = running(now);
+        subagent(&mut m, true, "sub1", now);
+        subagent(&mut m, true, "sub2", now);
+        assert!(m
+            .handle(subagent_stop_listing("sub1", 2), Some("s1"), now)
+            .is_empty());
+        let fx = m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(5),
+        );
+        assert_eq!(status_of(&fx), None, "held for sub2");
+        let fx = m.handle(subagent_stop_listing("sub2", 1), Some("s1"), now);
+        assert_eq!(status_of(&fx), None, "still listed: held");
+        subagent(&mut m, true, "sub3", now);
+        let fx = m.handle(subagent_stop_listing("sub3", 0), Some("s1"), now);
+        assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
+    }
+
+    #[test]
+    fn shells_monitors_and_handed_off_tasks_never_hold_a_turn() {
+        for never in ["shell", "monitor", "MCP task", "cloud session", " Shell "] {
+            assert!(!holds_turn(never), "{never}");
+        }
+        for holds in ["subagent", "workflow", "teammate", "local_agent"] {
+            assert!(holds_turn(holds), "{holds}");
+        }
+    }
+
     #[test]
     fn stop_with_active_subagents_holds_running_until_drained() {
         let mut m = AgentStatusMachine::new(AgentStatus::Fresh, None);
@@ -2251,7 +2423,11 @@ mod tests {
             Some("s1"),
             now,
         );
-        let fx = m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(5));
+        let fx = m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(5),
+        );
         assert_eq!(status_of(&fx), None, "stays running, no transition");
         assert_eq!(m.status(), AgentStatus::Running);
 
@@ -2259,6 +2435,7 @@ mod tests {
         m.handle(
             HookEvent::SubagentStop {
                 subagent_id: Some("sub1".into()),
+                background: None,
             },
             Some("s1"),
             now + Duration::from_secs(60),
@@ -2274,7 +2451,11 @@ mod tests {
         let mut m = AgentStatusMachine::new(AgentStatus::Fresh, None);
         let now = t0();
         m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
-        m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(10));
+        m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(10),
+        );
         assert_eq!(m.status(), AgentStatus::Finished);
         // The subagent's own POST arrives 2s later — race heal.
         let fx = m.handle(
@@ -2292,7 +2473,11 @@ mod tests {
         let mut m = AgentStatusMachine::new(AgentStatus::Fresh, None);
         let now = t0();
         m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
-        m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(10));
+        m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(10),
+        );
         // An away-summary helper fires SubagentStart minutes later.
         let fx = m.handle(
             HookEvent::SubagentStart {
@@ -2467,11 +2652,16 @@ mod tests {
         assert_eq!(m.status(), AgentStatus::Running);
         // The Stop that follows a beat later agrees, and the drain still owns
         // the promotion.
-        let fx = m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(5));
+        let fx = m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(5),
+        );
         assert!(fx.is_empty());
         m.handle(
             HookEvent::SubagentStop {
                 subagent_id: Some("sub1".into()),
+                background: None,
             },
             Some("s1"),
             now + Duration::from_secs(6),
@@ -2491,7 +2681,11 @@ mod tests {
         let now = t0();
         m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
         progress(&mut m, false, now + Duration::from_secs(10));
-        m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(10));
+        m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(10),
+        );
         assert_eq!(m.status(), AgentStatus::Finished);
         let fx = m.handle(
             HookEvent::SubagentStart {
@@ -2539,7 +2733,11 @@ mod tests {
         let now = t0();
         m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
         // A manually-launched claude in the same cwd posts a Stop.
-        let fx = m.handle(HookEvent::Stop, Some("other-session"), now);
+        let fx = m.handle(
+            HookEvent::Stop { background: None },
+            Some("other-session"),
+            now,
+        );
         assert!(fx.is_empty());
         assert_eq!(m.status(), AgentStatus::Running);
     }
@@ -2564,7 +2762,11 @@ mod tests {
         );
         assert!(fx.contains(&Effect::SaveSessionId("s2".into())));
         // Old subagents gone: a Stop finishes immediately.
-        let fx = m.handle(HookEvent::Stop, Some("s2"), now + Duration::from_secs(6));
+        let fx = m.handle(
+            HookEvent::Stop { background: None },
+            Some("s2"),
+            now + Duration::from_secs(6),
+        );
         assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
     }
 
@@ -2593,7 +2795,11 @@ mod tests {
         let fx = m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
         assert_eq!(saved_ids(&fx), ["s1"]);
         // Once, not on every turn.
-        let fx = m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(5));
+        let fx = m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(5),
+        );
         assert!(saved_ids(&fx).is_empty(), "{fx:?}");
         let fx = m.handle(
             HookEvent::UserPromptSubmit,
@@ -2608,11 +2814,15 @@ mod tests {
         let mut m = AgentStatusMachine::new(AgentStatus::Fresh, None);
         let now = t0();
         m.handle(HookEvent::SessionStart { source: None }, Some("s1"), now);
-        let fx = m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(3));
+        let fx = m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(3),
+        );
         assert_eq!(saved_ids(&fx), ["s1"]);
         // A Stop never adopts: an id no start or prompt reported is not saved.
         let mut m = AgentStatusMachine::new(AgentStatus::Fresh, None);
-        let fx = m.handle(HookEvent::Stop, Some("s9"), now);
+        let fx = m.handle(HookEvent::Stop { background: None }, Some("s9"), now);
         assert!(saved_ids(&fx).is_empty(), "{fx:?}");
     }
 
@@ -2677,7 +2887,7 @@ mod tests {
         let mut m = AgentStatusMachine::new(AgentStatus::Fresh, None);
         let now = t0();
         m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
-        m.handle(HookEvent::Stop, Some("s1"), now);
+        m.handle(HookEvent::Stop { background: None }, Some("s1"), now);
         let fx = m.handle(HookEvent::SessionEnded { exit_code: Some(1) }, None, now);
         assert!(
             fx.is_empty(),
@@ -2700,11 +2910,18 @@ mod tests {
             now,
         );
         m.handle(
-            HookEvent::SubagentStop { subagent_id: None },
+            HookEvent::SubagentStop {
+                subagent_id: None,
+                background: None,
+            },
             Some("s1"),
             now,
         );
-        let fx = m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(1));
+        let fx = m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(1),
+        );
         assert_eq!(
             status_of(&fx),
             Some(AgentStatus::Finished),
@@ -2731,7 +2948,11 @@ mod tests {
             Some("s1"),
             now,
         );
-        let fx = m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(1));
+        let fx = m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(1),
+        );
         assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
     }
 }

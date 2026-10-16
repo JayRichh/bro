@@ -243,7 +243,8 @@ async fn serve(opts: DaemonOpts) -> Result<()> {
                 // rollout limits, every harness's context (`registry::usage`).
                 if matches!(
                     event,
-                    crate::status::HookEvent::UserPromptSubmit | crate::status::HookEvent::Stop
+                    crate::status::HookEvent::UserPromptSubmit
+                        | crate::status::HookEvent::Stop { .. }
                 ) {
                     let daemon = daemon.clone();
                     let agent = agent_id.clone();

@@ -237,6 +237,9 @@ pub struct HookPayload {
     pub last_assistant_message: Option<serde_json::Value>,
     /// `{"level": "high"}`: the effort in effect as the hook runs.
     pub effort: Option<serde_json::Value>,
+    /// Stop / SubagentStop (2.1.145+): the session's tasks still in
+    /// flight, each `{"id", "type", "status", …}`.
+    pub background_tasks: Option<serde_json::Value>,
 }
 
 /// The most of Claude's error words a stop note carries: a tooltip's worth.
@@ -252,6 +255,22 @@ fn text_of(value: Option<&serde_json::Value>) -> Option<String> {
 }
 
 impl HookPayload {
+    /// What `background_tasks` says of the work still in flight: how many
+    /// of its tasks carry the work on (`status::holds_turn`; one with no
+    /// type does). None without a list — absent is not the same as empty.
+    fn background(&self) -> Option<crate::status::Background> {
+        let tasks = self.background_tasks.as_ref()?.as_array()?;
+        let holders = tasks
+            .iter()
+            .filter(|task| {
+                task.get("type")
+                    .and_then(serde_json::Value::as_str)
+                    .is_none_or(crate::status::holds_turn)
+            })
+            .count();
+        Some(crate::status::Background { holders })
+    }
+
     /// `StopFailure`'s words for a tooltip: its details, else the error
     /// line itself, cut to [`STOP_DETAIL_MAX`] characters.
     fn stop_detail(&self) -> Option<String> {
@@ -291,7 +310,9 @@ pub struct HookQuery {
 pub fn parse_event(hook_event: &str, payload: &HookPayload) -> Option<HookEvent> {
     Some(match hook_event {
         "UserPromptSubmit" => HookEvent::UserPromptSubmit,
-        "Stop" => HookEvent::Stop,
+        "Stop" => HookEvent::Stop {
+            background: payload.background(),
+        },
         // What the daemon knows of a limit's wait is filled in on the way
         // to the status machine (`Daemon::apply_hook_event`).
         "StopFailure" => HookEvent::StopFailure {
@@ -321,6 +342,7 @@ pub fn parse_event(hook_event: &str, payload: &HookPayload) -> Option<HookEvent>
         },
         "SubagentStop" => HookEvent::SubagentStop {
             subagent_id: payload.subagent_id(),
+            background: payload.background(),
         },
         _ => return None,
     })
@@ -857,6 +879,70 @@ mod tests {
         );
     }
 
+    /// `background_tasks` on a Stop (the docs' own example: one shell left
+    /// running) and on a SubagentStop counts the tasks that carry the work
+    /// on; no list is no count, and a list of another shape loses only
+    /// that field.
+    #[test]
+    fn background_tasks_count_what_holds_the_turn() {
+        use crate::status::Background;
+        let stop = |body: &str| {
+            let payload: HookPayload = serde_json::from_str(body).unwrap_or_default();
+            (
+                parse_event("Stop", &payload),
+                parse_event("SubagentStop", &payload),
+                payload.session_id,
+            )
+        };
+        let docs = r#"{"session_id":"abc123","hook_event_name":"Stop","stop_hook_active":true,
+            "last_assistant_message":"I've completed the refactoring.",
+            "background_tasks":[{"id":"task-001","type":"shell","status":"running",
+                "description":"tail logs","command":"tail -f /var/log/syslog"}],
+            "session_crons":[{"id":"cron-001","schedule":"0 9 * * 1-5","recurring":true,"prompt":"check the build"}]}"#;
+        let (s, sub, sid) = stop(docs);
+        let none_hold = Some(Background { holders: 0 });
+        assert_eq!(
+            s,
+            Some(HookEvent::Stop {
+                background: none_hold
+            })
+        );
+        assert_eq!(
+            sub,
+            Some(HookEvent::SubagentStop {
+                subagent_id: None,
+                background: none_hold
+            })
+        );
+        assert_eq!(sid.as_deref(), Some("abc123"));
+
+        let (s, ..) = stop(
+            r#"{"background_tasks":[{"type":"subagent","agent_type":"Explore"},
+                {"type":"workflow","name":"ship"},{"type":"teammate"},{"type":"monitor"},
+                {"type":"MCP task"},{"type":"cloud session"},{"id":"no-type"}]}"#,
+        );
+        assert_eq!(
+            s,
+            Some(HookEvent::Stop {
+                background: Some(Background { holders: 4 })
+            })
+        );
+        let (s, ..) = stop(r#"{"background_tasks":[]}"#);
+        assert_eq!(
+            s,
+            Some(HookEvent::Stop {
+                background: none_hold
+            })
+        );
+        let (s, ..) = stop(r#"{"session_id":"s1"}"#);
+        assert_eq!(s, Some(HookEvent::Stop { background: None }));
+        let (s, _, sid) = stop(r#"{"session_id":"s1","background_tasks":{"odd":1}}"#);
+        assert_eq!(
+            (s, sid.as_deref()),
+            (Some(HookEvent::Stop { background: None }), Some("s1"))
+        );
+    }
+
     /// The effort a Claude tool or Stop payload reports rides the delivery
     /// for the row to follow, but never a subagent's (its own level) and
     /// never another CLI's.
@@ -1253,7 +1339,7 @@ mod tests {
         // Another event with a prompt field is not a prompt.
         post("Stop", r#"{"session_id":"s1","prompt":"leftover"}"#).await;
         let delivery = rx.recv().await.unwrap();
-        assert_eq!(delivery.event, HookEvent::Stop);
+        assert_eq!(delivery.event, HookEvent::Stop { background: None });
         assert!(delivery.prompt.is_none());
     }
 
