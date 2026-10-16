@@ -321,18 +321,36 @@ pub fn xml_path() -> std::path::PathBuf {
     crate::paths::data_dir().join("wake-task.xml")
 }
 
+/// kete with no console window (`crates/nebula/src/kete_w.rs`), shipped
+/// beside `kete.exe` on Windows.
+pub const LAUNCHER: &str = "kete-w.exe";
+
+/// What the scheduled task runs for the kete at `kete`: the windowless
+/// [`LAUNCHER`] beside it when it is there (true), else kete itself, whose
+/// console shows for as long as each run lasts (false). Off Windows, kete.
+pub fn program_for(kete: &str) -> (String, bool) {
+    if cfg!(windows) {
+        let launcher = Path::new(kete).with_file_name(LAUNCHER);
+        if launcher.is_file() {
+            return (launcher.to_string_lossy().into_owned(), true);
+        }
+    }
+    (kete.to_string(), false)
+}
+
 /// Save `account`'s schedule (None removes it) and bring the scheduled
 /// task in line with every schedule: what `kete wake set` / `off` and both
-/// apps run. `exe` is kete's binary, which the task runs. On macOS and
+/// apps run. `kete` is kete's binary; the task runs the windowless
+/// launcher beside it when there is one ([`program_for`]). On macOS and
 /// Linux nothing is installed (the task half is a no-op). The schedule is
 /// saved even when the task can't be written; the Err then says so.
-pub fn save(account: &str, schedule: Option<&WakeSchedule>, exe: &str) -> Result<Synced, String> {
+pub fn save(account: &str, schedule: Option<&WakeSchedule>, kete: &str) -> Result<Synced, String> {
     super::set(account, schedule)?;
     let schedules = super::load();
     sync(
         &*system_runner(),
         &schedules,
-        exe,
+        &program_for(kete).0,
         current_user().as_deref(),
         &xml_path(),
     )
@@ -341,7 +359,9 @@ pub fn save(account: &str, schedule: Option<&WakeSchedule>, exe: &str) -> Result
 
 /// One line on where things stand with the trigger, for a person:
 /// `Task Scheduler: Kete\Whakaoho runs kete wake --all at 05:00, 10:00`.
-pub fn status_line(schedules: &BTreeMap<String, WakeSchedule>) -> String {
+/// `kete` is the binary the task is set up from: one with no windowless
+/// launcher beside it gets a note that each run shows a console.
+pub fn status_line(schedules: &BTreeMap<String, WakeSchedule>, kete: Option<&str>) -> String {
     let times: Vec<String> = triggers(schedules)
         .keys()
         .map(|m| super::hhmm(*m))
@@ -358,6 +378,11 @@ pub fn status_line(schedules: &BTreeMap<String, WakeSchedule>) -> String {
             line.push_str(&format!(
                 " (not registered: {} is set)",
                 crate::env::WAKE_NO_TASK
+            ));
+        }
+        if kete.is_some_and(|kete| !program_for(kete).1) {
+            line.push_str(&format!(
+                ". Each run shows a console window: {LAUNCHER} isn't beside kete (reinstall to get it)"
             ));
         }
         line
@@ -483,6 +508,34 @@ mod tests {
                 "45 23 * * * '/usr/bin/kete' wake --all",
             ]
         );
+    }
+
+    #[test]
+    fn the_task_runs_the_windowless_launcher_when_it_is_beside_kete() {
+        let dir = tempfile::tempdir().unwrap();
+        let kete = dir.path().join("kete.exe");
+        std::fs::write(&kete, b"").unwrap();
+        let kete = kete.to_string_lossy().into_owned();
+        let schedules = map(&[("work", on(300, WEEKDAYS))]);
+        // No launcher: kete itself, and the line says a console shows.
+        assert_eq!(program_for(&kete), (kete.clone(), false));
+        let xml = task_xml(&schedules, &program_for(&kete).0, None).unwrap();
+        assert!(xml.contains(&format!("<Command>{kete}</Command>")), "{xml}");
+        if cfg!(windows) {
+            assert!(status_line(&schedules, Some(&kete)).contains("shows a console window"));
+        }
+        std::fs::write(dir.path().join(LAUNCHER), b"").unwrap();
+        let (program, hidden) = program_for(&kete);
+        if cfg!(windows) {
+            assert!(hidden);
+            assert_eq!(program, dir.path().join(LAUNCHER).to_string_lossy());
+            let xml = task_xml(&schedules, &program, None).unwrap();
+            assert!(xml.contains("kete-w.exe</Command>"), "{xml}");
+            assert!(xml.contains("<Arguments>wake --all</Arguments>"));
+            assert!(!status_line(&schedules, Some(&kete)).contains("console"));
+        } else {
+            assert_eq!((program, hidden), (kete, false), "off Windows, kete itself");
+        }
     }
 
     #[test]

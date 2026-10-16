@@ -104,7 +104,7 @@ pub async fn wake_set(account: String, schedule: WakeSchedule) -> Res<String> {
     let exe = exe.trim_start_matches(r"\\?\").to_string();
     tokio::task::spawn_blocking(move || {
         task::save(&account, Some(&schedule), &exe)?;
-        Ok(task::status_line(&wake::load()))
+        Ok(task::status_line(&wake::load(), Some(&exe)))
     })
     .await
     .map_err(|e| e.to_string())?

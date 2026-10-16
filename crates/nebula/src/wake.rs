@@ -894,7 +894,7 @@ fn sync_task() -> Result<()> {
         let synced = task::sync(
             &*runner,
             &schedules,
-            &exe,
+            &task::program_for(&exe).0,
             task::current_user().as_deref(),
             &task::xml_path(),
         );
@@ -908,15 +908,7 @@ fn sync_task() -> Result<()> {
         }
         match synced {
             Ok(task::Synced::Written { .. }) => {
-                let times: Vec<String> = task::triggers(&schedules)
-                    .keys()
-                    .map(|m| wake::hhmm(*m))
-                    .collect();
-                println!(
-                    "  Task Scheduler: {} runs `kete wake --all` at {}",
-                    task::TASK_NAME,
-                    times.join(", ")
-                );
+                println!("  {}", task::status_line(&schedules, Some(&exe)));
                 Ok(())
             }
             Ok(task::Synced::Removed) => {
@@ -1044,7 +1036,10 @@ fn status(as_json: bool) -> Result<()> {
             "daemon": daemon_up,
             "windows": cfg!(windows),
             "task_name": task::TASK_NAME,
-            "task_line": task::status_line(&schedules),
+            "task_line": task::status_line(&schedules, Some(&own_exe()?)),
+            // The task runs kete-w.exe, which shows no window; false: kete
+            // itself, whose console shows while each run lasts.
+            "task_hidden": task::program_for(&own_exe()?).1,
             "task": task::triggers(&schedules).keys().map(|m| wake::hhmm(*m)).collect::<Vec<_>>(),
             "crontab": task::crontab_lines(&schedules, &own_exe()?),
             "log": wake::log_path(),
@@ -1145,11 +1140,7 @@ fn status(as_json: bool) -> Result<()> {
     if times.is_empty() {
         println!("Nothing scheduled. Switch an account on: kete wake set <account> --at 05:00");
     } else if cfg!(windows) {
-        println!(
-            "Task Scheduler: {} runs `kete wake --all` at {}.",
-            task::TASK_NAME,
-            times.join(", ")
-        );
+        println!("{}.", task::status_line(&schedules, Some(&own_exe()?)));
     } else {
         println!("Add to `crontab -e` (Kete installs nothing here):");
         for line in task::crontab_lines(&schedules, &own_exe()?) {
