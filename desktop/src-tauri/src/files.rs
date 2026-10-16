@@ -158,6 +158,10 @@ pub fn opened_file_open(
     path: String,
 ) -> Res<()> {
     let p = opened.check(&path)?;
+    // An agent can `kete open` anything: a script's default app runs it.
+    if nebula_core::editors::runs_program(&p) {
+        return Err(nebula_core::editors::RUNS_PROGRAM.into());
+    }
     app.opener()
         .open_path(p.display().to_string(), None::<&str>)
         .map_err(|e| e.to_string())

@@ -254,11 +254,15 @@ export function factsFor(worktree: string | null): Facts {
 /** A menu for a thing in `worktree` is opening: read whether an editor
  *  window is open there, and what Visual Studio would open, for this menu's
  *  next opening and the hover icons. */
-export function touch(worktree: string | null | undefined) {
+export function touch(worktree: string | null | undefined, now = Date.now()) {
   if (!worktree) return;
+  // The palette builds the same menus as it filters: once a second will do.
+  if (now - (touched.get(worktree) ?? 0) < 1000) return;
+  touched.set(worktree, now);
   void probeWindows([worktree]);
   refreshTargets([worktree]);
 }
+const touched = new Map<string, number>();
 
 const worktreeOf = (id: string): Worktree | undefined => app.model.worktrees.find((w) => w.id === id);
 
