@@ -1354,7 +1354,7 @@ fn the_install_looks_in_the_users_extensions_before_the_builtin_ones() {
     );
     let dir = tempfile::tempdir().unwrap();
     let vs = install_in(dir.path());
-    assert_eq!(vs.extension_dirs(), [vs.extensions.clone()]);
+    assert_eq!(vs.extension_dirs(), std::slice::from_ref(&vs.extensions));
 }
 
 /// `workbench.colorTheme` names the theme, a user's or a built-in, and the
