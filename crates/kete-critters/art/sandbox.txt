@@ -1,0 +1,355 @@
+# Blocky-sandbox archetypes (originals, not copies). Frames face right.
+
+== boom_bug
+size 12 9
+pal h #a4d96c
+pal a #7cbc52
+pal b #5a9a3e
+pal c #3f7a30
+pal d #26502a
+pal e #18121e
+pal g #e8f4d8
+lid c
+-- idle
+........d..d
+.hhhhhh.d..d
+haabaabhhhhh
+abbcbbacgagb
+bcbbabbceaeb
+abbcbbccbbbb
+ccbccbccbddc
+.cc.cc.cc.cc
+.dd....dd...
+-- walk
+........d..d
+.hhhhhh.d..d
+haabaabhhhhh
+abbcbbacgagb
+bcbbabbceaeb
+abbcbbccbbbb
+ccbccbccbddc
+.cc.cc.cc.cc
+....dd....dd
+-- sit
+............
+............
+........d..d
+.hhhhhh.d..d
+haabaabhhhhh
+abbcbbacgagb
+bcbbabbceaeb
+abbcbbccbbbb
+ccbccbccbddc
+-- eat
+............
+.hhhhhh.....
+haabaab.d..d
+abbcbba.d..d
+bcbbabbhhhhh
+abbcbbccgagb
+ccbccbcceaeb
+.cc.cc.cbbbb
+.dd.dd.cdddc
+-- held
+........d..d
+.hhhhhh.d..d
+haabaabhhhhh
+abbcbbacgagb
+bcbbabbceaeb
+abbcbbccbddb
+.cc.cc.cc.cc
+.cc.cc.cc.cc
+.dd.dd.dd.dd
+
+== slime
+size 10 9
+pal H #f2fff2
+pal h #a6f4c6
+pal c #b8f6cc
+pal m #44b67e
+pal d #1f7a56
+pal D #1f7a56
+pal e #18121e
+lid d
+-- idle
+..........
+.hhhhmmmm.
+hhmmmmmmmd
+HmccccccmD
+mmceccecmd
+mmccddccmd
+mmccccccmd
+mmmmmmmmdd
+.dddddddd.
+-- walk
+..hhmmmm..
+.hmmmmmmd.
+.Hccccccd.
+.mceccecd.
+.mccddccd.
+.mccccccd.
+.mmmmmmmd.
+.mmmmmmdd.
+..dddddd..
+-- sit
+..........
+..........
+..........
+..........
+.hhhhmmmm.
+hmceccecmd
+mmccddccmd
+mmmmmmmmdd
+.dddddddd.
+-- eat
+..........
+..........
+..........
+.hhhhmmmm.
+hhmmmmmmmd
+hmceccecmd
+mmcddddcmd
+mmmccccmdd
+.dddddddd.
+-- held
+....hm....
+...hmmmm..
+..hmmmmmd.
+.hmcccccd.
+.mceccecd.
+.mccddccd.
+.mmcccmmd.
+..mmmmmd..
+...dddd...
+
+== slime_mini
+size 6 5
+pal H #f2fff2
+pal h #a6f4c6
+pal c #b8f6cc
+pal m #44b67e
+pal d #1f7a56
+pal e #18121e
+lid d
+-- idle
+......
+.hhmm.
+hmcccd
+meccem
+.dddd.
+-- walk
+..hm..
+.hmmd.
+.mcec.
+.mccd.
+..dd..
+-- sit
+......
+......
+.hhmm.
+meccem
+.dddd.
+-- eat
+......
+.hhmm.
+hmcccd
+mecedd
+.dddd.
+-- held
+..hm..
+.hmmd.
+.mcec.
+.mccd.
+..dd..
+
+== axolotl
+size 14 7
+pal G #cf4a6c
+pal q #ec7f9a
+pal P #fcd0d8
+pal p #f6aab8
+pal w #fde6ea
+pal s #d27890
+pal r #f08aa0
+pal S #a8405c
+pal e #2a1c2c
+lid s
+-- idle
+......GGG.....
+....qGGGGPPPP.
+......GGGppepP
+...pqGGGGprSSp
+sspppppppppppP
+..pwwwwwwwwwws
+..ss.ss.ss.ss.
+-- walk
+......GGG.....
+....qGGGGPPPP.
+......GGGppepP
+ssppqGGGGprSSp
+..pppppppppppP
+..pwwwwwwwwwws
+..ss....ss....
+-- walk
+......GGG.....
+....qGGGGPPPP.
+......GGGppepP
+...pqGGGGprSSp
+sspppppppppppP
+..pwwwwwwwwwws
+.....ss....ss.
+-- sit
+..............
+......GGG.....
+....qGGGGPPPP.
+......GGGppepP
+...pqGGGGprSSp
+sspppppppppppP
+..pwwwwwwwwwws
+-- eat
+..............
+......GGG.....
+....qGGGGPPPP.
+......GGGppepP
+...pppppppSSSp
+ssppppppppSSSP
+..pwwwwwwwwwws
+-- held
+......GGG.....
+....qGGGGPPPP.
+......GGGppepP
+...pqGGGGprSSp
+sspppppppppppP
+..p..p..p..p..
+..s..s..s..s..
+
+== bee
+size 11 7
+pal Y #fce47e
+pal y #f4c430
+pal o #cf9420
+pal k #4a3426
+pal w #d4ecfa
+pal W #92bde0
+pal f #ee7a9c
+pal F #b84e70
+pal e #18121e
+pal O #f6a830
+lid o
+-- idle
+..ww.ww....
+..wWwwWw...
+..kYykyyy..
+.ykyykyyey.
+kykyykyyeo.
+.okookooo..
+..k..k.k...
+-- walk
+.ww.ww.....
+.wWwwWw....
+..kYykyyy..
+.ykyykyyey.
+kykyykyyeo.
+.okookooo..
+...k.k..k..
+-- sit
+...........
+...........
+.wwwwww....
+.wWkYkyy...
+.ykyykyyey.
+kykyykyyeo.
+.okookooo..
+-- eat
+...........
+..ww.ww....
+..wWwwWw...
+..kYykyyy..
+.ykyykyyeFf
+kykyykyyyfO
+.okookoooFf
+-- held
+..ww.ww....
+..wWwwWw...
+..kYykyyy..
+.ykyykyyey.
+kykyykyyeo.
+..k..k.k...
+..k..k.k...
+-- fly
+.ww..ww....
+.wWw.wWw...
+..wwwwww...
+.kYykyyy...
+ykyykyyyey.
+.ykyykyyyo.
+..okookoo..
+-- fly
+...........
+..kYykyyy..
+.ykyykyyey.
+kykyykyyeo.
+.okookooo..
+.wwWWwww...
+..wwwWw....
+
+== wisp
+size 8 9
+pal w #f4fdff
+pal c #b0eafc
+pal b #6ccaf2
+pal B #3f9ad6
+pal W #d8f4ff
+pal e #18121e
+pal g #f4fdff
+lid B
+-- idle
+...ccc..
+..cwwwcb
+Wwccgcgb
+.WcceceB
+..cwccbB
+...cwcbB
+...ccbB.
+..cbbB..
+.bBB....
+-- walk
+...ccc..
+..cwwwcb
+..ccgcgb
+.WcceceB
+WwcwccbB
+...cwcbB
+...ccbB.
+...cbbB.
+...bBB..
+-- sit
+........
+........
+...ccc..
+..cwwwcb
+Wwccgcgb
+.WcceceB
+..cwccbB
+..ccwcbB
+.bBBBBb.
+-- eat
+........
+........
+...ccc..
+..cwwwcb
+Wwcccccb
+.WcgegeB
+..cwccbB
+..ccwcbB
+.bBBBBb.
+-- held
+...ccc..
+..cwwwcb
+.WccgcgB
+WwcceceB
+..cwccbB
+...cwcb.
+...ccb..
+...cbB..
+...bB...

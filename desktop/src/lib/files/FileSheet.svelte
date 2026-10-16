@@ -7,6 +7,7 @@
   import { languageOf, fileIcon } from '../icons';
   import { defineMonacoTheme, termFamily } from '../theme';
   import { closeFiles, filesApi, sheet, showFiles, stepTab, type FileText } from './files.svelte';
+  import { registerViewer } from '../menus/surfaces';
   import type * as Monaco from 'monaco-esm/editor/editor.api.js';
 
   let box = $state<HTMLElement>();
@@ -86,6 +87,17 @@
   onDestroy(() => {
     unlisten?.();
     dropEditor();
+  });
+
+  // The viewer's right-click menu (menus/builtin.ts): Copy path:line is
+  // this tab's file.
+  $effect(() => {
+    const el = host;
+    if (!el) return;
+    return registerViewer(el, {
+      editorAt: (n) => (editor?.getDomNode()?.contains(n) ? { editor, old: false } : null),
+      path: () => shown.path || null,
+    });
   });
 
   function onKey(e: KeyboardEvent) {

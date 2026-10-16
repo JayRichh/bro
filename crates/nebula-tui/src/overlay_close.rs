@@ -52,6 +52,7 @@ pub(crate) fn overlay_area(overlay: &Overlay) -> Rect {
         Overlay::Subagents(v) => v.area,
         Overlay::Ado(v) => v.area,
         Overlay::Ship(v) => v.area,
+        Overlay::CritterLog(v) => v.area,
     }
 }
 

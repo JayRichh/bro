@@ -57,6 +57,13 @@ impl Overlay {
             Overlay::Subagents(view) => super::subagents_view::draw(f, app, view),
             Overlay::Ado(view) => super::ado_view::draw(f, app, view),
             Overlay::Ship(view) => super::ship_view::draw(f, app, view),
+            Overlay::CritterLog(mut view) => {
+                let area = f.area();
+                crate::critters::draw_log(f.buffer_mut(), app, &mut view, area);
+                if let Some(Overlay::CritterLog(live)) = &mut app.modals.overlay {
+                    live.area = view.area;
+                }
+            }
         }
     }
 }
@@ -896,7 +903,11 @@ fn draw_settings_overlay(f: &mut Frame, app: &mut App, view: crate::app::Setting
                     Style::default().fg(th.warn),
                 ))),
                 None => {
-                    let hint = crate::config::hint_at(tab, view.selected);
+                    let mut hint = crate::config::hint_at(tab, view.selected);
+                    // The CRITTERS rows lead to the collection log.
+                    if crate::critters::is_critters_row(tab, view.selected) {
+                        hint.push_str("  ⇧L critter log");
+                    }
                     lines.push(Line::from(Span::styled(
                         truncate(&format!(" {hint}"), inner.width as usize),
                         dim,

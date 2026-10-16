@@ -46,9 +46,31 @@
       if (m.search) {
         field?.focus();
         at = actionable[0] ?? -1;
-      } else box.focus();
+      } else if (!m.keep) box.focus();
     });
   });
+
+  // A menu that keeps the focus where it was (a field's, the terminal's)
+  // takes every key from the window while it is up, as a native menu
+  // does, and goes when the window does.
+  $effect(() => {
+    if (!ui.menu?.keep) return;
+    const take = (e: KeyboardEvent) => {
+      e.preventDefault();
+      onKey(e);
+    };
+    window.addEventListener('keydown', take, true);
+    window.addEventListener('blur', closeMenu);
+    return () => {
+      window.removeEventListener('keydown', take, true);
+      window.removeEventListener('blur', closeMenu);
+    };
+  });
+
+  /** A click on a kept menu, or outside it, leaves the focus put. */
+  function keepFocus(e: MouseEvent) {
+    if (ui.menu?.keep) e.preventDefault();
+  }
 
   // The row under the keys stays in view in a long list.
   $effect(() => {
@@ -94,10 +116,13 @@
 
 {#if ui.menu}
   <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-  <div class="fixed inset-0 z-40" onmousedown={closeMenu} oncontextmenu={(e) => (e.preventDefault(), closeMenu())}></div>
+  <!-- Above the sheets and dialogs (z-40/50): a field's menu in a dialog
+       shows over it. -->
+  <div class="fixed inset-0 z-[55]" onmousedown={(e) => (keepFocus(e), closeMenu())} oncontextmenu={(e) => (e.preventDefault(), closeMenu())}></div>
   <div
     bind:this={box}
-    class="fixed z-50 flex max-h-[80vh] min-w-[220px] flex-col border border-rule-strong bg-bg text-[13px] text-ink outline-none {ui.menu.search
+    onmousedown={keepFocus}
+    class="fixed z-[60] flex max-h-[80vh] min-w-[220px] flex-col border border-rule-strong bg-bg text-[13px] text-ink outline-none {ui.menu.search
       ? 'w-[min(360px,92vw)]'
       : 'max-w-[340px]'}"
     style="left: {pos.x}px; top: {pos.y}px"

@@ -1011,6 +1011,16 @@ impl Store {
         Ok(())
     }
 
+    /// The effort the next spawn or resume passes (`--effort`): the
+    /// launch's choice, or what Claude reported it runs at since.
+    pub fn set_agent_effort(&self, id: &AgentId, effort: Option<&str>) -> Result<()> {
+        self.conn.lock().execute(
+            "UPDATE agents SET effort = ?2 WHERE id = ?1",
+            params![id.as_str(), effort],
+        )?;
+        Ok(())
+    }
+
     pub fn delete_agent(&self, id: &AgentId) -> Result<()> {
         self.delete_by_id("agents", id.as_str())
     }

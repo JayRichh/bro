@@ -21168,6 +21168,12 @@ fn every_overlay() -> Vec<(&'static str, fn(&mut App), Option<&'static str>)> {
             None,
         ),
         (
+            // The critter menu's **Critter log…**.
+            "CritterLog",
+            |app| crate::critters::open_log(app),
+            None,
+        ),
+        (
             // ⇧S from the grid.
             "Subagents",
             |app| {
@@ -21324,6 +21330,7 @@ fn overlay_label(overlay: &Overlay) -> &'static str {
         Overlay::Subagents(_) => "Subagents",
         Overlay::Ado(_) => "Ado",
         Overlay::Ship(_) => "Ship",
+        Overlay::CritterLog(_) => "CritterLog",
     }
 }
 
@@ -21353,7 +21360,7 @@ fn the_overlay_table_covers_every_variant_exactly_once() {
         let mut unique = seen.clone();
         unique.dedup();
         assert_eq!(unique, seen, "two rows for the same variant");
-        assert_eq!(seen.len(), 23, "a variant came or went: {seen:?}");
+        assert_eq!(seen.len(), 24, "a variant came or went: {seen:?}");
     });
 }
 
@@ -22614,6 +22621,7 @@ fn a_desktop_write_waits_for_the_reset_confirm_too() {
 }
 mod board;
 mod buttons;
+mod critters;
 mod dispatch;
 mod learn;
 mod menus;

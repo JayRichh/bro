@@ -60,6 +60,10 @@ pub struct Model {
     /// Each session's context window, keyed by agent id
     /// (`ServerEvent::SessionContexts`).
     pub contexts: HashMap<String, nebula_core::usage::ContextUsage>,
+    /// Why each session's last turn stopped short (waiting out a usage
+    /// limit, logged out, an API error), keyed by agent id
+    /// (`ServerEvent::SessionStops`, a 62+ daemon).
+    pub stops: HashMap<String, nebula_core::stop::StopNote>,
     /// Each session's lane and attention tier by agent id, archived ones
     /// too: nebula-core's rule, filled in by [`Client::snapshot`]
     /// ([`crate::board::fill`]), never by the window.
@@ -564,6 +568,8 @@ impl Client {
                 // A 59+ daemon sends its recorded bases after this; an
                 // older one never does, and none of these may outlive it.
                 m.bases.clear();
+                // A 62+ daemon sends its stop notes after this too.
+                m.stops.clear();
                 drop(m);
                 self.touch();
             }
@@ -586,6 +592,7 @@ impl Client {
                     EntityId::Worktree(id) => m.worktrees.retain(|x| x.id != id),
                     EntityId::Agent(id) => {
                         m.contexts.remove(&id.0);
+                        m.stops.remove(&id.0);
                         m.subagents.retain(|s| s.parent_agent != id);
                         m.agents.retain(|x| x.id != id);
                     }
@@ -661,6 +668,17 @@ impl Client {
                 let mut m = self.model.lock().expect("model lock");
                 for c in contexts {
                     m.contexts.insert(c.agent.0, c.context);
+                }
+                drop(m);
+                self.touch();
+            }
+            ServerEvent::SessionStops { stops } => {
+                let mut m = self.model.lock().expect("model lock");
+                for s in stops {
+                    match s.note {
+                        Some(note) => m.stops.insert(s.agent.0, note),
+                        None => m.stops.remove(&s.agent.0),
+                    };
                 }
                 drop(m);
                 self.touch();
@@ -1305,6 +1323,77 @@ mod tests {
             id: EntityId::Agent(AgentId("b".into())),
         });
         assert!(!client.snapshot().contexts.contains_key("b"));
+    }
+
+    /// Stop notes fold in by agent (`None` clears one), reach the frontend
+    /// in the model's snake_case spelling, and go with a Snapshot or their
+    /// row: the daemon resends the list after every Snapshot.
+    #[test]
+    fn stop_notes_reach_the_frontend_model() {
+        use nebula_core::stop::{SessionStop, StopNote};
+        let note = |reason: &str, waiting: bool| StopNote {
+            reason: reason.into(),
+            waiting,
+            resumes: waiting.then(|| "3:45pm".to_string()),
+            resets_at: Some(1_800_000_000),
+            detail: None,
+            at: 1_700_000_000_000,
+        };
+        let stop = |agent: &str, note: Option<StopNote>| SessionStop {
+            agent: AgentId(agent.into()),
+            note,
+        };
+        let client = Client::new();
+        client.handle(ServerEvent::SessionStops {
+            stops: vec![
+                stop("a", Some(note("rate_limit", true))),
+                stop("b", Some(note("authentication_failed", false))),
+            ],
+        });
+        let json = serde_json::to_value(client.snapshot()).unwrap();
+        assert_eq!(json["stops"]["a"]["reason"], "rate_limit");
+        assert_eq!(json["stops"]["a"]["waiting"], true);
+        assert_eq!(json["stops"]["a"]["resumes"], "3:45pm");
+        assert_eq!(json["stops"]["a"]["resets_at"], 1_800_000_000);
+        assert!(json["stops"]["a"]["detail"].is_null());
+        assert_eq!(json["stops"]["a"]["at"], 1_700_000_000_000_i64);
+        assert_eq!(json["stops"]["b"]["reason"], "authentication_failed");
+
+        // A later note for the same session replaces it; None clears it,
+        // and clearing a session with no note is harmless.
+        client.handle(ServerEvent::SessionStops {
+            stops: vec![
+                stop("a", Some(note("overloaded", false))),
+                stop("b", None),
+                stop("never", None),
+            ],
+        });
+        let json = serde_json::to_value(client.snapshot()).unwrap();
+        assert_eq!(json["stops"]["a"]["reason"], "overloaded");
+        assert!(json["stops"].get("b").is_none());
+
+        // The row going takes its note.
+        client.handle(ServerEvent::SessionStops {
+            stops: vec![stop("c", Some(note("billing_error", false)))],
+        });
+        client.handle(ServerEvent::EntityRemoved {
+            id: EntityId::Agent(AgentId("c".into())),
+        });
+        assert!(!client.snapshot().stops.contains_key("c"));
+        assert!(client.snapshot().stops.contains_key("a"));
+
+        // A Snapshot clears them all; the daemon sends the list again.
+        client.handle(ServerEvent::Snapshot {
+            projects: Vec::new(),
+            worktrees: Vec::new(),
+            agents: Vec::new(),
+            terminals: Vec::new(),
+            links: Vec::new(),
+            pr_seen: Vec::new(),
+            ui_state: None,
+            subagents: Vec::new(),
+        });
+        assert!(client.snapshot().stops.is_empty());
     }
 
     /// Mirrors the daemon's prune: per parent, the newest

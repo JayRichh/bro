@@ -21,6 +21,9 @@ impl Daemon {
         // record before every event, so the machine's copy cannot go stale
         // — and before the machines lock, so the two are never nested.
         let relocating = self.pending_moves.lock().contains_key(agent_id);
+        // A usage limit's `StopFailure` learns what the screen and the
+        // account say of the wait, outside every lock here.
+        let event = self.with_limit_outlook(agent_id, event);
         let outcome = {
             let mut machines = self.status_machines.lock();
             match machines.entry(agent_id.clone()) {
@@ -119,6 +122,7 @@ impl Daemon {
                         tracing::warn!(error = %e, "persist session id failed");
                     }
                 }
+                Effect::SetStop(cause) => self.apply_stop(agent_id, cause),
             }
         }
     }

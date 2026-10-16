@@ -393,6 +393,9 @@ impl Daemon {
         cloud_task: Option<&str>,
         initial_prompt: Option<&str>,
     ) -> Result<Arc<PtySession>> {
+        // A fresh CLI: whatever the last one waited out or was stuck on
+        // went with it (`registry::stops`).
+        self.reset_stop(&agent.id);
         // A session the user sent to Claude's background (`/background`)
         // can't be resumed, only attached to — see `claude_bg`. The probe
         // costs a login shell, so it hides behind the one-`stat` hint.

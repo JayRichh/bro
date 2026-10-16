@@ -10,6 +10,11 @@ pub(super) fn handle_mouse(app: &mut App, mouse: MouseEvent, out: &mut Vec<Clien
     if app.pane.vim.is_some() {
         return;
     }
+    // The CRITTERS get the mouse first, but only on a cell one is drawn in
+    // (or while one is held); with a modal up they stay out of its way.
+    if app.modals.overlay.is_none() && crate::critters::handle_mouse(app, &mouse) {
+        return;
+    }
 
     if handle_overlay_mouse(app, mouse, mouse_pos, out) {
         return;
@@ -97,6 +102,7 @@ fn handle_overlay_mouse(
         Overlay::OrchestratorStart(_) => orchestrator::handle_start_mouse(app, mouse, out),
         Overlay::Accounts(_) => accounts::handle_mouse(app, mouse, out),
         Overlay::Ship(_) => ship::handle_mouse(app, mouse, mouse_pos, out),
+        Overlay::CritterLog(_) => crate::critters::log_mouse(app, &mouse),
         _ => true,
     }
 }

@@ -39,6 +39,7 @@
   import { fileIcon, languageOf } from './icons';
   import { blockLine, replacementModel, type ReplacementModel } from './replacement';
   import { defineMonacoTheme, termFamily, token } from './theme';
+  import { joinPath, registerViewer, type ViewerSurface } from './menus/surfaces';
   import type * as Monaco from 'monaco-esm/editor/editor.api.js';
 
   let {
@@ -559,8 +560,28 @@
     });
     repEditor = monaco.editor.create(repHost, { ...base, glyphMargin: false, folding: false, lineDecorationsWidth: 8 });
     repDecorations = repEditor.createDecorationsCollection();
+    // The viewers' right-click menu (menus/builtin.ts): which editor, and
+    // the shown file on disk.
+    const viewer: ViewerSurface = {
+      editorAt: (el) => {
+        const sides: { editor: Monaco.editor.ICodeEditor; old: boolean }[] = diffEditor
+          ? [
+              { editor: diffEditor.getOriginalEditor(), old: true },
+              { editor: diffEditor.getModifiedEditor(), old: false },
+            ]
+          : [];
+        if (repEditor) sides.push({ editor: repEditor, old: false });
+        return sides.find((s) => s.editor.getDomNode()?.contains(el)) ?? null;
+      },
+      path: () => {
+        const root = app.model.worktrees.find((w) => w.id === worktree)?.path;
+        return root && shown ? joinPath(root, shown.path) : null;
+      },
+    };
+    unregisterViewers = [registerViewer(diffHost, viewer), registerViewer(repHost, viewer)];
     ready = true;
   });
+  let unregisterViewers: (() => void)[] = [];
 
   let loadedFor = '';
   // Another session (or none): the whole worktree again.
@@ -602,6 +623,7 @@
   });
 
   onDestroy(() => {
+    for (const off of unregisterViewers) off();
     const pair = diffEditor?.getModel();
     const one = repEditor?.getModel();
     diffEditor?.dispose();

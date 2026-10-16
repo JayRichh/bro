@@ -1,6 +1,6 @@
 //! The ACCOUNTS OVERLAY's keys, and the usage the daemon pushes
-//! (`ServerEvent::AccountUsage` / `SessionContexts`). State and rows live
-//! in `crate::accounts_overlay`.
+//! (`ServerEvent::AccountUsage` / `SessionContexts` / `SessionStops`).
+//! State and rows live in `crate::accounts_overlay`.
 
 use super::*;
 use crate::accounts_overlay::{
@@ -484,6 +484,22 @@ pub(crate) fn on_session_contexts(
     app.chrome.dirty = true;
 }
 
+/// Session stop notes: folded in by agent, a `None` note taking that
+/// session's away.
+pub(crate) fn on_session_stops(app: &mut App, stops: Vec<nebula_core::stop::SessionStop>) {
+    for s in stops {
+        match s.note {
+            Some(note) => {
+                app.launcher.session_stops.insert(s.agent, note);
+            }
+            None => {
+                app.launcher.session_stops.remove(&s.agent);
+            }
+        }
+    }
+    app.chrome.dirty = true;
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::tests::{buffer_text, press, seed_tree, with_config_json};
@@ -572,6 +588,80 @@ mod tests {
                 Some(30.0)
             );
             assert!(out.is_empty(), "nothing goes to the daemon");
+        });
+    }
+
+    /// The daemon's stop notes land by agent, a later note replaces and a
+    /// `None` one takes the session's away; a Snapshot clears them (the
+    /// daemon sends the list again after it) and so does the session's
+    /// removal.
+    #[test]
+    fn pushed_stop_notes_fold_in_and_clear_with_a_none_a_snapshot_or_the_session() {
+        use nebula_core::stop::{SessionStop, StopNote, AUTHENTICATION_FAILED, RATE_LIMIT};
+        with_config_json("{}", || {
+            let mut app = App::new();
+            seed_tree(&mut app);
+            let mut out = Vec::new();
+            let a1 = AgentId("a1".into());
+            let note = |reason: &str| StopNote {
+                reason: reason.into(),
+                waiting: reason == RATE_LIMIT,
+                resumes: (reason == RATE_LIMIT).then(|| "3:45pm".into()),
+                resets_at: None,
+                detail: None,
+                at: 0,
+            };
+            let push = |note: Option<StopNote>| ServerEvent::SessionStops {
+                stops: vec![SessionStop {
+                    agent: a1.clone(),
+                    note,
+                }],
+            };
+
+            handle_server_event(&mut app, push(Some(note(RATE_LIMIT))), &mut out);
+            assert_eq!(app.launcher.session_stops.get(&a1), Some(&note(RATE_LIMIT)));
+            handle_server_event(&mut app, push(Some(note(AUTHENTICATION_FAILED))), &mut out);
+            assert_eq!(app.launcher.session_stops.len(), 1);
+            assert_eq!(
+                app.launcher.session_stops.get(&a1),
+                Some(&note(AUTHENTICATION_FAILED)),
+                "the later note replaces"
+            );
+            handle_server_event(&mut app, push(None), &mut out);
+            assert!(app.launcher.session_stops.is_empty(), "None takes it away");
+
+            // A resync Snapshot: the notes it left are stale until the
+            // daemon's list after it says otherwise.
+            handle_server_event(&mut app, push(Some(note(RATE_LIMIT))), &mut out);
+            app.chrome.snapshot_loaded = true;
+            let tree = app.tree.clone();
+            handle_server_event(
+                &mut app,
+                ServerEvent::Snapshot {
+                    projects: tree.projects,
+                    worktrees: tree.worktrees,
+                    agents: tree.agents,
+                    terminals: tree.terminals,
+                    links: tree.links,
+                    pr_seen: Vec::new(),
+                    ui_state: None,
+                    subagents: Vec::new(),
+                },
+                &mut out,
+            );
+            assert!(app.launcher.session_stops.is_empty());
+
+            // The session removed takes its note with it.
+            handle_server_event(&mut app, push(Some(note(RATE_LIMIT))), &mut out);
+            assert_eq!(app.launcher.session_stops.len(), 1);
+            handle_server_event(
+                &mut app,
+                ServerEvent::EntityRemoved {
+                    id: EntityId::Agent(a1.clone()),
+                },
+                &mut out,
+            );
+            assert!(app.launcher.session_stops.is_empty());
         });
     }
 

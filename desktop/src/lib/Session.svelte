@@ -2,6 +2,7 @@
   import { app, goHome, openDiff, projectOf, sessionWorktree } from './store.svelte';
   import { toneOf, terminalTone, harnessLabel, placeOf, age, lastPrompt } from './status';
   import Status from './Status.svelte';
+  import StopBadge from './StopBadge.svelte';
   import Terminal from './Terminal.svelte';
   import OrchBadge from './orchestrator/OrchBadge.svelte';
   import ContextBar from './accounts/ContextBar.svelte';
@@ -43,7 +44,6 @@
     <div
       class="@container flex min-w-0 flex-none flex-col gap-1 border-b border-rule px-4 py-2"
       data-target={target}
-      oncontextmenu={(e) => (e.preventDefault(), actions({ x: e.clientX, y: e.clientY }))}
     >
       <div class="flex min-w-0 items-center gap-3">
         <span class="min-w-0 truncate text-[15px] font-semibold {tone === 'needs' ? 'text-ember-ink' : 'text-ink'}"
@@ -51,6 +51,10 @@
         >
         {#if agent?.role === 'orchestrator'}<OrchBadge />{/if}
         <Status {tone} />
+        <!-- A usage limit it waits out, or why it stopped: "running, resumes 3:45pm".
+             Off in a narrow header, where it would squeeze the name away: the
+             session row and the board card still carry it. -->
+        <StopBadge note={agent ? app.model.stops?.[agent.id] : null} class="self-center @max-[560px]:hidden" />
         <span class="flex-1"></span>
         <div class="flex flex-none items-center gap-1" role="toolbar" aria-label="Session">
           {#if agent?.archived}

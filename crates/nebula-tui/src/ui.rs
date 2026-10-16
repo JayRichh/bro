@@ -230,6 +230,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         app.chrome.theme,
         app.chrome.black_background,
     );
+    // The CRITTERS go over everything, last.
+    crate::critters::draw(f.buffer_mut(), app, area);
 }
 
 /// The CANVAS under every cell nothing else colored. A TRUECOLOR PRESET

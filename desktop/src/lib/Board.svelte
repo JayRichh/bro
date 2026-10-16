@@ -5,6 +5,7 @@
   import { verbKeys } from './verbs';
   import { LANES, lanes, toneOf, harnessLabel, lastPrompt, age, placeOf, type Lane } from './status';
   import Status from './Status.svelte';
+  import StopBadge from './StopBadge.svelte';
   import { retract } from './motion';
   import Empty from './Empty.svelte';
   import type { Agent, DropTarget } from './api';
@@ -272,6 +273,7 @@
             {@const prompt = lastPrompt(a)}
             {@const pr = app.model.prs[a.worktree_id]}
             {@const commits = commitsWord(rows.git[a.worktree_id]?.ahead_of_base)}
+            {@const stop = app.model.stops?.[a.id]}
             {@const sel = cursor !== null && LANES[cursor.lane].id === lane.id && cursor.row === ri}
             {@const alert = lane.id === 'needs'}
             <!-- The card's verbs show on hover or focus; the card keys (Space, A,
@@ -294,12 +296,6 @@
             <button
               title="{a.name}: {lane.id === 'unseen' || lane.id === 'pr' ? 'Enter opens its review (the diff against its base, with its verbs); ' : ''}{withKey('drag to reorder beside cards of its worktree', ['move_up', 'move_down'])}, or onto a lane, Archived or a repo in the rail"
               data-card-sel={sel || undefined}
-              oncontextmenu={(e) => {
-                e.preventDefault();
-                selId = a.id;
-                (e.currentTarget as HTMLElement).focus();
-                openMenu(agentMenu(a), { x: e.clientX, y: e.clientY }, a.name);
-              }}
               class="relative flex w-full flex-col gap-1 border-0 border-b border-rule px-4 py-2.5 text-left focus-visible:-outline-offset-2
                 {sel ? 'bg-surface' : 'bg-transparent hover:bg-surface'} {app.review === a.id ? 'shadow-[inset_3px_0_0_var(--color-ink)]' : ''}"
               onclick={() => openCard(a, lane.id)}
@@ -313,8 +309,9 @@
               <Status tone={lane.id === 'pr' ? 'pr' : lane.id === 'done' && pr?.state === 'merged' ? 'merged' : toneOf(a)} />
               <span class="truncate text-[13px] text-muted">{harnessLabel(a)}{a.profile ? ` \u00B7 ${a.profile}` : ''}</span>
               <span class="truncate font-mono text-[12px] text-muted">{where.project} / {where.branch}</span>
-              {#if commits || pr}
+              {#if stop || commits || pr}
                 <span class="flex min-w-0 flex-wrap items-center gap-1.5">
+                  <StopBadge note={stop} />
                   {#if commits}<span class="{chip} border-rule text-muted" title="Commits on this branch since its base">{commits}</span>{/if}
                   {#if pr}
                     {@const c = prChip(pr)}

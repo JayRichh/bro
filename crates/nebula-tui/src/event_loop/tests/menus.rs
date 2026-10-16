@@ -1027,8 +1027,8 @@ fn archive_done_asks_first_and_lists_the_finished_read_sessions() {
     });
 }
 
-/// The editor, wake-up and critter keys still say they are coming rather
-/// than doing nothing, and send nothing.
+/// The editor and wake-up keys still say they are coming rather than
+/// doing nothing, and send nothing (the critters have landed).
 #[test]
 fn the_keys_of_the_verbs_still_to_land_say_they_are_coming() {
     with_default_config(|| {
@@ -1044,7 +1044,6 @@ fn the_keys_of_the_verbs_still_to_land_say_they_are_coming() {
             Action::OpenFileInKete,
             Action::WakeAccount,
             Action::WakeSchedule,
-            Action::Critters,
         ] {
             app.chrome.flash = None;
             run_action(&mut app, action, &mut out);

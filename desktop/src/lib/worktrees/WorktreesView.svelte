@@ -8,6 +8,7 @@
   import { api } from '../api';
   import { nav } from '../shell/history.svelte';
   import { openMenu } from '../ui/ui.svelte';
+  import { ownMenu } from '../menus/router';
   import { age } from '../status';
   import { newWorktree } from '../actions';
   import RunButton from '../overview/RunButton.svelte';
@@ -132,7 +133,7 @@
         data-row
         data-target="worktree:{w.id}"
         title={w.path}
-        oncontextmenu={(e) => (e.preventDefault(), openMenu(worktreeMenu(w), { x: e.clientX, y: e.clientY }, w.branch))}
+        use:ownMenu={() => ({ items: worktreeMenu(w), label: w.branch })}
         onkeydown={(e) => onKey(e, w.id)}
       >
         <span class="flex min-w-0 items-center gap-2">

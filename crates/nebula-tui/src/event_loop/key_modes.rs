@@ -62,6 +62,12 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientReque
         return;
     }
 
+    // ↑↑↓↓←→←→BA toggles the CRITTERS (the arrows still move; the B and
+    // the A that finish it are taken).
+    if crate::critters::konami(app, &key) {
+        return;
+    }
+
     if handle_preview_scroll_key(app, key) {
         return;
     }
@@ -455,8 +461,8 @@ fn handle_global_action(
         | Action::RevealInExplorer
         | Action::OpenWithDefault
         | Action::OpenFileInKete
-        | Action::WakeAccount
-        | Action::Critters => super::verbs::pending_verb(app, action),
+        | Action::WakeAccount => super::verbs::pending_verb(app, action),
+        Action::Critters => crate::critters::toggle(app),
         // lane/wake's schedule: its own arm, so that lane takes the id out
         // without touching the one above.
         Action::WakeSchedule => super::verbs::pending_verb(app, action),

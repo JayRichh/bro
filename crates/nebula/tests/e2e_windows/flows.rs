@@ -49,6 +49,10 @@ pub const TESTS: &[(&str, Test)] = &[
         "a_048_data_dir_upgrades_in_place",
         super::upgrade::a_048_data_dir_upgrades_in_place,
     ),
+    (
+        "a_usage_limit_reads_resumes_on_the_card_until_claude_carries_on",
+        a_usage_limit_reads_resumes_on_the_card_until_claude_carries_on,
+    ),
 ];
 
 /// The feature the fake agent builds: a question, a file, a commit.
@@ -399,6 +403,34 @@ fn the_pane_keeps_every_line_across_board_and_grid() {
     // And through a host resize, which repaints every cell.
     tui.host_repaint();
     pane_shows_the_feature(&tui);
+}
+
+/// A turn that ends on a usage limit (`StopFailure`) Claude then waits
+/// out: running, and its card says when it carries on, in the words the
+/// session's screen printed. Claude's resume clears it and the turn ends
+/// as any other; a failed login after it waits on you, saying so.
+fn a_usage_limit_reads_resumes_on_the_card_until_claude_carries_on() {
+    let tui = Tui::spawn(Options {
+        script: "fail:rate_limit;say:Continuing automatically at 3:45pm;gate:resumed;\
+                 notify:quota_auto_resume_fired;stop;gate:relogin;\
+                 fail:authentication_failed;echo"
+            .into(),
+        ..Options::default()
+    });
+    let repo = tui.make_repo("limit-proj");
+    tui.wait_for_text("create your first project");
+    tui.add_project(&repo, "limit-proj");
+    launch(&tui, "build the feature");
+    tui.wait_for_agent("step gate:resumed");
+    tui.wait_for_text("resumes 3:45pm");
+    tui.wait_for_text("1 running");
+    tui.open_gate("resumed");
+    tui.wait_for_gone("resumes 3:45pm");
+    tui.wait_for_agent("step gate:relogin");
+    tui.wait_for_text("agent-1  done");
+    tui.open_gate("relogin");
+    tui.wait_for_text("logged out");
+    tui.wait_for_text("1 needs you");
 }
 
 /// Every line the FEATURE agent printed, whole, in the screen model. On a

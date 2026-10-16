@@ -13,13 +13,21 @@
 //!   must not drive status.
 //! - An `idle_prompt` notification is Claude reporting it is parked at the
 //!   input box; it is what un-sticks a turn that ended without a `Stop`
-//!   (rejected prompt, escape mid-turn). But since Claude Code 2.1 the Agent
-//!   tool runs subagents in the *background*: the foreground turn ends, the
-//!   input box comes back, and `idle_prompt` fires ~60 s later while the
-//!   workers are still going. So with subagents tracked it is a hold, not a
-//!   finish — the same hold a gated `Stop` gets — and only a quiet set
-//!   (no subagent hook traffic for `SUBAGENT_QUIET_GRACE`) is presumed
+//!   (rejected prompt, escape mid-turn). Since Claude Code 2.1 the Agent
+//!   tool runs subagents in the *background*: the foreground turn ends and
+//!   the input box comes back while the workers go on. Before 2.1.288
+//!   `idle_prompt` fired ~60 s in regardless; since then it waits for them.
+//!   Older CLIs are still about, so with subagents tracked it is a hold,
+//!   not a finish — the same hold a gated `Stop` gets — and only a quiet
+//!   set (no subagent hook traffic for `SUBAGENT_QUIET_GRACE`) is presumed
 //!   orphaned and finished anyway.
+//! - Since 2.1.145 a `Stop` (and each `SubagentStop`) lists the session's
+//!   tasks still in flight (`background_tasks`). With that list the guess
+//!   is unneeded: none that carry the work on (subagents, workflows,
+//!   teammates; never a shell or a monitor left running) finishes the turn
+//!   at once, any holds it, and a `SubagentStop` whose list is empty
+//!   releases a held turn without the drain grace. Without a list (an
+//!   older CLI, another harness) the timers decide as before.
 //! - `Progress` is the same end-of-turn news read straight off the PTY
 //!   (OSC 9;4, see `pty::progress`). It is the only signal that survives a
 //!   user cancel — no hook fires at all there, and Claude suppresses
@@ -54,7 +62,19 @@
 //!   it — a death still terminates it — and the respawn starts over as a
 //!   launch. Without the hold the card fell to the bottom of the grid for
 //!   the seconds between the Stop and the respawned CLI's first hook.
+//! - A turn that ends on an API error fires `StopFailure` instead of
+//!   `Stop`, and its `error` decides the row (`nebula_core::stop`). A usage
+//!   limit Claude waits out (on by default since 2.1.234: it continues the
+//!   task by itself at the reset, and no `idle_prompt` fires meanwhile)
+//!   holds the row at `running`; a login, billing or account problem, or a
+//!   wait that went stale or gave up (`quota_auto_resume_stale` /
+//!   `_disabled`), waits on the user; anything else finishes it. The CLI's
+//!   progress-clear for that same turn can land on either side of the
+//!   hook, so while a limit is waited out or the user is needed, neither it
+//!   nor `idle_prompt` finishes the row. The reason rides beside the status
+//!   as a STOP NOTE (`Effect::SetStop`), never as a status of its own.
 
+use nebula_core::stop::{self, StopClass};
 use nebula_core::AgentStatus;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -80,11 +100,81 @@ pub const MAX_TRACKED_SUBAGENTS: usize = 512;
 /// own notification never comes sooner than that after the
 /// `PermissionRequest` / `PreToolUse` that opened it.
 pub const LATE_PROMPT_NOTIFICATION_GRACE: Duration = Duration::from_secs(5);
+/// How long past its reset a usage-limit wait is still believed: Claude
+/// continues at the reset, and `quota_auto_resume_fired` or the
+/// continuation's prompt ends the wait well inside this.
+pub const LIMIT_OVERRUN: Duration = Duration::from_secs(10 * 60);
+/// How long a usage-limit wait with no known reset is believed: the
+/// session window's own length, and the overrun.
+pub const LIMIT_WAIT_MAX: Duration = Duration::from_secs(5 * 60 * 60 + 10 * 60);
+
+/// What the daemon knows of a usage-limit wait as a `rate_limit`
+/// `StopFailure` lands — the session's screen, the account's reset —
+/// filled in before the machine sees the event (`Daemon::apply_hook_event`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum LimitOutlook {
+    /// Nothing says Claude is waiting: an API-billed session (no plan
+    /// windows to wait out), or no reading yet. The turn is over unless
+    /// the screen says otherwise ([`HookEvent::LimitWaiting`]).
+    Unknown,
+    /// Claude waits it out and continues on its own, at `until` when the
+    /// account's reset is known.
+    Waits { until: Option<Instant> },
+    /// The reset is more than a day off: Claude opens its usage-limit
+    /// menu instead of waiting, and that menu needs the user.
+    Menu,
+}
+
+/// What a `Stop` or `SubagentStop` payload's `background_tasks` (Claude
+/// 2.1.145+) says of the session's work still in flight as it lands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Background {
+    /// Tasks that keep the session's work going past the foreground
+    /// turn's end ([`holds_turn`]): subagents, workflows, teammates.
+    pub holders: usize,
+}
+
+/// Does a background task of this `type` keep the session working once
+/// the foreground turn ends? Subagents, workflows and agent-team
+/// teammates do — Claude's work goes on in them. A shell or a monitor
+/// left running (a dev server, `tail -f`), an MCP server's task and a
+/// cloud session the turn handed off never do: nothing more comes back
+/// into this turn from them. A label this build has never heard of holds,
+/// as a tracked subagent always has.
+pub fn holds_turn(task_type: &str) -> bool {
+    !matches!(
+        task_type.trim().to_ascii_lowercase().as_str(),
+        "shell" | "monitor" | "mcp task" | "cloud session"
+    )
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum HookEvent {
     UserPromptSubmit,
-    Stop,
+    /// The foreground turn ended. `background` is what its payload's
+    /// `background_tasks` said; None when it had no list (an older CLI,
+    /// another harness), and today's timers decide.
+    Stop {
+        background: Option<Background>,
+    },
+    /// The turn ended on an API error instead of a `Stop` (Claude's
+    /// `StopFailure`, 2.1.78+): `error` is its kind (`rate_limit`,
+    /// `authentication_failed`, `overloaded`, …), `detail` Claude's words.
+    StopFailure {
+        error: Option<String>,
+        detail: Option<String>,
+        limit: LimitOutlook,
+    },
+    /// Synthetic: the session's screen says Claude is waiting out a usage
+    /// limit and will continue on its own (`pty::usage`). It only confirms
+    /// a limit this turn already hit: a resumed session repaints old
+    /// conversation lines saying the same.
+    LimitWaiting {
+        until: Option<Instant>,
+    },
+    /// Synthetic: the screen says that wait was cancelled, or gave up
+    /// after repeated limits.
+    LimitWaitEnded,
     SessionStart {
         source: Option<String>,
     },
@@ -112,6 +202,9 @@ pub enum HookEvent {
     },
     SubagentStop {
         subagent_id: Option<String>,
+        /// The parent session's in-flight tasks as this one ended, as on
+        /// [`HookEvent::Stop`].
+        background: Option<Background>,
     },
     /// Synthetic: the agent's PTY died.
     SessionEnded {
@@ -154,6 +247,35 @@ impl HookEvent {
 pub enum Effect {
     SetStatus(AgentStatus),
     SaveSessionId(String),
+    /// The session's STOP NOTE changed: set, or cleared with None. The
+    /// daemon adds what only it knows (the screen's reset time, the
+    /// account's) and pushes it (`registry::stops`).
+    SetStop(Option<StopCause>),
+}
+
+/// Why the turn stopped short, as the machine knows it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StopCause {
+    /// Claude's `StopFailure` error, or the notification behind the note.
+    pub reason: String,
+    /// Claude's own words for it, when the payload had any.
+    pub detail: Option<String>,
+    /// Claude is waiting out a usage limit and will carry on by itself.
+    pub waiting: bool,
+}
+
+/// While a stop note still decides how the row reads.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Stopped {
+    /// Waiting out a usage limit: held at running until Claude continues,
+    /// the screen says the wait ended, or `deadline` passes.
+    Waiting { deadline: Instant },
+    /// The user has to act: held at needs_feedback through the turn's
+    /// progress-clear and `idle_prompt`.
+    NeedsUser,
+    /// Over: the row finished (or will, once its subagents drain), and the
+    /// note is a badge only.
+    Ended,
 }
 
 /// Who raised the dialog the agent is waiting on: the foreground turn, or
@@ -272,11 +394,19 @@ pub struct AgentStatusMachine {
     /// that arrives meanwhile holds at `running`: the respawn that follows
     /// it carries the work straight on (`hold_for_relocation`).
     relocating: bool,
+    /// Set while a stop note still decides how the row reads: a usage
+    /// limit being waited out, or a stop the user has to act on.
+    stopped: Option<Stopped>,
+    /// The stop note's cause as last emitted, so a clear goes out only
+    /// when there is a note to clear, and a repeat goes out not at all.
+    stop_cause: Option<StopCause>,
 }
 
 impl AgentStatusMachine {
     pub fn new(status: AgentStatus, session_id: Option<String>) -> Self {
         Self {
+            stopped: None,
+            stop_cause: None,
             status,
             saved_session_id: session_id.clone(),
             session_id,
@@ -325,6 +455,15 @@ impl AgentStatusMachine {
         self.relocating = relocating;
     }
 
+    /// The CLI is being started afresh (a restart, a resume, a relocation):
+    /// whatever the old process was waiting out or stuck on went with it —
+    /// a usage-limit wait does not restart on a resume — so its stop is
+    /// dropped without a word. The daemon clears the pushed note itself.
+    pub fn forget_stop(&mut self) {
+        self.stopped = None;
+        self.stop_cause = None;
+    }
+
     pub fn handle(
         &mut self,
         event: HookEvent,
@@ -344,6 +483,7 @@ impl AgentStatusMachine {
                     self.stop_held = false;
                     self.drain_idle_since = None;
                     self.subagent_alive_at = None;
+                    self.clear_stop(&mut effects);
                 }
             }
         } else if !matches!(event, HookEvent::SessionEnded { .. }) {
@@ -357,9 +497,12 @@ impl AgentStatusMachine {
         // writes the transcript a resume reads on the first prompt, so an
         // id saved at SessionStart for a CLI nobody typed into resumes into
         // "No conversation found". A Stop counts as well, for a first
-        // prompt whose submit hook never fired.
-        if let (HookEvent::UserPromptSubmit | HookEvent::Stop, Some(sid)) =
-            (&event, payload_session_id)
+        // prompt whose submit hook never fired, and so does the
+        // `StopFailure` that ends such a turn instead.
+        if let (
+            HookEvent::UserPromptSubmit | HookEvent::Stop { .. } | HookEvent::StopFailure { .. },
+            Some(sid),
+        ) = (&event, payload_session_id)
         {
             if self.session_id.as_deref() == Some(sid)
                 && self.saved_session_id.as_deref() != Some(sid)
@@ -377,21 +520,65 @@ impl AgentStatusMachine {
 
         let was_waiting = self.status == AgentStatus::NeedsFeedback;
         match event {
-            HookEvent::UserPromptSubmit => {
-                self.stop_held = false;
-                self.drain_idle_since = None;
-                self.subagent_alive_at = None;
-                self.finished_at = None;
-                self.set_status(AgentStatus::Running, &mut effects);
+            // A prompt — the user's, or the one Claude sends itself to pick
+            // a task up after a usage-limit wait — starts a turn, and with
+            // it any stop note is history.
+            HookEvent::UserPromptSubmit => self.start_turn(&mut effects),
+            HookEvent::Stop { background } => {
+                self.clear_stop(&mut effects);
+                match background {
+                    // Claude's own word that nothing still in flight
+                    // carries the work on: whatever subagents nebula still
+                    // tracks are done (their SubagentStops raced this, or
+                    // never came), so the turn is over now — no drain.
+                    Some(Background { holders: 0 }) => {
+                        self.subagents.clear();
+                        self.end_turn(now, &mut effects);
+                    }
+                    // Subagents, workflows or teammates still working: held
+                    // at running as a Stop with tracked subagents always
+                    // was, even when nebula tracks none of them (a workflow
+                    // fires no SubagentStart). The usual timers, or a later
+                    // payload saying they are done, release it.
+                    Some(_) => {
+                        if !self.hold_for_relocation(&mut effects) {
+                            self.hold_for_subagents(now, &mut effects);
+                        }
+                    }
+                    None => self.end_turn(now, &mut effects),
+                }
             }
-            HookEvent::Stop => self.end_turn(now, &mut effects),
+            HookEvent::StopFailure {
+                error,
+                detail,
+                limit,
+            } => self.stop_failure(error, detail, limit, now, &mut effects),
+            HookEvent::LimitWaiting { until } => {
+                // Only a limit this turn hit, and only a live session.
+                let limited = self
+                    .stop_cause
+                    .clone()
+                    .filter(|c| c.reason == stop::RATE_LIMIT);
+                if let Some(cause) = limited {
+                    if !matches!(self.stopped, Some(Stopped::Waiting { .. })) && self.alive() {
+                        self.wait_out_limit(cause.detail, until, now, &mut effects);
+                    }
+                }
+            }
+            HookEvent::LimitWaitEnded => {
+                if matches!(self.stopped, Some(Stopped::Waiting { .. })) {
+                    self.end_wait(now, &mut effects);
+                }
+            }
             HookEvent::SessionStart { source } => {
                 if source.as_deref() == Some("clear") {
-                    // Same session id, but /clear killed any live subagents.
+                    // Same session id, but /clear killed any live subagents,
+                    // and ends a usage-limit wait.
                     self.subagents.clear();
                     self.stop_held = false;
                     self.drain_idle_since = None;
                     self.subagent_alive_at = None;
+                    self.clear_stop(&mut effects);
                 }
             }
             HookEvent::PermissionRequest { subagent_id } => {
@@ -402,17 +589,62 @@ impl AgentStatusMachine {
                     // Deferred by 6 s on Claude's side, so it is never the
                     // first word of a dialog nebula can see — and it can be
                     // the last word of one the user has already closed.
-                    Some("permission_prompt") => {
+                    // The blocking dialogs announced the same deferred way
+                    // ("you haven't typed for about six seconds"): an MCP
+                    // server's form or URL request, and `agent_needs_input`
+                    // — a teammate's setup question or auto mode's billing
+                    // notice in this terminal (its other case, a background
+                    // session waiting while agent view is open, is never a
+                    // Kete row). Dropped before 0.54, so auto mode's few
+                    // remaining dialogs read as working.
+                    Some(
+                        "permission_prompt"
+                        | "agent_needs_input"
+                        | "elicitation_dialog"
+                        | "elicitation_url_dialog",
+                    ) => {
                         if !self.late_prompt_echo(now) {
                             self.wait_on(Origin::Foreground, false, &mut effects);
                         }
+                    }
+                    // The MCP form was answered: the tool call carries on.
+                    Some("elicitation_complete" | "elicitation_response") => {
+                        self.dialog_closed(Origin::Foreground, &mut effects);
                     }
                     // "Claude is waiting for your input". Claude fires this
                     // only with nothing in flight and no dialog open, so it
                     // means the turn really is over — see `mark_idle`.
                     Some("idle_prompt") => self.mark_idle(now, &mut effects),
-                    // Every other notification type (auth, quota, nested
-                    // fleet sessions) is none of our business.
+                    // The usage limit reset and Claude picked the task up:
+                    // a turn, though no prompt was typed.
+                    Some("quota_auto_resume_fired") => {
+                        if self.alive() {
+                            self.start_turn(&mut effects);
+                        }
+                    }
+                    // The reset came while the computer slept and Claude
+                    // waits for Enter, or it gave the wait up: either way
+                    // nothing carries on until the user acts.
+                    Some(reason @ (stop::QUOTA_RESUME_STALE | stop::QUOTA_RESUME_DISABLED)) => {
+                        if self.alive() {
+                            self.needs_user(reason.to_string(), None, &mut effects);
+                        }
+                    }
+                    // Logged back in after a failed login: the note's ask is
+                    // done, and the turn stays over until the next prompt.
+                    Some("auth_success") => {
+                        let logged_out = self
+                            .stop_cause
+                            .as_ref()
+                            .is_some_and(|c| c.reason == stop::AUTHENTICATION_FAILED);
+                        if logged_out && self.stopped == Some(Stopped::NeedsUser) {
+                            self.clear_stop(&mut effects);
+                            self.finished_at = None;
+                            self.set_status(AgentStatus::Finished, &mut effects);
+                        }
+                    }
+                    // Every other notification type (nested fleet sessions,
+                    // a finished background agent) is none of our business.
                     _ => {}
                 }
             }
@@ -466,9 +698,27 @@ impl AgentStatusMachine {
                     }
                 }
             }
-            HookEvent::SubagentStop { subagent_id } => {
+            HookEvent::SubagentStop {
+                subagent_id,
+                background,
+            } => {
                 self.subagents.stop(subagent_id);
                 self.note_subagent_alive(now);
+                // The last of a held turn's workers ended and the parent's
+                // list says nothing else carries the work on: finished now,
+                // not a drain grace later. While the stopping subagent is
+                // still listed it counts as a holder, and the hold stands.
+                if background == Some(Background { holders: 0 })
+                    && self.stop_held
+                    && self.status == AgentStatus::Running
+                {
+                    self.subagents.clear();
+                    self.stop_held = false;
+                    self.drain_idle_since = None;
+                    self.subagent_alive_at = None;
+                    self.finished_at = Some(now);
+                    self.set_status(AgentStatus::Finished, &mut effects);
+                }
             }
             HookEvent::Progress { busy } => {
                 if busy {
@@ -479,11 +729,7 @@ impl AgentStatusMachine {
                     // permission prompt (which holds progress at *busy*
                     // anyway, so no edge arrives) or revive a dead agent.
                     if matches!(self.status, AgentStatus::Fresh | AgentStatus::Finished) {
-                        self.stop_held = false;
-                        self.drain_idle_since = None;
-                        self.subagent_alive_at = None;
-                        self.finished_at = None;
-                        self.set_status(AgentStatus::Running, &mut effects);
+                        self.start_turn(&mut effects);
                     }
                 } else if launch_idle_pending && self.status == AgentStatus::Running {
                     // The startup `9;4;0` of a CLI the CREATE stamped
@@ -492,6 +738,11 @@ impl AgentStatusMachine {
                     // and the turn has not started, let alone ended.
                     // Swallowed once — the reprieve is spent now, so the
                     // `0` that really ends the turn lands below.
+                } else if self.holds_stop() {
+                    // The turn already ended on its `StopFailure`, which
+                    // this clear can trail or lead: a limit being waited out
+                    // stays running, and a stop the user must act on stays
+                    // theirs.
                 } else if matches!(
                     self.status,
                     AgentStatus::Running | AgentStatus::NeedsFeedback
@@ -521,12 +772,14 @@ impl AgentStatusMachine {
                 }
             }
             HookEvent::SessionEnded { exit_code } => {
-                // Dead process: laggard subagent POSTs must never resurrect it.
+                // Dead process: laggard subagent POSTs must never resurrect it,
+                // and nothing it was waiting out or stuck on is true now.
                 self.subagents.clear();
                 self.stop_held = false;
                 self.drain_idle_since = None;
                 self.subagent_alive_at = None;
                 self.finished_at = None;
+                self.clear_stop(&mut effects);
                 if matches!(
                     self.status,
                     AgentStatus::Running | AgentStatus::NeedsFeedback
@@ -556,6 +809,15 @@ impl AgentStatusMachine {
     /// agent on yellow.
     pub fn tick(&mut self, now: Instant) -> Vec<Effect> {
         let mut effects = Vec::new();
+        // A usage-limit wait that outlived its reset: the continuation's
+        // prompt never came (a cancel the screen didn't show, a menu where
+        // a wait was presumed), so the turn is over after all.
+        if let Some(Stopped::Waiting { deadline }) = self.stopped {
+            if now >= deadline {
+                self.end_wait(now, &mut effects);
+            }
+            return effects;
+        }
         if !self.stop_held || self.status != AgentStatus::Running {
             return effects;
         }
@@ -618,7 +880,160 @@ impl AgentStatusMachine {
             && !self.question_open
             && self.waiting_on.as_ref() == Some(&origin)
         {
+            // A stop the user had to act on is behind them: the turn runs.
+            if self.stopped == Some(Stopped::NeedsUser) {
+                self.clear_stop(effects);
+            }
             self.set_status(AgentStatus::Running, effects);
+        }
+    }
+
+    /// A turn starts — a prompt, Claude picking a task up after a usage
+    /// limit, or the progress bar of a turn no prompt announced — and
+    /// whatever stopped the last one is history.
+    fn start_turn(&mut self, effects: &mut Vec<Effect>) {
+        self.stop_held = false;
+        self.drain_idle_since = None;
+        self.subagent_alive_at = None;
+        self.finished_at = None;
+        self.clear_stop(effects);
+        self.set_status(AgentStatus::Running, effects);
+    }
+
+    /// Not a dead CLI: a laggard POST from one says nothing.
+    fn alive(&self) -> bool {
+        !matches!(
+            self.status,
+            AgentStatus::Terminated | AgentStatus::Disconnected
+        )
+    }
+
+    /// A stop that holds the row where it is against the turn's own
+    /// end-of-turn signals: a usage limit being waited out, or a stop the
+    /// user must act on.
+    fn holds_stop(&self) -> bool {
+        matches!(
+            self.stopped,
+            Some(Stopped::Waiting { .. } | Stopped::NeedsUser)
+        )
+    }
+
+    /// `StopFailure`: the turn ended on an API error, and its class
+    /// decides the row (`nebula_core::stop::class`). A usage limit reads as
+    /// what the daemon could tell of the wait.
+    fn stop_failure(
+        &mut self,
+        error: Option<String>,
+        detail: Option<String>,
+        limit: LimitOutlook,
+        now: Instant,
+        effects: &mut Vec<Effect>,
+    ) {
+        if !self.alive() {
+            return;
+        }
+        let reason = error
+            .map(|e| e.trim().to_string())
+            .filter(|e| !e.is_empty())
+            .unwrap_or_else(|| "unknown".into());
+        match (stop::class(&reason), limit) {
+            (StopClass::Limit, LimitOutlook::Waits { until }) => {
+                self.wait_out_limit(detail, until, now, effects)
+            }
+            (StopClass::Limit, LimitOutlook::Menu) | (StopClass::NeedsYou, _) => {
+                self.needs_user(reason, detail, effects)
+            }
+            (StopClass::Limit, LimitOutlook::Unknown) | (StopClass::Error, _) => {
+                self.stopped = Some(Stopped::Ended);
+                self.set_stop(
+                    StopCause {
+                        reason,
+                        detail,
+                        waiting: false,
+                    },
+                    effects,
+                );
+                // Over, as a Stop would say: the progress-clear may have
+                // said so already, and subagents still hold it as ever.
+                self.end_turn(now, effects);
+            }
+        }
+    }
+
+    /// Claude is waiting out a usage limit and will continue by itself:
+    /// the foreground turn is over but the session's work is not, so the
+    /// row holds at running — not a subagent hold, whose timers would
+    /// finish it — until the continuation, the screen saying the wait
+    /// ended, or the reset (plus [`LIMIT_OVERRUN`]) passing.
+    fn wait_out_limit(
+        &mut self,
+        detail: Option<String>,
+        until: Option<Instant>,
+        now: Instant,
+        effects: &mut Vec<Effect>,
+    ) {
+        let deadline = until.map_or(now + LIMIT_WAIT_MAX, |at| at.max(now) + LIMIT_OVERRUN);
+        self.stopped = Some(Stopped::Waiting { deadline });
+        self.stop_held = false;
+        self.drain_idle_since = None;
+        self.finished_at = None;
+        self.set_status(AgentStatus::Running, effects);
+        self.set_stop(
+            StopCause {
+                reason: stop::RATE_LIMIT.into(),
+                detail,
+                waiting: true,
+            },
+            effects,
+        );
+    }
+
+    /// The user has to act — log in, sort out billing, press Enter, pick
+    /// from Claude's usage-limit menu — and the row waits on them through
+    /// the turn's own progress-clear and `idle_prompt`.
+    fn needs_user(&mut self, reason: String, detail: Option<String>, effects: &mut Vec<Effect>) {
+        self.stopped = Some(Stopped::NeedsUser);
+        self.stop_held = false;
+        self.drain_idle_since = None;
+        self.wait_on(Origin::Foreground, false, effects);
+        self.set_stop(
+            StopCause {
+                reason,
+                detail,
+                waiting: false,
+            },
+            effects,
+        );
+    }
+
+    /// A usage-limit wait ended without Claude carrying on (cancelled, or
+    /// past its deadline): the turn is over, and the note stays as the
+    /// limit it was.
+    fn end_wait(&mut self, now: Instant, effects: &mut Vec<Effect>) {
+        self.stopped = Some(Stopped::Ended);
+        if let Some(cause) = self.stop_cause.clone() {
+            self.set_stop(
+                StopCause {
+                    waiting: false,
+                    ..cause
+                },
+                effects,
+            );
+        }
+        self.end_turn(now, effects);
+    }
+
+    fn set_stop(&mut self, cause: StopCause, effects: &mut Vec<Effect>) {
+        if self.stop_cause.as_ref() != Some(&cause) {
+            self.stop_cause = Some(cause.clone());
+            effects.push(Effect::SetStop(Some(cause)));
+        }
+    }
+
+    fn clear_stop(&mut self, effects: &mut Vec<Effect>) {
+        self.stopped = None;
+        if self.stop_cause.take().is_some() {
+            effects.push(Effect::SetStop(None));
         }
     }
 
@@ -672,17 +1087,24 @@ impl AgentStatusMachine {
     /// permission prompt still waiting on the user suppresses it, so this
     /// can't green out an agent that genuinely needs feedback.
     ///
-    /// It is *not* proof that the turn's work is over: the Agent tool runs
-    /// its subagents in the background, the foreground loop parks at the
-    /// input box while they work, and this fires ~60 s in. With subagents
-    /// still tracked the agent stays at running exactly as a gated `Stop`
-    /// would — `tick` finishes it once they drain, or once they have been
-    /// quiet for `SUBAGENT_QUIET_GRACE`.
+    /// Before Claude Code 2.1.288 it is *not* proof that the turn's work is
+    /// over: the Agent tool runs its subagents in the background, the
+    /// foreground loop parks at the input box while they work, and an
+    /// older CLI fires this ~60 s in regardless (2.1.288 holds it back
+    /// while background agents run). With subagents still tracked the agent
+    /// stays at running exactly as a gated `Stop` would — `tick` finishes
+    /// it once they drain, or once they have been quiet for
+    /// `SUBAGENT_QUIET_GRACE`.
     fn mark_idle(&mut self, now: Instant, effects: &mut Vec<Effect>) {
         if !matches!(
             self.status,
             AgentStatus::Running | AgentStatus::NeedsFeedback
         ) {
+            return;
+        }
+        // Parked at the input box is exactly what a usage-limit wait or a
+        // logged-out session looks like: the stop note decides, not this.
+        if self.holds_stop() {
             return;
         }
         if self.hold_for_relocation(effects) {
@@ -752,7 +1174,11 @@ mod tests {
         let fx = m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
         assert_eq!(status_of(&fx), Some(AgentStatus::Running));
         assert!(fx.contains(&Effect::SaveSessionId("s1".into())));
-        let fx = m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(10));
+        let fx = m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(10),
+        );
         assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
     }
 
@@ -765,7 +1191,7 @@ mod tests {
     fn a_pending_relocation_holds_every_turn_end_at_running() {
         let now = t0();
         let ends = [
-            HookEvent::Stop,
+            HookEvent::Stop { background: None },
             HookEvent::Notification {
                 notification_type: Some("idle_prompt".into()),
             },
@@ -795,14 +1221,18 @@ mod tests {
             now,
         );
         m.set_relocating(true);
-        let fx = m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(10));
+        let fx = m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(10),
+        );
         assert_eq!(status_of(&fx), Some(AgentStatus::Running));
 
         // A row that already finished is not revived by a late Stop, and
         // the process dying is still the end of it.
         let mut m = AgentStatusMachine::new(AgentStatus::Finished, None);
         m.set_relocating(true);
-        let fx = m.handle(HookEvent::Stop, Some("s1"), now);
+        let fx = m.handle(HookEvent::Stop { background: None }, Some("s1"), now);
         assert_eq!(status_of(&fx), None);
         assert_eq!(m.status(), AgentStatus::Finished);
         let mut m = AgentStatusMachine::new(AgentStatus::Fresh, None);
@@ -857,7 +1287,7 @@ mod tests {
             now,
         );
         assert_eq!(status_of(&fx), Some(AgentStatus::Running));
-        let fx = m.handle(HookEvent::Stop, Some("ses_1"), now);
+        let fx = m.handle(HookEvent::Stop { background: None }, Some("ses_1"), now);
         assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
     }
 
@@ -873,7 +1303,7 @@ mod tests {
         assert_eq!(status_of(&fx), Some(AgentStatus::NeedsFeedback));
         let fx = m.handle(HookEvent::Question { open: false }, None, now);
         assert_eq!(status_of(&fx), Some(AgentStatus::Running));
-        let fx = m.handle(HookEvent::Stop, Some("c1"), now);
+        let fx = m.handle(HookEvent::Stop { background: None }, Some("c1"), now);
         assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
         let fx = m.handle(HookEvent::Question { open: false }, None, now);
         assert_eq!(status_of(&fx), None, "a late close does not revive it");
@@ -881,7 +1311,7 @@ mod tests {
         // A turn that ends with the dialog up (a cancel) finishes as usual.
         m.handle(HookEvent::UserPromptSubmit, Some("c1"), now);
         m.handle(HookEvent::Question { open: true }, None, now);
-        let fx = m.handle(HookEvent::Stop, Some("c1"), now);
+        let fx = m.handle(HookEvent::Stop { background: None }, Some("c1"), now);
         assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
 
         let mut m = AgentStatusMachine::new(AgentStatus::Terminated, None);
@@ -1297,7 +1727,7 @@ mod tests {
         let mut m = AgentStatusMachine::new(AgentStatus::Fresh, None);
         let now = t0();
         m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
-        m.handle(HookEvent::Stop, Some("s1"), now);
+        m.handle(HookEvent::Stop { background: None }, Some("s1"), now);
         let fx = idle(&mut m, now);
         assert!(fx.is_empty(), "already finished: {fx:?}");
         assert_eq!(m.status(), AgentStatus::Finished);
@@ -1341,6 +1771,7 @@ mod tests {
         } else {
             HookEvent::SubagentStop {
                 subagent_id: Some(id.into()),
+                background: None,
             }
         };
         m.handle(ev, Some("s1"), now)
@@ -1356,7 +1787,7 @@ mod tests {
         let now = t0();
         m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
         subagent(&mut m, true, "sub1", now);
-        m.handle(HookEvent::Stop, Some("s1"), now);
+        m.handle(HookEvent::Stop { background: None }, Some("s1"), now);
         assert_eq!(m.status(), AgentStatus::Running, "stop held open");
         let fx = idle(&mut m, now + Duration::from_secs(60));
         assert!(fx.is_empty(), "idle with live subagents is a hold: {fx:?}");
@@ -1372,7 +1803,11 @@ mod tests {
             now + Duration::from_secs(96),
         );
         assert_eq!(m.status(), AgentStatus::Running);
-        let fx = m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(100));
+        let fx = m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(100),
+        );
         assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
     }
 
@@ -1382,7 +1817,7 @@ mod tests {
         let now = t0();
         m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
         subagent(&mut m, true, "sub1", now);
-        m.handle(HookEvent::Stop, Some("s1"), now);
+        m.handle(HookEvent::Stop { background: None }, Some("s1"), now);
         idle(&mut m, now + Duration::from_secs(60));
         subagent(&mut m, false, "sub1", now + Duration::from_secs(120));
         let t = now + Duration::from_secs(121);
@@ -1418,7 +1853,11 @@ mod tests {
         let now = t0();
         m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
         subagent(&mut m, true, "sub1", now);
-        m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(5));
+        m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(5),
+        );
         idle(&mut m, now + Duration::from_secs(65));
         assert_eq!(m.status(), AgentStatus::Running);
         // The quiet clock runs from the last sign of life — the
@@ -1445,7 +1884,7 @@ mod tests {
         let now = t0();
         m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
         subagent(&mut m, true, "sub1", now);
-        m.handle(HookEvent::Stop, Some("s1"), now);
+        m.handle(HookEvent::Stop { background: None }, Some("s1"), now);
         idle(&mut m, now + Duration::from_secs(60));
 
         // Twenty minutes in, the worker runs a Bash call (agent_id stamped).
@@ -1515,6 +1954,10 @@ mod tests {
         assert_eq!(m.status(), AgentStatus::NeedsFeedback);
     }
 
+    /// Types with nothing to say about a running turn: a login with no
+    /// logged-out note to settle, a background agent finishing, the resume
+    /// of a wait that never started (still a turn: no change), and a type
+    /// Claude adds later.
     #[test]
     fn unknown_notification_types_are_ignored() {
         let mut m = AgentStatusMachine::new(AgentStatus::Fresh, None);
@@ -1522,19 +1965,450 @@ mod tests {
         m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
         for ty in [
             "auth_success",
-            "agent_needs_input",
+            "agent_completed",
             "quota_auto_resume_fired",
+            "a_type_claude_adds_later",
         ] {
-            let fx = m.handle(
-                HookEvent::Notification {
-                    notification_type: Some(ty.into()),
-                },
-                Some("s1"),
-                now,
-            );
+            let fx = m.handle(notification(ty), Some("s1"), now);
             assert!(fx.is_empty(), "{ty} must not flip status: {fx:?}");
         }
         assert_eq!(m.status(), AgentStatus::Running);
+    }
+
+    fn notification(ty: &str) -> HookEvent {
+        HookEvent::Notification {
+            notification_type: Some(ty.into()),
+        }
+    }
+
+    fn fail(error: &str, limit: LimitOutlook) -> HookEvent {
+        HookEvent::StopFailure {
+            error: Some(error.into()),
+            detail: Some("API Error: something".into()),
+            limit,
+        }
+    }
+
+    /// The last stop-note change in `effects`: `Some(None)` is a clear.
+    fn stop_of(effects: &[Effect]) -> Option<Option<StopCause>> {
+        effects.iter().rev().find_map(|e| match e {
+            Effect::SetStop(cause) => Some(cause.clone()),
+            _ => None,
+        })
+    }
+
+    fn cause(reason: &str, waiting: bool) -> Option<Option<StopCause>> {
+        Some(Some(StopCause {
+            reason: reason.into(),
+            detail: Some("API Error: something".into()),
+            waiting,
+        }))
+    }
+
+    fn running(now: Instant) -> AgentStatusMachine {
+        let mut m = AgentStatusMachine::new(AgentStatus::Fresh, None);
+        m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
+        m
+    }
+
+    /// Auto mode's remaining blocking dialogs, which 0.53 dropped: each
+    /// waits on the user, its answer (the foreground's next tool event,
+    /// or the form's own completion) runs the turn on, and one that lands
+    /// just after an answer is the deferred echo of it.
+    #[test]
+    fn blocking_dialog_notifications_wait_on_the_user() {
+        let now = t0();
+        for ty in [
+            "agent_needs_input",
+            "elicitation_dialog",
+            "elicitation_url_dialog",
+        ] {
+            let mut m = running(now);
+            let fx = m.handle(notification(ty), Some("s1"), now);
+            assert_eq!(status_of(&fx), Some(AgentStatus::NeedsFeedback), "{ty}");
+            let fx = m.handle(tool("Bash", None, true), Some("s1"), now);
+            assert_eq!(status_of(&fx), Some(AgentStatus::Running), "{ty}");
+            let fx = m.handle(notification(ty), Some("s1"), now + Duration::from_secs(2));
+            assert!(fx.is_empty(), "{ty}: a late echo: {fx:?}");
+        }
+        let mut m = running(now);
+        m.handle(notification("elicitation_dialog"), Some("s1"), now);
+        let fx = m.handle(notification("elicitation_response"), Some("s1"), now);
+        assert_eq!(status_of(&fx), Some(AgentStatus::Running));
+    }
+
+    /// A usage limit Claude waits out: the row stays running with the
+    /// note, whichever of the hook and the progress-clear comes first, and
+    /// `idle_prompt` and the drain timers leave it be. Claude's own
+    /// continuation clears the note, and that turn ends as any other.
+    #[test]
+    fn a_waited_out_limit_holds_running_whichever_end_comes_first() {
+        let now = t0();
+        let waits = || LimitOutlook::Waits {
+            until: Some(now + Duration::from_secs(3600)),
+        };
+        // The hook first.
+        let mut m = running(now);
+        let fx = m.handle(fail("rate_limit", waits()), Some("s1"), now);
+        assert_eq!(status_of(&fx), None, "still running");
+        assert_eq!(stop_of(&fx), cause("rate_limit", true));
+        assert!(m
+            .handle(HookEvent::Progress { busy: false }, None, now)
+            .is_empty());
+        assert!(m
+            .handle(notification("idle_prompt"), Some("s1"), now)
+            .is_empty());
+        assert!(m.tick(now + Duration::from_secs(1800)).is_empty());
+        assert_eq!(m.status(), AgentStatus::Running);
+        let fx = m.handle(notification("quota_auto_resume_fired"), Some("s1"), now);
+        assert_eq!(stop_of(&fx), Some(None), "cleared");
+        assert_eq!(m.status(), AgentStatus::Running);
+        let fx = m.handle(HookEvent::Stop { background: None }, Some("s1"), now);
+        assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
+
+        // The progress-clear first: finished for a moment, then running.
+        let mut m = running(now);
+        let fx = m.handle(HookEvent::Progress { busy: false }, None, now);
+        assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
+        let fx = m.handle(fail("rate_limit", waits()), Some("s1"), now);
+        assert_eq!(status_of(&fx), Some(AgentStatus::Running));
+        assert_eq!(stop_of(&fx), cause("rate_limit", true));
+        // The continuation's own prompt clears it as well.
+        let fx = m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
+        assert_eq!(stop_of(&fx), Some(None));
+    }
+
+    /// A login, billing or account stop waits on the user in either order,
+    /// through the turn's own end signals; logging back in settles a
+    /// logged-out note, and a prompt or the next tool call settles any.
+    #[test]
+    fn an_account_stop_waits_on_the_user_through_the_turn_end() {
+        let now = t0();
+        for clear_first in [false, true] {
+            let mut m = running(now);
+            if clear_first {
+                m.handle(HookEvent::Progress { busy: false }, None, now);
+            }
+            let fx = m.handle(
+                fail("authentication_failed", LimitOutlook::Unknown),
+                Some("s1"),
+                now,
+            );
+            assert_eq!(status_of(&fx), Some(AgentStatus::NeedsFeedback));
+            assert_eq!(stop_of(&fx), cause("authentication_failed", false));
+            assert!(m
+                .handle(HookEvent::Progress { busy: false }, None, now)
+                .is_empty());
+            let later = now + Duration::from_secs(70);
+            assert!(m
+                .handle(notification("idle_prompt"), Some("s1"), later)
+                .is_empty());
+            let fx = m.handle(notification("auth_success"), Some("s1"), later);
+            assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
+            assert_eq!(stop_of(&fx), Some(None));
+        }
+        for reason in ["billing_error", "account_on_hold", "model_not_found"] {
+            let mut m = running(now);
+            m.handle(fail(reason, LimitOutlook::Unknown), Some("s1"), now);
+            assert_eq!(m.status(), AgentStatus::NeedsFeedback, "{reason}");
+            let fx = m.handle(notification("auth_success"), Some("s1"), now);
+            assert!(fx.is_empty(), "{reason}: not a login problem");
+            let fx = m.handle(tool("Bash", None, false), Some("s1"), now);
+            assert_eq!(status_of(&fx), Some(AgentStatus::Running), "{reason}");
+            assert_eq!(stop_of(&fx), Some(None), "{reason}");
+        }
+    }
+
+    /// Any other API error ends the turn, with its note as a badge until
+    /// the next turn starts.
+    #[test]
+    fn an_api_error_finishes_the_turn_with_a_note() {
+        let now = t0();
+        for reason in ["overloaded", "server_error", "a_kind_claude_adds_later"] {
+            let mut m = running(now);
+            let fx = m.handle(fail(reason, LimitOutlook::Unknown), Some("s1"), now);
+            assert_eq!(status_of(&fx), Some(AgentStatus::Finished), "{reason}");
+            assert_eq!(stop_of(&fx), cause(reason, false));
+            let fx = m.handle(HookEvent::Progress { busy: true }, None, now);
+            assert_eq!(status_of(&fx), Some(AgentStatus::Running));
+            assert_eq!(stop_of(&fx), Some(None), "{reason}");
+        }
+        // No error kind at all reads as `unknown`.
+        let mut m = running(now);
+        let fx = m.handle(
+            HookEvent::StopFailure {
+                error: None,
+                detail: None,
+                limit: LimitOutlook::Unknown,
+            },
+            Some("s1"),
+            now,
+        );
+        assert_eq!(
+            stop_of(&fx),
+            Some(Some(StopCause {
+                reason: "unknown".into(),
+                detail: None,
+                waiting: false
+            }))
+        );
+    }
+
+    /// A limit with no wait in sight (an API-billed session, no reading)
+    /// finishes — until the screen says Claude is waiting after all. A
+    /// reset days off is Claude's menu, which needs the user.
+    #[test]
+    fn the_screen_turns_an_unknown_limit_into_a_wait() {
+        let now = t0();
+        let mut m = running(now);
+        let fx = m.handle(fail("rate_limit", LimitOutlook::Unknown), Some("s1"), now);
+        assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
+        assert_eq!(stop_of(&fx), cause("rate_limit", false));
+        let fx = m.handle(HookEvent::LimitWaiting { until: None }, None, now);
+        assert_eq!(status_of(&fx), Some(AgentStatus::Running));
+        assert_eq!(stop_of(&fx), cause("rate_limit", true));
+        assert!(m
+            .handle(HookEvent::LimitWaiting { until: None }, None, now)
+            .is_empty());
+
+        let mut m = running(now);
+        let fx = m.handle(fail("rate_limit", LimitOutlook::Menu), Some("s1"), now);
+        assert_eq!(status_of(&fx), Some(AgentStatus::NeedsFeedback));
+        assert_eq!(stop_of(&fx), cause("rate_limit", false));
+        let fx = m.handle(HookEvent::LimitWaiting { until: None }, None, now);
+        assert_eq!(status_of(&fx), Some(AgentStatus::Running), "a wait chosen");
+    }
+
+    /// The screen only confirms a limit this turn hit: a resumed session
+    /// repaints old "continuing automatically" lines, and an ordinary turn
+    /// or an account stop must not read them as a wait.
+    #[test]
+    fn the_screen_never_starts_a_wait_on_its_own() {
+        let now = t0();
+        let mut m = running(now);
+        m.handle(HookEvent::Stop { background: None }, Some("s1"), now);
+        assert!(m
+            .handle(HookEvent::LimitWaiting { until: None }, None, now)
+            .is_empty());
+        let mut m = running(now);
+        m.handle(
+            fail("billing_error", LimitOutlook::Unknown),
+            Some("s1"),
+            now,
+        );
+        assert!(m
+            .handle(HookEvent::LimitWaiting { until: None }, None, now)
+            .is_empty());
+        assert!(m.handle(HookEvent::LimitWaitEnded, None, now).is_empty());
+    }
+
+    /// A wait the screen says was cancelled, or one past its reset and the
+    /// overrun, finishes as the limit it was; one with no known reset is
+    /// given the session window's length.
+    #[test]
+    fn a_cancelled_or_overdue_wait_finishes_as_the_limit_it_was() {
+        let now = t0();
+        let mut m = running(now);
+        m.handle(
+            fail("rate_limit", LimitOutlook::Waits { until: None }),
+            Some("s1"),
+            now,
+        );
+        let fx = m.handle(HookEvent::LimitWaitEnded, None, now);
+        assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
+        assert_eq!(stop_of(&fx), cause("rate_limit", false));
+
+        let reset = now + Duration::from_secs(3600);
+        let mut m = running(now);
+        m.handle(
+            fail("rate_limit", LimitOutlook::Waits { until: Some(reset) }),
+            Some("s1"),
+            now,
+        );
+        assert!(m
+            .tick(reset + LIMIT_OVERRUN - Duration::from_secs(1))
+            .is_empty());
+        let fx = m.tick(reset + LIMIT_OVERRUN);
+        assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
+        assert_eq!(stop_of(&fx), cause("rate_limit", false));
+
+        let mut m = running(now);
+        m.handle(
+            fail("rate_limit", LimitOutlook::Waits { until: None }),
+            Some("s1"),
+            now,
+        );
+        assert!(m.tick(now + Duration::from_secs(5 * 3600)).is_empty());
+        let fx = m.tick(now + LIMIT_WAIT_MAX);
+        assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
+    }
+
+    /// The reset came while the computer slept (Claude waits for Enter),
+    /// or Claude gave the wait up: the user has to act, and a prompt or
+    /// Enter's continuation settles it.
+    #[test]
+    fn a_stale_or_given_up_wait_needs_the_user() {
+        let now = t0();
+        for ty in ["quota_auto_resume_stale", "quota_auto_resume_disabled"] {
+            let mut m = running(now);
+            m.handle(
+                fail("rate_limit", LimitOutlook::Waits { until: None }),
+                Some("s1"),
+                now,
+            );
+            let fx = m.handle(notification(ty), Some("s1"), now);
+            assert_eq!(status_of(&fx), Some(AgentStatus::NeedsFeedback), "{ty}");
+            assert_eq!(
+                stop_of(&fx),
+                Some(Some(StopCause {
+                    reason: ty.into(),
+                    detail: None,
+                    waiting: false
+                }))
+            );
+            assert!(m
+                .handle(HookEvent::Progress { busy: false }, None, now)
+                .is_empty());
+            let fx = m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
+            assert_eq!(status_of(&fx), Some(AgentStatus::Running), "{ty}");
+            assert_eq!(stop_of(&fx), Some(None), "{ty}");
+        }
+    }
+
+    /// A dead CLI's laggard POSTs say nothing, a death clears a note, and
+    /// so does a new session taking the row; another session's failure is
+    /// not this row's.
+    #[test]
+    fn stop_notes_follow_the_process_not_strays() {
+        let now = t0();
+        for dead in [AgentStatus::Terminated, AgentStatus::Disconnected] {
+            let mut m = AgentStatusMachine::new(dead, Some("s1".into()));
+            for event in [
+                fail("rate_limit", LimitOutlook::Waits { until: None }),
+                notification("quota_auto_resume_stale"),
+                notification("quota_auto_resume_fired"),
+            ] {
+                assert!(m.handle(event, Some("s1"), now).is_empty(), "{dead:?}");
+            }
+        }
+        let mut m = running(now);
+        assert!(m
+            .handle(
+                fail("overloaded", LimitOutlook::Unknown),
+                Some("someone-else"),
+                now
+            )
+            .is_empty());
+        m.handle(
+            fail("rate_limit", LimitOutlook::Waits { until: None }),
+            Some("s1"),
+            now,
+        );
+        let fx = m.handle(HookEvent::SessionEnded { exit_code: None }, None, now);
+        assert_eq!(stop_of(&fx), Some(None));
+        assert_eq!(status_of(&fx), Some(AgentStatus::Terminated));
+
+        let mut m = running(now);
+        m.handle(
+            fail("billing_error", LimitOutlook::Unknown),
+            Some("s1"),
+            now,
+        );
+        let fx = m.handle(
+            HookEvent::SessionStart {
+                source: Some("startup".into()),
+            },
+            Some("s2"),
+            now,
+        );
+        assert_eq!(stop_of(&fx), Some(None), "a new process");
+        // A forgotten stop (a respawn) holds nothing any more.
+        let mut m = running(now);
+        m.handle(
+            fail("rate_limit", LimitOutlook::Waits { until: None }),
+            Some("s1"),
+            now,
+        );
+        m.forget_stop();
+        let fx = m.handle(HookEvent::Progress { busy: false }, None, now);
+        assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
+        assert_eq!(stop_of(&fx), None, "nothing left to clear");
+    }
+
+    fn stop_listing(holders: usize) -> HookEvent {
+        HookEvent::Stop {
+            background: Some(Background { holders }),
+        }
+    }
+
+    fn subagent_stop_listing(id: &str, holders: usize) -> HookEvent {
+        HookEvent::SubagentStop {
+            subagent_id: Some(id.into()),
+            background: Some(Background { holders }),
+        }
+    }
+
+    /// A Stop whose `background_tasks` lists nothing that carries the work
+    /// on is the end, whatever nebula still tracks (a SubagentStop lost or
+    /// still on its way): finished at once, no drain grace.
+    #[test]
+    fn a_stop_listing_no_working_task_finishes_at_once() {
+        let now = t0();
+        let mut m = running(now);
+        subagent(&mut m, true, "sub1", now);
+        let fx = m.handle(stop_listing(0), Some("s1"), now);
+        assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
+        assert!(m.tick(now + DRAIN_GRACE).is_empty(), "nothing held");
+    }
+
+    /// One that lists a subagent, workflow or teammate holds the row at
+    /// running even when nebula tracks none of them (a workflow fires no
+    /// SubagentStart); the drain grace still lets go of it in the end.
+    #[test]
+    fn a_stop_listing_a_working_task_holds_running_even_untracked() {
+        let now = t0();
+        let mut m = running(now);
+        let fx = m.handle(stop_listing(1), Some("s1"), now);
+        assert_eq!(status_of(&fx), None, "held at running");
+        assert_eq!(m.status(), AgentStatus::Running);
+        assert!(m.tick(now + Duration::from_secs(1)).is_empty());
+        let fx = m.tick(now + Duration::from_secs(1) + DRAIN_GRACE);
+        assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
+    }
+
+    /// A held turn's SubagentStop whose list still names a worker keeps
+    /// the hold; the one whose list is empty releases it at once. One that
+    /// lands mid-turn, nothing held, changes nothing.
+    #[test]
+    fn a_subagent_stop_with_nothing_left_listed_releases_the_hold() {
+        let now = t0();
+        let mut m = running(now);
+        subagent(&mut m, true, "sub1", now);
+        subagent(&mut m, true, "sub2", now);
+        assert!(m
+            .handle(subagent_stop_listing("sub1", 2), Some("s1"), now)
+            .is_empty());
+        let fx = m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(5),
+        );
+        assert_eq!(status_of(&fx), None, "held for sub2");
+        let fx = m.handle(subagent_stop_listing("sub2", 1), Some("s1"), now);
+        assert_eq!(status_of(&fx), None, "still listed: held");
+        subagent(&mut m, true, "sub3", now);
+        let fx = m.handle(subagent_stop_listing("sub3", 0), Some("s1"), now);
+        assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
+    }
+
+    #[test]
+    fn shells_monitors_and_handed_off_tasks_never_hold_a_turn() {
+        for never in ["shell", "monitor", "MCP task", "cloud session", " Shell "] {
+            assert!(!holds_turn(never), "{never}");
+        }
+        for holds in ["subagent", "workflow", "teammate", "local_agent"] {
+            assert!(holds_turn(holds), "{holds}");
+        }
     }
 
     #[test]
@@ -1549,7 +2423,11 @@ mod tests {
             Some("s1"),
             now,
         );
-        let fx = m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(5));
+        let fx = m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(5),
+        );
         assert_eq!(status_of(&fx), None, "stays running, no transition");
         assert_eq!(m.status(), AgentStatus::Running);
 
@@ -1557,6 +2435,7 @@ mod tests {
         m.handle(
             HookEvent::SubagentStop {
                 subagent_id: Some("sub1".into()),
+                background: None,
             },
             Some("s1"),
             now + Duration::from_secs(60),
@@ -1572,7 +2451,11 @@ mod tests {
         let mut m = AgentStatusMachine::new(AgentStatus::Fresh, None);
         let now = t0();
         m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
-        m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(10));
+        m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(10),
+        );
         assert_eq!(m.status(), AgentStatus::Finished);
         // The subagent's own POST arrives 2s later — race heal.
         let fx = m.handle(
@@ -1590,7 +2473,11 @@ mod tests {
         let mut m = AgentStatusMachine::new(AgentStatus::Fresh, None);
         let now = t0();
         m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
-        m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(10));
+        m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(10),
+        );
         // An away-summary helper fires SubagentStart minutes later.
         let fx = m.handle(
             HookEvent::SubagentStart {
@@ -1765,11 +2652,16 @@ mod tests {
         assert_eq!(m.status(), AgentStatus::Running);
         // The Stop that follows a beat later agrees, and the drain still owns
         // the promotion.
-        let fx = m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(5));
+        let fx = m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(5),
+        );
         assert!(fx.is_empty());
         m.handle(
             HookEvent::SubagentStop {
                 subagent_id: Some("sub1".into()),
+                background: None,
             },
             Some("s1"),
             now + Duration::from_secs(6),
@@ -1789,7 +2681,11 @@ mod tests {
         let now = t0();
         m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
         progress(&mut m, false, now + Duration::from_secs(10));
-        m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(10));
+        m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(10),
+        );
         assert_eq!(m.status(), AgentStatus::Finished);
         let fx = m.handle(
             HookEvent::SubagentStart {
@@ -1837,7 +2733,11 @@ mod tests {
         let now = t0();
         m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
         // A manually-launched claude in the same cwd posts a Stop.
-        let fx = m.handle(HookEvent::Stop, Some("other-session"), now);
+        let fx = m.handle(
+            HookEvent::Stop { background: None },
+            Some("other-session"),
+            now,
+        );
         assert!(fx.is_empty());
         assert_eq!(m.status(), AgentStatus::Running);
     }
@@ -1862,7 +2762,11 @@ mod tests {
         );
         assert!(fx.contains(&Effect::SaveSessionId("s2".into())));
         // Old subagents gone: a Stop finishes immediately.
-        let fx = m.handle(HookEvent::Stop, Some("s2"), now + Duration::from_secs(6));
+        let fx = m.handle(
+            HookEvent::Stop { background: None },
+            Some("s2"),
+            now + Duration::from_secs(6),
+        );
         assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
     }
 
@@ -1891,7 +2795,11 @@ mod tests {
         let fx = m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
         assert_eq!(saved_ids(&fx), ["s1"]);
         // Once, not on every turn.
-        let fx = m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(5));
+        let fx = m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(5),
+        );
         assert!(saved_ids(&fx).is_empty(), "{fx:?}");
         let fx = m.handle(
             HookEvent::UserPromptSubmit,
@@ -1906,11 +2814,15 @@ mod tests {
         let mut m = AgentStatusMachine::new(AgentStatus::Fresh, None);
         let now = t0();
         m.handle(HookEvent::SessionStart { source: None }, Some("s1"), now);
-        let fx = m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(3));
+        let fx = m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(3),
+        );
         assert_eq!(saved_ids(&fx), ["s1"]);
         // A Stop never adopts: an id no start or prompt reported is not saved.
         let mut m = AgentStatusMachine::new(AgentStatus::Fresh, None);
-        let fx = m.handle(HookEvent::Stop, Some("s9"), now);
+        let fx = m.handle(HookEvent::Stop { background: None }, Some("s9"), now);
         assert!(saved_ids(&fx).is_empty(), "{fx:?}");
     }
 
@@ -1975,7 +2887,7 @@ mod tests {
         let mut m = AgentStatusMachine::new(AgentStatus::Fresh, None);
         let now = t0();
         m.handle(HookEvent::UserPromptSubmit, Some("s1"), now);
-        m.handle(HookEvent::Stop, Some("s1"), now);
+        m.handle(HookEvent::Stop { background: None }, Some("s1"), now);
         let fx = m.handle(HookEvent::SessionEnded { exit_code: Some(1) }, None, now);
         assert!(
             fx.is_empty(),
@@ -1998,11 +2910,18 @@ mod tests {
             now,
         );
         m.handle(
-            HookEvent::SubagentStop { subagent_id: None },
+            HookEvent::SubagentStop {
+                subagent_id: None,
+                background: None,
+            },
             Some("s1"),
             now,
         );
-        let fx = m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(1));
+        let fx = m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(1),
+        );
         assert_eq!(
             status_of(&fx),
             Some(AgentStatus::Finished),
@@ -2029,7 +2948,11 @@ mod tests {
             Some("s1"),
             now,
         );
-        let fx = m.handle(HookEvent::Stop, Some("s1"), now + Duration::from_secs(1));
+        let fx = m.handle(
+            HookEvent::Stop { background: None },
+            Some("s1"),
+            now + Duration::from_secs(1),
+        );
         assert_eq!(status_of(&fx), Some(AgentStatus::Finished));
     }
 }
