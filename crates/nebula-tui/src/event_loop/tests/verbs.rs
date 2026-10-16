@@ -774,7 +774,6 @@ fn the_new_verbs_have_rows_and_say_they_are_coming() {
     for action in [
         Action::OpenInVscode,
         Action::CopyPath,
-        Action::Critters,
         Action::MarkSeen,
         Action::ArchiveDone,
     ] {

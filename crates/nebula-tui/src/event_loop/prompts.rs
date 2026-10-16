@@ -119,6 +119,20 @@ pub(crate) fn open_prompt(app: &mut App, kind: PromptKind) {
                 .unwrap_or_default();
             ("Rename agent".into(), "name".into(), current)
         }
+        PromptKind::CritterName { id } => {
+            let current = app
+                .critters
+                .world
+                .as_ref()
+                .and_then(|w| w.get(*id))
+                .map(|c| c.name.clone())
+                .unwrap_or_default();
+            (
+                "Name this critter".into(),
+                "its kind keeps the name for next time".into(),
+                current,
+            )
+        }
         PromptKind::RenameTerminal { id } => {
             let current = app
                 .tree

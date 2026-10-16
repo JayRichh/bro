@@ -1,0 +1,17 @@
+[package]
+name = "kete-critters"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Kete's critters easter egg: the cast (palette-indexed pixel art), their brain and a deterministic world that both the TUI and the desktop window draw"
+
+# serde only, on purpose: the TUI runs this world directly and the desktop
+# runs a TypeScript port of it against `desktop/src/lib/critters/cast.gen.ts`,
+# which a test here writes.
+[dependencies]
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+# The contact sheet example only (`cargo run -p kete-critters --example sheet`).
+png = "0.17"

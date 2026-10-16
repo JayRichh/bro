@@ -62,6 +62,12 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientReque
         return;
     }
 
+    // ↑↑↓↓←→←→BA toggles the CRITTERS (the arrows still move; the B and
+    // the A that finish it are taken).
+    if crate::critters::konami(app, &key) {
+        return;
+    }
+
     if handle_preview_scroll_key(app, key) {
         return;
     }
@@ -449,8 +455,8 @@ fn handle_global_action(
         | Action::CopyPath
         | Action::CopyRelativePath
         | Action::CopyBranch
-        | Action::WakeAccount
-        | Action::Critters => super::verbs::pending_verb(app, action),
+        | Action::WakeAccount => super::verbs::pending_verb(app, action),
+        Action::Critters => crate::critters::toggle(app),
         // The menu matrix's verbs, for the menu lanes (and lane/wake's
         // schedule) to route: their own arm, so each lane takes its ids
         // out without touching the one above.

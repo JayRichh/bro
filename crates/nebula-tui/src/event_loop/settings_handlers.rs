@@ -50,6 +50,11 @@ pub(crate) fn handle_settings_key(app: &mut App, key: KeyEvent) {
         // Shift+E / Shift+I: the settings to a file, or a file's in.
         KeyCode::Char('E') => SettingsCmd::Export,
         KeyCode::Char('I') => SettingsCmd::Import,
+        // Shift+L on a CRITTERS row: the collection log.
+        KeyCode::Char('L') if !on_tabs && crate::critters::is_critters_row(tab, selected) => {
+            crate::critters::open_log(app);
+            return;
+        }
         // ---- the tab strip has focus ----
         KeyCode::Left | KeyCode::Char('h') if on_tabs => SettingsCmd::Tab((tab + tabs - 1) % tabs),
         KeyCode::Right | KeyCode::Char('l') if on_tabs => SettingsCmd::Tab((tab + 1) % tabs),
@@ -530,6 +535,12 @@ pub(crate) fn apply_config(app: &mut App, cfg: &crate::config::Config) {
     crate::learn::sync(app, cfg);
     app.chrome.theme = app.chrome.live_theme.resolve(&cfg.theme);
     app.chrome.animations = cfg.animations;
+    crate::critters::apply(
+        app,
+        cfg.critters,
+        cfg.critters_size_word(),
+        cfg.critters_often_word(),
+    );
     app.chrome.black_background = cfg.black_background;
     app.chrome.icons = crate::icons::IconStyle::from_setting(cfg.icons_word());
     if let Some(mode) = cfg.diff_mode() {

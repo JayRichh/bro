@@ -331,6 +331,8 @@ pub fn clamp_files_width(area: Rect, boundary_x: i32) -> Option<u16> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum MenuAction {
+    /// A row of the CRITTER MENU (right-click on a critter).
+    Critter(crate::critters::CritterAct),
     Attach(SessionRef),
     RestartAgent(AgentId),
     /// Pin this session as the machine's ORCHESTRATOR (`SetOrchestrator`).
@@ -1099,6 +1101,11 @@ impl HelpView {
 #[derive(Debug, Clone, PartialEq)]
 pub enum PromptKind {
     AddProject,
+    /// The critter menu's **Name…**: what to call this visitor (and its
+    /// species, next time).
+    CritterName {
+        id: u32,
+    },
     /// Point an existing project at its new main checkout after its
     /// original `repo_path` disappeared from disk.
     SetProjectPath {
@@ -2885,6 +2892,8 @@ pub enum Overlay {
     /// The SHIP OVERLAY: the pull request composer, or the merge
     /// confirm, for one checkout (`ship_view`).
     Ship(crate::ship_view::ShipView),
+    /// The CRITTER LOG: every species, seen or a silhouette.
+    CritterLog(crate::critters::LogView),
 }
 
 /// Rows optimistically removed for an in-flight DeleteWorktree, kept so an
@@ -5185,6 +5194,8 @@ pub struct App {
     pub desk: crate::desk::DeskState,
     /// LEARN IN PLACE: the first-use tip on the footer's padding row.
     pub learn: crate::learn::Learn,
+    /// The CRITTERS overlay (an easter egg; `crate::critters`).
+    pub critters: crate::critters::Critters,
 }
 
 impl Default for App {
@@ -5208,6 +5219,7 @@ impl App {
             orch: crate::orchestrator_view::OrchState::default(),
             desk: crate::desk::DeskState::default(),
             learn: crate::learn::Learn::default(),
+            critters: crate::critters::Critters::new(),
         };
         app.launcher.columns_recent_prompts_count = 3;
         app

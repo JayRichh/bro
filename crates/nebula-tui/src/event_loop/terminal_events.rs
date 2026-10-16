@@ -268,6 +268,7 @@ pub(crate) fn dispatch_input(app: &mut App, event: Event, out: &mut Vec<ClientRe
         // browser tab where a pull request was just merged or closed.
         Event::FocusGained => {
             app.chrome.window_focused = true;
+            crate::critters::refocused(app);
             schedule_pull_request_refresh(app);
             // Back from VS Code, maybe with another theme picked there.
             recheck_theme(app);

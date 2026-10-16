@@ -9,6 +9,7 @@ nebula-core = { workspace = true }
 nebula-config = { workspace = true }
 nebula-fuzzy = { workspace = true }
 kete-ado = { workspace = true }
+kete-critters = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["io-std"] }
@@ -32,6 +33,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Pipes",
     "Win32_System_Threading",
     "Win32_System_Registry",
+    "Win32_System_SystemInformation",
     "Win32_System_Console",
     "Win32_Storage_FileSystem",
     "Win32_Security",

@@ -1,0 +1,1023 @@
+# Aotearoa. Frames face right; `.` is transparent; `e`/`g` are eye/glint.
+# Light comes from the top left: highlights on top edges, shade underneath.
+
+== kiwi
+size 20 11
+pal h #b8925f
+pal b #8a6a45
+pal s #745538
+pal d #5a412f
+pal H #c9a77a
+pal e #18121e
+pal k #efe3c4
+pal K #c2ae84
+pal f #d8b98a
+pal F #a48a62
+lid H
+-- idle
+....hhhhh...........
+..hhbbbbbhh.........
+.hbbbsbbbbbhHH......
+hbbbbbbsbbbHHeH.....
+bbsbbbbbbbbbHHHkk...
+bbbbbsbbbbbbbbHkkkk.
+dbbbbbbbsbbbbd.....K
+.dbsdbsdbsbdsd......
+..dddddddddd........
+....ff...FF.........
+..f.ff..F.FF........
+-- walk
+....hhhhh...........
+..hhbbbbbhh.........
+.hbbbsbbbbbhHH......
+hbbbbbbsbbbHHeH.....
+bbsbbbbbbbbbHHHkk...
+bbbbbsbbbbbbbbHkkkk.
+dbbbbbbbsbbbbd.....K
+.dbsdbsdbsbdsd......
+..dddddddddd........
+....FF...ff.........
+..F.FF..f.ff........
+-- sit
+....................
+....................
+....hhhhh...........
+..hhbbbbbhh.........
+.hbbbsbbbbbhHH......
+hbbbbbbsbbbHHeH.....
+bbsbbbbbbbbbHHHkk...
+bbbbbsbbbbbbbbHkkkk.
+dbbbbbbbsbbbbd.....K
+.dbsdbsdbsbdsd......
+..dfdfdddFdF........
+-- eat
+....................
+....hhhhh...........
+..hhbbbbbhh.........
+.hbbbsbbbbbhh.......
+hbbbbbbsbbbbHH......
+bbsbbbbbbbbbHeH.....
+bbbbbsbbbbbbHHHk....
+dbbbbbbbsbbbbdkK....
+.dbsdbsdbsbdsd.k....
+..dddddddddd...k....
+..f.ff..F.FF...K....
+-- held
+....hhhhh...........
+..hhbbbbbhh.........
+.hbbbsbbbbbhHH......
+hbbbbbbsbbbHHeH.....
+bbsbbbbbbbbbHHHkk...
+bbbbbsbbbbbbbbHkkkk.
+dbbbbbbbsbbbbd.....K
+.dbsdbsdbsbdsd......
+..dddddddddd........
+....ff...FF.........
+....ff...FF.........
+-- squash
+....................
+....................
+....................
+...hhhhhhh..........
+.hhbbbsbbbbhHH......
+hbbbbbbsbbHHeHkk....
+bbsbbbbbbbbbbHHkkkk.
+dbbbbbsbbbbbbd.....K
+.dbsdbsdbsbdsd......
+..dddddddddd........
+..fffff.FFFFF.......
+
+== tui
+size 13 10
+pal s #6a9c86
+pal b #2c3f4c
+pal B #4b5f94
+pal d #1d2632
+pal w #f1ede4
+pal W #c9c3cf
+pal k #241c2a
+pal f #3a3240
+pal e #0f0b14
+pal g #b8d0c8
+lid d
+-- idle
+.........ss..
+........sbbs.
+.......sbbgek
+......sbbbwWk
+....ssbbbbww.
+...sbbbbbbb..
+..sbBBBbbbd..
+.sbBBBbbbdd..
+sbdd..ff.....
+bd....f.f....
+-- walk
+.........ss..
+........sbbs.
+.......sbbgek
+......sbbbwWk
+....ssbbbbww.
+...sbbbbbbb..
+..sbBBBbbbd..
+.sbBBBbbbdd..
+sbdd...ff....
+bd.....f.f...
+-- sit
+.............
+.........ss..
+........sbbs.
+.......sbbgek
+......sbbbwWk
+....ssbbbbww.
+...sbbbbbbb..
+..sbBBBbbbd..
+.sbBBBbbbdd..
+sbddddddd....
+-- eat
+.............
+.............
+.............
+......sss....
+....ssbbbs...
+...sbbbbbbs..
+..sbBBBbbgek.
+.sbBBBbbbwWk.
+sbdd..ffbdd..
+bd....f.f....
+-- held
+.........ss..
+........sbbs.
+.......sbbgek
+......sbbbwWk
+....ssbbbbww.
+...sbbbbbbb..
+..sbBBBbbbd..
+.sbBBBbbbdd..
+sbdd..f.f....
+bd....f.f....
+-- fly
+...ssB.......
+...sBBs......
+....sBBs.ss..
+....ssBBsbbs.
+..ssbbbbbbgek
+ssbbbbbbbbwWk
+.ddbbbbbbdw..
+...ddddddd...
+.............
+.............
+-- fly
+.............
+.............
+.........ss..
+........sbbs.
+..ssbbbbbbgek
+ssbbbbbbbbwWk
+.ddbBBbbbdw..
+...dBBBdddd..
+....sBBB.....
+.....sB......
+
+== pukeko
+size 14 12
+pal k #2b2a60
+pal K #5659ad
+pal d #1f1d45
+pal b #3f58b8
+pal B #7790e0
+pal r #e23a30
+pal R #a3222c
+pal w #f2ede4
+pal W #c9c4d4
+pal o #f08a3c
+pal O #c25a34
+pal e #f6b43c
+lid k
+-- idle
+.........Krr..
+.........kerrr
+.........kkRR.
+..........kk..
+..kKKkkkkkkk..
+.wwkkkkkkkbbB.
+..wkkkkkkbbbb.
+...dkkkkbbbbd.
+....ddbbbbdd..
+.....o...o....
+.....o...o....
+.....ooo.ooo..
+-- walk
+.........Krr..
+.........kerrr
+.........kkRR.
+..kk......kk..
+.wwkKkkkkkkk..
+.wwkkkkkkkbbB.
+..wkkkkkkbbbb.
+...dkkkkbbbbd.
+....ddbbbbdd..
+....o.....o...
+...O.......o..
+..OOO.....ooo.
+-- sit
+..............
+..............
+..............
+.........Krr..
+.........kerrr
+.........kkRR.
+..kKKkkkkkkk..
+.wwkkkkkkkbbB.
+..wkkkkkkbbbb.
+...dkkkkbbbbd.
+....ddbbbbdd..
+.....oo..oo...
+-- eat
+..............
+..............
+..............
+..............
+..............
+.kKKkkkkkkkkk.
+wwkkkkkkkbBkk.
+.wkkkkkkbbbkkK
+..dkkkkbbbbker
+...ddbbbbddRrr
+...o...o...Rr.
+...ooo.ooo..r.
+-- held
+.........Krr..
+.........kerrr
+.........kkRR.
+..........kk..
+..kKKkkkkkkk..
+.wwkkkkkkkbbB.
+..wkkkkkkbbbb.
+...dddbbbbddd.
+.....o...o....
+.....o...o....
+.....o...o....
+.....oo..oo...
+
+== takahe
+size 15 12
+pal o #98b868
+pal t #72c4a0
+pal T #3f9a8c
+pal u #2a6f78
+pal I #7a86d8
+pal i #4c58b4
+pal j #2f3485
+pal q #f26a56
+pal r #d8322f
+pal R #9c2230
+pal l #ea5a45
+pal L #b53a3a
+pal w #f2ede4
+pal e #18121e
+lid j
+-- idle
+.........Iiq...
+........Iiiqqr.
+........ieirrrr
+...oooooiiirrrR
+..ttttttiiRRR..
+.tttTTTTiiii...
+wtTTTTTTiiii...
+wTTTTTuuiiij...
+.uuTTuuujjjj...
+..uuuuuujjj....
+...ll...ll.....
+..llll..llll...
+-- walk
+.........Iiq...
+........Iiiqqr.
+........ieirrrr
+...oooooiiirrrR
+..ttttttiiRRR..
+.tttTTTTiiii...
+wtTTTTTTiiii...
+wTTTTTuuiiij...
+.uuTTuuujjjj...
+..uuuuuujjj....
+...ll...llll...
+..llll.........
+-- sit
+...............
+...............
+.........Iiq...
+........Iiiqqr.
+........ieirrrr
+...oooooiiirrrR
+..ttttttiiRRR..
+.tttTTTTiiii...
+wtTTTTTTiiii...
+wTTTTTuuiiij...
+.uuTTuuujjjj...
+..uuuuuujjj....
+-- eat
+...............
+...............
+...............
+...............
+..oooooiii.....
+.ttttttii......
+tttTTTTiiiiIiq.
+tTTTTTTiiiiieqr
+TTTTTuuiiijiirr
+uuTTuuujjjj.rrR
+.uuuuuujjj...RR
+..llll.llll..R.
+-- held
+.........Iiq...
+........Iiiqqr.
+........ieirrrr
+...oooooiiirrrR
+..ttttttiiRRR..
+.tttTTTTiiii...
+wtTTTTTTiiii...
+wTTTTTuuiiij...
+.uuTTuuujjjj...
+...ll...ll.....
+...ll...ll.....
+...lll..lll....
+
+== korora
+size 8 10
+pal h #7c9ccc
+pal b #4a69a4
+pal d #344a7a
+pal w #f2ede4
+pal W #c8cbd8
+pal k #626a7a
+pal p #ee9aa2
+pal P #c47482
+pal e #18121e
+lid d
+-- idle
+..hhbb..
+.hbbbbb.
+.bbbebkk
+.bbbbww.
+bbbdwwww
+bbbdwwww
+bbbdwwww
+.bbbwwww
+..bbwwW.
+..pp.ppp
+-- walk
+.hhbb...
+hbbbbb..
+bbbebkk.
+.bbbbww.
+bbbdwwww
+bbbdwwww
+bbbdwwww
+.bbbwwww
+..bbwwW.
+.pp..pp.
+-- sit
+........
+..hhbb..
+.hbbbbb.
+.bbbebkk
+.bbbbww.
+bbbdwwww
+bbbdwwww
+bbbdwwww
+.bbbwwww
+..bbwwpp
+-- eat
+........
+..hhbb..
+.hbbbbb.
+.bbbebb.
+bbbbbwwk
+bbbdwwwk
+bbbdwwww
+.bbbwwww
+..bbwwW.
+..pp.ppp
+-- held
+..hhbb..
+.hbbbbb.
+.bbbebkk
+.bbbbww.
+bbbdwwww
+bbbdwwww
+.bbbwwww
+..bbwwW.
+..p..pp.
+..p..pp.
+
+== hoiho
+size 10 13
+pal h #9fb0c4
+pal b #6f86a6
+pal d #45546f
+pal w #f2ede4
+pal W #c9c9d2
+pal y #f6dc72
+pal g #e6a82a
+pal P #e07e82
+pal p #ee9aa2
+pal Q #c06070
+pal e #18121e
+lid b
+-- idle
+...hbbb...
+..hbbbbb..
+.yyyygePPP
+.bbbwwwPP.
+bbbbbwwww.
+bbbbdwwww.
+bbbbdwwww.
+bbbbdwwww.
+bbbbdwwww.
+.bbbbwwww.
+.bbbbwwww.
+.dbbbwwW..
+..pp..ppp.
+-- walk
+..hbbb....
+.hbbbbb...
+yyyygePPP.
+bbbwwwPP..
+bbbbbwwww.
+bbbbdwwww.
+bbbbdwwww.
+bbbbdwwww.
+bbbbdwwww.
+.bbbbwwww.
+.bbbbwwww.
+.dbbbwwW..
+.pp...pp..
+-- sit
+..........
+..........
+...hbbb...
+..hbbbbb..
+.yyyygePPP
+.bbbwwwPP.
+bbbbbwwww.
+bbbbdwwww.
+bbbbdwwww.
+bbbbdwwww.
+bbbbdwwww.
+.bbbbwwww.
+.bbbbwwppp
+-- eat
+..........
+..........
+..........
+...hbbb...
+..hbbbbb..
+.yyyygeb..
+bbbbwwwP..
+bbbbdwwwPP
+bbbbdwwwQ.
+bbbbdwwww.
+.bbbbwwww.
+.dbbbwwW..
+..pp..ppp.
+-- held
+...hbbb...
+..hbbbbb..
+.yyyygePPP
+.bbbwwwPP.
+bbbbbwwww.
+bbbbdwwww.
+bbbbdwwww.
+bbbbdwwww.
+.bbbbwwww.
+..bbbwwW..
+..pp..pp..
+..pp..pp..
+..p...p...
+
+== kea
+size 14 10
+pal h #a8b45a
+pal a #738d3e
+pal G #4f6a32
+pal d #33492a
+pal b #bcc0c6
+pal B #7b8090
+pal o #f46a2c
+pal O #d04822
+pal n #8e7462
+pal e #18121e
+lid G
+-- idle
+.......hhh....
+......haaabbb.
+......aaeaabbB
+.....GaaaaBB.B
+....haaaaaa..B
+...haadaada...
+..haadaaada...
+.haadaGadaG...
+.GGdGaGaGd....
+.GdG..n..n....
+-- walk
+.......hhh....
+......haaabbb.
+......aaeaabbB
+.....GaaaaBB.B
+....haaaaaa..B
+...haadaada...
+..haadaaada...
+.haadaGadaG...
+.GGdGaGaGd....
+.GdG.n....n...
+-- sit
+..............
+.......hhh....
+......haaabbb.
+......aaeaabbB
+.....GaaaaBB.B
+....haaaaaa..B
+...haadaada...
+..haadaaada...
+.haadaGadaG...
+.GGdGaGaGd....
+-- eat
+..............
+..............
+..............
+....hhhh......
+...haaaaaa....
+..haadaaeaabb.
+.haadaaadaabbB
+.aadaGadaGaBBB
+.GGdGaGaGd..BB
+.GdG..n..n...B
+-- held
+.......hhh....
+......haaabbb.
+......aaeaabbB
+.....GaaaaBB.B
+....haaaaaa..B
+...haadaada...
+..haadaaada...
+.haadaGadaG...
+.GGdGaGaGd....
+..dG..n..n....
+-- fly
+dOooaa........
+.Oooooa.......
+.Oooooahhh....
+..Oooahaaabbb.
+.haaaaaaeaabbB
+.aadaaaaaaBB.B
+GGdaGadaG....B
+GdG...........
+..............
+..............
+-- fly
+..............
+..............
+.......hhh....
+......haaabbb.
+.haaaaaaeaabbB
+.aadaaaaaaBB.B
+GGdaOooaG....B
+GdGOooooa.....
+..Oooooa......
+.dOoooa.......
+
+== ruru
+size 10 11
+pal B #8a6a4c
+pal b #5c4331
+pal d #3a2a24
+pal s #efe0b8
+pal f #c9a97c
+pal c #a07e58
+pal g #f4d23a
+pal k #d2c090
+pal p #d8b888
+pal e #18121e
+lid b
+-- idle
+..BBbbbb..
+.bddbbddb.
+.bgeffgeb.
+.bggfkggb.
+..bffkfb..
+.bbBbfffb.
+.bsbbfcfb.
+.bbbsfffb.
+.bsbbfcfb.
+dbbbbbffb.
+.d.pp.pp..
+-- walk
+..BBbbbb..
+.bddbbddb.
+.bgeffgeb.
+.bggfkggb.
+..bffkfb..
+.bbBbfffb.
+.bsbbfcfb.
+.bbbsfffb.
+.bsbbfcfb.
+.dbbbbffb.
+..d.pp..pp
+-- sit
+..........
+..BBbbbb..
+.bddbbddb.
+.bgeffgeb.
+.bggfkggb.
+..bffkfb..
+bbbBbfffbb
+bbsbbfcfbb
+bbbbsfffbb
+.bsbbfcfb.
+.bbbbbffbb
+-- eat
+..........
+..........
+..........
+..........
+...BBbbbb.
+.bbddbbddb
+.bbgeffgeb
+.bbggfkggb
+.bsbffkfb.
+dbbbbbffb.
+.d.pp.pp..
+-- held
+..BBbbbb..
+.bddbbddb.
+.bgeffgeb.
+.bggfkggb.
+..bffkfb..
+.bbBbfffb.
+.bsbbfcfb.
+.bbbsfffb.
+dbbbbbffb.
+...p.pp...
+...p.pp...
+-- fly
+.sbb......
+bbsbB.....
+bsbbbb....
+..bbbbBBb.
+.bbbbbddbb
+dbbsbbgegk
+bbsbbbggfk
+.bbbbbffb.
+..........
+..........
+..........
+-- fly
+..........
+..........
+..........
+......BBb.
+.bbbbbddbb
+dbbsbbgegk
+bbsbbbggfk
+.bbbbbffb.
+.bbsbbbb..
+.bsbbsb...
+..dbb.....
+
+== piwakawaka
+size 11 8
+pal B #ad9a80
+pal b #7d6a58
+pal c #a39080
+pal d #3e342f
+pal w #f4efe6
+pal f #eab870
+pal F #c98f50
+pal k #6a5a52
+pal e #18121e
+lid b
+-- idle
+..ww.......
+.wddw......
+.wdd...dd..
+..dbbbbdww.
+...bbbbceck
+...bffffww.
+....fffddd.
+.....k.k...
+-- walk
+.wwwww.....
+wdddddw....
+wddddw.dd..
+.wdbbbbdww.
+...bbbbceck
+...bffffww.
+....fffddd.
+...k....k..
+-- sit
+...........
+..ww.......
+.wddw......
+.wdd...dd..
+..dbbbbdww.
+...bbbbceck
+...bffffww.
+....fffddd.
+-- eat
+..ww.......
+.wddw......
+.wdd.......
+..dbbbb....
+...bbbbbdd.
+...bfffceck
+....fffwwdk
+.....k.k...
+-- held
+..ww.......
+.wddw......
+.wdd...dd..
+..dbbbbdww.
+...bbbbceck
+...bffffww.
+.....k.k...
+.....k.k...
+-- fly
+.wwwww.bb..
+wdddddwbBb.
+wddddw.bbb.
+.wdbbbbdww.
+...bbbbceck
+...bffffww.
+....fffddd.
+...........
+-- fly
+.wwwww.....
+wdddddw....
+wddddw.dd..
+.wdbbbbdww.
+...bbbbceck
+...bffffww.
+...bBbbddd.
+..bbbb.....
+
+== weka
+size 13 10
+pal B #c58a52
+pal b #9a5e34
+pal D #6e4024
+pal d #3e2418
+pal S #6c3e22
+pal f #bb905c
+pal F #9c7448
+pal p #e4a79a
+pal P #bf8076
+pal l #b4604a
+pal L #8a4434
+pal e #18121e
+lid D
+-- idle
+.............
+........BBb..
+........bebpp
+.dB.....bbbPp
+..BBBbbbbbb..
+.BbSbSbSbbfF.
+.bbSbSbSbbfF.
+..bbbbbbbbDD.
+.....l..l....
+....lll.lll..
+-- walk
+.............
+........BBb..
+.d......dedpp
+.dB.....bbbPp
+..BBBbbbbbb..
+.BbSbSbSbbfF.
+.bbSbSbSbbfF.
+..bbbbbbbbDD.
+....l....l...
+...lll...lll.
+-- sit
+.............
+.............
+.............
+........BBb..
+........bebpp
+.dB.....bbbPp
+..BBBbbbbbb..
+.BbSbSbSbbfF.
+.bbSbSbSbbfF.
+..bbllbbllDD.
+-- eat
+.............
+.............
+.............
+B............
+BBBbbbbbb....
+bSbSbSbbfFbdB
+bSbSbSbbfFbeB
+bbbbbbbbDDbdb
+...l..l...Pp.
+..lll.lll.pp.
+-- held
+.............
+........BBb..
+........bebpp
+.dB.....bbbPp
+..BBBbbbbbb..
+.BbSbSbSbbfF.
+.bbSbSbSbbfF.
+.....l..l....
+.....l..l....
+....ll..ll...
+
+== kakapo
+size 14 11
+pal h #b0bf68
+pal a #7e9c4c
+pal G #587a3a
+pal y #dccc5e
+pal m #8c6c3a
+pal f #eadfa4
+pal F #c9b97a
+pal b #a2a8b0
+pal B #727882
+pal n #d0aa9a
+pal e #18121e
+lid G
+-- idle
+.....hhhh.....
+....haaaaaa...
+...haaffffFa..
+...aaGfffeffF.
+..haaGffffffbb
+..aaaaafffFB..
+.haayaaaaamaa.
+haamaaayaaaaG.
+aGaaaymaaaaaG.
+.GamaaaaayaGG.
+...nn....nn...
+-- walk
+....hhhh......
+...haaaaaa....
+..haaffffFa...
+..aaGfffeffF..
+.haaGffffffbb.
+.aaaaafffFB...
+haayaaaaamaa..
+haamaaayaaaaG.
+aGaaaymaaaaaG.
+.GamaaaaayaGG.
+....nn..nn....
+-- sit
+..............
+.....hhhh.....
+....haaaaaa...
+...haaffffFa..
+...aaGfffeffF.
+..haaGffffffbb
+..aaaaafffFB..
+.haayaaaaamaa.
+haamaaayaaaaG.
+aGaaaymaaaaaG.
+.GamaaaaayaGG.
+-- eat
+..............
+..............
+..............
+......hhhh....
+.....haaaaaa..
+....haaffffFa.
+.haaaaGfffeffF
+haahaaGffffffb
+aGaaaaaafffFB.
+.GamaaaaayaGG.
+...nn....nn...
+-- held
+.....hhhh.....
+....haaaaaa...
+...haaffffFa..
+...aaGfffeffF.
+..haaGffffffbb
+..aaaaafffFB..
+.haayaaaaamaa.
+haamaaayaaaaG.
+.GamaaaaayaGG.
+...n....n.....
+...n....n.....
+
+== tuatara
+size 18 7
+pal h #abb56e
+pal a #7a8a4c
+pal G #56673a
+pal d #37422d
+pal f #c4bc84
+pal F #a8a274
+pal s #f4ecd0
+pal S #d2c79c
+pal e #18121e
+pal g #e6d070
+lid a
+-- idle
+.....s..s..s.s....
+....hShhShhShShhh.
+..aaaadaaadaaaaega
+aaaaaGaaGaaGaaFFad
+.aaGGGGGGGGGGGFFF.
+..GG.GG....GGG....
+....dGdd..dGdd....
+-- walk
+.....s..s..s.s....
+....hShhShhShShhh.
+..aaaadaaadaaaaega
+aaaaaGaaGaaGaaFFad
+.aaGGGGGGGGGGGFFF.
+..GG...GG.GGG.....
+.....dGdd.dGdd....
+-- sit
+..................
+..................
+.....s..s..s.s....
+....hShhShhShShhh.
+..aaaadaaadaaaaega
+aaaaaGaaGaaGaaFFad
+.aaGGGGGGGGGGGFFF.
+-- eat
+.....s..s..s.s....
+....hShhShhSh.....
+..aaaadaaadaa.....
+aaaaaGaaGaaGahhhh.
+.aaGGGGGGGGGGaaega
+..GG.GG....GGFFFad
+....dGdd..dGddd.d.
+-- held
+.....s..s..s.s....
+....hShhShhShShhh.
+..aaaadaaadaaaaega
+aaaaaGaaGaaGaaFFad
+.aaGGGGGGGGGGGFFF.
+....G.G...G.G.....
+....d.d...d.d.....
+
+== weta
+size 16 9
+pal B #d0a068
+pal b #80502e
+pal D #563422
+pal d #2e1c14
+pal S #f0d8b0
+pal a #e8c898
+pal l #a87244
+pal e #18121e
+lid D
+-- idle
+....S....aaaa...
+...SB........a..
+...lBB........a.
+...lSBB....BB..a
+..lSbDBBDbbBBBBB
+..lbbDbBBbbbbbBe
+.l.SDdDDBBDDDDbd
+.lS........l.l..
+l.S.......ll..ll
+-- walk
+....S.....aaaa..
+...SB........a..
+...lBB........a.
+...lSBB....BB..a
+..lSbDBBDbbBBBBB
+..lbbDbBBbbbbbBe
+.l.SDdDDBBDDDDbd
+.lS........l.l..
+.lS.........ll..
+-- sit
+................
+.........aaaa...
+....SB.......a..
+....l.B.......a.
+...l...B...BB..a
+..lSbDbbBbbBBBBB
+..lbbDbbDBbbbbBe
+.lSDDdDDdDBDDDbd
+l..........l.l..
+-- eat
+....S....aaaa...
+...SB........a..
+...lBB........a.
+...lSBB....BB..a
+..lSbDBBDbbBBB..
+..lbbDbBBbbbbb..
+.l.SDdDDBBDDDbBB
+.lS........ll.Be
+l.S.......lll.bd
+-- held
+.........aaaa...
+.............a..
+..............a.
+...........BB..a
+....bDbbDbbBBBBB
+...bbDbbDbbbbbBe
+...DDdDDdDDDDDbd
+...ll..ll..l.l..
+...SS..SS..S.S..
