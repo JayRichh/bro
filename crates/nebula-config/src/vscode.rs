@@ -526,15 +526,16 @@ fn extension_themes(ext: &Path, builtin: bool) -> Vec<ThemeFile> {
 }
 
 /// Find the theme settings call `name` among the extensions under `dirs`,
-/// case-insensitively: by id first, then by label, the user's extensions
-/// before the built-ins. `Default Dark Modern` also finds the `Dark
-/// Modern` newer releases ship.
+/// case-insensitively: by the name VS Code stores for it (its id, else
+/// its label) first, then by its label, the user's extensions before the
+/// built-ins. `Default Dark Modern` also finds the `Dark Modern` newer
+/// releases ship.
 pub fn find_theme(name: &str, dirs: &[PathBuf]) -> Option<ThemeFile> {
     let all = themes_in(dirs);
     let pick = |want: &str| {
         let want = want.trim().to_lowercase();
         all.iter()
-            .find(|t| t.id.as_deref().is_some_and(|id| id.to_lowercase() == want))
+            .find(|t| t.settings_id().to_lowercase() == want)
             .or_else(|| all.iter().find(|t| t.label.to_lowercase() == want))
             .cloned()
     };
@@ -568,24 +569,30 @@ impl ThemeData {
         Some(kind == "light" || kind == "hc-light" || kind == "vs")
     }
 
-    /// The foreground the theme gives the first of `scopes` it styles: an
-    /// exact scope first, then a broader one it starts with (`keyword`
-    /// for `keyword.control`), the later entry winning either way, as in
-    /// VS Code.
-    pub fn token(&self, scopes: &[&str]) -> Option<Rgba> {
+    /// The foreground the theme gives the first of `scopes` it styles, as
+    /// VS Code picks it: the most specific entry that covers the scope —
+    /// the scope itself, else the longest one it starts with (`keyword`
+    /// covers `keyword.control`) — the later entry winning a tie. As
+    /// written (alpha and all); [`ThemeData::token`] parses it.
+    pub fn token_str(&self, scopes: &[&str]) -> Option<&str> {
         for want in scopes {
-            let exact = self.tokens.iter().rev().find(|(s, _)| s == want);
-            let broader = || {
-                self.tokens
-                    .iter()
-                    .rev()
-                    .find(|(s, _)| want.starts_with(&format!("{s}.")))
-            };
-            if let Some(c) = exact.or_else(broader).and_then(|(_, fg)| Rgba::parse(fg)) {
-                return Some(c);
+            let covers = |s: &str| s == *want || want.starts_with(&format!("{s}."));
+            let hit = self
+                .tokens
+                .iter()
+                .enumerate()
+                .filter(|(_, (s, fg))| covers(s) && Rgba::parse(fg).is_some())
+                .max_by_key(|(i, (s, _))| (s.len(), *i));
+            if let Some((_, (_, fg))) = hit {
+                return Some(fg);
             }
         }
         None
+    }
+
+    /// [`ThemeData::token_str`], parsed.
+    pub fn token(&self, scopes: &[&str]) -> Option<Rgba> {
+        self.token_str(scopes).and_then(Rgba::parse)
     }
 }
 

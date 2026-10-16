@@ -1,0 +1,12 @@
+{
+	// The theme this VS Code is set to, written the way people write
+	// settings.json: comments, and a comma left trailing.
+	"workbench.colorTheme": "Atom One Dark",
+	"editor.fontFamily": "'JetBrains Mono', Consolas, monospace",
+	"editor.fontSize": 14,
+	"workbench.colorCustomizations": {
+		"[Atom One Dark]": {
+			"editor.background": "#1B1E24",
+		},
+	},
+}

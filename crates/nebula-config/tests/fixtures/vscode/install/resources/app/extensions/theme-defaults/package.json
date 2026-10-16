@@ -1,0 +1,32 @@
+{
+	"name": "theme-defaults",
+	"displayName": "%displayName%",
+	"description": "%description%",
+	"categories": ["Themes"],
+	"version": "1.0.0",
+	"publisher": "vscode",
+	"license": "MIT",
+	"engines": { "vscode": "*" },
+	"contributes": {
+		"themes": [
+			{
+				"id": "Dark Modern",
+				"label": "%darkModernThemeLabel%",
+				"uiTheme": "vs-dark",
+				"path": "./themes/dark_modern.json"
+			},
+			{
+				"id": "Light Modern",
+				"label": "%lightModernThemeLabel%",
+				"uiTheme": "vs",
+				"path": "./themes/light_modern.json"
+			},
+			{
+				"id": "Default Dark+",
+				"label": "%darkPlusColorThemeLabel%",
+				"uiTheme": "vs-dark",
+				"path": "./themes/dark_plus.json"
+			}
+		]
+	}
+}

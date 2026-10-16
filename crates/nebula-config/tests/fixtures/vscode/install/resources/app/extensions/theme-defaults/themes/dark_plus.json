@@ -1,0 +1,22 @@
+{
+	"$schema": "vscode://schemas/color-theme",
+	"name": "Dark+",
+	"include": "./dark_vs.json",
+	"colors": {
+		// Set here, and again by dark_modern.json: the child wins.
+		"sideBar.background": "#202020",
+		"list.deemphasizedForeground": "#8C8C8C"
+	},
+	"tokenColors": [
+		{
+			"name": "Function declarations",
+			"scope": ["entity.name.function", "support.function"],
+			"settings": { "foreground": "#DCDCAA" }
+		},
+		{
+			"name": "Control flow keywords",
+			"scope": "keyword.control",
+			"settings": { "foreground": "#C586C0" }
+		}
+	]
+}

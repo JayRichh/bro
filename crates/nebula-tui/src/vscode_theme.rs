@@ -30,25 +30,11 @@ pub fn parse_color(s: &str, under: Option<Color>) -> Option<Color> {
     Some(blend(color, under, f32::from(c.a) / 255.0))
 }
 
-/// The foreground the theme gives the first of `scopes` it styles: an
-/// exact scope first, then a broader one it starts with (`keyword` for
-/// `keyword.control`), the later entry winning either way, as in VS Code.
+/// The foreground the theme gives the first of `scopes` it styles, the
+/// way VS Code picks one (`ThemeData::token_str`), its alpha blended over
+/// `bg`.
 fn token_color(data: &ThemeData, scopes: &[&str], bg: Option<Color>) -> Option<Color> {
-    for want in scopes {
-        let exact = data.tokens.iter().rev().find(|(s, _)| s == want);
-        let broader = || {
-            data.tokens
-                .iter()
-                .rev()
-                .find(|(s, _)| want.starts_with(&format!("{s}.")))
-        };
-        if let Some((_, fg)) = exact.or_else(broader) {
-            if let Some(c) = parse_color(fg, bg) {
-                return Some(c);
-            }
-        }
-    }
-    None
+    parse_color(data.token_str(scopes)?, bg)
 }
 
 /// Kete's palette, from a VS Code theme's colors over the One preset of the
