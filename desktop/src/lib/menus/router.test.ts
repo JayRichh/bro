@@ -38,15 +38,25 @@ function rightClick(path: unknown[], at = { x: 40, y: 60 }) {
 }
 
 let listener: ((e: unknown) => void) | null = null;
+let keyListener: ((e: unknown) => void) | null = null;
 let stop: () => void;
 const doc = {
-  addEventListener: (_: string, f: (e: unknown) => void, capture?: boolean) => {
+  addEventListener: (type: string, f: (e: unknown) => void, capture?: boolean) => {
     expect(capture).toBe(true);
-    listener = f;
+    if (type === 'keydown') keyListener = f;
+    else listener = f;
   },
-  removeEventListener: () => (listener = null),
+  removeEventListener: (type: string) => (type === 'keydown' ? (keyListener = null) : (listener = null)),
   getSelection: () => null,
+  activeElement: null as unknown,
 };
+
+/** Press `key` (Shift with F10), let the timers run; `taken`: something
+ *  before the router took the key. */
+async function pressMenuKey(key: 'ContextMenu' | 'F10', taken = false) {
+  keyListener!({ key, shiftKey: key === 'F10', ctrlKey: false, altKey: false, metaKey: false, defaultPrevented: taken });
+  await new Promise((r) => setTimeout(r, 0));
+}
 
 /** Fire `e` and let the menu open (it opens a tick later). */
 async function fire(e: ReturnType<typeof rightClick>) {
@@ -202,9 +212,32 @@ describe('the right-click router', () => {
     expect(ui.menu?.items[0]).toMatchObject({ label: 'Other' });
   });
 
+  it('opens the focused row\'s own menu on the Menu key and Shift+F10', async () => {
+    const row = el('button') as ReturnType<typeof el> & { parentElement?: unknown; getBoundingClientRect?: () => { left: number; bottom: number } };
+    row.parentElement = null;
+    row.getBoundingClientRect = () => ({ left: 30, bottom: 40 });
+    router.ownMenu(row as unknown as HTMLElement, () => ({ items: [{ label: 'Copy path', run: () => {} }], label: 'src/a.ts' }));
+    doc.activeElement = row;
+    await pressMenuKey('F10');
+    expect(ui.menu).toMatchObject({ label: 'src/a.ts', x: 30, y: 40 });
+    closeMenu();
+    await pressMenuKey('ContextMenu');
+    expect(ui.menu?.label).toBe('src/a.ts');
+    closeMenu();
+    // The window's row key (or the terminal's program) took it: nothing more.
+    await pressMenuKey('F10', true);
+    expect(ui.menu).toBeNull();
+    // A menu already up stays the one.
+    openMenu([{ label: 'First', run: () => {} }], { x: 1, y: 1 }, 'Row');
+    await pressMenuKey('F10');
+    expect(ui.menu?.label).toBe('Row');
+    doc.activeElement = null;
+  });
+
   it('stops listening when stopped', () => {
     stop();
     expect(listener).toBeNull();
+    expect(keyListener).toBeNull();
     stop = () => {};
   });
 });

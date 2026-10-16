@@ -168,7 +168,7 @@ flow('dragging a Done card onto Archived offers the worktree delete', { script: 
   assert.ok((await d.agents()).find((a) => a.id === id)?.archived, 'archived');
 });
 
-flow('a Review card opens the review split: the diff against base with its commit, Alt+A archives', { script: FEATURE }, async (d) => {
+flow('a Review card opens the review split: the diff against base with its commit, Alt+A archives', { script: FEATURE, env: { KETE_BROWSER_KEYS: 'off' } }, async (d) => {
   const repo = d.makeRepo('review-proj');
   await d.addRepo(repo);
   await toBoard(d);
@@ -211,6 +211,17 @@ flow('a Review card opens the review split: the diff against base with its commi
   } finally {
     if (before) setClipboard(before);
   }
+  // The same menu from the keys: Shift+F10 on the focused file row (a row
+  // with a menu of its own, no registry target), one menu.
+  await d.wd.exec(
+    `for (const b of document.querySelectorAll('[aria-label="Changed files"] button')) if (b.innerText.includes('feature.txt')) return b.focus();`,
+  );
+  await d.press(Key.F10, Key.Shift);
+  await d.menu('src/feature.txt');
+  await new Promise((r) => setTimeout(r, 400));
+  assert.equal(await d.wd.exec(`return document.querySelectorAll('[role="menu"]').length;`), 1);
+  await d.press(Key.Escape);
+  await menuGone(d);
   await d.press('a', Key.Alt);
   await d.waitForText('Archive session');
   await d.click('[role="dialog"] button, [role="alertdialog"] button', 'Archive');
@@ -443,6 +454,26 @@ flow("right-click a terminal, a board card and Shift+F10 open Kete's menus, one 
   await d.press(Key.ArrowLeft);
   await d.waitFor('the submenu closed', () => d.wd.exec(`return ![...document.querySelectorAll('[role="menu"]')].some((m) => m.getAttribute('aria-label') === 'Open in');`));
   assert.equal(await d.activeRow(), 'Open in');
+  await d.press(Key.Escape);
+  await menuGone(d);
+  // At 640px: the band's kebab at the right edge opens the same menu, kept
+  // inside the window, and Open in flips to the menu's left.
+  await d.wd.call('POST', '/window/rect', { width: 640, height: 760 });
+  await d.waitFor('a 640px window', () => d.wd.exec('return window.innerWidth <= 640;'));
+  await d.click(`[aria-label="${branch} actions"]`);
+  await d.menu(branch);
+  for (let i = 0; i < 30 && (await d.activeRow()) !== 'Open in'; i++) await d.press(Key.ArrowDown);
+  await d.press(Key.ArrowRight);
+  await d.menu('Open in');
+  const boxes = await d.wd.exec(`return [...document.querySelectorAll('[role="menu"]')].map((m) => {
+      const r = m.getBoundingClientRect();
+      return { label: m.getAttribute('aria-label'), left: r.left, right: r.right, top: r.top, bottom: r.bottom, w: innerWidth, h: innerHeight };
+    });`);
+  for (const b of boxes) assert.ok(b.left >= 0 && b.right <= b.w && b.top >= 0 && b.bottom <= b.h, `${b.label} inside the window: ${JSON.stringify(b)}`);
+  const top = boxes.find((b) => b.label === branch);
+  const sub = boxes.find((b) => b.label === 'Open in');
+  assert.ok(sub.right <= top.left + 2, 'Open in flips to the left of the menu at the window edge');
+  await d.press(Key.Escape);
   await d.press(Key.Escape);
   await menuGone(d);
 });

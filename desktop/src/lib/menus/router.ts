@@ -108,9 +108,15 @@ function ancestors(n: Walkable | null | undefined): Walkable[] {
 /** The menu's own layers: its boxes and the scrim behind them. */
 const isLayer = (n: Walkable) => n.getAttribute?.('data-menu-scrim') != null || n.getAttribute?.('role') === 'menu';
 
+/** Where a menu the keys opened goes with no element to hang it under. */
+const MIDDLE = () => ({ x: Math.max(8, Math.round((globalThis.innerWidth ?? 800) / 2 - 180)), y: 96 });
+
 /** Listen on `doc`; returns the stop. */
 export function installMenuRouter(
-  doc: Pick<Document, 'addEventListener' | 'removeEventListener' | 'getSelection'> & { elementsFromPoint?: (x: number, y: number) => Element[] } = document,
+  doc: Pick<Document, 'addEventListener' | 'removeEventListener' | 'getSelection'> & {
+    elementsFromPoint?: (x: number, y: number) => Element[];
+    activeElement?: Element | null;
+  } = document,
 ): () => void {
   // The page's selection covers `n` (hit.ts rule 4): a real selection,
   // not a caret.
@@ -150,8 +156,31 @@ export function installMenuRouter(
     const at = menuPoint(e, 'el' in hit ? (hit.el as Element | null) : null);
     setTimeout(() => openHit(hit, at), 0);
   };
+  // The Menu key and Shift+F10 open the focused thing's menu by themselves,
+  // not only through the browser's contextmenu for the key: a row with a
+  // menu of its own (a diff file row, an Azure DevOps row, an account) or a
+  // chip's (`pr:`) has it from the keys either way. After the key has run
+  // its course: the window's row key (`row_menu`, which opens a registry
+  // row's menu and takes the key) or the surface under the focus (the
+  // terminal's program) goes first, and a menu already up is left alone.
+  const onKey = (e: KeyboardEvent) => {
+    const menuKey = e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey);
+    if (!menuKey || ui.menu) return;
+    setTimeout(() => {
+      if (e.defaultPrevented || ui.menu) return;
+      const el = (doc.activeElement ?? null) as Walkable | null;
+      const hit = resolveHit(ancestors(el), { selected, own });
+      if (hit.kind === 'menu') return;
+      const at = hit.kind === 'none' ? MIDDLE() : menuPoint({ clientX: 0, clientY: 0 }, 'el' in hit ? (hit.el as Element | null) : null);
+      openHit(hit, at);
+    }, 0);
+  };
   doc.addEventListener('contextmenu', onMenu, true);
+  doc.addEventListener('keydown', onKey, true);
   (globalThis as { __keteContextMenu?: typeof lastContextMenu }).__keteContextMenu = lastContextMenu;
-  return () => doc.removeEventListener('contextmenu', onMenu, true);
+  return () => {
+    doc.removeEventListener('contextmenu', onMenu, true);
+    doc.removeEventListener('keydown', onKey, true);
+  };
 }
 
