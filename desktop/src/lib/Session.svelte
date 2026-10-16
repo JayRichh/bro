@@ -52,8 +52,10 @@
         >
         {#if agent?.role === 'orchestrator'}<OrchBadge />{/if}
         <Status {tone} />
-        <!-- A usage limit it waits out, or why it stopped: "running, resumes 3:45pm". -->
-        <StopBadge note={agent ? app.model.stops?.[agent.id] : null} class="self-center" />
+        <!-- A usage limit it waits out, or why it stopped: "running, resumes 3:45pm".
+             Off in a narrow header, where it would squeeze the name away: the
+             session row and the board card still carry it. -->
+        <StopBadge note={agent ? app.model.stops?.[agent.id] : null} class="self-center @max-[560px]:hidden" />
         <span class="flex-1"></span>
         <div class="flex flex-none items-center gap-1" role="toolbar" aria-label="Session">
           {#if agent?.archived}
