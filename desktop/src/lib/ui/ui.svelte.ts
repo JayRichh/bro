@@ -10,17 +10,38 @@ import { learn } from '../learn.svelte';
 export type MenuItem = {
   label: string;
   run: () => void;
-  /** Chords from the shortcut table, shown at the right. */
+  /** Chords from the shortcut table, shown at the right, every one. */
   keys?: string[];
   danger?: boolean;
   disabled?: boolean;
-  /** Why it is greyed out, as its tooltip. */
+  /** Why it is greyed out, as its tooltip; on a live row, what it acts on. */
   title?: string;
   /** Kept last whatever a searchable menu's query (the verbs menu's All
    *  keys). */
   pinned?: boolean;
+  /** A submenu (`Open in \u25b8`): the row opens these and runs nothing.
+   *  Submenus never nest: a child's own `children` are ignored. */
+  children?: MenuEntry[];
+  /** A checkbox row (or a radio row with `radio`): ticked or not. */
+  checked?: boolean;
+  /** One of a set (View \u25b8 Overview / Board): a radio, not a checkbox. */
+  radio?: boolean;
+  /** The icon slot ahead of the words. */
+  icon?: MenuIcon;
+  /** The row's whole words outside its submenu ("Open in VS Code" for the
+   *  submenu's "VS Code"): what the palette lists. */
+  full?: string;
 };
-export type MenuEntry = MenuItem | { heading: string } | 'sep';
+/** A status dot (its tone a theme colour), an image (an editor's icon, a
+ *  file's), or a glyph (an account's harness letter). */
+export type MenuIcon =
+  | { dot: 'ember' | 'ink' | 'muted' | 'faint' | 'done' | 'fail' | 'merged' | 'unread' }
+  | { src: string }
+  | { glyph: string };
+/** A heading: small caps, faint; `ember` for a state that needs you (a
+ *  menu's state banner, \u00a71.7 of the menu matrix). */
+export type MenuHeading = { heading: string; ember?: boolean };
+export type MenuEntry = MenuItem | MenuHeading | 'sep';
 
 export type Field = {
   key: string;
@@ -81,7 +102,8 @@ export const ui = $state({
 export type ReviewTab = 'terminal' | 'diff' | 'history' | 'pr';
 export type ReviewSheet = { sessions: string[]; at: number; tab: ReviewTab };
 
-/** Open a context menu at the pointer (or under an element). */
+/** Open a context menu at the pointer (or under an element). `label`
+ *  names it for a screen reader: the thing it acts on. */
 export function openMenu(
   items: MenuEntry[],
   at: { x: number; y: number } | HTMLElement,

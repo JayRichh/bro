@@ -16,7 +16,7 @@
 // selects the word under the pointer first (`rightClickSelectsWord`), and
 // nothing here stops the event, so that still happens.
 
-import { openMenu, ui, type MenuEntry } from '../ui/ui.svelte';
+import { closeMenu, openMenu, ui, type MenuEntry } from '../ui/ui.svelte';
 import { menuPoint, resolveHit, targetKind, type Hit, type HitKind, type MenuNode } from './hit';
 
 export type Point = { x: number; y: number };
@@ -95,8 +95,23 @@ export function openHit(hit: Hit, at: Point): boolean {
  *  (`window.__keteContextMenu`) to know WebView2's menu was stopped. */
 export const lastContextMenu = { count: 0, kind: '' as HitKind | '', prevented: false };
 
+type Walkable = MenuNode & { parentElement?: Walkable | null };
+
+/** `n` and the elements around it, innermost first: a path as
+ *  `composedPath()` gives one. */
+function ancestors(n: Walkable | null | undefined): Walkable[] {
+  const out: Walkable[] = [];
+  for (let at = n; at; at = at.parentElement) out.push(at);
+  return out;
+}
+
+/** The menu's own layers: its boxes and the scrim behind them. */
+const isLayer = (n: Walkable) => n.getAttribute?.('data-menu-scrim') != null || n.getAttribute?.('role') === 'menu';
+
 /** Listen on `doc`; returns the stop. */
-export function installMenuRouter(doc: Pick<Document, 'addEventListener' | 'removeEventListener' | 'getSelection'> = document): () => void {
+export function installMenuRouter(
+  doc: Pick<Document, 'addEventListener' | 'removeEventListener' | 'getSelection'> & { elementsFromPoint?: (x: number, y: number) => Element[] } = document,
+): () => void {
   // The page's selection covers `n` (hit.ts rule 4): a real selection,
   // not a caret.
   const selected = (n: MenuNode) => {
@@ -104,12 +119,33 @@ export function installMenuRouter(doc: Pick<Document, 'addEventListener' | 'remo
     if (!sel || sel.isCollapsed || !sel.toString().trim()) return false;
     return sel.containsNode(n as Node, true);
   };
+  const own = (n: MenuNode) => owned.has(n);
+  const note = (kind: HitKind, e: MouseEvent) => {
+    lastContextMenu.count++;
+    lastContextMenu.kind = kind;
+    lastContextMenu.prevented = e.defaultPrevented;
+  };
   const onMenu = (e: MouseEvent) => {
     e.preventDefault();
-    const hit = resolveHit(e.composedPath(), { menuOpen: !!ui.menu, selected, own: (n) => owned.has(n) });
-    lastContextMenu.count++;
-    lastContextMenu.kind = hit.kind;
-    lastContextMenu.prevented = e.defaultPrevented;
+    const path = e.composedPath();
+    // A right-click on the scrim behind an open menu (anywhere outside it):
+    // that menu goes and the one for what is under the pointer opens, in
+    // one click. The Menu key's late event lands on the focused element,
+    // not the scrim, so a keyboard open is never doubled.
+    const first = path[0] as Walkable | undefined;
+    if (ui.menu && first && first.getAttribute?.('data-menu-scrim') != null) {
+      const under = (doc.elementsFromPoint?.(e.clientX, e.clientY) as unknown as Walkable[] | undefined)?.find(
+        (n) => !ancestors(n).some(isLayer),
+      );
+      closeMenu();
+      const hit = resolveHit(ancestors(under), { selected, own });
+      note(hit.kind, e);
+      const at = menuPoint(e, 'el' in hit ? (hit.el as Element | null) : null);
+      setTimeout(() => openHit(hit, at), 0);
+      return;
+    }
+    const hit = resolveHit(path, { menuOpen: !!ui.menu, selected, own });
+    note(hit.kind, e);
     if (hit.kind === 'menu') return;
     const at = menuPoint(e, 'el' in hit ? (hit.el as Element | null) : null);
     setTimeout(() => openHit(hit, at), 0);

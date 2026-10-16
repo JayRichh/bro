@@ -7,8 +7,9 @@
 // Field, terminal and viewer menus keep the focus where it is (`keep`), so
 // their verbs act on the focused field or pane directly.
 
-import { app, toast } from '../store.svelte';
-import { menuFor, parseTarget } from '../actions';
+import { toast } from '../store.svelte';
+import { menuFor, parseTarget, targetLabel } from '../actions';
+import './targets';
 import type { MenuEntry } from '../ui/ui.svelte';
 import { clipboardHasText, copyText, readClipboard } from './clipboard';
 import { fieldItems, selectionItems, terminalItems, viewerItems, type FieldState } from './items';
@@ -182,19 +183,12 @@ setBuilder('viewer', (hit, at): Opened | null => {
 });
 
 // The registry's rows: the same menu as the row's Menu key (Shift+F10),
-// named for the row.
-function nameOf(kind: string, id: string): string | undefined {
-  const m = app.model;
-  if (kind === 'agent' || kind === 'subagent') return m.agents.find((a) => a.id === id)?.name;
-  if (kind === 'terminal') return m.terminals.find((t) => t.id === id)?.name;
-  if (kind === 'worktree') return m.worktrees.find((w) => w.id === id)?.branch;
-  if (kind === 'project') return m.projects.find((p) => p.id === id)?.name;
-  return undefined;
-}
-for (const kind of ['agent', 'subagent', 'terminal', 'worktree', 'project']) {
-  setRowBuilder(kind, (id, _el, target) => {
+// named for the row. A worktree's, and the window's other targets (pull
+// requests, ports, lanes, the background), are targets.ts's.
+for (const kind of ['agent', 'subagent', 'terminal', 'project']) {
+  setRowBuilder(kind, (_id, _el, target) => {
     const t = parseTarget(target);
-    return t ? { items: menuFor(t), label: nameOf(kind, id) } : null;
+    return t ? { items: menuFor(t), label: targetLabel(t) } : null;
   });
 }
 

@@ -5,27 +5,33 @@
 // app's do: delete always, archive when Confirm on archive is on or the
 // session has sessions nested under it (they go with it).
 
-import { api, type Agent, type Model, type TerminalTab, type Worktree } from './api';
-import { app, focusQuickPrompt, markSeen, openDiff, openSession, projectOf, setScope, toast } from './store.svelte';
-import { ask, type MenuEntry, type MenuItem } from './ui/ui.svelte';
+import { api, type AccountRow, type Agent, type Model, type TerminalTab, type Worktree } from './api';
+import { app, focusQuickPrompt, markSeen, openDiff, openSession, projectOf, revealRepo, setScope, toast } from './store.svelte';
+import { ask, openMenu, type MenuEntry, type MenuHeading, type MenuIcon, type MenuItem } from './ui/ui.svelte';
 import type { ShortcutId } from './shortcuts';
-import { makeOrchestrator, orchestratorMenuItems, unpinOrchestrator } from './orch.svelte';
-import { orchestratorOf } from './orchestrator';
-import type { ActionId, AppliesTo } from './actions.gen';
-import { destructive, menuIds, menuLabel, verbKeys } from './verbs';
+import { makeOrchestrator, openReview, unpinOrchestrator } from './orch.svelte';
+import { isOrchestrator, orchestratorOf } from './orchestrator';
+import type { ActionId, AppliesTo, MenuSection } from './actions.gen';
+import { destructive, groupOf as menuGroupOf, menuIds, menuLabel, sectionOf, verbKeys } from './verbs';
 import { worktreeApi } from './worktrees/api';
 import { cardsLine, dirty, stateLines } from './worktrees/offer';
 import { deleteEmptied, offerConfirm, prepareOffer, stillOffered } from './worktrees/delete';
 import { canSwitchBranch, openBranchSwitch } from './worktrees/switcher.svelte';
 import { checkoutSessions, deleteAllSessions } from './checkout';
-import { moveToAccount, pickProjectAccount, SWITCH_UNAVAILABLE } from './accounts/actions';
-import { canSwitch } from './accounts/view';
-import { rows as gitRows, whileCutting } from './worktrees/rows.svelte';
+import { moveToAccount, runLogin, setProjectAccount, SWITCH_UNAVAILABLE } from './accounts/actions';
+import { canSwitch, projectAccount } from './accounts/view';
+import { accountKey, sessionHarness } from './accounts/usage';
+import { rows as gitRows, setCollapsed, whileCutting } from './worktrees/rows.svelte';
 import { moveStep, stepInFor, type StepIn } from './reorder.svelte';
 import { openComposer, openMerge } from './ship/sheet.svelte';
-import { reviewVerbs } from './ship/ship';
-import { repoScope, worktreeScope } from './scope';
-import { groupOf } from './worktrees/groups';
+import { isOpen, reviewVerbs } from './ship/ship';
+import { dropPart, repoScope, worktreeScope } from './scope';
+import { groupOf, repoKey } from './worktrees/groups';
+import { nav } from './shell/history.svelte';
+import { toneOf } from './status';
+import { copyText } from './menus/clipboard';
+import { submenu } from './menus/model';
+import { insertRows, layout, withoutIds, type Row } from './menus/layout';
 
 export type Target =
   /** `viaSub`: picked from one of its subagents' rows, so it acts on
@@ -46,6 +52,17 @@ export function parseTarget(k: string | null | undefined): Target | null {
   const id = k.slice(i + 1);
   if (kind === 'agent' || kind === 'terminal' || kind === 'worktree' || kind === 'project') return { kind, id };
   if (kind === 'subagent') return { kind: 'agent', id, viaSub: true };
+  return null;
+}
+
+/** The nearest row around `el` whose target the window's keys know (a
+ *  session, terminal, worktree or repo), past a chip's own (`pr:`,
+ *  `port:`, `account:`), which only its menu reads. */
+export function closestTarget(el: Element | null | undefined): Target | null {
+  for (let at = el?.closest<HTMLElement>('[data-target]'); at; at = at.parentElement?.closest<HTMLElement>('[data-target]') ?? null) {
+    const t = parseTarget(at.dataset.target);
+    if (t) return t;
+  }
   return null;
 }
 
@@ -430,20 +447,32 @@ export async function removeProject(id: string) {
 
 // ---- menus ----
 
-// Every menu is built in the registry's order (MENUS) from the verbs the
-// window can run on the thing (`verbTable`), in the registry's words
-// (`menuLabel`), each with its key: the same rows, words and order as the
-// terminal app's. The window's own extras (Mark seen, Review, Default
-// account, Locate folder) sit among the registry's rows.
+// Every menu is built from the registry's rows for the thing's kind
+// (MENUS), in its order and words, each with its keys, from the verbs the
+// window can run on it now (`verbTable`), then laid out by the menu matrix
+// (menus/layout.ts): a rule where the section changes, a submenu group's
+// rows folded into `Title \u25b8` where two or more mean something. The
+// window's own rows (Review, the card's checkout, Default account) take
+// their matrix places among them. State hides a row, greys it with its
+// reason, or turns its words; it never reorders.
 
 /** What the window does for a registry verb on one thing. */
 interface VerbImpl {
   run: () => unknown;
   /** Words where the verb turns (Run or Stop run, Unpin orchestrator). */
   label?: string;
+  /** Its word inside its submenu, where that turns too ("Browser \u00b7
+   *  localhost:5173", "Open merged pull request"). */
+  word?: string;
   disabled?: boolean;
   /** Why it is disabled: the row's tooltip, and what its key says. */
   why?: string;
+  /** What a live row acts on (a folder, a link): its tooltip. */
+  note?: string;
+  /** A checkbox row (View \u25b8 Archived sessions), or with `radio` one of a
+   *  set (View \u25b8 Overview). */
+  checked?: boolean;
+  radio?: boolean;
 }
 export type VerbTable = Partial<Record<ActionId, VerbImpl>>;
 
@@ -453,49 +482,75 @@ const entry = (id: ActionId, on: AppliesTo, v: VerbImpl): MenuItem => ({
   keys: verbKeys(id),
   danger: destructive(id),
   ...(v.disabled ? { disabled: true } : {}),
-  ...(v.disabled && v.why ? { title: v.why } : {}),
+  ...(v.disabled ? (v.why ? { title: v.why } : {}) : v.note ? { title: v.note } : {}),
+  ...(v.checked !== undefined ? { checked: v.checked } : {}),
+  ...(v.radio ? { radio: true } : {}),
 });
 
-/** The registry's rows of `on`'s menu that `table` has, in its order. */
-function rows(on: AppliesTo, table: VerbTable): MenuItem[] {
-  return menuIds(on).flatMap((id) => {
+/** The registry's rows of `on`'s menu that `table` has, in its order,
+ *  with their sections and submenu groups. `titles`: a group's title where
+ *  the window knows better (the repo's Remote \u25b8 is GitHub \u25b8). */
+export function registryRows(on: AppliesTo, table: VerbTable, titles: Record<string, string> = {}): Row[] {
+  return menuIds(on).flatMap((id): Row[] => {
     const v = table[id];
-    return v ? [entry(id, on, v)] : [];
+    if (!v) return [];
+    const g = menuGroupOf(id, on);
+    return [
+      {
+        id,
+        section: sectionOf(id, on) ?? null,
+        ...(g ? { group: { id: g.group.id, title: titles[g.group.id] ?? g.group.title, label: v.word ?? g.label } } : {}),
+        item: entry(id, on, v),
+      },
+    ];
   });
 }
 
-/** A checkout's pull request verbs, as the terminal app has them: its
- *  page while it has one (open_pull_request), the composer while none is
- *  open (create_pull_request), the merge while one is (merge_pull_request).
+/** A row the window builds itself, at its matrix place. */
+export const localRow = (id: string, section: MenuSection | null, item: MenuItem, group?: Row['group']): Row => ({
+  id,
+  section,
+  item,
+  ...(group ? { group } : {}),
+});
+
+/** A checkout's pull request verbs by its state (the matrix's table):
+ *  none open, Create (greyed on the base branch); open, its page and
+ *  Merge (greyed on a draft); merged or closed, its page only, saying so.
  *  `session`: the card it is asked from, whose drop verdict on Ship says
  *  whether the branch is the base. */
 function prVerbs(worktree: string, session?: string): VerbTable {
   const pr = m().prs[worktree];
+  const t: VerbTable = {};
+  const page = () => pr && api.openUrl(pr.url).catch((e) => toast(String(e)));
+  if (pr && !isOpen(pr)) {
+    const words = `Open ${pr.state} pull request`;
+    t.open_pull_request = { run: page, label: words, word: words, note: pr.url };
+    return t;
+  }
   const onBase = !!gitRows.git[worktree]?.on_default_branch;
   const rv = reviewVerbs(pr, session ? m().cards[session]?.drops?.pr : undefined, !!worktreeOf(worktree)?.is_main, onBase);
-  const t: VerbTable = {};
-  if (pr) t.open_pull_request = { run: () => api.openUrl(pr.url).catch((e) => toast(String(e))) };
+  if (pr) t.open_pull_request = { run: page, note: pr.url };
   if (rv.pr.kind === 'open')
-    t.create_pull_request = {
-      run: () => openComposer(worktree, session ?? null),
-      disabled: !!rv.pr.why,
-      why: rv.pr.why ?? undefined,
-      // On the base branch, as the terminal app says by leaving it out.
-      label: onBase ? `${menuLabel('create_pull_request', session ? 'session' : 'worktree')} (on the base branch)` : undefined,
+    t.create_pull_request = { run: () => openComposer(worktree, session ?? null), disabled: !!rv.pr.why, why: rv.pr.why ?? undefined };
+  if (rv.merge)
+    t.merge_pull_request = {
+      run: () => openMerge(worktree, session ?? null),
+      disabled: !!rv.merge.why,
+      why: pr?.draft ? DRAFT_MERGE : (rv.merge.why ?? undefined),
     };
-  if (rv.merge) t.merge_pull_request = { run: () => openMerge(worktree, session ?? null), disabled: !!rv.merge.why };
   return t;
 }
 
-/** Focus here: the scope chip narrowed to the checkout (a session's or a
- *  worktree's) or the repo, the account narrowing kept. */
+const DRAFT_MERGE = 'Draft pull request: publish it first';
+
+/** Focus here, or once the scope is on it, back out: a checkout widens to
+ *  its repo, a repo to everything. The account narrowing stays. */
 function focusVerb(on: { worktree: string } | { repo: string }): VerbImpl {
-  return {
-    run: () => {
-      const s = m().scope ?? {};
-      setScope('repo' in on ? repoScope(s, on.repo) : worktreeScope(m(), s, on.worktree));
-    },
-  };
+  const s = m().scope ?? {};
+  if ('worktree' in on && s.worktree === on.worktree) return { run: () => setScope(dropPart(s, 'worktree')), label: 'Widen to the repo' };
+  if ('repo' in on && s.repo === on.repo && !s.worktree && !s.session) return { run: () => setScope(dropPart(s, 'repo')), label: 'Widen to everything' };
+  return { run: () => setScope('repo' in on ? repoScope(s, on.repo) : worktreeScope(m(), s, on.worktree)) };
 }
 
 /** A session's verbs as the window runs them: none an archived one does
@@ -518,7 +573,7 @@ function agentVerbs(a: Agent, viaSub = false, where: StepIn = stepInFor()): Verb
     // A fresh restart on another login: the conversation stays behind.
     move_to_account: canSwitch(m())
       ? { run: () => moveToAccount(a.id) }
-      : { run: () => toast(SWITCH_UNAVAILABLE), label: `${menuLabel('move_to_account', 'session')} (daemon too old)`, disabled: true },
+      : { run: () => toast(SWITCH_UNAVAILABLE), disabled: true, why: SWITCH_UNAVAILABLE },
     rename: { run: () => renameAgent(a.id) },
     // Make orchestrator only while none is pinned (the menu matrix):
     // replacing one is rare, and Unpin on it comes first.
@@ -530,13 +585,13 @@ function agentVerbs(a: Agent, viaSub = false, where: StepIn = stepInFor()): Verb
     archive: { run: () => archiveAgent(a.id, viaSub), label: viaSub ? 'Archive parent session\u2026' : undefined },
     delete: { run: () => deleteAgent(a.id) },
   };
-  // Its worktree's pull request, and the scope chip on its checkout.
+  // Its worktree's pull request.
   Object.assign(t, prVerbs(a.worktree_id, a.id));
-  t.focus_scope = focusVerb({ worktree: a.worktree_id });
   if (!viaSub) {
     t.reorder_up = { run: () => moveStep({ kind: 'agent', id: a.id }, -1, where) };
     t.reorder_down = { run: () => moveStep({ kind: 'agent', id: a.id }, 1, where) };
   }
+  Object.assign(t, sessionMenuVerbs(a));
   return t;
 }
 
@@ -548,13 +603,21 @@ function terminalVerbs(x: TerminalTab): VerbTable {
   };
 }
 
-/** Run or stop `w`'s run command, when it has one. */
+/** `w`'s run terminal while it runs. */
+export function runTerminalOf(w: string): TerminalTab | undefined {
+  return m().terminals.find((t) => t.worktree_id === w && !!t.run_command && t.alive);
+}
+
+/** Run or stop `w`'s run command: with one set, or while one still runs
+ *  (the command taken off since). */
 function runVerbOf(w: Worktree | undefined): VerbImpl | undefined {
-  if (!w || !app.runCommands[w.id]) return undefined;
-  const running = m().terminals.some((t) => t.worktree_id === w.id && t.run_command && t.alive);
+  if (!w) return undefined;
+  const running = !!runTerminalOf(w.id);
+  if (!app.runCommands[w.id] && !running) return undefined;
   return {
     run: () => attempt(running ? 'Could not stop' : 'Could not run', () => (running ? api.stopRun(w.id) : api.startRun(w.id))),
     label: running ? 'Stop run' : undefined,
+    note: app.runCommands[w.id],
   };
 }
 
@@ -579,6 +642,7 @@ function worktreeVerbs(w: Worktree): VerbTable {
     t.delete_worktree = { run: () => deleteWorktree(w.id) };
   }
   if (count) t.delete_all = { run: () => deleteAllSessions(w.id) };
+  Object.assign(t, worktreeMenuVerbs(w));
   return t;
 }
 
@@ -611,6 +675,123 @@ function projectVerbs(project: string): VerbTable {
           ),
         ),
     };
+  Object.assign(t, repoMenuVerbs(project));
+  return t;
+}
+
+// ---- the menu matrix's verbs (desk-menus) ----
+
+/** A finished turn nobody has read: what Mark seen clears. */
+const unread = (a: Agent) => a.unseen && !a.archived;
+/** A finished session already read, not the orchestrator: what Archive
+ *  done sessions takes (the terminal app's rule; one still waiting on its
+ *  subagents reads running, not finished). */
+export const isDone = (a: Agent) => a.status === 'finished' && !a.unseen && !a.archived && !isOrchestrator(a);
+
+/** Mark every unread session of `list` seen. */
+export function markAllSeen(list: Agent[]) {
+  const n = list.filter(unread);
+  for (const a of n) api.markSeen(a.id).catch(() => {});
+  toast(n.length ? `Marked ${n.length} ${n.length === 1 ? 'session' : 'sessions'} seen.` : 'Nothing unread here.');
+}
+
+/** Archive the done sessions of `list` (`where` says whose), after one
+ *  confirm that lists them; U brings any back. Each is checked again as
+ *  it goes: one that started a turn while the confirm was up stays. */
+export async function archiveDone(list: () => Agent[], where: string) {
+  const done = list().filter(isDone);
+  if (!done.length) return toast(`No finished, read sessions ${where}.`);
+  const r = await ask.confirm({
+    title: `Archive ${done.length} done ${done.length === 1 ? 'session' : 'sessions'}`,
+    message: `Archive the finished sessions you have read ${where}? Their agents stop; U brings any back.`,
+    detail: done.map((a) => sessionPath(m(), a)),
+    confirm: 'Archive',
+  });
+  if (!r.ok) return;
+  const still = new Set(list().filter(isDone).map((a) => a.id));
+  let n = 0;
+  await attempt('Could not archive', async () => {
+    for (const a of done) if (still.has(a.id)) (await api.archiveAgent(a.id), n++);
+  });
+  if (n) toast(`Archived ${n} done ${n === 1 ? 'session' : 'sessions'}.`);
+}
+
+/** Open `url`; `said`: what it is, for a failure. */
+function openLink(url: string) {
+  api.openUrl(url).catch((e) => toast(String(e)));
+}
+
+/** The dev server checkout `w` listens on: its first live port. */
+export function livePort(w: string | undefined): number | undefined {
+  return w ? m().ports.find((p) => p.worktree === w)?.live[0] : undefined;
+}
+
+/** Open in \u25b8 Browser \u00b7 localhost:N, while `w`'s dev server listens. */
+function browserVerb(w: string | undefined): VerbImpl | undefined {
+  const port = livePort(w);
+  if (!port) return undefined;
+  const url = `http://localhost:${port}`;
+  return { run: () => openLink(url), label: `Open localhost:${port} in browser`, word: `Browser \u00b7 localhost:${port}`, note: url };
+}
+
+/** Copy \u25b8 Pull request link, while the checkout has one. */
+function prLinkVerb(w: string): VerbImpl | undefined {
+  const pr = m().prs[w];
+  return pr ? { run: () => copyText(pr.url, pr.url), note: pr.url } : undefined;
+}
+
+/** A checkout's Explorer and Copy path rows, the band's Open folder and
+ *  Copy path as they were (worktrees/verbs.ts before the menus were one).
+ *  lane/editors owns `reveal_in_explorer` and the copy verbs: its rows in
+ *  the verb tables take these places when it lands (`verbTable` lays the
+ *  tables over these). */
+function checkoutFallbacks(path: string | undefined, worktree: string | undefined): VerbTable {
+  const t: VerbTable = {};
+  if (worktree) t.reveal_in_explorer = { run: () => attempt('Could not open the folder', () => worktreeApi.reveal(worktree)), note: path };
+  if (path) t.copy_path = { run: () => copyText(path, path), note: path };
+  return t;
+}
+
+/** The session's rows the matrix added: its dev server, its pull
+ *  request's link, Mark seen. */
+function sessionMenuVerbs(a: Agent): VerbTable {
+  const t: VerbTable = {};
+  const browser = browserVerb(a.worktree_id);
+  if (browser) t.open_in_browser = browser;
+  const link = prLinkVerb(a.worktree_id);
+  if (link) t.copy_pr_url = link;
+  if (unread(a)) t.mark_seen = { run: () => seeAgent(a.id) };
+  return t;
+}
+
+/** The checkout's: its dev server, its link, and the bulk verbs over its
+ *  sessions; Delete worktree says so when its pull request merged. */
+function worktreeMenuVerbs(w: Worktree): VerbTable {
+  const t: VerbTable = {};
+  const browser = browserVerb(w.id);
+  if (browser) t.open_in_browser = browser;
+  const link = prLinkVerb(w.id);
+  if (link) t.copy_pr_url = link;
+  const mine = () => m().agents.filter((a) => a.worktree_id === w.id);
+  if (mine().some(unread)) t.mark_seen = { run: () => markAllSeen(mine()) };
+  if (mine().some(isDone)) t.archive_done = { run: () => archiveDone(mine, `in ${w.branch}`) };
+  if (!w.is_main && m().prs[w.id]?.state === 'merged')
+    t.delete_worktree = { run: () => deleteWorktree(w.id), label: 'Delete worktree (pull request merged)\u2026' };
+  return t;
+}
+
+/** The repo's: its remote's own view (Azure DevOps), its main checkout's
+ *  dev server, the bulk verbs over its sessions. */
+function repoMenuVerbs(project: string): VerbTable {
+  const t: VerbTable = {};
+  if (app.adoCtx[project]) t.azure_devops = { run: () => nav.go({ view: 'tasks', repo: project }) };
+  const browser = browserVerb(mainOf(project)?.id);
+  if (browser) t.open_in_browser = browser;
+  const wts = new Set(m().worktrees.filter((w) => w.project_id === project).map((w) => w.id));
+  const mine = () => m().agents.filter((a) => wts.has(a.worktree_id));
+  const name = m().projects.find((p) => p.id === project)?.name ?? 'the repo';
+  if (mine().some(unread)) t.mark_seen = { run: () => markAllSeen(mine()) };
+  if (mine().some(isDone)) t.archive_done = { run: () => archiveDone(mine, `in ${name}`) };
   return t;
 }
 
@@ -619,19 +800,39 @@ export function verbTable(t: Target): VerbTable {
   switch (t.kind) {
     case 'agent': {
       const a = agentOf(t.id);
-      return a ? agentVerbs(a, t.viaSub) : {};
+      return a ? sessionTable(a, t.viaSub) : {};
     }
     case 'terminal': {
       const x = terminalOf(t.id);
-      return x ? terminalVerbs(x) : {};
+      return x ? terminalTable(x) : {};
     }
     case 'worktree': {
       const w = worktreeOf(t.id);
-      return w ? worktreeVerbs(w) : {};
+      return w ? worktreeTable(w) : {};
     }
     case 'project':
-      return projectVerbs(t.id);
+      return projectTable(t.id);
   }
+}
+
+// The tables with the checkout fallbacks under them (lane/editors' rows
+// win where both have one).
+function sessionTable(a: Agent, viaSub = false, where: StepIn = stepInFor()): VerbTable {
+  const w = worktreeOf(a.worktree_id);
+  return { ...(a.archived ? {} : checkoutFallbacks(w?.path, w?.id)), ...agentVerbs(a, viaSub, where) };
+}
+function terminalTable(x: TerminalTab): VerbTable {
+  // Copy path on a terminal is its checkout's folder (the matrix widened
+  // `copy_path` to terminals; this one is desk-menus').
+  const path = worktreeOf(x.worktree_id)?.path;
+  return { ...terminalVerbs(x), ...(path ? { copy_path: { run: () => copyText(path, path), note: path } } : {}) };
+}
+function worktreeTable(w: Worktree): VerbTable {
+  return { ...checkoutFallbacks(w.path, w.id), ...worktreeVerbs(w) };
+}
+function projectTable(project: string): VerbTable {
+  const p = m().projects.find((x) => x.id === project);
+  return { ...checkoutFallbacks(p?.repo_path, mainOf(project)?.id), ...projectVerbs(project) };
 }
 
 /** Run verb `id` on `t`, as its menu row does. False when it means
@@ -644,66 +845,225 @@ export function runVerb(t: Target, id: ActionId): boolean {
   return true;
 }
 
-function worktreeItems(w: Worktree | undefined): MenuEntry[] {
-  if (!w) return [];
-  return [{ heading: `${w.is_main ? 'checkout' : 'worktree'} ${w.branch}` }, ...rows('worktree', worktreeVerbs(w))];
-}
-
 /** Move up / Move down, the keyboard's (and the menu's) drag. */
 export function moveItems(t: { kind: string; id: string }, where: StepIn = 'tree'): MenuEntry[] {
   const on: AppliesTo = t.kind === 'project' ? 'repo' : t.kind === 'worktree' ? 'worktree' : 'session';
   return [entry('reorder_up', on, { run: () => moveStep(t, -1, where) }), entry('reorder_down', on, { run: () => moveStep(t, 1, where) })];
 }
 
-/** `where`: the board orders a lane's cards, the overview a tree's rows;
- *  by default wherever the focus is as the menu opens. */
+/** How a menu is asked for. `jump`: the surface doesn't show the
+ *  checkout's sessions (the Worktrees view, a breadcrumb), so its menu
+ *  lists them to open. */
+export interface MenuOpts {
+  jump?: boolean;
+}
+
+// ---- the session ----
+
+/** The banner a session's menu opens with: its state when that is worth
+ *  a line (\u00a71.7). */
+function sessionBanner(a: Agent): MenuHeading | null {
+  const orch = isOrchestrator(a) ? 'orchestrator \u00b7 ' : '';
+  if (a.archived) return { heading: 'archived' };
+  const login = loginAccount(a);
+  if (login) return { heading: `${orch}needs you \u00b7 log in again (${login.name})`, ember: true };
+  if (a.status === 'needs_feedback') return { heading: `${orch}needs you`, ember: true };
+  if (a.status === 'disconnected' || a.status === 'terminated') return { heading: `${orch}disconnected \u00b7 restart to resume` };
+  if (a.status === 'running') return { heading: `${orch}running` };
+  if (a.status === 'finished' && a.unseen) return { heading: `${orch}done \u00b7 unread` };
+  return orch ? { heading: 'orchestrator' } : null;
+}
+
+/** The account a session runs on, when it needs signing in again. */
+function loginAccount(a: Agent): AccountRow | undefined {
+  if (!app.accounts.length) return undefined;
+  const key = accountKey(a.profile, sessionHarness(a) ?? '');
+  const r = app.accounts.find((x) => x.key === key);
+  return r && r.loginHint && !r.problem && (r.login === 'needs_login' || r.expired) ? r : undefined;
+}
+
+/** A session's menu (\u00a75.1). `where`: the board orders a lane's cards, the
+ *  overview a tree's rows; by default wherever the focus is as it opens. */
 export function agentMenu(a: Agent, viaSub = false, where: StepIn = stepInFor()): MenuEntry[] {
-  const w = worktreeOf(a.worktree_id);
   // From a subagent's row every verb is the parent's: say so up top.
   const head: MenuEntry[] = viaSub ? [{ heading: `Parent session: ${a.name}` }] : [];
-  const verbs = rows('session', agentVerbs(a, viaSub, where));
-  if (a.archived) return [...head, ...verbs];
-  // The window's own, ahead of the rows that take the session away.
-  const extra: MenuEntry[] = [
-    ...(a.unseen ? [{ label: 'Mark seen', run: () => seeAgent(a.id) }] : []),
-    ...orchestratorMenuItems(a).filter((e) => typeof e === 'object' && 'label' in e && e.label === 'Review\u2026'),
-  ];
-  const at = verbs.findIndex((e) => e.danger || e.label === menuLabel('archive', 'session') || e.label === 'Archive parent session\u2026');
-  const cut = at < 0 ? verbs.length : at;
-  // The checkout's rows go on after, less the verbs the session's already
-  // offered (its pull request, Focus here), as the terminal app's do.
-  const said = new Set(verbs.flatMap((e) => (typeof e === 'object' && 'label' in e ? [e.label] : [])));
-  const checkout = worktreeItems(w).filter((e) => !(typeof e === 'object' && 'label' in e && said.has(e.label)));
-  return [...head, ...verbs.slice(0, cut), ...extra, ...verbs.slice(cut), 'sep', ...checkout];
+  const banner = sessionBanner(a);
+  if (banner) head.push(banner);
+  let rows = registryRows('session', sessionTable(a, viaSub, where));
+  if (a.archived) return layout(rows, { head });
+  const login = loginAccount(a);
+  if (login) rows = insertRows(rows, localRow('local:session.login', 'act', { label: `Log in to ${login.name}\u2026`, run: () => void runLogin(login), title: login.loginHint ?? undefined }), { before: ['activate'] });
+  const parent = a.parent ? agentOf(a.parent) : undefined;
+  if (parent && !parent.archived)
+    rows = insertRows(rows, localRow('local:session.parent', 'go', { label: `Open parent session ${parent.name}`, run: () => openSession({ Agent: parent.id }) }), {
+      after: ['git_diff'],
+    });
+  // Review: the orchestrator's review sheet, first in Pull request \u25b8.
+  const review = localRow('local:session.review', 'go', { label: 'Review\u2026', run: () => openReview([a.id]) }, { id: 'pull_request', title: 'Pull request', label: 'Review\u2026' });
+  rows = insertRows(rows, review, { before: ['open_pull_request', 'create_pull_request', 'merge_pull_request'], after: ['local:session.parent', 'git_diff'] });
+  const w = worktreeOf(a.worktree_id);
+  const checkout = w && checkoutRow(w, rows);
+  return layout(checkout ? [...rows, checkout] : rows, { head });
 }
+
+/** The card's `Worktree \u2039branch\u203a \u25b8` (\u00a75.2): the checkout's own menu less
+ *  every verb the card already shows, flat; its Move rows say whose. */
+function checkoutRow(w: Worktree, shown: readonly Row[]): Row | null {
+  const own = new Set(['reorder_up', 'reorder_down', 'mark_seen']);
+  const said = shown.map((r) => r.id).filter((id) => !own.has(id));
+  const rows = withoutIds(checkoutRows(w, {}), said).map((r) =>
+    r.id === 'reorder_up' || r.id === 'reorder_down'
+      ? { ...r, item: { ...r.item, label: r.id === 'reorder_up' ? 'Move worktree up' : 'Move worktree down' } }
+      : r,
+  );
+  const kids = layout(rows, { fold: false, rules: false });
+  if (!kids.length) return null;
+  return localRow('local:session.checkout', null, submenu(`${w.is_main ? 'Checkout' : 'Worktree'} ${w.branch}`, kids));
+}
+
+// ---- terminals, checkouts, repos ----
 
 export function terminalMenu(t: TerminalTab): MenuEntry[] {
-  return [...rows('terminal', terminalVerbs(t)), 'sep', ...worktreeItems(worktreeOf(t.worktree_id))];
+  const rows = registryRows('terminal', terminalTable(t));
+  const w = worktreeOf(t.worktree_id);
+  const checkout = w && checkoutRow(w, rows);
+  return layout(checkout ? [...rows, checkout] : rows);
 }
 
-export function projectMenu(project: string): MenuEntry[] {
-  const linked = m()
-    .worktrees.filter((w) => w.project_id === project && !w.is_main)
+/** The banner a checkout's menu opens with. */
+function checkoutBanner(w: Worktree): MenuHeading | null {
+  const words: string[] = [];
+  if (m().prs[w.id]?.state === 'merged') words.push('merged');
+  else if (!w.is_main && gitRows.git[w.id]?.on_default_branch) words.push('on the base branch');
+  if (runTerminalOf(w.id)) {
+    const port = livePort(w.id);
+    words.push(port ? `running :${port}` : 'running');
+  }
+  return words.length ? { heading: words.join(' \u00b7 ') } : null;
+}
+
+/** A checkout's rows (\u00a75.5): the registry's, Show run terminal while its
+ *  run goes, and with `jump` its live sessions to open. */
+function checkoutRows(w: Worktree, opts: MenuOpts): Row[] {
+  let rows = registryRows('worktree', worktreeTable(w));
+  const run = runTerminalOf(w.id);
+  if (run)
+    rows = insertRows(rows, localRow('local:worktree.run_terminal', 'go', { label: 'Show run terminal', run: () => openSession({ Terminal: run.id }), title: run.run_command ?? undefined }), {
+      after: ['open_repo', 'focus_scope', 'git_diff'],
+    });
+  if (opts.jump) {
+    const kids = sessionJumps(w.id);
+    if (kids.length)
+      rows = insertRows(rows, localRow('local:worktree.sessions', 'go', submenu('Open session', kids)), {
+        after: ['local:worktree.run_terminal', 'open_repo', 'focus_scope', 'git_diff'],
+      });
+  }
+  return rows;
+}
+
+const TONE_DOT: Record<string, NonNullable<Extract<MenuIcon, { dot: string }>['dot']>> = {
+  needs: 'ember',
+  running: 'ink',
+  failed: 'fail',
+  unread: 'unread',
+  done: 'done',
+};
+
+/** Checkout `w`'s live sessions and terminals, up to nine, to open. */
+function sessionJumps(w: string): MenuItem[] {
+  const agents = m()
+    .agents.filter((a) => a.worktree_id === w && !a.archived)
     .sort((a, b) => a.sort_order - b.sort_order);
-  const out: MenuEntry[] = rows('repo', projectVerbs(project));
-  // The window's own: the repo's default account after the reload, the
-  // folder's location before the remove.
-  const at = (id: ActionId) => out.findIndex((e) => typeof e === 'object' && 'label' in e && e.label === menuLabel(id, 'repo'));
-  const refresh = at('refresh_pull_requests');
-  out.splice(refresh < 0 ? out.length : refresh + 1, 0, { label: 'Default account\u2026', run: () => void pickProjectAccount(project) });
-  const remove = at('remove_project');
-  out.splice(remove < 0 ? out.length : remove, 0, { label: 'Locate folder\u2026', run: () => void locateProject(project) });
-  if (linked.length) {
-    out.push('sep', { heading: 'worktrees' });
-    for (const w of linked) {
-      out.push({ label: `Open ${w.branch} in editor`, run: () => void openEditor(w.id) });
-      out.push({ label: `Delete ${w.branch}\u2026`, run: () => void deleteWorktree(w.id), danger: true });
-    }
+  const terms = m().terminals.filter((t) => t.worktree_id === w);
+  const rows: MenuItem[] = [
+    ...agents.map((a) => ({ label: a.name, run: () => openSession({ Agent: a.id }), icon: { dot: TONE_DOT[toneOf(a)] ?? 'faint' } })),
+    ...terms.map((t) => ({ label: t.name, run: () => openSession({ Terminal: t.id }), icon: { glyph: '>' } })),
+  ];
+  return rows.slice(0, 9) as MenuItem[];
+}
+
+/** A checkout's menu (\u00a75.5). */
+export function checkoutMenu(w: Worktree, opts: MenuOpts = {}): MenuEntry[] {
+  const banner = checkoutBanner(w);
+  return layout(checkoutRows(w, opts), { head: banner ? [banner] : [] });
+}
+
+/** The repo's remote by its host, for Remote \u25b8's title: Azure DevOps by
+ *  its probe, GitHub once a pull request was found on it. */
+function remoteTitle(project: string): string | undefined {
+  if (app.adoCtx[project]) return 'Azure DevOps';
+  const wts = new Set(m().worktrees.filter((w) => w.project_id === project).map((w) => w.id));
+  return Object.keys(m().prs).some((w) => wts.has(w)) ? 'GitHub' : undefined;
+}
+
+/** Bring a checkout's band into view on the overview, focused. */
+export function revealWorktree(w: Worktree) {
+  setCollapsed(repoKey(w.project_id), false);
+  revealRepo(w.project_id);
+  setTimeout(() => {
+    const el = document.querySelector<HTMLElement>(`[data-worktree="${CSS.escape(w.id)}"] [data-target]`);
+    el?.scrollIntoView({ block: 'nearest' });
+    el?.focus();
+  }, 120);
+}
+
+/** A repo's Default account \u25b8: per harness with accounts, each one (the
+ *  repo's checked) and "Its default", the spread picking. */
+function defaultAccountRows(project: string): MenuEntry[] {
+  const p = m().projects.find((x) => x.id === project);
+  const profiles = app.launch.profiles;
+  if (!p || !profiles.length) return [];
+  const harnesses = [...new Set(profiles.map((x) => x.harness))];
+  const out: MenuEntry[] = [];
+  for (const h of harnesses) {
+    const now = projectAccount(app.launch, p.repo_path, h);
+    if (harnesses.length > 1) out.push({ heading: h });
+    out.push({
+      label: 'Its default',
+      title: `No ${h} account of its own: the account spread picks`,
+      checked: !now,
+      radio: true,
+      run: () => void (now && setProjectAccount(project, h, null)),
+    });
+    for (const x of profiles.filter((y) => y.harness === h))
+      out.push({
+        label: x.name,
+        checked: x.name === now,
+        radio: true,
+        ...(x.disabled ? { title: `${x.name} is switched off: launches that pick no account skip it` } : {}),
+        run: () => void (x.name !== now && setProjectAccount(project, h, x.name)),
+      });
   }
   return out;
 }
 
-export function menuFor(t: Target): MenuEntry[] {
+/** A repo's menu (\u00a75.6). */
+export function projectMenu(project: string): MenuEntry[] {
+  let rows = registryRows('repo', projectTable(project), { remote: remoteTitle(project) ?? 'Remote' });
+  const linked = m()
+    .worktrees.filter((w) => w.project_id === project && !w.is_main)
+    .sort((a, b) => a.sort_order - b.sort_order);
+  if (linked.length) {
+    const kids: MenuEntry[] = [
+      ...linked.map((w): MenuItem => ({ label: w.branch, run: () => revealWorktree(w), title: w.path })),
+      'sep',
+      { label: 'All worktrees\u2026', run: () => nav.go({ view: 'worktrees', repo: project }) },
+    ];
+    rows = insertRows(rows, localRow('local:repo.worktrees', 'go', submenu('Worktrees', kids)), {
+      after: ['refresh_pull_requests', 'azure_devops', 'open_repo', 'focus_scope'],
+    });
+  }
+  const accounts = defaultAccountRows(project);
+  if (accounts.length) rows = insertRows(rows, localRow('local:repo.default_account', 'change', submenu('Default account', accounts)), { after: ['rename', 'switch_branch', 'mark_seen'] });
+  rows = insertRows(rows, localRow('local:repo.locate', 'away', { label: 'Locate folder\u2026', run: () => void locateProject(project) }), {
+    before: ['sweep_worktrees', 'remove_project'],
+  });
+  return layout(rows);
+}
+
+/** The menu for `t`: every way in (right-click, `\u22ef`, Shift+F10, Enter on
+ *  a Worktrees row, `?`) builds this one. */
+export function menuFor(t: Target, opts: MenuOpts = {}): MenuEntry[] {
   switch (t.kind) {
     case 'agent': {
       const a = agentOf(t.id);
@@ -713,11 +1073,33 @@ export function menuFor(t: Target): MenuEntry[] {
       const x = terminalOf(t.id);
       return x ? terminalMenu(x) : [];
     }
-    case 'worktree':
-      return worktreeItems(worktreeOf(t.id));
+    case 'worktree': {
+      const w = worktreeOf(t.id);
+      return w ? checkoutMenu(w, opts) : [];
+    }
     case 'project':
       return projectMenu(t.id);
   }
+}
+
+/** What a menu for `t` is named: the thing it acts on. */
+export function targetLabel(t: Target): string {
+  switch (t.kind) {
+    case 'agent':
+      return agentOf(t.id)?.name ?? 'Session';
+    case 'terminal':
+      return terminalOf(t.id)?.name ?? 'Terminal';
+    case 'worktree':
+      return worktreeOf(t.id)?.branch ?? 'Worktree';
+    case 'project':
+      return m().projects.find((p) => p.id === t.id)?.name ?? 'Repo';
+  }
+}
+
+/** Open `t`'s menu at `at`, named for it: the kebabs, the Menu key,
+ *  Enter on a Worktrees row. */
+export function openTargetMenu(t: Target, at: { x: number; y: number } | HTMLElement, opts: MenuOpts = {}) {
+  openMenu(menuFor(t, opts), at, targetLabel(t));
 }
 
 /** A row key from the shortcut table, on its target. True when handled. */

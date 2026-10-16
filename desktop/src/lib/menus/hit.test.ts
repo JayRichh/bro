@@ -168,10 +168,32 @@ describe('resolveHit: selection', () => {
 });
 
 describe('resolveHit: own menu and rows', () => {
-  it('prefers an element with a menu of its own over a target inside it', () => {
-    const inner = target('worktree:w1');
+  it('gives a target inside an own menu its own menu (a band PR chip)', () => {
+    const chip = target('pr:w1');
     const band = node('div');
-    const h = resolveHit(path(inner, band), { own: (n) => n === band });
+    const h = resolveHit(path(node('span'), chip, band), { own: (n) => n === band });
+    expect(h).toMatchObject({ kind: 'row', target: 'pr:w1' });
+    expect(elOf(h)).toBe(chip);
+  });
+
+  it('gives an own menu inside a target its own menu (a diff file row in a session)', () => {
+    const file = node('button');
+    const outer = target('agent:7');
+    const h = resolveHit(path(node('span'), file, outer), { own: (n) => n === file });
+    expect(h.kind).toBe('own');
+    expect(elOf(h)).toBe(file);
+  });
+
+  it('prefers the own menu on an element that has a target too', () => {
+    const row = node('button', { attrs: { 'data-target': 'file:w1:src/a.ts' } });
+    const h = resolveHit(path(node('span'), row), { own: (n) => n === row });
+    expect(h.kind).toBe('own');
+    expect(elOf(h)).toBe(row);
+  });
+
+  it('takes an own menu over the area beside a target (the band past its title)', () => {
+    const band = node('div');
+    const h = resolveHit(path(node('span'), band, target('project:p')), { own: (n) => n === band });
     expect(h.kind).toBe('own');
     expect(elOf(h)).toBe(band);
   });
