@@ -41,6 +41,8 @@ pub(crate) struct UsageBook {
     scans: HashMap<AgentId, TranscriptScan>,
     statusline_at: HashMap<AgentId, i64>,
     copilot_polled: HashMap<String, Instant>,
+    /// The effort each Claude session last reported (`adopt_claude_effort`).
+    effort_seen: HashMap<AgentId, String>,
 }
 
 /// The same windows with the same numbers, read times aside: a new read
@@ -188,6 +190,7 @@ impl Daemon {
             book.contexts.remove(agent);
             book.scans.remove(agent);
             book.statusline_at.remove(agent);
+            book.effort_seen.remove(agent);
         });
     }
 
@@ -211,6 +214,58 @@ impl Daemon {
                 .max_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
                 .map(|(_, at)| at)
         })
+    }
+
+    /// EFFORT SYNC: Claude runs session `id` at `level` now (the
+    /// statusLine's `effort.level`, or a foreground hook payload's), which
+    /// a mid-session `/effort` or the model's own cap can make differ from
+    /// the `--effort` it was launched with. Stored and broadcast as the
+    /// model is (`session_model`), so the card says what it runs at and
+    /// the next spawn or resume passes it on. Built-in Claude rows only;
+    /// a level outside Claude's list is not one `--effort` takes. An absent
+    /// level is never reported here, so nothing ever clears the row's.
+    ///
+    /// A row launched on the default (no effort) is not pinned to the
+    /// level that default runs at: only a later change from the first
+    /// level the session reported is the user's choice. Returns whether
+    /// the row changed.
+    pub fn adopt_claude_effort(&self, id: &AgentId, level: &str) -> bool {
+        // Every tool call reports it: a repeat costs no store read.
+        let previous =
+            self.with_usage(|book| book.effort_seen.insert(id.clone(), level.to_string()));
+        if previous.as_deref() == Some(level) {
+            return false;
+        }
+        let Ok(Some(agent)) = self.store.get_agent(id) else {
+            return false;
+        };
+        if agent.kind != AgentKind::Claude || agent.cloud_session_id.is_some() {
+            return false;
+        }
+        let known = nebula_core::harness::builtin("claude")
+            .is_some_and(|claude| claude.effort.efforts.iter().any(|e| e == level));
+        if !known {
+            return false;
+        }
+        let adopt = match agent
+            .effort
+            .as_deref()
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+        {
+            Some(current) => current != level,
+            None => previous.is_some(),
+        };
+        if !adopt {
+            return false;
+        }
+        if let Err(e) = self.store.set_agent_effort(id, Some(level)) {
+            tracing::warn!(agent = %id, error = %e, "effort change not adopted");
+            return false;
+        }
+        tracing::info!(agent = %id, effort = %level, "adopted the effort Claude runs at");
+        self.try_broadcast_agent(id);
+        true
     }
 
     /// Feed `agent`'s log scan at `path` (a new scan when the path moved)
@@ -241,6 +296,9 @@ impl Daemon {
         }
         let now = nebula_core::clock::now_ms();
         let reading = usage::claude_statusline(body);
+        if let Some(level) = &reading.effort {
+            self.adopt_claude_effort(agent_id, level);
+        }
         let harness = harness_of(&agent);
         let key = usage::account_key(agent.profile.as_deref(), &harness);
         if !reading.windows.is_empty() {
@@ -661,6 +719,80 @@ mod tests {
         assert!(daemon.account_usage_list().is_empty());
         assert!(usage::read_account_in(dir.path(), "@claude").is_none());
         assert!(usage::read_account_in(dir.path(), "@codex").is_none());
+    }
+
+    /// EFFORT SYNC: a statusLine naming another effort than the row's —
+    /// a `/effort`, or the model capping `max` at `high` — is stored and
+    /// pushed, and the next spawn passes it; a repeat or a reading with no
+    /// effort changes nothing. A row on the default is not pinned to the
+    /// level the default runs at, only to a change from it. Never a
+    /// non-Claude row, never a level `--effort` doesn't take.
+    #[test]
+    fn a_statusline_effort_follows_the_row_into_the_next_spawn() {
+        let dir = tempfile::tempdir().unwrap();
+        let daemon = test_daemon();
+        daemon.set_usage_root(dir.path().to_path_buf());
+        daemon
+            .store
+            .insert_agent(&Agent {
+                effort: Some("max".into()),
+                session_id: Some("s1".into()),
+                ..agent("a1", AgentKind::Claude, None)
+            })
+            .unwrap();
+        let id = AgentId("a1".into());
+        let effort = |daemon: &Daemon, id: &str| {
+            daemon
+                .store
+                .get_agent(&AgentId(id.into()))
+                .unwrap()
+                .unwrap()
+                .effort
+        };
+        let mut events = daemon.events.subscribe();
+        daemon.on_statusline(&id, &serde_json::json!({"effort": {"level": "high"}}));
+        assert_eq!(effort(&daemon, "a1").as_deref(), Some("high"));
+        assert!(matches!(
+            events.try_recv(),
+            Ok(ServerEvent::EntityUpserted { .. })
+        ));
+        let row = daemon.store.get_agent(&id).unwrap().unwrap();
+        let (_, args, _) = super::super::agent_spawn_command(
+            AgentKind::Claude,
+            row.session_id.as_deref(),
+            row.model.as_deref(),
+            row.effort.as_deref(),
+            None,
+        );
+        let at = args.iter().position(|a| a == "--effort").expect("--effort");
+        assert_eq!(args[at + 1], "high", "{args:?}");
+        daemon.on_statusline(&id, &serde_json::json!({"effort": {"level": "high"}}));
+        daemon.on_statusline(&id, &serde_json::json!({"context_window": {}}));
+        assert_eq!(effort(&daemon, "a1").as_deref(), Some("high"));
+        assert!(events.try_recv().is_err(), "nothing moved: nothing pushed");
+        assert!(!daemon.adopt_claude_effort(&id, "ludicrous"));
+        assert_eq!(effort(&daemon, "a1").as_deref(), Some("high"));
+
+        // On the default: its first level is the default's, then a change.
+        daemon
+            .store
+            .insert_agent(&agent("d1", AgentKind::Claude, None))
+            .unwrap();
+        let d1 = AgentId("d1".into());
+        assert!(!daemon.adopt_claude_effort(&d1, "high"));
+        assert_eq!(effort(&daemon, "d1"), None, "not pinned to the default");
+        assert!(daemon.adopt_claude_effort(&d1, "low"));
+        assert_eq!(effort(&daemon, "d1").as_deref(), Some("low"));
+
+        daemon
+            .store
+            .insert_agent(&Agent {
+                effort: Some("high".into()),
+                ..agent("cx", AgentKind::Codex, None)
+            })
+            .unwrap();
+        assert!(!daemon.adopt_claude_effort(&AgentId("cx".into()), "low"));
+        assert_eq!(effort(&daemon, "cx").as_deref(), Some("high"));
     }
 
     /// A screen notice keeps the five-hour window the status line read.

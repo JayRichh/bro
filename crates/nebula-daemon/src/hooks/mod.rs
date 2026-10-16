@@ -173,6 +173,11 @@ pub struct HookDelivery {
     /// Subagent news riding the event: its type, or a Task / Agent tool
     /// call's description (`registry::subagents`).
     pub subagent: SubagentHookInfo,
+    /// The reasoning effort the session runs at now (`effort.level`, on
+    /// tool, Stop and SubagentStop payloads): Claude route, foreground
+    /// payloads only — a subagent's hook reports the subagent's own
+    /// (`Daemon::adopt_claude_effort`).
+    pub effort: Option<String>,
 }
 
 /// One statusLine JSON `kete _statusline` POSTed for an agent: plan
@@ -230,6 +235,8 @@ pub struct HookPayload {
     /// On `StopFailure`, the error line Claude showed ("API Error: Rate
     /// limit reached"); on `Stop`, Claude's reply, which is not read.
     pub last_assistant_message: Option<serde_json::Value>,
+    /// `{"level": "high"}`: the effort in effect as the hook runs.
+    pub effort: Option<serde_json::Value>,
 }
 
 /// The most of Claude's error words a stop note carries: a tooltip's worth.
@@ -591,6 +598,15 @@ async fn receive_hook(
         task: tool_input_text("description"),
         task_kind: tool_input_text("subagent_type").filter(|k| !k.is_empty()),
     };
+    // Claude's effort for the session: never off a subagent's payload,
+    // whose level is the subagent's own (the Agent tool takes an effort).
+    let effort = match cli {
+        HookCli::Claude if payload.subagent_id().is_none() => payload
+            .effort
+            .as_ref()
+            .and_then(|e| text_of(e.get("level"))),
+        _ => None,
+    };
     let _ = state
         .tx
         .send(HookDelivery {
@@ -601,6 +617,7 @@ async fn receive_hook(
             transcript,
             prompt,
             subagent,
+            effort,
         })
         .await;
 
@@ -837,6 +854,52 @@ mod tests {
             HookEvent::Notification {
                 notification_type: Some("quota_auto_resume_fired".into())
             }
+        );
+    }
+
+    /// The effort a Claude tool or Stop payload reports rides the delivery
+    /// for the row to follow, but never a subagent's (its own level) and
+    /// never another CLI's.
+    #[tokio::test]
+    async fn a_foreground_claude_payload_carries_its_effort() {
+        let store = seeded_store();
+        let (env, mut rx, _) = start_hook_server(store, None).await.unwrap();
+        let post = |route: &'static str, body: &'static str| {
+            let (port, token) = (env.port, env.token.clone());
+            async move {
+                http_post(
+                    port,
+                    &format!("/api/hooks/{route}?agentId=titled&hookEvent=PostToolUse"),
+                    &token,
+                    body,
+                )
+                .await
+            }
+        };
+        post(
+            "claude",
+            r#"{"session_id":"s1","tool_name":"Bash","effort":{"level":"high"}}"#,
+        )
+        .await;
+        assert_eq!(rx.recv().await.unwrap().effort.as_deref(), Some("high"));
+        post(
+            "claude",
+            r#"{"session_id":"s1","agent_id":"sub1","tool_name":"Bash","effort":{"level":"low"}}"#,
+        )
+        .await;
+        assert_eq!(rx.recv().await.unwrap().effort, None, "a subagent's");
+        post(
+            "codex",
+            r#"{"session_id":"s1","tool_name":"Bash","effort":{"level":"low"}}"#,
+        )
+        .await;
+        assert_eq!(rx.recv().await.unwrap().effort, None, "not Claude");
+        post("claude", r#"{"session_id":"s1","effort":"max"}"#).await;
+        let got = rx.recv().await.unwrap();
+        assert_eq!(
+            (got.effort, got.session_id.as_deref()),
+            (None, Some("s1")),
+            "an odd shape loses the field, not the payload"
         );
     }
 
