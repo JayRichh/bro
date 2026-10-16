@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.53.1
+
+- **Pastes on Windows no longer send early.** When the console paused partway through a large paste, as it can on a busy or slow machine, the closing line break could arrive on its own after the pause. The terminal app then treated it as a typed Enter, so the agent got the paste up to that point and the rest followed as a new message. For a second after a large paste, keys that arrive pressed and released together now count as part of the paste. An Enter you type yourself still sends.
+
 ## 0.53.0
 
 No new features. Upgrading from 0.47/0.48 is tested on a real old data folder, the desktop has end-to-end tests, and the bugs these tests found are fixed.

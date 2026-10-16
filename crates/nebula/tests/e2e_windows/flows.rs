@@ -34,6 +34,10 @@ pub const TESTS: &[(&str, Test)] = &[
         a_20_kb_paste_reaches_the_agent_as_one_paste,
     ),
     (
+        "a_paste_with_a_pause_before_its_last_line_break_never_submits",
+        a_paste_with_a_pause_before_its_last_line_break_never_submits,
+    ),
+    (
         "the_grid_pane_shows_every_line_the_agent_printed",
         the_grid_pane_shows_every_line_the_agent_printed,
     ),
@@ -295,6 +299,54 @@ fn a_20_kb_paste_reaches_the_agent_as_one_paste() {
     assert_eq!((starts, ends), (1, 1), "one bracketed paste");
     let inner = &got[6..got.len() - 6];
     assert_eq!(String::from_utf8_lossy(inner), text);
+}
+
+/// A large paste the host hands over with a pause before its last line
+/// break (a busy console, a slow machine) still arrives as paste and never
+/// submits: the tail after the pause is the paste's, not a typed Enter.
+fn a_paste_with_a_pause_before_its_last_line_break_never_submits() {
+    let tui = Tui::spawn(Options::default());
+    let repo = tui.make_repo("pause-proj");
+    tui.wait_for_text("create your first project");
+    tui.add_project(&repo, "pause-proj");
+    launch(&tui, "paste here");
+    tui.wait_for_text("echo ready");
+    tui.send(ENTER);
+    tui.wait_for_text("back to the card");
+
+    let mut text = String::new();
+    let mut i = 0;
+    while text.len() < 100 * 1024 {
+        text.push_str(&format!("let value_{i} = compute(\"line {i}\");\r"));
+        i += 1;
+    }
+    let (head, tail) = text.split_at(text.len() - 1);
+    tui.send(&[&b"\x1b[200~"[..], head.as_bytes()].concat());
+    std::thread::sleep(Duration::from_millis(400));
+    tui.send(&[tail.as_bytes(), b"\x1b[201~"].concat());
+    assert!(
+        !tui.try_wait_for_text("submit", Duration::from_secs(8)),
+        "the paste submitted:\n{}",
+        tui.screen_text()
+    );
+    let got = std::fs::read(&tui.echo_log).unwrap();
+    // One paste or two back to back, the agent got every byte and no Enter.
+    let text_only = strip(&strip(&got, b"\x1b[200~"), b"\x1b[201~");
+    assert_eq!(String::from_utf8_lossy(&text_only), text);
+}
+
+fn strip(hay: &[u8], needle: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(hay.len());
+    let mut i = 0;
+    while i < hay.len() {
+        if hay[i..].starts_with(needle) {
+            i += needle.len();
+        } else {
+            out.push(hay[i]);
+            i += 1;
+        }
+    }
+    out
 }
 
 /// What the agent printed, read in the grid's pane: every line whole, as
