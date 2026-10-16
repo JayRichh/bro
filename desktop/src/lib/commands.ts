@@ -61,6 +61,7 @@ import { insertRows, layout } from './menus/layout';
 import { exportSettings, importSettings } from './settings/io';
 import { bringBack, critters, hiddenNow, hideUntilTomorrow, toggleCritters } from './critters/state.svelte';
 import { openCritterLog } from './critters/sheet.svelte';
+import { closeFilesView, openFilesView } from './files/tree.svelte';
 
 /** F10: the orchestrator, or the Start form when there is none. */
 function orchestratorKey() {
@@ -149,6 +150,7 @@ export function diffTarget(): string | null {
             : undefined;
   if (focused) return focused;
   const v = nav.current.view;
+  if (v === 'files' && nav.current.item) return nav.current.item;
   if (v === 'session' || v === 'orchestrator') return sessionWorktree(app.session) ?? app.diffWorktree;
   const repo = nav.current.repo;
   if (repo && v !== 'overview' && v !== 'board' && v !== 'diff') return rootOf(repo) ?? null;
@@ -174,9 +176,19 @@ export function toggleDiff() {
   openDiff(want);
 }
 
+/** B, Ctrl+Shift+E and the header's Files: the checkout in context as a
+ *  tree, or, from the files, back to where they were opened. A row
+ *  focused beside them that reads another checkout shows that one. */
+export function toggleFiles() {
+  const t = focusedTarget();
+  const want = diffTarget();
+  if (nav.current.view === 'files' && (!t || want === nav.current.item)) return closeFilesView();
+  openFilesView(want);
+}
+
 /** Views with their own f and / (a filter box, the diff's file list) and
  *  Shift+R (the Branches view's fetch): the window's keys stand down. */
-const FINDS_ITSELF = new Set(['diff', 'tasks', 'branches']);
+const FINDS_ITSELF = new Set(['diff', 'files', 'tasks', 'branches']);
 const REFRESHES_ITSELF = new Set(['branches']);
 
 /** F and /: the window's find, the palette, where the view has no filter
@@ -203,7 +215,7 @@ function railRepo(n: number): boolean {
   return true;
 }
 
-const split = () => nav.current.view === 'session' || nav.current.view === 'diff' || nav.current.view === 'orchestrator';
+const split = () => nav.current.view === 'session' || nav.current.view === 'diff' || nav.current.view === 'files' || nav.current.view === 'orchestrator';
 
 /** Z, Ctrl+Shift+M and the panes' Full pane button: the split's right side
  *  takes the window, or comes back down. Nothing to do with no split up. */
@@ -226,6 +238,7 @@ function quickPrompt() {
 function viewTarget(): Target | null {
   const v = nav.current.view;
   if (v === 'diff' && app.diffWorktree) return { kind: 'worktree', id: app.diffWorktree };
+  if (v === 'files' && nav.current.item) return { kind: 'worktree', id: nav.current.item };
   if (v === 'session') return currentTarget();
   const repo = nav.current.repo;
   return repo ? { kind: 'project', id: repo } : null;
@@ -241,7 +254,7 @@ export function targetName(t: Target): string {
       return `terminal ${m.terminals.find((x) => x.id === t.id)?.name ?? ''}`;
     case 'worktree': {
       const w = m.worktrees.find((x) => x.id === t.id);
-      return `${nav.current.view === 'diff' ? 'diff' : w?.is_main ? 'checkout' : 'worktree'} ${w?.branch ?? ''}`;
+      return `${nav.current.view === 'diff' ? 'diff' : nav.current.view === 'files' ? 'files' : w?.is_main ? 'checkout' : 'worktree'} ${w?.branch ?? ''}`;
     }
     case 'project':
       return `repo ${m.projects.find((p) => p.id === t.id)?.name ?? ''}`;
@@ -339,6 +352,8 @@ export function runShortcut(id: ShortcutId): boolean {
     open_session: () => app.session && openSession(app.session),
     open_diff: toggleDiff,
     diff: toggleDiff,
+    open_files: toggleFiles,
+    files: toggleFiles,
     repo_1: () => railRepo(1),
     repo_2: () => railRepo(2),
     repo_3: () => railRepo(3),
@@ -362,6 +377,7 @@ export function runShortcut(id: ShortcutId): boolean {
       // A full pane comes back down first; the next Esc closes the split.
       if (app.paneMax && split()) return void (app.paneMax = false);
       if (nav.current.view === 'diff') return closeDiff();
+      if (nav.current.view === 'files') return closeFilesView();
       goHome(nav.current.repo);
     },
     toggle_archived: toggleArchived,
@@ -470,6 +486,7 @@ export function paletteCommands(): Command[] {
     cmd('next-attention', 'Next session needing you', 'Window', () => jumpAttention(1), 'next_attention', 'attention jump feedback'),
     cmd('prev-attention', 'Previous session needing you', 'Window', () => jumpAttention(-1), 'prev_attention', 'attention jump feedback'),
     cmd('diff', 'Diff the worktree', 'Window', () => openDiff(diffTarget()), ['diff', 'open_diff']),
+    cmd('files', 'Files of the worktree', 'Window', () => openFilesView(diffTarget()), ['files', 'open_files'], 'tree explorer browse folder'),
     ...diffAgainstCommand(cmd),
     ...(split() ? [cmd('maximize', app.paneMax ? 'Bring the pane back down' : 'Full pane', 'Window', toggleMaximize, ['maximize_z', 'maximize'], 'maximize zoom full screen')] : []),
     cmd('theme', `Cycle Workshop theme (now ${themeLabel(app.themePref, look.prefs.themes)})`, 'Window', cycleTheme, 'cycle_theme', 'dark light system'),

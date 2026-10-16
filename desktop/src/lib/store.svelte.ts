@@ -124,7 +124,7 @@ export function setThemePref(p: ThemePref) {
 export function setHome(h: Home, repo?: string) {
   app.home = h;
   saveDesktopPref('home', h);
-  if (nav.current.view === 'session' || nav.current.view === 'diff') return;
+  if (nav.current.view === 'session' || nav.current.view === 'diff' || nav.current.view === 'files') return;
   goHome(repo);
 }
 

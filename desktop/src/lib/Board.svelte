@@ -20,6 +20,8 @@
   import { commitsWord, dropHint, dropVerbOf, laneLook, prChip } from './ship/ship';
   import { openComposer, openMerge } from './ship/sheet.svelte';
   import { hiddenTotal } from './scope';
+  // A Files row dropped on a card types its path into that session.
+  import { pathDrop } from './files/drop.svelte';
 
   // The Review lane reads each checkout's changes off the git reads the
   // overview already makes (src-tauri keeps the last one); keep them
@@ -297,6 +299,7 @@
               ondragenter={(e) => overCard(e, lane.id, a)}
               ondragover={(e) => overCard(e, lane.id, a)}
               ondrop={(e) => dropOn(e, lane.id, a)}
+              use:pathDrop={{ target: () => ({ Agent: a.id }) }}
             >
             {#if mark}
               <span class="pointer-events-none absolute inset-x-0 z-10 h-px bg-ember {mark === 'before' ? '-top-px' : '-bottom-px'}" aria-hidden="true"></span>

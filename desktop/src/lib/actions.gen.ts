@@ -146,6 +146,8 @@ export type DeskKeyId =
   | "open_session"
   | "open_diff"
   | "diff"
+  | "open_files"
+  | "files"
   | "repo_1"
   | "repo_2"
   | "repo_3"
@@ -1185,15 +1187,15 @@ export const ACTIONS: readonly ActionRow[] = [
   {
     id: "tree_browser",
     label: "File tree browser",
-    hint: "Browse the worktree's files with a preview pane",
+    hint: "Browse the worktree's files as git lists them, folders folded (the terminal app previews beside the tree)",
     group: "FILES",
     word: "files",
     destructive: false,
     appliesTo: ["worktree"],
     worksIn: ["grid", "board"],
-    surface: "tui",
+    surface: "both",
     tui: ["b"],
-    desktop: [],
+    desktop: ["open_files", "files"],
   },
   {
     id: "unlock_terminal",
@@ -1805,6 +1807,8 @@ export const DESK_KEYS: readonly DeskKey[] = [
   { id: "open_session", action: "open_session", label: "Show the session", group: "Views", scope: "anywhere", editorOwns: false, chords: ["ctrl+shift+t"] },
   { id: "open_diff", action: "git_diff", label: "Diff the checkout in context: the focused row, the session, the repo (again: back from the diff)", group: "Views", scope: "anywhere", editorOwns: false, chords: ["ctrl+shift+d"] },
   { id: "diff", action: "git_diff", label: "Diff the checkout in context: the focused row, the session, the repo (again: back from the diff)", group: "Views", scope: "global", editorOwns: false, chords: ["d"] },
+  { id: "open_files", action: "tree_browser", label: "Files: the checkout in context as a tree (again: back from it)", group: "Views", scope: "anywhere", editorOwns: false, chords: ["ctrl+shift+e"] },
+  { id: "files", action: "tree_browser", label: "Files: the checkout in context as a tree (again: back from it)", group: "Views", scope: "global", editorOwns: false, chords: ["b"] },
   { id: "repo_1", action: "project_tab_1", label: "Repo 1 on the rail", group: "Views", scope: "global", editorOwns: false, chords: ["1"] },
   { id: "repo_2", action: "project_tab_2", label: "Repo 2 on the rail", group: "Views", scope: "global", editorOwns: false, chords: ["2"] },
   { id: "repo_3", action: "project_tab_3", label: "Repo 3 on the rail", group: "Views", scope: "global", editorOwns: false, chords: ["3"] },

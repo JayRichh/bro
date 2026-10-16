@@ -65,7 +65,7 @@ pub(crate) fn git_command(cwd: &Path, args: &[&str]) -> Command {
     cmd
 }
 
-fn git(cwd: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
+pub(crate) fn git(cwd: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
     let out = git_raw(cwd, args)?;
     if !out.status.success() {
         return Err(git_failure(args, &out));
@@ -111,15 +111,35 @@ fn git_text(cwd: &Path, args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out).trim().to_string())
 }
 
-/// Every changed path in the checkout: staged, unstaged and untracked, each
-/// once, with line counts against HEAD where git has them.
-pub fn changed_files(root: &Path) -> Result<Vec<DiffFile>, String> {
-    let status = git(
-        root,
-        &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
-    )?;
-    let mut files = Vec::new();
-    let mut parts = status.split(|b| *b == 0).filter(|p| !p.is_empty());
+/// One entry of `git status --porcelain=v1 -z`: git's two status letters
+/// (`??` untracked), the path from the repo's root, and where a rename or
+/// copy came from.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct StatusEntry {
+    pub x: char,
+    pub y: char,
+    pub path: String,
+    pub from: Option<String>,
+}
+
+/// `git status` in the checkout at `root`, every untracked file listed
+/// (not only its folder), limited to `pathspec` (literal, from `root`)
+/// when given. Paths are from the repo's root, as porcelain v1 always
+/// gives them.
+pub(crate) fn status_entries(
+    root: &Path,
+    pathspec: Option<&str>,
+) -> Result<Vec<StatusEntry>, String> {
+    let mut args = vec!["status", "--porcelain=v1", "-z", "--untracked-files=all"];
+    if let Some(p) = pathspec {
+        args.extend(["--", p]);
+    }
+    Ok(parse_status(&git(root, &args)?))
+}
+
+fn parse_status(raw: &[u8]) -> Vec<StatusEntry> {
+    let mut out = Vec::new();
+    let mut parts = raw.split(|b| *b == 0).filter(|p| !p.is_empty());
     while let Some(entry) = parts.next() {
         if entry.len() < 4 {
             continue;
@@ -134,22 +154,34 @@ pub fn changed_files(root: &Path) -> Result<Vec<DiffFile>, String> {
         } else {
             None
         };
-        let status = match (x, y) {
-            ('?', '?') => 'U',
-            ('U', _) | (_, 'U') | ('A', 'A') | ('D', 'D') => 'C',
-            _ if renamed => 'R',
-            ('A', _) => 'A',
-            ('D', _) | (_, 'D') => 'D',
-            _ => 'M',
-        };
-        files.push(DiffFile {
-            path,
-            from,
-            status,
-            added: None,
-            removed: None,
-        });
+        out.push(StatusEntry { x, y, path, from });
     }
+    out
+}
+
+/// Every changed path in the checkout: staged, unstaged and untracked, each
+/// once, with line counts against HEAD where git has them.
+pub fn changed_files(root: &Path) -> Result<Vec<DiffFile>, String> {
+    let mut files: Vec<DiffFile> = status_entries(root, None)?
+        .into_iter()
+        .map(|e| {
+            let status = match (e.x, e.y) {
+                ('?', '?') => 'U',
+                ('U', _) | (_, 'U') | ('A', 'A') | ('D', 'D') => 'C',
+                _ if e.from.is_some() => 'R',
+                ('A', _) => 'A',
+                ('D', _) | (_, 'D') => 'D',
+                _ => 'M',
+            };
+            DiffFile {
+                path: e.path,
+                from: e.from,
+                status,
+                added: None,
+                removed: None,
+            }
+        })
+        .collect();
     // Line counts for tracked changes; a repo with no commit yet has none.
     if let Ok(numstat) = git(root, &["diff", "HEAD", "--numstat", "-z", "-M"]) {
         apply_numstat(&mut files, &numstat);

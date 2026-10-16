@@ -71,7 +71,7 @@ fn state_of(found: &[Editor]) -> EditorsState {
     }
 }
 
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Res<T> {
+pub(crate) async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Res<T> {
     tauri::async_runtime::spawn_blocking(f)
         .await
         .map_err(|e| e.to_string())
@@ -229,7 +229,7 @@ pub async fn editor_windows(
 // ---- paths ----
 
 /// A checkout's root and its repo's main checkout.
-fn checkout(client: &Client, worktree: &str) -> Res<(PathBuf, PathBuf)> {
+pub(crate) fn checkout(client: &Client, worktree: &str) -> Res<(PathBuf, PathBuf)> {
     let model = client.snapshot();
     let w = model
         .worktrees

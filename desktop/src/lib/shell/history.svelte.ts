@@ -9,6 +9,7 @@ export type View =
   | 'board'
   | 'session'
   | 'diff'
+  | 'files'
   | 'tasks'
   | 'branches'
   | 'prs'

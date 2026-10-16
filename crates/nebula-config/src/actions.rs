@@ -1507,7 +1507,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::TreeBrowser,
         id: "tree_browser",
         label: "File tree browser",
-        hint: "Browse the worktree's files with a preview pane",
+        hint: "Browse the worktree's files as git lists them, folders folded (the terminal app previews beside the tree)",
         group: "FILES",
         scope: Scope::Global,
         defaults: &["b"],
@@ -1515,8 +1515,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         destructive: false,
         applies_to: &[AppliesTo::Worktree],
         works_in: &[WorksIn::Grid, WorksIn::Board],
-        surface: Surface::Tui,
-        desktop: &[],
+        surface: Surface::Both,
+        // The window's Files view, beside Diff in the split.
+        desktop: &[
+            dk("open_files", "Files: the checkout in context as a tree (again: back from it)", "Views", DeskScope::Anywhere, &["ctrl+shift+e"]),
+            dk("files", "Files: the checkout in context as a tree (again: back from it)", "Views", DeskScope::Global, &["b"]),
+        ],
     },
     // ---- TERMINAL ----
     ActionSpec {
@@ -2291,6 +2295,8 @@ pub const DESKTOP_ORDER: &[&str] = &[
     "open_session",
     "open_diff",
     "diff",
+    "open_files",
+    "files",
     "repo_1",
     "repo_2",
     "repo_3",
