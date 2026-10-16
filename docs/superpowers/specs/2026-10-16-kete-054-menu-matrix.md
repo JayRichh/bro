@@ -50,8 +50,8 @@ The palette lists the same verbs, flattened. Two builders for one target is a de
 | G go | look at what it is connected to | Diff, Review, Pull request ▸, Focus here, remote, parent session |
 | O open | another app | Open in ▸ |
 | C copy | the clipboard | Copy ▸ |
-| Ch change | change it in place | Mark seen, Restart, Duplicate, Account ▸, Rename, Make orchestrator, Switch branch, Wake |
-| Or organise | move it among the rest | Move ▸ |
+| Ch change | change it in place | Mark seen, Restart, Duplicate, Rename, Make orchestrator, Switch branch, Wake |
+| Or organise | move it among the rest, or onto another worktree or account | Move ▸ |
 | W away | archive, delete, remove | Archive, Delete… (always last, behind a rule) |
 
 The registry stores this as `MENU_SECTIONS` / `section_of(id, kind)`. A test enforces that every `MENUS` list runs through the sections in order and that every destructive verb sits in W.
@@ -63,7 +63,7 @@ The registry stores this as `MENU_SECTIONS` / `section_of(id, kind)`. A test enf
 - Inside the submenu each row uses its short word ("VS Code").
 - Submenus never nest:
   - Inside a submenu, groups stay flat. Inside `Worktree ‹branch› ▸`, Move up and Move down are two rows, not `Move ▸`.
-  - A picker submenu (Account ▸) is one level deep.
+  - A row that opens a picker (Move ▸ To another account…, Move to…) opens it as the dialog D has today, or as a child menu in T. It is never a third level of submenu.
 - Short menus never fold: file, folder, terminal, account and every local menu under 8 rows.
 
 | Group | Title | Folds on | Rows (short words) |
@@ -72,9 +72,8 @@ The registry stores this as `MENU_SECTIONS` / `section_of(id, kind)`. A test enf
 | `remote` | Remote (shown as GitHub or Azure DevOps when the app knows the host) | repo | Open in browser, Pull requests…, Issues…, Azure DevOps…, Refresh pull requests |
 | `open_in` | Open in | session, worktree, repo | Open command, VS Code, Visual Studio, Explorer, Browser, Dock editor beside Kete |
 | `copy` | Copy | session, worktree | Path, Branch name, Pull request link |
-| `move` | Move | session, worktree, repo | To another worktree…, Up, Down |
+| `move` | Move | session, worktree, repo | To another worktree…, To another account… (session), Up, Down |
 | `view` | View | background | Overview, Board, Board or bands, Orchestrator, Accounts, Whakaoho, Archived sessions |
-| local `account` | Account | session | the move_to_account picker as a submenu (§5.1) |
 | local `checkout` | Worktree ‹branch› / Checkout ‹branch› | session, terminal | the checkout's menu less the card's rows (§5.2) |
 | local `more` | More | `?` only | the verbs `?` lists beyond the menu (§3.4) |
 | local `vote` | Vote | Azure DevOps PR | Approve, Approve with suggestions, Wait for author, Reject, Reset |
@@ -108,17 +107,23 @@ Within the Open in group:
 
 **1.8 TUI parity rule.** T has no headings, rules or disabled rows. It leaves them out, so a disabled desktop row is a hidden T row. The words, order, submenus and keys are the same in both apps. Each place T builds a menu says this in a comment (tui-menus).
 
-**1.9 Size.**
-- About 12 top-level rows in the common state for every target except two:
-  - the live session card: 16 in D, 15 in T, and up to 19 in D with every state row (Log in, parent, Mark seen);
-  - the repo: 15 in D.
-  Every row beyond 12 is a frequent verb or appears only in a state, and the sections keep the menu scannable. Trimming further would put Restart, Rename or Archive behind another click.
-- Registry rows, folded, with every one meaning something at once: at most 16 for session and worktree, and 14 for repo. `menus_follow_their_sections_and_fold_into_groups` enforces this per kind.
-- If the 12-row rule has to hold, the cheapest trims, in order:
-  1. D's Review… moves into Pull request ▸.
-  2. Make orchestrator is left off a card while another session is pinned. The palette and the orchestrator rail still have it.
-  3. Account ▸ folds into Move ▸ as "To another account…".
-  Together these bring the common session card to 13 in D and 14 in T.
+**1.9 Size.** About 12 top-level rows in the common state. The orchestrator approved three trims to the session card on 2026-10-16, and all three are applied:
+1. D's Review… is the first row of Pull request ▸ (§5.1 row 7).
+2. Make orchestrator is left off a card while another session is pinned. Both apps do this already: T `menu_for`, D `agentVerbs`. To move the role, Unpin the pinned session first, from its own menu or the palette's Unpin orchestrator. In T, `?`'s More ▸, the palette and a bound key still reach Make directly.
+3. Account ▸ folds into Move ▸ as "To another account…" (registry: `move_to_account` is in the Organise section and the `move` group).
+
+The resulting counts:
+- **Live session card, read, another session pinned:** 13 in D and 13 in T. That is 12 registry rows plus the card's Worktree ▸.
+- **The same card with no orchestrator pinned:** 14 in both, because Make orchestrator shows.
+- **The fullest live card in D:** 17, adding Log in, Open parent session and Mark seen.
+- **The repo:** 15 in D in the common state. No trim applies to it. Its extra rows are the desktop's own: Default account ▸, Locate folder… and Worktrees ▸.
+
+`menus_follow_their_sections_and_fold_into_groups` caps the registry rows, folded and at their fullest:
+- session 14 (a live card, so Unarchive is left out);
+- worktree 15 (a linked checkout, so Switch branch is left out);
+- repo 14, terminal 4, file 7, folder 4, account 4, background 8.
+
+Each cap equals the current maximum, so any new row has to make its case.
 
 **1.10 Type-ahead.**
 - Every menu filters as you type (desk-menus adds it to the desktop's non-search menus).
@@ -153,7 +158,8 @@ All are in `crates/nebula-config/src/actions.rs`, regenerated into `desktop/src/
 **MENUS** (full lists are in the code):
 - **Session:**
   - gains `git_diff` (today it only arrived through the checkout rows), `comment_pull_request`, `open_in_browser`, `copy_pr_url` and `mark_seen`;
-  - loses `focus_scope`, which moves into the card's checkout submenu and acts the same way (both apps scope a card to its checkout).
+  - loses `focus_scope`, which moves into the card's checkout submenu and acts the same way (both apps scope a card to its checkout);
+  - `move_to_account` moves from the Change rows into Move (section Organise, group `move`, "To another account…"), the third trim of §1.9.
 - **Terminal:** activate, copy_path, rename, delete.
 - **Worktree:**
   - gains `open_pull_request`. Today it was set in D's table but never listed, so no worktree menu showed it.
@@ -213,14 +219,20 @@ This lane added rows to T's flat menus before tui-menus folds them. So that T sh
 - **Filter.** In a filtered menu (`?`), typing filters across the flattened children. A hit's label reads `Open in › VS Code`. Enter runs it directly.
 - **Mouse.** `Moved` sets `hover`. The wheel scrolls a long menu. Only the left button or Enter runs a row. A right-click while a menu is open closes it and reopens the menu for the thing under the new spot.
 
-**3.3 Picker rows as submenus.** `move_to_account` renders as `Account ▸` holding `account_switch::open_picker`'s rows in both apps. T builds the same `ContextMenu` as a child. `move_session` stays a dialog ("Move to…"), since its list of worktrees can run long.
+**3.3 Picker rows.** `move_to_account` is the row Move ▸ To another account…:
+- D opens today's pick dialog, then today's confirm (`moveToAccount`, accounts/actions.ts:52).
+- T opens `account_switch::open_picker`'s menu as a child, with `parent` set, so ← comes back to Move ▸.
+- The pick lists each target as "Restart on ‹account›…", with "(default)", "(off)", "(not signed in)" and, from lane/limits, "(limited · resets 15:45)".
+- `move_session` (To another worktree…) stays a dialog, since its list of worktrees can run long.
+
+The session's account itself (usage and settings, Accounts…) is reached from the session header's account chip in D and the pane's AccountChip in T. Both open today's account menu (`accountMenu`, accounts/actions.ts:40).
 
 **3.4 `?` in T.** It shows the folded `menu_for` rows, then one `More ▸` row (the `more_rows`: Subagents, Full screen, Find file, Grep, Tree, Agent presets, Screenshot), then `All keys…`. `more_rows` counts folded children as shown, and leaves out rows that mean nothing now (§8.7). D's `?` is the same menu with its search field, plus `All keys…`.
 
 **3.5 Counts for T's `?`** on a live session card with an open PR, linked checkout, Grid:
 - Today: **43** rows (menu_for 32 + 10 extras + All keys).
-- After: **17** (Open, Follow-up prompt…, Diff, Pull request ▸, Open in ▸, Copy ▸, Restart agent, Duplicate, Account ▸, Rename…, Make orchestrator, Move ▸, Archive, Delete…, Worktree ‹branch› ▸, More ▸, All keys…).
-- Right-click on the same card: 32 today, **15** after (the same rows less More ▸ and All keys).
+- After, with another session pinned: **15** (Open, Follow-up prompt…, Diff, Pull request ▸, Open in ▸, Copy ▸, Restart agent, Duplicate, Rename…, Move ▸, Archive, Delete…, Worktree ‹branch› ▸, More ▸, All keys…). With no orchestrator pinned it is 16, because Make orchestrator shows.
+- Right-click on the same card: 32 today, **13** after (14 with no orchestrator pinned): the same rows less More ▸ and All keys.
 
 ---
 
@@ -257,7 +269,7 @@ Unknown is not "no". Where a fact isn't loaded, the row shows:
 | account Whakaoho on | lane/wake schedule (config.local.json `wake`) | same | | Wake rows' words |
 | file tracked / untracked / staged / deleted / binary / huge | `DiffFile.status`, hunks staged list, files.rs caps (2 MB / 10k lines) | `DiffView` files `xy`; FileTabs caps | | §5.7 |
 | remote app (T over ssh) | n/a | `chrome.is_remote` | | hides every local-editor/Explorer/dock row (Copy rows stay; they go through OSC 52) |
-| daemon too old | `canSwitch` (protocol ≥ 57) | account_switch.rs:137 | | Account ▸ disabled: "The running kete daemon is older than this window: restart it (kete kill, then reopen) to move sessions between accounts." |
+| daemon too old | `canSwitch` (protocol ≥ 57) | account_switch.rs:137 | | Move ▸ To another account… disabled: "The running kete daemon is older than this window: restart it (kete kill, then reopen) to move sessions between accounts." |
 
 ---
 
@@ -278,18 +290,16 @@ Entry points:
 | 2 | Open (cloud: Open in browser) | activate | A | Enter | live | | today |
 | 3 | Follow-up prompt… (cloud: Send to cloud session) | follow_up | A | Space | live | | today |
 | 4 | Diff | git_diff | G | D | live | | BUILD (MENUS; was only in the checkout rows) |
-| 5 | Review… | local:session.review | G | | D: live (orchestrator review sheet) | | today D; T LATER (review dock opens from the Review lane only) |
 | 6 | Open parent session ‹name› | local:session.parent | G | | `parent` set and that session live | | BUILD (D `openSession(parent)`; T Attach) |
-| 7 | Pull request ▸ Open in browser · Create… / Merge… · Comment… · Open the issue | open_pull_request, create_pull_request, merge_pull_request, comment_pull_request, open_issue | G | ⇧V, —, —, y, ⇧I | see the PR rules below | Merge on a draft: "Draft pull request: publish it first". Create on the base branch: today's `why` | BUILD (fold + state fixes) |
+| 7 | Pull request ▸ Review… (D) · Open in browser · Create… / Merge… · Comment… · Open the issue | local:session.review, open_pull_request, create_pull_request, merge_pull_request, comment_pull_request, open_issue | G | —, ⇧V, —, —, y, ⇧I | see the PR rules below. Review… (D: the orchestrator review sheet for a live session) is the submenu's first row (§1.9 trim 1); with no pull request rows it stands alone as "Review…" | Merge on a draft: "Draft pull request: publish it first". Create on the base branch: today's `why` | BUILD (fold + state fixes; Review moves in). T: Review LATER (the review dock opens from the Review lane only) |
 | 8 | Open in ▸ VS Code · Visual Studio · Explorer · Browser · localhost:N · Dock editor beside Kete | open_in_vscode, open_in_visual_studio, reveal_in_explorer, open_in_browser, dock_editor | O | | local, live, not cloud; T not remote; each editor only when detected; Visual Studio only when the checkout has a solution or project; Browser only when a port is live | Dock: "No VS Code or Visual Studio window is open on this checkout" | BUILD (lane/editors runs them; menu lanes place them) |
 | 9 | Copy ▸ Path · Branch name · Pull request link | copy_path, copy_branch, copy_pr_url | C | | live; link only with a PR | | BUILD |
 | 10 | Mark seen | mark_seen | Ch | | `unseen` | | BUILD |
 | 11 | Restart agent | restart | Ch | | local (not cloud), live | | today |
 | 12 | Duplicate | duplicate_session | Ch | ⇧P | always | | today |
-| 13 | Account ▸ (‹account›: usage and settings… · rule · Restart on ‹other›… for each target · Accounts…) | move_to_account | Ch | | local | daemon too old (§4) | BUILD (the picker as a submenu, §3.3; first row jumps to the account) |
 | 14 | Rename… | rename | Ch | R | live | | today |
-| 15 | Make orchestrator / Unpin orchestrator | pin_orchestrator | Ch | | local | | today |
-| 16 | Move ▸ To another worktree… · Up · Down | move_session, reorder_up, reorder_down | Or | M, Alt+↑/↓ | live; Up/Down not from a subagent's row | | BUILD (fold) |
+| 15 | Make orchestrator / Unpin orchestrator | pin_orchestrator | Ch | | local. Make only while no other session is pinned; Unpin on the pinned one (§1.9 trim 2) | | BUILD (rule applied in both apps) |
+| 16 | Move ▸ To another worktree… · To another account… · Up · Down | move_session, move_to_account, reorder_up, reorder_down | Or | M, —, Alt+↑/↓ | live; To another account… local (not cloud); Up/Down not from a subagent's row | To another account… on an old daemon (§4) | BUILD (fold; the account move is §1.9 trim 3, picker per §3.3) |
 | 17 | Archive (from a subagent row: Archive parent session…) | archive | W | A | live | | today |
 | 17′ | Unarchive | unarchive | W | U | archived | | today |
 | 18 | Delete… | delete | W | Del | always | | today |
@@ -443,7 +453,7 @@ Entry points:
 ### 5.9 Account
 
 Entry points:
-- **D:** rail AccountsSection row (no menu today), AccountsView row (buttons and `?` today), session account chip (its Account ▸), Whakaoho view row.
+- **D:** rail AccountsSection row (no menu today), AccountsView row (buttons and `?` today), session account chip (today's `accountMenu`), Whakaoho view row.
 - **T:** accounts overlay row (right-click does nothing today; `?` has 13 static rows).
 
 | # | Row | id | Sec | Show | Disable (D) | Verdict |
@@ -599,7 +609,7 @@ Verdict: BUILD as specified. No change here.
 
 ### 5.21 Whakaoho view account row (lane/wake)
 
-Wake up now · Wake-up on (checked) · Snap to the suggested hour (when it differs) · Decisions log… · rule · the account's menu (§5.9) as `Account ▸`.
+Wake up now · Wake-up on (checked) · Snap to the suggested hour (when it differs) · Decisions log… · rule · Account details… (its full menu is on the account row, §5.9; submenus never nest).
 
 Verdict: BUILD (lane/wake).
 
@@ -641,7 +651,7 @@ The jumps Jay asked for, each with the data it runs on. "Today" means it exists 
 |---|---|---|---|---|---|
 | session → PR | Pull request ▸ Open in browser | §5.1 | `model.prs[worktree]` | yes | today |
 | session → diff | Diff | §5.1 | | via checkout rows only | BUILD |
-| session → account | Account ▸ first row "‹account›: usage and settings…" | §5.1 | `Agent.profile` | chip only (D) | BUILD |
+| session → account | the account chip's menu (D header, T pane AccountChip): ‹account›, Restart on…, Accounts…; Move ▸ To another account… on the card | §3.3, §5.1 | `Agent.profile` | chip (D), picker (T) | today + Move ▸ |
 | session → log in | Log in to ‹account›… | §5.1 | lane/limits `stop_reason`, `AccountRow.login` | no | BUILD |
 | session → parent | Open parent session ‹name› | §5.1 | `Agent.parent` | D `from` chip | BUILD |
 | session → checkout | Worktree ‹branch› ▸ | §5.2 | | flat rows | BUILD |
@@ -731,7 +741,9 @@ Every candidate considered, BUILD (0.54), LATER, or CUT, with the reason.
 | `mark_seen` (new verb) | session, worktree, repo, lane, background | BUILD | Inbox triage with many projects; both apps already mark seen |
 | `archive_done` (new verb) | worktree, repo, lane, background | BUILD | Scoped bulk instead of multi-select; reversible |
 | `wake_schedule` (new verb) | account, background | BUILD | Ctrl+K and View ▸ reach Whakaoho in both apps |
-| Account ▸ submenu (move_to_account picker) | session | BUILD | Existing chip menu becomes the session's Account row |
+| To another account… in Move ▸ (the account picker) | session | BUILD | §1.9 trim 3: one row fewer at the top; the account chip keeps the account's own menu |
+| Review… inside Pull request ▸ | session | BUILD | §1.9 trim 1 (D) |
+| Make orchestrator only while none is pinned | session | BUILD | §1.9 trim 2; Unpin first, or `?` More, the palette or a key |
 | Log in to ‹account›… on auth failure | session | BUILD | Connects a failed session to its fix; needs lane/limits for the reason |
 | State banner heading | session, worktree, account | BUILD | One line of context; D headings exist |
 | Card checkout submenu | session, terminal | BUILD | Removes 9-19 flat rows per card |
@@ -807,7 +819,7 @@ Top-level rows. "After" is the common state, with the worst case in brackets. D 
 
 | Target | D today | D after | T today | T after |
 |---|---|---|---|---|
-| Session (live, PR open, linked) | 17 + rule + heading + 9 checkout rows | 16 (19) | 32 (`?` 43) | 15 (`?` 17) |
+| Session (live, PR open, linked; another session pinned) | 17 + rule + heading + 9 checkout rows | 13 (17; 14 with none pinned) | 32 (`?` 43) | 13 (`?` 15; 14 and 16 with none pinned) |
 | Session (archived) | 3 | 3 + banner | 10 (`?` 33) | 3 (`?` 4) |
 | Terminal | 3 + rule + 13 | 5 | 22 | 5 |
 | Worktree (linked, PR open, sessions) | A 12 / B 13 | 12 (16) | 19 (`?` 29) | 13 (`?` 15) |

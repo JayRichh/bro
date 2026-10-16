@@ -124,6 +124,14 @@ describe('menus from the registry', () => {
     expect((rename as { keys?: string[] } | undefined)?.keys).toEqual(['r']);
   });
 
+  it('offers Make orchestrator only while no other session is pinned', () => {
+    setAgents([agent('a'), agent('o', { role: 'orchestrator' })]);
+    expect(words(actions.menuFor({ kind: 'agent', id: 'a' }))).not.toContain('Make orchestrator');
+    expect(words(actions.menuFor({ kind: 'agent', id: 'o' }))).toContain('Unpin orchestrator');
+    setAgents([agent('a'), agent('o')]);
+    expect(words(actions.menuFor({ kind: 'agent', id: 'a' }))).toContain('Make orchestrator');
+  });
+
   it('a terminal closes, a repo is removed from Kete', () => {
     app.model = {
       ...app.model,

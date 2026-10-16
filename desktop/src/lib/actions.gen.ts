@@ -1909,7 +1909,7 @@ export const MENU_LABELS: readonly { id: ActionId; on: AppliesTo | null; label: 
 
 /** Each kind's menu, in order: a right-click's rows in both apps. */
 export const MENUS: Readonly<Partial<Record<AppliesTo, readonly ActionId[]>>> = {
-  session: ["activate", "follow_up", "git_diff", "open_pull_request", "create_pull_request", "merge_pull_request", "comment_pull_request", "open_issue", "open_in_vscode", "open_in_visual_studio", "reveal_in_explorer", "open_in_browser", "dock_editor", "copy_path", "copy_branch", "copy_pr_url", "mark_seen", "restart", "duplicate_session", "move_to_account", "rename", "pin_orchestrator", "move_session", "reorder_up", "reorder_down", "unarchive", "archive", "delete"],
+  session: ["activate", "follow_up", "git_diff", "open_pull_request", "create_pull_request", "merge_pull_request", "comment_pull_request", "open_issue", "open_in_vscode", "open_in_visual_studio", "reveal_in_explorer", "open_in_browser", "dock_editor", "copy_path", "copy_branch", "copy_pr_url", "mark_seen", "restart", "duplicate_session", "rename", "pin_orchestrator", "move_session", "move_to_account", "reorder_up", "reorder_down", "unarchive", "archive", "delete"],
   terminal: ["activate", "copy_path", "rename", "delete"],
   worktree: ["new", "quick_prompt", "new_terminal", "toggle_run", "git_diff", "open_pull_request", "create_pull_request", "merge_pull_request", "comment_pull_request", "focus_scope", "open_repo", "open_worktree", "open_in_vscode", "open_in_visual_studio", "reveal_in_explorer", "open_in_browser", "dock_editor", "copy_path", "copy_branch", "copy_pr_url", "mark_seen", "switch_branch", "reorder_up", "reorder_down", "archive_done", "delete_all", "delete_worktree"],
   repo: ["quick_prompt", "new_worktree", "toggle_run", "focus_scope", "open_repo", "pull_requests", "issues", "azure_devops", "refresh_pull_requests", "open_worktree", "open_in_vscode", "open_in_visual_studio", "reveal_in_explorer", "open_in_browser", "dock_editor", "copy_path", "mark_seen", "switch_branch", "rename", "reorder_up", "reorder_down", "archive_done", "sweep_worktrees", "remove_project"],
@@ -1985,13 +1985,13 @@ export const MENU_SECTIONS: readonly { id: ActionId; on: AppliesTo | null; secti
   { id: "mark_seen", on: null, section: "change" },
   { id: "restart", on: null, section: "change" },
   { id: "duplicate_session", on: null, section: "change" },
-  { id: "move_to_account", on: null, section: "change" },
   { id: "rename", on: null, section: "change" },
   { id: "pin_orchestrator", on: null, section: "change" },
   { id: "switch_branch", on: null, section: "change" },
   { id: "wake_account", on: null, section: "change" },
   { id: "critters", on: null, section: "change" },
   { id: "move_session", on: null, section: "organise" },
+  { id: "move_to_account", on: null, section: "organise" },
   { id: "reorder_up", on: null, section: "organise" },
   { id: "reorder_down", on: null, section: "organise" },
   { id: "unarchive", on: null, section: "away" },
@@ -2016,7 +2016,7 @@ export const MENU_GROUPS: readonly MenuGroup[] = [
   { id: "remote", title: "Remote", on: ["repo"], rows: [{ id: "open_repo", label: "Open in browser" }, { id: "pull_requests", label: "Pull requests\u2026" }, { id: "issues", label: "Issues\u2026" }, { id: "azure_devops", label: "Azure DevOps\u2026" }, { id: "refresh_pull_requests", label: "Refresh pull requests" }] },
   { id: "open_in", title: "Open in", on: ["session", "worktree", "repo"], rows: [{ id: "open_worktree", label: "Open command" }, { id: "open_in_vscode", label: "VS Code" }, { id: "open_in_visual_studio", label: "Visual Studio" }, { id: "reveal_in_explorer", label: "Explorer" }, { id: "open_in_browser", label: "Browser" }, { id: "dock_editor", label: "Dock editor beside Kete" }] },
   { id: "copy", title: "Copy", on: ["session", "worktree"], rows: [{ id: "copy_path", label: "Path" }, { id: "copy_branch", label: "Branch name" }, { id: "copy_pr_url", label: "Pull request link" }] },
-  { id: "move", title: "Move", on: ["session", "worktree", "repo"], rows: [{ id: "move_session", label: "To another worktree\u2026" }, { id: "reorder_up", label: "Up" }, { id: "reorder_down", label: "Down" }] },
+  { id: "move", title: "Move", on: ["session", "worktree", "repo"], rows: [{ id: "move_session", label: "To another worktree\u2026" }, { id: "move_to_account", label: "To another account\u2026" }, { id: "reorder_up", label: "Up" }, { id: "reorder_down", label: "Down" }] },
   { id: "view", title: "View", on: ["global"], rows: [{ id: "home_overview", label: "Overview" }, { id: "home_board", label: "Board" }, { id: "toggle_kanban", label: "Board or bands" }, { id: "toggle_orchestrator_view", label: "Orchestrator" }, { id: "accounts", label: "Accounts" }, { id: "wake_schedule", label: "Whakaoho" }, { id: "toggle_archived", label: "Archived sessions" }] },
 ];
 

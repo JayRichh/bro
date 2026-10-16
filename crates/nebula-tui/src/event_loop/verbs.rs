@@ -484,6 +484,19 @@ fn rows(app: &App, ids: &[&str], t: &Target) -> Vec<MenuItem> {
 /// card has a row of the same verb (Move worktree up).
 pub(crate) fn menu_for(app: &App, t: &Target) -> Vec<MenuItem> {
     let mut items = rows(app, menu_of(t.kind()), t);
+    // Make orchestrator only while no other session is pinned (the menu
+    // matrix's trim): replacing one is rare, and `?`'s More, the palette
+    // and a bound key still reach it.
+    if let Target::Session(id) = t {
+        let pinned = app
+            .tree
+            .agents
+            .iter()
+            .any(|a| &a.id != id && !a.archived && a.role.is_orchestrator());
+        if pinned {
+            items.retain(|i| !matches!(i.action, MenuAction::MakeOrchestrator(_)));
+        }
+    }
     let card = matches!(t, Target::Session(_) | Target::Terminal(_));
     // An archived card keeps no checkout verbs: it runs in none.
     let live = match t {

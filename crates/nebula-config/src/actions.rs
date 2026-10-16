@@ -2476,10 +2476,10 @@ pub const MENUS: &[(AppliesTo, &[&str])] = &[
             "mark_seen",
             "restart",
             "duplicate_session",
-            "move_to_account",
             "rename",
             "pin_orchestrator",
             "move_session",
+            "move_to_account",
             "reorder_up",
             "reorder_down",
             "unarchive",
@@ -2683,13 +2683,14 @@ pub const MENU_SECTIONS: &[(&str, Option<AppliesTo>, MenuSection)] = &[
     ("mark_seen", None, MenuSection::Change),
     ("restart", None, MenuSection::Change),
     ("duplicate_session", None, MenuSection::Change),
-    ("move_to_account", None, MenuSection::Change),
     ("rename", None, MenuSection::Change),
     ("pin_orchestrator", None, MenuSection::Change),
     ("switch_branch", None, MenuSection::Change),
     ("wake_account", None, MenuSection::Change),
     ("critters", None, MenuSection::Change),
     ("move_session", None, MenuSection::Organise),
+    // A fresh restart on another login: moved, as far as the menus go.
+    ("move_to_account", None, MenuSection::Organise),
     ("reorder_up", None, MenuSection::Organise),
     ("reorder_down", None, MenuSection::Organise),
     ("unarchive", None, MenuSection::Away),
@@ -2785,6 +2786,7 @@ pub const MENU_GROUPS: &[MenuGroup] = &[
         on: &[AppliesTo::Session, AppliesTo::Worktree, AppliesTo::Repo],
         rows: &[
             ("move_session", "To another worktree\u{2026}"),
+            ("move_to_account", "To another account\u{2026}"),
             ("reorder_up", "Up"),
             ("reorder_down", "Down"),
         ],
@@ -3759,31 +3761,55 @@ mod tests {
                 }
             }
         }
-        // Folded, with every row meaning something at once: the session
-        // card, the richest menu, stays at sixteen rows (a live card has
-        // one of Archive and Unarchive, and the checkout's row after);
-        // a file's and a folder's never fold.
+        // Folded, at its fullest, no menu runs long. The fullest session is
+        // a live card (Unarchive is an archived one's), the fullest
+        // checkout a linked one (Switch branch is the root's). A live
+        // card's 14 are its registry rows with Mark seen and Make
+        // orchestrator both showing; read, with another session pinned,
+        // it is 12, and each app adds the checkout's row after (13). A
+        // file's and a folder's never fold.
         let top = |kind: AppliesTo| {
-            let ids = menu_of(kind);
+            let not_with = match kind {
+                AppliesTo::Session => "unarchive",
+                AppliesTo::Worktree => "switch_branch",
+                _ => "",
+            };
+            let ids: Vec<&str> = menu_of(kind)
+                .iter()
+                .copied()
+                .filter(|id| *id != not_with)
+                .collect();
             let folded: usize = MENU_GROUPS
                 .iter()
                 .filter(|g| g.on.contains(&kind))
-                .map(|g| g.rows.iter().filter(|(id, _)| ids.contains(id)).count() - 1)
+                .map(|g| {
+                    g.rows
+                        .iter()
+                        .filter(|(id, _)| ids.contains(id))
+                        .count()
+                        .saturating_sub(1)
+                })
                 .sum();
             ids.len() - folded
         };
         for (kind, most) in [
-            (AppliesTo::Session, 16),
-            (AppliesTo::Worktree, 16),
+            (AppliesTo::Session, 14),
+            (AppliesTo::Worktree, 15),
             (AppliesTo::Repo, 14),
             (AppliesTo::Terminal, 4),
-            (AppliesTo::File, 8),
-            (AppliesTo::Folder, 6),
-            (AppliesTo::Account, 6),
+            (AppliesTo::File, 7),
+            (AppliesTo::Folder, 4),
+            (AppliesTo::Account, 4),
             (AppliesTo::Global, 8),
         ] {
             assert!(top(kind) <= most, "{kind:?} runs to {} rows", top(kind));
         }
+        // The account move is one of Move's rows, not a menu row of its
+        // own.
+        assert_eq!(
+            group_of("move_to_account", AppliesTo::Session).map(|(g, w)| (g.id, w)),
+            Some(("move", "To another account\u{2026}"))
+        );
         assert_eq!(
             section_of("wake_schedule", AppliesTo::Account),
             Some(MenuSection::Change)
