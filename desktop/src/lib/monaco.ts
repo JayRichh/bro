@@ -22,16 +22,21 @@ import EditorWorker from 'monaco-esm/editor/editor.worker.js?worker';
   getWorker: () => new EditorWorker(),
 };
 
-/** What every read-only editor in the window shares: the diff editor and replacement mode. */
-export function readingOptions(fontFamily: string): monaco.editor.IStandaloneEditorConstructionOptions {
+/** What every read-only editor in the window shares: the diff editor and
+ *  replacement mode. `font` is the Diff and file size the look asks for
+ *  (look.svelte.ts editorOptions); the window's own is 12.5 on 19. */
+export function readingOptions(
+  fontFamily: string,
+  font: { fontSize: number; lineHeight: number } = { fontSize: 12.5, lineHeight: 19 },
+): monaco.editor.IStandaloneEditorConstructionOptions {
   return {
     theme: 'kete',
     readOnly: true,
     domReadOnly: true,
     automaticLayout: true,
     fontFamily,
-    fontSize: 12.5,
-    lineHeight: 19,
+    fontSize: font.fontSize,
+    lineHeight: font.lineHeight,
     fontLigatures: false,
     minimap: { enabled: false },
     scrollBeyondLastLine: false,

@@ -8,6 +8,7 @@
   import '@xterm/xterm/css/xterm.css';
   import { api, Channel, decodeB64, type PtyEvent, type SessionRef } from './api';
   import { termFamily, xtermTheme } from './theme';
+  import { look, termOptions } from './look.svelte';
   import { app, sessionKey, sessionWorktree, toast } from './store.svelte';
   import { registerTerminal } from './menus/surfaces';
 
@@ -101,15 +102,18 @@
     }
   }
 
+  /** Load the terminal font's regular and bold faces at `size`. */
+  function loadFont(family: string, size: number) {
+    return Promise.all([document.fonts.load(`${size}px ${family}`), document.fonts.load(`bold ${size}px ${family}`)]).catch(() => {});
+  }
+
   onMount(async () => {
-    await Promise.all([
-      document.fonts.load('13px ' + termFamily()),
-      document.fonts.load('bold 13px ' + termFamily()),
-    ]).catch(() => {});
+    const font = termOptions();
+    await loadFont(termFamily(), font.fontSize);
     term = new Terminal({
       fontFamily: termFamily(),
-      fontSize: 13,
-      lineHeight: 1.12,
+      fontSize: font.fontSize,
+      lineHeight: font.lineHeight,
       letterSpacing: 0,
       cursorBlink: true,
       cursorStyle: 'bar',
@@ -204,11 +208,24 @@
     }
   });
 
-  // Re-read the palette once the new data-theme has applied.
+  // Re-read the palette and the font once the look has applied: a new
+  // data-theme, an inline palette, a family or a size (`look.seq`).
   $effect(() => {
     void dark;
-    requestAnimationFrame(() => {
-      if (term) term.options.theme = xtermTheme();
+    void look.seq;
+    requestAnimationFrame(async () => {
+      if (!term) return;
+      term.options.theme = xtermTheme();
+      const family = termFamily();
+      const font = termOptions();
+      const o = term.options;
+      if (o.fontFamily === family && o.fontSize === font.fontSize && o.lineHeight === font.lineHeight) return;
+      await loadFont(family, font.fontSize);
+      if (!term) return;
+      term.options.fontFamily = family;
+      term.options.fontSize = font.fontSize;
+      term.options.lineHeight = font.lineHeight;
+      refit(true);
     });
   });
 

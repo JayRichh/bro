@@ -19,8 +19,10 @@ import {
   setHome,
   setThemePref,
   toast,
-  type ThemePref,
 } from './store.svelte';
+import { nextTheme, themeLabel } from './look';
+import { look } from './look.svelte';
+import { importVsCodeTheme, lookIsKetes, resetAppearance } from './settings/appearance';
 import { keysOf, type ShortcutId } from './shortcuts';
 import { menuFor, newWorktree, parseTarget, refreshPrs, runRowKey, type Target } from './actions';
 import { pickBranchSwitch } from './worktrees/switcher.svelte';
@@ -46,8 +48,7 @@ function orchestratorKey() {
 }
 
 export function cycleTheme() {
-  const order: ThemePref[] = ['system', 'light', 'dark'];
-  setThemePref(order[(order.indexOf(app.themePref) + 1) % order.length]);
+  setThemePref(nextTheme(app.themePref));
 }
 
 export function toggleHome() {
@@ -370,7 +371,9 @@ export function paletteCommands(): Command[] {
     cmd('diff', 'Diff the worktree', 'Window', () => openDiff(diffTarget()), ['diff', 'open_diff']),
     ...diffAgainstCommand(cmd),
     ...(split() ? [cmd('maximize', app.paneMax ? 'Bring the pane back down' : 'Full pane', 'Window', toggleMaximize, ['maximize_z', 'maximize'], 'maximize zoom full screen')] : []),
-    cmd('theme', `Cycle theme (now ${app.themePref})`, 'Window', cycleTheme, 'cycle_theme', 'dark light system'),
+    cmd('theme', `Cycle Workshop theme (now ${themeLabel(app.themePref, look.prefs.themes)})`, 'Window', cycleTheme, 'cycle_theme', 'dark light system'),
+    cmd('import-theme', 'Import a VS Code theme\u2026', 'Window', () => void importVsCodeTheme(), undefined, 'appearance colours colors one dark vscode'),
+    ...(lookIsKetes() ? [] : [cmd('reset-look', 'Reset appearance to Kete defaults', 'Window', () => void resetAppearance(), undefined, 'appearance theme font workshop default')]),
     cmd('settings', 'Settings', 'Window', () => openSettings(), 'settings', 'preferences config'),
     cmd('presets', 'Agent presets', 'Window', () => openSettings('presets'), undefined, 'prefix postfix'),
     cmd('export-settings', menuLabel('export_settings', 'global'), 'Window', exportSettings, undefined, 'backup config save file'),

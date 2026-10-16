@@ -298,3 +298,140 @@ html[data-theme='dark'] {
     --diff-del-word: rgb(210 105 78 / 0.24);
   }
 }
+
+/*
+ * One Dark and One Light: Atom's pair, as VS Code's akamud.vscode-theme-onedark
+ * paints it, for a window that sits beside an editor wearing them. They
+ * follow the same token contract, so every surface, status and the
+ * terminal re-colour together. Ember stays Kete's (it means "needs you"),
+ * and the muted and faint tiers are lifted to read at AA on the canvas.
+ * `data-palette` is set alongside `data-theme`, so these win over both
+ * Workshop blocks above.
+ *
+ * A theme imported from VS Code (and VS Code's own, followed live) is not
+ * here: the window paints its tokens as inline variables on <html>
+ * (lib/look.svelte.ts), which beat every block in this file.
+ */
+html[data-palette='one-dark'][data-theme] {
+  color-scheme: dark;
+
+  --color-bg: #282C34;
+  --color-surface: #21252B;
+  --color-raised: #2C313A;
+  --color-rule: #3E4451;
+  --color-rule-strong: #ABB2BF;
+  --color-ink: #ABB2BF;
+  --color-muted: #9DA5B4;
+  --color-faint: #7F848E;
+  --color-ember: #E08A35;
+  --color-ember-ink: #F0A35A;
+  --color-on-ember: #282C34;
+  --color-unread: #56B6C2;
+  --color-done: #98C379;
+  --color-fail: #E06C75;
+  --color-merged: #C678DD;
+  --color-running: #ABB2BF;
+  --color-selection: rgb(171 178 191 / 0.2);
+  --color-git-modified: #E5C07B;
+  --color-git-added: #98C379;
+  --color-git-deleted: #E06C75;
+  --color-git-renamed: #56B6C2;
+  --color-git-conflict: #C678DD;
+  --color-term-bg: #282C34;
+  --color-term-fg: #ABB2BF;
+  --color-term-cursor: #528BFF;
+  --color-term-selection: #3E4451;
+  --color-term-black: #3F4451;
+  --color-term-red: #E05561;
+  --color-term-green: #8CC265;
+  --color-term-yellow: #D18F52;
+  --color-term-blue: #4AA5F0;
+  --color-term-magenta: #C162DE;
+  --color-term-cyan: #42B3C2;
+  --color-term-white: #D7DAE0;
+  --color-term-bright-black: #4F5666;
+  --color-term-bright-red: #FF616E;
+  --color-term-bright-green: #A5E075;
+  --color-term-bright-yellow: #F0A45D;
+  --color-term-bright-blue: #4DC4FF;
+  --color-term-bright-magenta: #DE73FF;
+  --color-term-bright-cyan: #4CD1E0;
+  --color-term-bright-white: #E6E6E6;
+  --color-syn-comment: #7F848E;
+  --color-syn-keyword: #C678DD;
+  --color-syn-string: #98C379;
+  --color-syn-number: #D19A66;
+  --color-syn-type: #E5C07B;
+  --color-syn-tag: #E06C75;
+  --color-syn-attr: #D19A66;
+  --color-syn-function: #61AFEF;
+  --color-syn-regexp: #56B6C2;
+  --color-editor-gutter: #737984;
+  --color-editor-line: #2C313A;
+  --diff-add-line: rgb(152 195 121 / 0.10);
+  --diff-add-word: rgb(152 195 121 / 0.24);
+  --diff-del-line: rgb(224 108 117 / 0.10);
+  --diff-del-word: rgb(224 108 117 / 0.24);
+}
+
+html[data-palette='one-light'][data-theme] {
+  color-scheme: light;
+
+  --color-bg: #FAFAFA;
+  --color-surface: #F0F0F1;
+  --color-raised: #E5E5E6;
+  --color-rule: #DBDBDC;
+  --color-rule-strong: #383A42;
+  --color-ink: #383A42;
+  --color-muted: #696C77;
+  --color-faint: #8E9099;
+  --color-ember: #D9822B;
+  --color-ember-ink: #A9550F;
+  --color-on-ember: #383A42;
+  --color-unread: #0184BC;
+  --color-done: #50A14F;
+  --color-fail: #E45649;
+  --color-merged: #A626A4;
+  --color-running: #383A42;
+  --color-selection: rgb(56 58 66 / 0.14);
+  --color-git-modified: #C18401;
+  --color-git-added: #50A14F;
+  --color-git-deleted: #E45649;
+  --color-git-renamed: #0184BC;
+  --color-git-conflict: #A626A4;
+  --color-term-bg: #FAFAFA;
+  --color-term-fg: #383A42;
+  --color-term-cursor: #526FFF;
+  --color-term-selection: #E5E5E6;
+  --color-term-black: #383A42;
+  --color-term-red: #E45649;
+  --color-term-green: #50A14F;
+  --color-term-yellow: #C18401;
+  --color-term-blue: #4078F2;
+  --color-term-magenta: #A626A4;
+  --color-term-cyan: #0184BC;
+  --color-term-white: #A0A1A7;
+  --color-term-bright-black: #4F525E;
+  --color-term-bright-red: #E06C75;
+  --color-term-bright-green: #98C379;
+  --color-term-bright-yellow: #E5C07B;
+  --color-term-bright-blue: #61AFEF;
+  --color-term-bright-magenta: #C678DD;
+  --color-term-bright-cyan: #56B6C2;
+  --color-term-bright-white: #FFFFFF;
+  --color-syn-comment: #8E9099;
+  --color-syn-keyword: #A626A4;
+  --color-syn-string: #50A14F;
+  --color-syn-number: #986801;
+  --color-syn-type: #C18401;
+  --color-syn-tag: #E45649;
+  --color-syn-attr: #986801;
+  --color-syn-function: #4078F2;
+  --color-syn-regexp: #0184BC;
+  --color-editor-gutter: #8E9099;
+  --color-editor-line: #F0F0F1;
+  --diff-add-line: rgb(80 161 79 / 0.11);
+  --diff-add-word: rgb(80 161 79 / 0.26);
+  --diff-del-line: rgb(228 86 73 / 0.09);
+  --diff-del-word: rgb(228 86 73 / 0.22);
+}
