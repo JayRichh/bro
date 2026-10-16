@@ -842,21 +842,25 @@ fn sync_task() -> Result<()> {
     let schedules = wake::load();
     let exe = own_exe()?;
     if cfg!(windows) {
-        if nebula_core::env::non_empty(nebula_core::env::WAKE_NO_TASK).is_some() {
-            println!(
-                "  {} is set: the scheduled task was left alone",
-                nebula_core::env::WAKE_NO_TASK
-            );
-            return Ok(());
-        }
+        // Under NEBULA_WAKE_NO_TASK the runner does nothing: the definition
+        // is still written to the data dir, to read, but not registered.
         let runner = task::system_runner();
-        match task::sync(
+        let synced = task::sync(
             &*runner,
             &schedules,
             &exe,
             task::current_user().as_deref(),
             &task::xml_path(),
-        ) {
+        );
+        if nebula_core::env::non_empty(nebula_core::env::WAKE_NO_TASK).is_some() {
+            println!(
+                "  {} is set: the scheduled task was left alone ({} shows what it would be)",
+                nebula_core::env::WAKE_NO_TASK,
+                task::xml_path().display()
+            );
+            return synced.map(|_| ()).map_err(anyhow::Error::msg);
+        }
+        match synced {
             Ok(task::Synced::Written { .. }) => {
                 let times: Vec<String> = task::triggers(&schedules)
                     .keys()
