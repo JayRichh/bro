@@ -1,0 +1,17 @@
+{
+	"$schema": "vscode://schemas/color-theme",
+	"name": "Light Modern",
+	"type": "light",
+	"colors": {
+		"editor.background": "#FFFFFF",
+		"editor.foreground": "#3B3B3B",
+		"sideBar.background": "#F8F8F8",
+		"focusBorder": "#005FB8"
+	},
+	"tokenColors": [
+		{
+			"scope": "comment",
+			"settings": { "foreground": "#008000" }
+		}
+	]
+}

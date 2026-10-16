@@ -395,6 +395,30 @@ impl TreeBrowser {
         }
     }
 
+    /// A folder's menu's **Expand all** / **Collapse all**: the selected
+    /// directory and every directory under it opened (or folded), the
+    /// cursor kept on it. Nothing under a live filter, which opens every
+    /// directory it keeps anyway.
+    pub fn set_subtree(&mut self, open: bool) {
+        let Some(node) = self.list.selected().map(|r| r.node) else {
+            return;
+        };
+        if !self.list.query.is_empty() || !self.nodes[node].is_dir {
+            return;
+        }
+        let mut stack = vec![node];
+        while let Some(n) = stack.pop() {
+            if self.nodes[n].is_dir {
+                self.expanded[n] = open;
+                stack.extend(self.nodes[n].children.iter().copied());
+            }
+        }
+        self.rebuild_rows();
+        if let Some(row) = self.list.items.iter().position(|r| r.node == node) {
+            self.list.cursor = row;
+        }
+    }
+
     /// Recompute `rows` after a filter edit and park the selection on the
     /// best-scoring file (top row when the filter is empty), reloading the
     /// preview when the selected node changed.
@@ -809,6 +833,32 @@ mod tests {
         assert_eq!(visible_paths(&b), vec!["a", "a/sub", "a/x.rs", "b.txt"]);
         b.collapse_selected(); // collapsed dir: jump to parent
         assert_eq!(b.selected_node().unwrap().path, "a");
+    }
+
+    /// A folder's Expand all opens every directory under it, and Collapse
+    /// all folds them again, the cursor staying on the folder.
+    #[test]
+    fn expand_all_and_collapse_all_take_the_whole_subtree() {
+        let mut b = browser(&["b.txt", "a/x.rs", "a/sub/z.rs", "a/sub/deep/w.rs"]);
+        b.set_subtree(true);
+        assert_eq!(
+            visible_paths(&b),
+            vec![
+                "a",
+                "a/sub",
+                "a/sub/deep",
+                "a/sub/deep/w.rs",
+                "a/sub/z.rs",
+                "a/x.rs",
+                "b.txt"
+            ]
+        );
+        assert_eq!(b.selected_node().unwrap().path, "a");
+        b.set_subtree(false);
+        assert_eq!(visible_paths(&b), vec!["a", "b.txt"]);
+        // Opened one level again, its subfolders stay folded.
+        b.expand_selected();
+        assert_eq!(visible_paths(&b), vec!["a", "a/sub", "a/x.rs", "b.txt"]);
     }
 
     #[test]

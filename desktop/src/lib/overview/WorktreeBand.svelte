@@ -9,16 +9,18 @@
   import { app, focusQuickPrompt, toast } from '../store.svelte';
   import { emptyCopy } from '../learn';
   import { api } from '../api';
-  import { openMenu } from '../ui/ui.svelte';
+  import { ownMenu } from '../menus/router';
+  import { checkoutMenu, openTargetMenu } from '../actions';
   import { age } from '../status';
   import RunButton from './RunButton.svelte';
   import SessionTree from './SessionTree.svelte';
   import { type WorktreeGroup, isEmpty, prLabel, worktreeKey } from '../worktrees/groups';
   import { isCollapsed, rows, toggleCollapsed, setCollapsed } from '../worktrees/rows.svelte';
-  import { verbTitle, verbsFor, worktreeMenu } from '../worktrees/verbs';
+  import { verbTitle, verbsFor } from '../worktrees/verbs';
   import { drag, dropWorktree, endDrag, leftFor, moveOnto, offsetIn, startDrag, worktreeDropOk } from '../reorder.svelte';
   import { dropZone, type Zone } from '../order';
   import { withKey } from '../shortcuts';
+  import EditorButtons from '../editors/EditorButtons.svelte';
 
   let { repo, group }: { repo: string; group: WorktreeGroup } = $props();
 
@@ -42,10 +44,10 @@
           .join(' \u00b7 '),
   );
 
-  function menu(e: MouseEvent) {
-    e.preventDefault();
-    openMenu(worktreeMenu(w), { x: e.clientX, y: e.clientY }, w.branch);
-  }
+  /** The band's right-click menu past its title too (its ahead/behind, its
+   *  verbs, its kebab): the checkout's own, as every way in builds it. Its
+   *  PR chip and ports have their own (`pr:`, `port:`): menus/router.ts. */
+  const bandMenu = () => ({ items: checkoutMenu(w), label: w.branch });
 
   /** The row's own keys; the shortcut table's row keys (t, Shift+O, c)
    *  reach it through `data-target`. */
@@ -98,7 +100,8 @@
     class="group/wt relative flex min-h-8 min-w-0 items-center gap-3 border-b border-rule bg-bg pr-4 pl-6 {over === 'onto' && drag.item
       ? 'outline-2 -outline-offset-2 outline-ember'
       : ''}"
-    oncontextmenu={menu}
+    use:ownMenu={bandMenu}
+    data-perch
     ondragenter={dragOver}
     ondragover={dragOver}
     ondragleave={(e) => leftFor(e) && (over = null)}
@@ -154,14 +157,16 @@
           : pr.state === 'closed'
             ? 'text-muted line-through'
             : 'text-ink'}"
-        title="{pr.title} ({prLabel(pr)}). Open it."
+        data-target="pr:{w.id}"
+        title="{pr.title} ({prLabel(pr)}). Open it; right-click for its menu."
         onclick={() => api.openUrl(pr.url).catch((e) => toast(String(e)))}>{prLabel(pr)}</button
       >
     {/if}
     {#each group.ports as port (port)}
       <button
         class="{meta} flex-none border-0 bg-transparent p-0 text-muted hover:text-ink hover:underline hover:underline-offset-4 @max-[620px]/wt:hidden"
-        title="Open http://localhost:{port}"
+        data-target="port:{w.id}:{port}"
+        title="Open http://localhost:{port}; right-click for its menu"
         onclick={() => api.openUrl(`http://localhost:${port}`).catch((e) => toast(String(e)))}>:{port}</button
       >
     {/each}
@@ -171,7 +176,9 @@
     <span
       class="flex flex-none items-center gap-0.5 opacity-0 group-focus-within/wt:opacity-100 group-hover/wt:opacity-100 @max-[960px]/wt:hidden"
     >
-      {#each verbs.filter((v) => v.id !== 'run') as v (v.id)}
+      <!-- The editor word is the default editor's own icon now (and Visual Studio's beside it). -->
+      <EditorButtons worktree={w} btn="grid size-6 flex-none place-items-center border border-transparent bg-transparent p-0 text-muted hover:border-rule hover:text-ink" size={13} />
+      {#each verbs.filter((v) => v.id !== 'run' && v.id !== 'editor') as v (v.id)}
         <button
           class="h-6 border border-transparent bg-transparent px-1.5 text-[12px] hover:border-rule {v.danger
             ? 'text-fail'
@@ -183,10 +190,10 @@
     </span>
     <button
       class="grid size-6 flex-none place-items-center border border-transparent bg-transparent p-0 text-muted hover:border-rule hover:text-ink"
-      title="Worktree actions: new session, terminal, diff, editor, folder, copy path, run, delete (or right-click; {withKey('on the row', 'row_menu')})"
+      title="Worktree actions: new session, terminal, diff, pull request, open in, copy, run, delete (or right-click; {withKey('on the row', 'row_menu')})"
       aria-label="{w.branch} actions"
       aria-haspopup="menu"
-      onclick={(e) => openMenu(worktreeMenu(w), e.currentTarget as HTMLElement, w.branch)}
+      onclick={(e) => openTargetMenu({ kind: 'worktree', id: w.id }, e.currentTarget as HTMLElement)}
     >
       <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"
         ><rect x="1" y="5" width="2" height="2" fill="currentColor" /><rect x="5" y="5" width="2" height="2" fill="currentColor" /><rect

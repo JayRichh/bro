@@ -1953,7 +1953,7 @@ dependencies = [
 
 [[package]]
 name = "kete-ado"
-version = "0.53.1"
+version = "0.54.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1967,13 +1967,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "kete-critters"
+version = "0.54.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "kete-desktop"
-version = "0.53.1"
+version = "0.54.0"
 dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.22.1",
  "kete-ado",
+ "kete-critters",
  "nebula-config",
  "nebula-core",
  "serde",
@@ -1984,6 +1992,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tempfile",
  "tokio",
+ "webview2-com",
  "windows",
  "windows-sys 0.61.2",
 ]
@@ -2205,7 +2214,7 @@ dependencies = [
 
 [[package]]
 name = "nebula-config"
-version = "0.53.1"
+version = "0.54.0"
 dependencies = [
  "nebula-core",
  "serde",
@@ -2215,9 +2224,11 @@ dependencies = [
 
 [[package]]
 name = "nebula-core"
-version = "0.53.1"
+version = "0.54.0"
 dependencies = [
  "directories",
+ "libc",
+ "png 0.17.16",
  "rmp-serde",
  "serde",
  "serde_bytes",

@@ -1,8 +1,12 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { app, toast } from '../store.svelte';
+  import { app, openSession, toast } from '../store.svelte';
   import { api } from '../api';
   import { nav } from '../shell/history.svelte';
+  import { layerOpen } from '../ui/ui.svelte';
+  import { copyText } from '../menus/clipboard';
+  import { ownMenu } from '../menus/router';
+  import { taskItems } from '../menus/rows';
   import Chip from './Chip.svelte';
   import { composeItem } from './prs-api';
   import StartTask from './StartTask.svelte';
@@ -145,7 +149,8 @@
   }
 
   function onKey(e: KeyboardEvent) {
-    if (starting || e.ctrlKey || e.altKey || e.metaKey) return;
+    // A menu over the list takes its own keys.
+    if (layerOpen() || starting || e.ctrlKey || e.altKey || e.metaKey) return;
     const t = e.target as HTMLElement;
     if (e.key === 'Escape' && t === filterBox) {
       ui.q = '';
@@ -168,6 +173,52 @@
       e.preventDefault();
       starting = selected;
     }
+  }
+
+  /** The linked branch a task's menu speaks of: the one with a session, else
+   *  the one with a pull request, else the first. A task on several branches
+   *  gets that one's session, branch and pull request, so Draft PR acts on
+   *  the branch the menu names. */
+  function primaryLink(links: BranchRow[]): BranchRow | null {
+    return links.find((b) => b.session) ?? links.find((b) => b.pr) ?? links[0] ?? null;
+  }
+
+  /** A task row's right-click menu (menus/rows.ts). The links come from the
+   *  branch list the view reads beside the tasks; until it is in, the menu
+   *  has no session, branch or pull request to go to. */
+  function taskMenu(it: WorkItem) {
+    // The selection follows the click, so j and k walk on from this row.
+    if (selectedId !== it.id) select(it.id);
+    const link = primaryLink(linked(it.id));
+    const sid = link?.session ?? null;
+    const agent = sid ? app.model.agents.find((a) => a.id === sid) : undefined;
+    const items = taskItems(
+      {
+        id: it.id,
+        title: it.title,
+        url: it.url || null,
+        closed: it.stateCategory === 'Completed' || it.stateCategory === 'Removed',
+        session: sid ? { id: sid, name: agent?.name ?? sid } : null,
+        branch: link?.name ?? null,
+        pr: link?.pr?.id ?? null,
+      },
+      {
+        // What a double-click does, with the row selected as the click would.
+        start: () => {
+          select(it.id);
+          starting = it;
+        },
+        goSession: (id) => openSession({ Agent: id }),
+        goBranch: (name) => nav.go({ view: 'branches', repo, item: name }),
+        goPr: (id) => nav.go({ view: 'prs', repo, item: String(id) }),
+        draftPr: () => {
+          if (link) nav.go({ view: 'prs', repo, item: composeItem(link.name, it.id) });
+        },
+        open: (url) => void api.openUrl(url).catch((e) => toast(`Could not open the task in the browser: ${String(e)}`)),
+        copy: (text, said) => void copyText(text, said),
+      },
+    );
+    return { items, label: `Task ${it.id}` };
   }
 
   function fmtDay(d: string | null): string {
@@ -349,6 +400,7 @@
                 <li>
                   <button
                     data-id={it.id}
+                    use:ownMenu={() => taskMenu(it)}
                     class="grid h-9 w-full grid-cols-[64px_minmax(0,1fr)_120px_96px_48px] items-center gap-3 border-0 border-b border-rule px-6 text-left text-[14px] {on
                       ? 'bg-surface'
                       : 'bg-transparent hover:bg-surface'}"

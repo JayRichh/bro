@@ -8,7 +8,10 @@
   import '@xterm/xterm/css/xterm.css';
   import { api, Channel, decodeB64, type PtyEvent, type SessionRef } from './api';
   import { termFamily, xtermTheme } from './theme';
-  import { app, sessionKey } from './store.svelte';
+  import { look, termOptions } from './look.svelte';
+  import { app, sessionKey, sessionWorktree, toast } from './store.svelte';
+  import { registerTerminal, terminalAt } from './menus/surfaces';
+  import { pathDrop } from './files/drop.svelte';
 
   let { session, dark }: { session: SessionRef; dark: boolean } = $props();
 
@@ -23,6 +26,9 @@
   let lastSize = { cols: 0, rows: 0 };
   /** Bumped per attach, so a late event from the previous session is dropped. */
   let generation = 0;
+  /** The URL under the pointer (the web-links addon's hover). */
+  let link: string | null = null;
+  let unregister: (() => void) | undefined;
 
   function send(data: string, binary = false) {
     if (!attached || replaying) return;
@@ -97,15 +103,18 @@
     }
   }
 
+  /** Load the terminal font's regular and bold faces at `size`. */
+  function loadFont(family: string, size: number) {
+    return Promise.all([document.fonts.load(`${size}px ${family}`), document.fonts.load(`bold ${size}px ${family}`)]).catch(() => {});
+  }
+
   onMount(async () => {
-    await Promise.all([
-      document.fonts.load('13px ' + termFamily()),
-      document.fonts.load('bold 13px ' + termFamily()),
-    ]).catch(() => {});
+    const font = termOptions();
+    await loadFont(termFamily(), font.fontSize);
     term = new Terminal({
       fontFamily: termFamily(),
-      fontSize: 13,
-      lineHeight: 1.12,
+      fontSize: font.fontSize,
+      lineHeight: font.lineHeight,
       letterSpacing: 0,
       cursorBlink: true,
       cursorStyle: 'bar',
@@ -122,9 +131,13 @@
     term.loadAddon(new Unicode11Addon());
     term.unicode.activeVersion = '11';
     term.loadAddon(
-      new WebLinksAddon((_e, uri) => {
-        api.openUrl(uri).catch(() => {});
-      }),
+      new WebLinksAddon(
+        (_e, uri) => {
+          api.openUrl(uri).catch(() => {});
+        },
+        // The link under the pointer, for the menu's Open link.
+        { hover: (_e, uri) => (link = uri), leave: () => (link = null) },
+      ),
     );
     // The daemon answers DA1, DSR and the kitty keyboard query for every
     // session; a second answer from here would land in the CLI as input.
@@ -135,7 +148,7 @@
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true;
       // App chords reach the window, not the CLI.
-      if (e.ctrlKey && e.shiftKey && /^[BDLMNOPT]$/i.test(e.key)) return false;
+      if (e.ctrlKey && e.shiftKey && /^[BDELMNOPT]$/i.test(e.key)) return false;
       if (e.ctrlKey && !e.shiftKey && e.key === 'c' && term!.hasSelection()) {
         navigator.clipboard.writeText(term!.getSelection()).catch(() => {});
         term!.clearSelection();
@@ -152,6 +165,25 @@
     term.onData((d) => send(d));
     term.onBinary((d) => send(d, true));
     term.open(host);
+    // Its right-click menu (menus/builtin.ts). Paste goes through
+    // `term.paste`, the same path as Ctrl+V's paste event.
+    unregister = registerTerminal(host, {
+      live: () => phase === 'live' && !!attached,
+      hasSelection: () => !!term?.hasSelection(),
+      selection: () => term?.getSelection() ?? '',
+      clearSelection: () => term?.clearSelection(),
+      paste: (text) => term?.paste(text),
+      selectAll: () => term?.selectAll(),
+      clear: () => term?.clear(),
+      focus: () => term?.focus(),
+      folder: () => {
+        const w = sessionWorktree(attached ?? session);
+        return app.model.worktrees.find((x) => x.id === w)?.path ?? null;
+      },
+      link: () => link,
+      openLink: (url) => void api.openUrl(url).catch((e) => toast(String(e))),
+      ready: () => (phase === 'live' && !replaying ? attached : null),
+    });
     try {
       const gl = new WebglAddon();
       gl.onContextLoss(() => gl.dispose());
@@ -178,11 +210,24 @@
     }
   });
 
-  // Re-read the palette once the new data-theme has applied.
+  // Re-read the palette and the font once the look has applied: a new
+  // data-theme, an inline palette, a family or a size (`look.seq`).
   $effect(() => {
     void dark;
-    requestAnimationFrame(() => {
-      if (term) term.options.theme = xtermTheme();
+    void look.seq;
+    requestAnimationFrame(async () => {
+      if (!term) return;
+      term.options.theme = xtermTheme();
+      const family = termFamily();
+      const font = termOptions();
+      const o = term.options;
+      if (o.fontFamily === family && o.fontSize === font.fontSize && o.lineHeight === font.lineHeight) return;
+      await loadFont(family, font.fontSize);
+      if (!term) return;
+      term.options.fontFamily = family;
+      term.options.fontSize = font.fontSize;
+      term.options.lineHeight = font.lineHeight;
+      refit(true);
     });
   });
 
@@ -195,6 +240,7 @@
   });
 
   onDestroy(() => {
+    unregister?.();
     ro?.disconnect();
     generation++;
     if (attached) api.detach(attached).catch(() => {});
@@ -202,7 +248,8 @@
   });
 </script>
 
-<div class="relative h-full min-h-0 bg-term-bg">
+<!-- A Files row dropped here types its path, as Ctrl+V would. -->
+<div class="relative h-full min-h-0 bg-term-bg" use:pathDrop={{ target: () => attached, pane: () => terminalAt(host) }}>
   <div class="absolute inset-[8px_4px_4px_12px] [&_.xterm]:h-full [&_.xterm-viewport]:bg-transparent!" bind:this={host}></div>
   {#if phase === 'booting'}
     <div class="absolute top-3.5 right-[18px] flex items-center gap-2 font-mono text-[12px] text-muted">

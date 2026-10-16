@@ -261,6 +261,7 @@ fn dispatch_prompt(
         }
         PromptKind::RenameAgent { id } => optimistic::rename_agent(app, id, value, out),
         PromptKind::RenameTerminal { id } => optimistic::rename_terminal(app, id, value, out),
+        PromptKind::CritterName { id } => crate::critters::rename(app, id, &value),
         PromptKind::RenameProject { id } => optimistic::rename_project(app, id, value, out),
         PromptKind::SettingText { kind, project } => {
             // Same path as a toggled row (`apply_setting_at`): write the
@@ -354,6 +355,15 @@ pub(crate) fn run_pending_action(
                 close_terminal(app, id, out);
             }
         }
+        PendingAction::DiscardFile { root, rel } => {
+            let said = crate::git_diff::discard_file(&root, &rel)
+                .map(|()| format!("discarded the unstaged changes to {rel}"));
+            app.chrome.flash = Some(said.unwrap_or_else(|e| e));
+            app.modals.overlay = app.modals.verbs_under.take().map(|o| *o);
+            if let Some(Overlay::Diff(view)) = &mut app.modals.overlay {
+                reread_diff(view);
+            }
+        }
         PendingAction::DeleteAgent(id) => delete_agent(app, id, out),
         PendingAction::MoveAgent { id, worktree } => launcher::move_agent(app, id, worktree, out),
         PendingAction::SwitchAccount { id, profile } => {
@@ -443,6 +453,9 @@ pub(crate) fn run_pending_action(
         }
         PendingAction::ResetSettings => reset_settings(app),
         PendingAction::Quit => app.chrome.should_quit = true,
+        PendingAction::RunOpenCommand { worktree, command } => {
+            super::worktree_views::run_approved_open(app, &worktree, &command)
+        }
     }
 }
 
@@ -664,6 +677,7 @@ pub(crate) fn run_menu_action(app: &mut App, action: MenuAction, out: &mut Vec<C
         MenuAction::NewAgent(worktree) => open_new_agent_picker(app, worktree),
         MenuAction::NewTerminal(worktree) => create_terminal(app, worktree, out),
         MenuAction::RenameTerminal(id) => open_prompt(app, PromptKind::RenameTerminal { id }),
+        MenuAction::Critter(act) => crate::critters::run(app, act),
         MenuAction::CloseTerminal(id) => {
             if let Some(t) = app.tree.terminals.iter().find(|t| t.id == id).cloned() {
                 app.modals.overlay = Some(Overlay::Confirm(confirm_close_terminal_in(app, &t)));
@@ -844,6 +858,136 @@ pub(crate) fn run_menu_action(app: &mut App, action: MenuAction, out: &mut Vec<C
             if let Some(under) = app.modals.verbs_under.take() {
                 app.modals.overlay = Some(*under);
                 handle_overlay_key(app, KeyEvent::new(code, mods), out);
+            }
+        }
+        MenuAction::OverlayKeys(keys) => {
+            if let Some(under) = app.modals.verbs_under.take() {
+                app.modals.overlay = Some(*under);
+                for (code, mods) in keys {
+                    handle_overlay_key(app, KeyEvent::new(code, mods), out);
+                }
+            }
+        }
+        // Opened in the menu's place by the row itself (`menu_row`); there
+        // is nothing to run.
+        MenuAction::Submenu { .. } => {}
+        MenuAction::Verb { action, target } => super::verbs::run_verb(app, action, &target, out),
+        MenuAction::Copy(text) => {
+            let label = format!("Copied {text}");
+            copy_and_flash(app, &text, &label);
+        }
+        MenuAction::Jump(target) => {
+            let attaches = crate::config::Config::load().palette_enter_attaches;
+            let landing = Landing::for_enter_on(app, &target, attaches);
+            jump_to_target(app, target, landing, out);
+        }
+        MenuAction::CheckoutBranch {
+            project,
+            branch,
+            remote,
+        } => super::ado::checkout_branch(app, project, branch, remote, out),
+        MenuAction::FileGit { root, rel, op } => file_git(app, root, rel, op),
+        MenuAction::FoldTree(open) => {
+            if let Some(Overlay::Tree(view)) = &mut app.modals.overlay {
+                view.set_subtree(open);
+            }
+        }
+        MenuAction::LogIn(account) => super::accounts::sign_in(app, &account, out),
+        MenuAction::DiffThisFile(rel) => {
+            // Asked for before the diff opens: a list read off the loop
+            // lands its cursor there (`land_diff_listing`).
+            app.modals.diff_land_on = Some(rel);
+            open_diff_view(app);
+            // Opened at once (its list in hand, or on its way): land now
+            // or when the list does. Not opened yet: the probe's answer
+            // opens it and lands.
+            if matches!(app.modals.overlay, Some(Overlay::Diff(_))) {
+                land_diff_on_file(app);
+            } else if app.jobs.diff_probe.is_none() {
+                app.modals.diff_land_on = None;
+            }
+        }
+        MenuAction::Editor(act) => crate::editors::run(app, act),
+        MenuAction::PickTheme(name) => pick_theme(app, &name),
+    }
+}
+
+/// A diff file menu's git row: the file staged or unstaged on the spot and
+/// the list read again; its unstaged changes discarded only once a confirm
+/// naming it is answered, the diff waiting under it.
+fn file_git(app: &mut App, root: std::path::PathBuf, rel: String, op: crate::app::FileOp) {
+    use crate::app::FileOp;
+    if op == FileOp::Discard {
+        app.modals.verbs_under = app.modals.overlay.take().map(Box::new);
+        app.modals.overlay = Some(Overlay::Confirm(ConfirmDialog {
+            title: "Discard changes".into(),
+            message: format!(
+                "Discard the changes to {rel} not staged yet?\nGit keeps no copy of them; what is staged stays."
+            ),
+            action: PendingAction::DiscardFile { root, rel },
+            area: ratatui::layout::Rect::default(),
+        }));
+        return;
+    }
+    let head_ok = match &app.modals.overlay {
+        Some(Overlay::Diff(view)) => view.head_ok,
+        _ => crate::git_diff::has_head(&root),
+    };
+    let done = if op == FileOp::Stage {
+        crate::git_diff::stage_file(&root, &rel).map(|()| format!("staged {rel}"))
+    } else {
+        crate::git_diff::unstage_file(&root, &rel, head_ok).map(|()| format!("unstaged {rel}"))
+    };
+    app.chrome.flash = Some(done.unwrap_or_else(|e| e));
+    if let Some(Overlay::Diff(view)) = &mut app.modals.overlay {
+        reread_diff(view);
+    }
+}
+
+/// The DIFF VIEWER's cursor onto the file **Diff this file** asked for, once
+/// its list is in: the file's diff read, or a word that it has none. A
+/// list still being read keeps the ask for when it lands; a diff that
+/// never opened (nothing changed, a read that failed) lets it go.
+pub(crate) fn land_diff_on_file(app: &mut App) {
+    let Some(Overlay::Diff(view)) = &mut app.modals.overlay else {
+        app.modals.diff_land_on = None;
+        return;
+    };
+    if view.listing.is_some() {
+        return;
+    }
+    let Some(rel) = app.modals.diff_land_on.take() else {
+        return;
+    };
+    if view.select_path(&rel) {
+        crate::git_diff::load_selected_diff(view);
+    } else {
+        app.chrome.flash = Some(format!("no changes in {rel}"));
+    }
+}
+
+/// The DIFF VIEWER's list read again after a file changed under it (a
+/// stage, a discard), the reader kept on the file they were on.
+pub(crate) fn reread_diff(view: &mut crate::app::DiffView) {
+    view.keep_open = true;
+    let root = view.root.clone();
+    let against = view.against;
+    let recorded = view.attribution.recorded.clone();
+    let read = move || crate::git_diff::read_listing_with(&root, Some(against), recorded.as_ref());
+    match view.jobs.clone() {
+        Some(jobs) => {
+            let ticket = crate::view_jobs::ticket();
+            view.listing = Some(ticket);
+            jobs.run(move || {
+                Some(crate::view_jobs::Answer::DiffListing {
+                    ticket,
+                    result: read(),
+                })
+            });
+        }
+        None => {
+            if let Ok(listing) = read() {
+                crate::git_diff::fill_view(view, listing);
             }
         }
     }

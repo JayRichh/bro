@@ -1,0 +1,18 @@
+{
+  "nameShort": "Cursor",
+  "nameLong": "Cursor",
+  "applicationName": "cursor",
+  "dataFolderName": ".cursor",
+  "win32MutexName": "cursor",
+  "win32DirName": "Cursor",
+  "win32NameVersion": "Cursor",
+  "win32RegValueName": "Cursor",
+  "win32AppUserModelId": "Anysphere.Cursor",
+  "win32ShellNameShort": "Cursor",
+  "win32x64UserAppId": "{{DF6B21E3-78D9-4F0B-A3E5-2E4B5E1D8C47}",
+  "urlProtocol": "cursor",
+  "quality": "stable",
+  "commit": "e27b94d0a3c168f5b2d70e49a1c8f365d0b7e2a9",
+  "version": "2.6.3",
+  "date": "2026-10-09T14:22:51.000Z"
+}

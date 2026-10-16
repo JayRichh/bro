@@ -1095,6 +1095,21 @@ mod tests {
                             | Action::FocusScope
                             | Action::ScopeAccount
                             | Action::WhatsNew
+                            | Action::OpenInVscode
+                            | Action::OpenInVisualStudio
+                            | Action::DockEditor
+                            | Action::RevealInExplorer
+                            | Action::OpenWithDefault
+                            | Action::OpenFileInKete
+                            | Action::CopyPath
+                            | Action::CopyRelativePath
+                            | Action::CopyBranch
+                            | Action::WakeAccount
+                            | Action::Critters
+                            | Action::MarkSeen
+                            | Action::CopyPrUrl
+                            | Action::ArchiveDone
+                            | Action::WakeSchedule
                     ),
                     "{} ships with no chord",
                     spec.id

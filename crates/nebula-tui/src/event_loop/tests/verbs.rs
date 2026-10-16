@@ -191,8 +191,10 @@ fn legacy_repo(app: &App, p: &ProjectId) -> Vec<MenuAction> {
     items
 }
 
+/// Every row of `legacy` is still a row of `t`'s menu, at its top or in
+/// one of its submenus.
 fn assert_kept(app: &App, t: &Target, legacy: Vec<MenuAction>) {
-    let menu = verbs::menu_for(app, t);
+    let menu = verbs::flat(&verbs::menu_for(app, t));
     for want in legacy {
         assert!(
             menu.iter().any(|i| i.action == want),
@@ -264,12 +266,15 @@ fn menus_leave_out_what_means_nothing_there() {
 }
 
 /// The same verb says the same words in both apps: the registry's menu
-/// labels, the card's checkout rows named as the checkout's where the
-/// card has its own.
+/// labels, the card's checkout rows (in its `Worktree feat ▸`) named as
+/// the checkout's where the card has its own.
 #[test]
 fn menu_rows_take_the_registrys_words_and_show_their_keys() {
     let app = bench();
-    let menu = verbs::menu_for(&app, &Target::Session(AgentId("a3".into())));
+    let menu = verbs::flat(&verbs::menu_for(
+        &app,
+        &Target::Session(AgentId("a3".into())),
+    ));
     let label = |a: MenuAction| {
         menu.iter()
             .find(|i| i.action == a)
@@ -295,9 +300,11 @@ fn menu_rows_take_the_registrys_words_and_show_their_keys() {
         label(MenuAction::DeleteAgent(AgentId("a3".into()))),
         "Delete\u{2026}"
     );
+    // A terminal: Open, Copy path, Rename…, Close terminal…, its checkout.
     let term = verbs::menu_for(&app, &Target::Terminal(TerminalId("t1".into())));
-    assert_eq!(term[2].label, "Close terminal\u{2026}");
-    assert!(term[2].destructive);
+    assert_eq!(term[3].label, "Close terminal\u{2026}");
+    assert!(term[3].destructive);
+    assert_eq!(term[4].label, "Checkout main");
     let repo = verbs::menu_for(&app, &Target::Repo(ProjectId("p1".into())));
     assert!(repo.iter().any(|i| i.label == "Remove from Kete\u{2026}"));
     // Every registry row carries its verb, so the draw shows its key.
@@ -318,6 +325,7 @@ fn menu_rows_take_the_registrys_words_and_show_their_keys() {
         at: Some((2, 2)),
         hover: 0,
         area: ratatui::layout::Rect::default(),
+        scroll: 0,
         parent: None,
         filter: None,
     }));
@@ -359,10 +367,11 @@ fn question_mark_opens_the_selections_verbs() {
     assert!(menu.title.as_deref().unwrap().contains("agent-1"));
     assert!(menu.filter.is_some(), "type to narrow");
     assert!(menu.items.iter().any(|i| i.verb == Some(Action::Archive)));
-    // The rest of what applies, past the card's menu: a comment on its
-    // pull request, its subagents.
-    assert!(menu
-        .items
+    // The rest of what applies, past the card's menu, under one `More ▸`
+    // ahead of All keys: a comment on its pull request, its subagents.
+    let more = &menu.items[menu.items.len() - 2];
+    assert_eq!(more.label, "More");
+    assert!(verbs::flat(std::slice::from_ref(more))
         .iter()
         .any(|i| i.action == MenuAction::Run(Action::Subagents)));
     assert_eq!(menu.items.last().unwrap().action, MenuAction::AllKeys);
@@ -744,4 +753,696 @@ fn the_panels_footer_leads_with_the_registrys_verbs() {
         );
         assert!(!text.contains("del  "), "no hand-written list: {text}");
     });
+}
+
+/// The 0.54/0.55 verbs all act now: a card's editor rows sit in its
+/// `Open in ▸` after its own verbs (each install by its name inside), the
+/// copies in `Copy ▸` before its changes, and a key runs an editor verb
+/// on the selection's checkout, never a word about a later release. The
+/// editors' own rules have their tests in `tests/editors.rs`.
+#[test]
+fn the_new_verbs_have_rows_and_act() {
+    // The menu below lists editor rows too: name the installs it sees.
+    crate::editors::test::installs(Some(vec![crate::editors::test::install(
+        "code",
+        nebula_core::editors::Family::Code,
+        "VS Code",
+    )]));
+    let mut app = bench();
+    app.chrome.is_remote = false;
+    let rows = app.visible_session_rows();
+    let at = rows
+        .iter()
+        .position(|r| r.sref() == Some(SessionRef::Agent(AgentId("a1".into()))))
+        .unwrap();
+    app.nav.sel_session = at;
+    let menu = verbs::menu_for(&app, &Target::Session(AgentId("a1".into())));
+    let labels: Vec<&str> = menu.iter().map(|i| i.label.as_str()).collect();
+    let pos = |l: &str| {
+        labels
+            .iter()
+            .position(|x| *x == l)
+            .unwrap_or_else(|| panic!("{l}: {labels:?}"))
+    };
+    assert!(pos("Follow-up prompt\u{2026}") < pos("Open in"));
+    assert!(pos("Open in") < pos("Copy"));
+    assert!(pos("Copy") < pos("Restart agent"));
+    let flat = verbs::flat(&menu);
+    let words: Vec<&str> = flat.iter().map(|i| i.label.as_str()).collect();
+    assert!(words.contains(&"VS Code"), "{words:?}");
+    assert_eq!(
+        flat.iter()
+            .filter(|i| i.verb == Some(Action::CopyPath))
+            .count(),
+        1
+    );
+    let mut out = Vec::new();
+    crate::editors::test::launched();
+    app.chrome.flash = None;
+    run_action(&mut app, Action::OpenInVscode, &mut out);
+    let flash = app.chrome.flash.clone().unwrap_or_default();
+    assert!(flash.starts_with("opening "), "{flash}");
+    assert_eq!(crate::editors::test::launched().len(), 1);
+    // The copy is the card's checkout's folder.
+    app.chrome.flash = None;
+    run_action(&mut app, Action::CopyPath, &mut out);
+    let path = verbs::native(&worktree(&app, "w1").path);
+    assert_eq!(app.chrome.flash, Some(format!("Copied {path}")));
+    assert!(out.is_empty(), "nothing sent: {out:?}");
+}
+
+/// The menu matrix's rows show only where they can act: Mark seen on an
+/// unread card, a pull request's rows with one, the dev server while it
+/// listens, a repo's remote lists by host (its submenu titled by it),
+/// Archive done with a finished session already read.
+#[test]
+fn the_matrix_rows_follow_their_state() {
+    let mut app = bench();
+    let a1 = AgentId("a1".into());
+    let rows = app.visible_session_rows();
+    app.nav.sel_session = rows
+        .iter()
+        .position(|r| r.sref() == Some(SessionRef::Agent(a1.clone())))
+        .unwrap();
+    let labels = |app: &App, t: &Target| -> Vec<String> {
+        verbs::menu_for(app, t)
+            .into_iter()
+            .map(|i| i.label)
+            .collect()
+    };
+    let has = |app: &App, t: &Target, l: &str| labels(app, t).iter().any(|x| x == l);
+    // A verb anywhere in the menu, folded or not: the card's own rows,
+    // not its checkout's submenu, for a card.
+    let has_verb = |app: &App, t: &Target, v: Action| {
+        let menu = verbs::menu_for(app, t);
+        let own: Vec<MenuItem> = match t {
+            Target::Session(_) => menu[..menu.len() - 1].to_vec(),
+            _ => menu,
+        };
+        verbs::flat(&own).iter().any(|i| i.verb == Some(v))
+    };
+    let card = Target::Session(a1.clone());
+    let root = Target::Worktree(WorktreeId("w1".into()));
+    let repo = Target::Repo(ProjectId("p1".into()));
+
+    // Read: no Mark seen; unread: the card's, its checkout's, its repo's.
+    let set = |app: &mut App, unseen: bool| {
+        for a in app.tree.agents.iter_mut().filter(|a| a.id == a1) {
+            a.status = nebula_core::AgentStatus::Finished;
+            a.unseen = unseen;
+        }
+    };
+    set(&mut app, false);
+    assert!(!has_verb(&app, &card, Action::MarkSeen));
+    assert!(!has(&app, &root, "Mark all seen"));
+    assert!(
+        has(&app, &root, "Archive done sessions\u{2026}"),
+        "{:?}",
+        labels(&app, &root)
+    );
+    set(&mut app, true);
+    assert!(has(&app, &card, "Mark seen"));
+    assert!(has(&app, &root, "Mark all seen"));
+    assert!(has(&app, &repo, "Mark all seen"));
+
+    // No pull request on the checkout: no link to copy, nothing to
+    // comment on, no Open pull request in its menu.
+    for t in [&card, &root] {
+        assert!(!has_verb(&app, t, Action::CopyPrUrl), "{t:?}");
+        assert!(!has_verb(&app, t, Action::CommentPullRequest), "{t:?}");
+    }
+    assert!(!has_verb(&app, &root, Action::OpenPullRequest));
+
+    // The dev server only while something listens, by its port.
+    assert!(!has_verb(&app, &card, Action::OpenInBrowser));
+    app.tree.ports.insert(
+        WorktreeId("w1".into()),
+        nebula_core::ports::WorktreePorts {
+            worktree: WorktreeId("w1".into()),
+            block: None,
+            live: vec![5173],
+        },
+    );
+    assert!(has_verb(&app, &card, Action::OpenInBrowser));
+    assert!(has_verb(&app, &root, Action::OpenInBrowser));
+    let browser = verbs::flat(&verbs::menu_for(&app, &root))
+        .into_iter()
+        .find(|i| i.verb == Some(Action::OpenInBrowser))
+        .unwrap();
+    assert_eq!(browser.label, "Browser \u{b7} localhost:5173");
+
+    // A repo's lists by host, under its host's name.
+    app.desk.ado_remote.insert(ProjectId("p1".into()), false);
+    assert!(!has_verb(&app, &repo, Action::Ado));
+    assert!(has_verb(&app, &repo, Action::PullRequests));
+    assert!(has(&app, &repo, "GitHub"), "{:?}", labels(&app, &repo));
+    app.desk.ado_remote.insert(ProjectId("p1".into()), true);
+    assert!(has_verb(&app, &repo, Action::Ado));
+    assert!(!has_verb(&app, &repo, Action::Issues));
+    assert!(
+        has(&app, &repo, "Azure DevOps"),
+        "{:?}",
+        labels(&app, &repo)
+    );
+}
+
+/// The card's own rows, without its checkout's `Worktree ‹branch› ▸`,
+/// flattened out of their submenus.
+fn card_rows(app: &App, id: &str) -> Vec<MenuItem> {
+    let menu = verbs::menu_for(app, &Target::Session(AgentId(id.into())));
+    verbs::flat(&menu[..menu.len() - 1])
+}
+
+fn pr_on_feat(state: &str, draft: bool) -> crate::pull_request::PullRequest {
+    crate::pull_request::PullRequest {
+        number: 12,
+        url: "https://github.com/o/r/pull/12".into(),
+        title: "Polish the nav".into(),
+        state: state.into(),
+        is_draft: draft,
+        head: "feat".into(),
+        head_sha: String::new(),
+        base: "main".into(),
+        health: Default::default(),
+        activity: Vec::new(),
+    }
+}
+
+/// A checkout's pull request by its state (matrix §5.1): none, Create
+/// standing alone; open, the browser, the merge and a comment in `Pull
+/// request ▸`; a draft, no merge until it is published; merged or closed,
+/// only its own row, in words that say so, and never Create beside it.
+#[test]
+fn pull_request_rows_follow_its_state() {
+    use crate::pull_request::{STATE_CLOSED, STATE_MERGED, STATE_OPEN};
+    let mut app = bench();
+    let has = |app: &App, a: Action| card_rows(app, "a3").iter().any(|i| i.verb == Some(a));
+    let top = |app: &App| -> Vec<String> {
+        verbs::menu_for(app, &Target::Session(AgentId("a3".into())))
+            .into_iter()
+            .map(|i| i.label)
+            .collect()
+    };
+    let feat = WorktreeId("w2".into());
+    assert!(top(&app).contains(&"Create pull request\u{2026}".to_string()));
+
+    app.github
+        .pull_requests
+        .insert(feat.clone(), Some(pr_on_feat(STATE_OPEN, false)));
+    assert!(!has(&app, Action::CreatePullRequest));
+    assert!(has(&app, Action::MergePullRequest));
+    assert!(has(&app, Action::OpenPullRequest));
+    assert!(
+        top(&app).contains(&"Pull request".to_string()),
+        "{:?}",
+        top(&app)
+    );
+
+    app.github
+        .pull_requests
+        .insert(feat.clone(), Some(pr_on_feat(STATE_OPEN, true)));
+    assert!(
+        !has(&app, Action::MergePullRequest),
+        "a draft is published first"
+    );
+    assert!(has(&app, Action::OpenPullRequest));
+
+    for (state, words) in [
+        (STATE_MERGED, "Open merged pull request"),
+        (STATE_CLOSED, "Open closed pull request"),
+    ] {
+        app.github
+            .pull_requests
+            .insert(feat.clone(), Some(pr_on_feat(state, false)));
+        assert!(top(&app).contains(&words.to_string()), "{:?}", top(&app));
+        for gone in [
+            Action::CreatePullRequest,
+            Action::MergePullRequest,
+            Action::CommentPullRequest,
+        ] {
+            assert!(!has(&app, gone), "{state}: {gone:?}");
+        }
+    }
+    // A merged checkout says so on its delete and in its banner.
+    app.github
+        .pull_requests
+        .insert(feat.clone(), Some(pr_on_feat(STATE_MERGED, false)));
+    let band: Vec<String> = verbs::menu_for(&app, &Target::Worktree(feat.clone()))
+        .into_iter()
+        .map(|i| i.label)
+        .collect();
+    assert!(
+        band.contains(&"Delete worktree (pull request merged)\u{2026}".to_string()),
+        "{band:?}"
+    );
+    assert_eq!(
+        verbs::banner(&app, &Target::Worktree(feat)).as_deref(),
+        Some("merged")
+    );
+}
+
+/// A repo's menu reaches its linked worktrees (`Worktrees ▸`, each landing
+/// on its band) after its remote's lists and ahead of what opens another
+/// app; a checkout's reaches its live run terminal, on the band and in a
+/// card's `Worktree ‹branch› ▸`.
+#[test]
+fn the_go_rows_connect_a_repo_and_a_checkout_to_their_parts() {
+    let mut app = bench();
+    let rows = app.visible_session_rows();
+    app.nav.sel_session = rows
+        .iter()
+        .position(|r| r.sref() == Some(SessionRef::Agent(AgentId("a1".into()))))
+        .unwrap();
+    let repo = verbs::menu_for(&app, &Target::Repo(ProjectId("p1".into())));
+    let labels: Vec<&str> = repo.iter().map(|i| i.label.as_str()).collect();
+    let pos = |l: &str| {
+        labels
+            .iter()
+            .position(|x| *x == l)
+            .unwrap_or_else(|| panic!("{l}: {labels:?}"))
+    };
+    assert!(pos("Remote") < pos("Worktrees"));
+    assert!(pos("Worktrees") < pos("Open in"));
+    let MenuAction::Submenu { items, .. } = &repo[pos("Worktrees")].action else {
+        panic!("Worktrees is a submenu");
+    };
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].label, "feat");
+    assert_eq!(
+        items[0].action,
+        MenuAction::Jump(crate::palette::PaletteTarget::Worktree(WorktreeId(
+            "w2".into()
+        )))
+    );
+
+    hse(
+        &mut app,
+        ServerEvent::EntityUpserted {
+            entity: Entity::Terminal(TerminalTab {
+                id: TerminalId("dev".into()),
+                worktree_id: WorktreeId("w2".into()),
+                name: "dev".into(),
+                sort_order: 1,
+                alive: true,
+                run_command: Some("npm run dev".into()),
+            }),
+        },
+    );
+    let show = MenuAction::Attach(SessionRef::Terminal(TerminalId("dev".into())));
+    let band = verbs::menu_for(&app, &Target::Worktree(WorktreeId("w2".into())));
+    assert!(band
+        .iter()
+        .any(|i| i.label == "Show run terminal" && i.action == show));
+    let card = verbs::menu_for(&app, &Target::Session(AgentId("a3".into())));
+    assert!(verbs::flat(&card[card.len() - 1..])
+        .iter()
+        .any(|i| i.action == show));
+}
+
+/// Diff this file (from the tree browser or a finder) opens the
+/// checkout's diff on that file; a file with nothing changed says so.
+#[test]
+fn diff_this_file_lands_the_diff_on_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = test_repo(&dir);
+    std::fs::write(repo.join("a.txt"), "changed\n").unwrap();
+    std::fs::write(repo.join("z.txt"), "fresh\n").unwrap();
+    let mut app = App::new();
+    seed_repo_tree(&mut app, &repo);
+    let mut out = Vec::new();
+    run_menu_action(&mut app, MenuAction::DiffThisFile("z.txt".into()), &mut out);
+    match &app.modals.overlay {
+        Some(Overlay::Diff(v)) => assert_eq!(v.selected_path(), Some("z.txt")),
+        other => panic!("no diff: {other:?}"),
+    }
+    assert!(app.modals.diff_land_on.is_none());
+    app.modals.overlay = None;
+    run_menu_action(
+        &mut app,
+        MenuAction::DiffThisFile("untouched.txt".into()),
+        &mut out,
+    );
+    assert_eq!(
+        app.chrome.flash.as_deref(),
+        Some("no changes in untouched.txt")
+    );
+}
+
+/// `?` over Azure DevOps lists the pull request under its cursor's menu
+/// (the browser, its threads, the worktree on its branch, its copies, a
+/// vote, the merge), then the overlay's own keys; a vote presses `v` and
+/// its letter in the overlay put back.
+#[test]
+fn azure_devops_rows_have_their_own_menus() {
+    use crate::ado::{AdoBranch, AdoPr, AdoTab, AdoView, Load};
+    let mut app = bench();
+    app.modals.overlay = Some(Overlay::Ado(AdoView {
+        project: Some(ProjectId("p1".into())),
+        tab: AdoTab::PullRequests,
+        prs: Load::Ready(vec![AdoPr {
+            id: 7,
+            title: "Polish".into(),
+            source: "refs/heads/feat".into(),
+            target: "refs/heads/main".into(),
+            is_draft: false,
+            created_by: "someone".into(),
+            url: "https://dev.azure.com/o/p/_git/r/pullrequest/7".into(),
+            mine: false,
+        }]),
+        branches: Load::Ready(vec![AdoBranch {
+            name: "feat".into(),
+            local: true,
+            remote: None,
+        }]),
+        ..AdoView::default()
+    }));
+    let mut out = Vec::new();
+    handle_overlay_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+        &mut out,
+    );
+    let Some(Overlay::Menu(menu)) = &app.modals.overlay else {
+        panic!("no menu over Azure DevOps: {:?}", app.modals.overlay);
+    };
+    assert_eq!(menu.title.as_deref(), Some("pull request !7"));
+    let labels: Vec<String> = menu.items.iter().map(|i| i.label.clone()).collect();
+    for want in [
+        "Open in browser",
+        "Review comments\u{2026}",
+        "Go to worktree feat",
+        "Copy",
+        "Vote",
+        "Merge\u{2026}",
+        "Refresh",
+        "Branches",
+        "All keys\u{2026}",
+    ] {
+        assert!(labels.iter().any(|l| l == want), "{want}: {labels:?}");
+    }
+    assert!(matches!(
+        app.modals.verbs_under.as_deref(),
+        Some(Overlay::Ado(_))
+    ));
+    let vote = labels.iter().position(|l| l == "Vote").unwrap();
+    activate::menu_row(&mut app, vote, &mut out);
+    let Some(Overlay::Menu(sub)) = &app.modals.overlay else {
+        panic!("the vote submenu");
+    };
+    assert_eq!(sub.title.as_deref(), Some("pull request !7 \u{203a} Vote"));
+    assert_eq!(sub.items[0].label, "Approve");
+    activate::menu_row(&mut app, 0, &mut out);
+    assert!(matches!(app.modals.overlay, Some(Overlay::Ado(_))));
+    assert_eq!(
+        app.chrome.flash.as_deref(),
+        Some("voting approve on !7\u{2026}")
+    );
+}
+
+/// A session stopped short (lane/limits' stop notes) says why in its
+/// menu's title, and one stopped on its login leads with the way back in.
+#[test]
+fn a_stopped_sessions_menu_says_why_and_leads_with_its_login() {
+    use nebula_core::stop::{StopNote, AUTHENTICATION_FAILED, RATE_LIMIT};
+    let mut app = bench();
+    let a1 = AgentId("a1".into());
+    let note = |reason: &str, waiting: bool| StopNote {
+        reason: reason.into(),
+        waiting,
+        resumes: Some("3:45pm".into()),
+        resets_at: None,
+        detail: None,
+        at: crate::app::now_ms(),
+    };
+    let t = Target::Session(a1.clone());
+    app.launcher
+        .session_stops
+        .insert(a1.clone(), note(RATE_LIMIT, true));
+    assert_eq!(
+        verbs::banner(&app, &t).as_deref(),
+        Some("limited \u{b7} resumes 3:45pm")
+    );
+    assert!(!verbs::menu_for(&app, &t)[0].label.starts_with("Log in"));
+
+    app.launcher
+        .session_stops
+        .insert(a1.clone(), note(AUTHENTICATION_FAILED, false));
+    let account = nebula_core::accounts::session_account(&agent(&app, "a1"));
+    let name = account.trim_start_matches('@').to_string();
+    assert_eq!(
+        verbs::banner(&app, &t),
+        Some(format!("needs you \u{b7} log in again ({name})"))
+    );
+    let first = &verbs::menu_for(&app, &t)[0];
+    assert_eq!(first.label, format!("Log in to {name}\u{2026}"));
+    assert_eq!(first.action, MenuAction::LogIn(account));
+}
+
+/// An Azure DevOps branch's menu: the worktree it is checked out in, its
+/// name, its pull request, and its page, built from a pull request the
+/// overlay already read (no `git` on the loop).
+#[test]
+fn an_azure_devops_branch_reaches_its_worktree_and_its_page() {
+    use crate::ado::{AdoBranch, AdoPr, AdoTab, AdoView, Load};
+    let mut app = bench();
+    app.modals.overlay = Some(Overlay::Ado(AdoView {
+        project: Some(ProjectId("p1".into())),
+        tab: AdoTab::Branches,
+        prs: Load::Ready(vec![AdoPr {
+            id: 7,
+            title: "Polish".into(),
+            source: "refs/heads/feat".into(),
+            target: "refs/heads/main".into(),
+            is_draft: false,
+            created_by: "someone".into(),
+            url: "https://dev.azure.com/o/p/_git/r/pullrequest/7".into(),
+            mine: true,
+        }]),
+        branches: Load::Ready(vec![AdoBranch {
+            name: "feat".into(),
+            local: true,
+            remote: None,
+        }]),
+        ..AdoView::default()
+    }));
+    let mut out = Vec::new();
+    handle_overlay_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+        &mut out,
+    );
+    let Some(Overlay::Menu(menu)) = &app.modals.overlay else {
+        panic!("no menu over Azure DevOps: {:?}", app.modals.overlay);
+    };
+    assert_eq!(menu.title.as_deref(), Some("branch feat"));
+    let row = |label: &str| {
+        menu.items
+            .iter()
+            .find(|i| i.label == label)
+            .unwrap_or_else(|| panic!("{label}: {:?}", menu.items))
+            .action
+            .clone()
+    };
+    assert_eq!(
+        row("Go to worktree feat"),
+        MenuAction::Jump(crate::palette::PaletteTarget::Worktree(WorktreeId(
+            "w2".into()
+        )))
+    );
+    assert_eq!(row("Copy name"), MenuAction::Copy("feat".into()));
+    assert_eq!(
+        row("Open pull request !7"),
+        MenuAction::OpenLink("https://dev.azure.com/o/p/_git/r/pullrequest/7".into())
+    );
+    assert_eq!(
+        row("Open in Azure DevOps"),
+        MenuAction::OpenLink("https://dev.azure.com/o/p/_git/r?version=GBfeat".into())
+    );
+}
+
+/// The registry's wake-up verb: with the accounts overlay up and a Claude
+/// account picked it wakes that account (the footer says so at once, and
+/// no thread starts under a unit test); from anywhere else it opens the
+/// overlay on its Wake view. It is no longer a word about the next release.
+#[test]
+fn wake_account_wakes_the_picked_account_or_opens_the_wake_view() {
+    use crate::accounts_overlay::Tab;
+    with_config_json(
+        r#"{"profiles":[{"name":"work","harness":"claude"},{"name":"gpt","harness":"codex"}]}"#,
+        || {
+            let mut app = bench();
+            let mut out = Vec::new();
+            // From the grid: nothing picked, so the Wake view opens.
+            run_action(&mut app, Action::WakeAccount, &mut out);
+            match &app.modals.overlay {
+                Some(Overlay::Accounts(v)) => assert_eq!(v.tab, Tab::Wake),
+                other => panic!("no Wake view: {other:?}"),
+            }
+            assert!(
+                !app.chrome.flash.as_deref().unwrap_or("").contains("coming"),
+                "{:?}",
+                app.chrome.flash
+            );
+            // Run again from the Accounts view with a Claude account picked.
+            let Some(Overlay::Accounts(v)) = &mut app.modals.overlay else {
+                panic!("closed");
+            };
+            v.tab = Tab::Accounts;
+            v.cursor = v.rows.iter().position(|r| r.key == "work").unwrap();
+            run_action(&mut app, Action::WakeAccount, &mut out);
+            assert_eq!(app.chrome.flash.as_deref(), Some("waking work\u{2026}"));
+            // Another harness's account is refused, not woken.
+            let Some(Overlay::Accounts(v)) = &mut app.modals.overlay else {
+                panic!("closed");
+            };
+            v.cursor = v.rows.iter().position(|r| r.key == "gpt").unwrap();
+            run_action(&mut app, Action::WakeAccount, &mut out);
+            let flash = app.chrome.flash.clone().unwrap_or_default();
+            assert!(flash.contains("Claude accounts only"), "{flash}");
+            assert!(out.is_empty(), "nothing sent to the daemon: {out:?}");
+        },
+    );
+}
+
+/// An account's own menu rows act on that account, whatever the cursor is
+/// on: Wake up now wakes it, Wake-up schedule… turns the overlay it stood
+/// on to the Wake view on it; from the background the schedule opens the
+/// Wake view with no account named. A switched-off account's menu has
+/// the schedule but not Wake up now.
+#[test]
+fn an_account_rows_wake_verbs_act_on_that_account() {
+    use crate::accounts_overlay::Tab;
+    with_config_json(
+        r#"{"profiles":[{"name":"work","harness":"claude"},{"name":"home","harness":"claude"},{"name":"off","harness":"claude","disabled":true}]}"#,
+        || {
+            let mut app = bench();
+            let mut out = Vec::new();
+            accounts::open(&mut app);
+            let Some(Overlay::Accounts(v)) = &mut app.modals.overlay else {
+                panic!("closed");
+            };
+            v.cursor = v.rows.iter().position(|r| r.key == "off").unwrap();
+            handle_overlay_key(
+                &mut app,
+                KeyEvent::new(KeyCode::Char('?'), KeyModifiers::SHIFT),
+                &mut out,
+            );
+            let Some(Overlay::Menu(menu)) = &app.modals.overlay else {
+                panic!("no menu: {:?}", app.modals.overlay);
+            };
+            let labels: Vec<&str> = menu.items.iter().map(|i| i.label.as_str()).collect();
+            assert!(labels.contains(&"Wake-up schedule\u{2026}"), "{labels:?}");
+            assert!(!labels.contains(&"Wake up now"), "{labels:?}");
+            handle_overlay_key(
+                &mut app,
+                KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+                &mut out,
+            );
+            let Some(Overlay::Accounts(v)) = &mut app.modals.overlay else {
+                panic!("closed");
+            };
+            v.cursor = v.rows.iter().position(|r| r.key == "work").unwrap();
+            let home = Target::Account("home".into());
+            verbs::run_verb(&mut app, Action::WakeAccount, &home, &mut out);
+            assert_eq!(app.chrome.flash.as_deref(), Some("waking home\u{2026}"));
+            // The row's menu over the list, its Wake-up schedule… row
+            // picked: the same overlay back, on its Wake view.
+            let Some(Overlay::Accounts(v)) = &mut app.modals.overlay else {
+                panic!("closed");
+            };
+            v.cursor = v.rows.iter().position(|r| r.key == "work").unwrap();
+            handle_overlay_key(
+                &mut app,
+                KeyEvent::new(KeyCode::Char('?'), KeyModifiers::SHIFT),
+                &mut out,
+            );
+            let Some(Overlay::Menu(menu)) = &mut app.modals.overlay else {
+                panic!("no menu: {:?}", app.modals.overlay);
+            };
+            menu.hover = menu
+                .items
+                .iter()
+                .position(|i| i.label == "Wake-up schedule\u{2026}")
+                .expect("the schedule row");
+            handle_overlay_key(
+                &mut app,
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                &mut out,
+            );
+            match &app.modals.overlay {
+                Some(Overlay::Accounts(v)) => {
+                    assert_eq!(v.tab, Tab::Wake);
+                    assert_eq!(v.rows[v.cursor].key, "work");
+                }
+                other => panic!("no Wake view: {other:?}"),
+            }
+            assert!(app.modals.verbs_under.is_none());
+            app.modals.overlay = None;
+            verbs::run_verb(&mut app, Action::WakeSchedule, &Target::Global, &mut out);
+            assert!(
+                matches!(&app.modals.overlay, Some(Overlay::Accounts(v)) if v.tab == Tab::Wake),
+                "{:?}",
+                app.modals.overlay
+            );
+            assert!(out.is_empty(), "nothing sent to the daemon: {out:?}");
+        },
+    );
+}
+
+/// `?` over the Wake view lists the Wake view's own keys, not the
+/// Accounts list's, and over the list it names the wake-up ones too.
+#[test]
+fn question_mark_over_the_wake_view_lists_its_own_verbs() {
+    with_config_json(
+        r#"{"profiles":[{"name":"work","harness":"claude"}]}"#,
+        || {
+            let mut app = bench();
+            let mut out = Vec::new();
+            accounts::open(&mut app);
+            let ask = |app: &mut App, out: &mut Vec<ClientRequest>| {
+                handle_overlay_key(
+                    app,
+                    KeyEvent::new(KeyCode::Char('?'), KeyModifiers::SHIFT),
+                    out,
+                );
+                match &app.modals.overlay {
+                    Some(Overlay::Menu(menu)) => menu
+                        .items
+                        .iter()
+                        .map(|i| i.label.clone())
+                        .collect::<Vec<_>>(),
+                    other => panic!("no verbs menu: {other:?}"),
+                }
+            };
+            let labels = ask(&mut app, &mut out);
+            for want in ["Wake up now", "Wake-up schedule\u{2026}", "Rename\u{2026}"] {
+                assert!(labels.iter().any(|l| l == want), "{want}: {labels:?}");
+            }
+            handle_overlay_key(
+                &mut app,
+                KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+                &mut out,
+            );
+            handle_overlay_key(
+                &mut app,
+                KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+                &mut out,
+            );
+            let labels = ask(&mut app, &mut out);
+            for want in [
+                "On or off",
+                "Earlier",
+                "Later",
+                "Wake up now",
+                "Accounts",
+                "Close",
+            ] {
+                assert!(labels.iter().any(|l| l == want), "{want}: {labels:?}");
+            }
+            assert!(
+                !labels.iter().any(|l| l == "Rename\u{2026}"),
+                "the list's verbs don't apply here: {labels:?}"
+            );
+        },
+    );
 }

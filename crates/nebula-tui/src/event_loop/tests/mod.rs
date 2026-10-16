@@ -6520,6 +6520,7 @@ fn question_mark_ignores_menus_without_session_rows() {
             at: None,
             hover: 0,
             area: ratatui::layout::Rect::default(),
+            scroll: 0,
             parent: None,
             filter: None,
         }));
@@ -7314,9 +7315,12 @@ fn a_run_ack_ahead_of_its_terminal_names_the_command_when_it_lands() {
 
 /// `Shift+Enter` on a worktree fires its OPEN COMMAND — the project's
 /// **Open command** setting first, else `.nebula.json`'s `open` — and
-/// with neither says where to put one, without Enter's drill-in. The
-/// key answers from the Sessions panel too, where the cursor's
-/// worktree is just as much the context, and `Shift+O` beside it.
+/// with neither says where to put one, without Enter's drill-in. A
+/// command from the file asks once per repo and command (a changed one
+/// asks again, and a file that changes under the dialog runs nothing);
+/// the setting is the user's own and never asks. The key answers from the
+/// Sessions panel too, where the cursor's worktree is just as much the
+/// context, and `Shift+O` beside it.
 #[test]
 fn shift_enter_on_a_worktree_fires_its_open_command() {
     use crate::config::SettingKind::OpenCommand;
@@ -7337,22 +7341,113 @@ fn shift_enter_on_a_worktree_fires_its_open_command() {
         );
         assert_eq!(app.nav.focus, Focus::Worktrees, "not Enter's drill-in");
 
-        std::fs::write(
-            dir.path().join(".kete.json"),
-            r#"{"open": "open http://localhost:3000"}"#,
-        )
-        .unwrap();
+        // A command from the repo's file (anyone who can push wrote it)
+        // asks first: nothing runs until the yes.
+        let ran = |app: &App| {
+            app.chrome
+                .flash
+                .as_deref()
+                .is_some_and(|f| f.starts_with('↗'))
+        };
+        let kete_json = dir.path().join(".kete.json");
+        std::fs::write(&kete_json, r#"{"open": "open http://localhost:3000"}"#).unwrap();
+        app.chrome.flash = None;
         press(&mut app, KeyCode::Enter, KeyModifiers::SHIFT, &mut out);
+        let Some(Overlay::Confirm(confirm)) = &app.modals.overlay else {
+            panic!(
+                "no confirm for the file's command: {:?} {:?}",
+                app.modals.overlay, app.chrome.flash
+            );
+        };
+        assert_eq!(confirm.title, "Run the repo's open command?");
+        assert!(
+            confirm.message.contains("open http://localhost:3000"),
+            "{}",
+            confirm.message
+        );
+        assert!(
+            !ran(&app),
+            "nothing ran before the yes: {:?}",
+            app.chrome.flash
+        );
+        press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
+        assert!(app.modals.overlay.is_none());
         assert_eq!(
             app.chrome.flash.as_deref(),
             Some("↗ open http://localhost:3000")
         );
 
-        // The setting wins over the file, and is read fresh per press.
+        // The approval is kept: the same command runs at once.
+        app.chrome.flash = None;
+        press(&mut app, KeyCode::Enter, KeyModifiers::SHIFT, &mut out);
+        assert!(app.modals.overlay.is_none(), "no second ask");
+        assert_eq!(
+            app.chrome.flash.as_deref(),
+            Some("↗ open http://localhost:3000")
+        );
+
+        // A changed command asks again (a different length, whatever the
+        // file's stamp says).
+        std::fs::write(&kete_json, r#"{"open": "open http://localhost:3000/docs"}"#).unwrap();
+        app.chrome.flash = None;
+        press(&mut app, KeyCode::Enter, KeyModifiers::SHIFT, &mut out);
+        let Some(Overlay::Confirm(confirm)) = &app.modals.overlay else {
+            panic!(
+                "no confirm for the changed command: {:?}",
+                app.modals.overlay
+            );
+        };
+        assert!(
+            confirm.message.contains("open http://localhost:3000/docs"),
+            "{}",
+            confirm.message
+        );
+        assert!(
+            !ran(&app),
+            "nothing ran before the yes: {:?}",
+            app.chrome.flash
+        );
+
+        // The file changes under the dialog: the yes runs nothing, and the
+        // next press asks about what is there now.
+        std::fs::write(
+            &kete_json,
+            r#"{"open": "open http://localhost:3000/admin/login"}"#,
+        )
+        .unwrap();
+        press(&mut app, KeyCode::Char('y'), KeyModifiers::NONE, &mut out);
+        assert!(app.modals.overlay.is_none());
+        assert_eq!(
+            app.chrome.flash.as_deref(),
+            Some("the repo's open command changed before it ran: open again to review it")
+        );
+        app.chrome.flash = None;
+        press(&mut app, KeyCode::Enter, KeyModifiers::SHIFT, &mut out);
+        let Some(Overlay::Confirm(confirm)) = &app.modals.overlay else {
+            panic!("no confirm after the change: {:?}", app.modals.overlay);
+        };
+        assert!(
+            confirm
+                .message
+                .contains("open http://localhost:3000/admin/login"),
+            "{}",
+            confirm.message
+        );
+        press(&mut app, KeyCode::Esc, KeyModifiers::NONE, &mut out);
+        assert!(app.modals.overlay.is_none());
+        assert!(
+            !ran(&app),
+            "backing out runs nothing: {:?}",
+            app.chrome.flash
+        );
+
+        // The setting wins over the file, is the user's own (no confirm),
+        // and is read fresh per press.
         let mut cfg = crate::config::Config::load();
         assert!(cfg.set_project_text(dir.path(), OpenCommand, "open http://localhost:5173"));
         cfg.save_to(&config_path).unwrap();
         press(&mut app, KeyCode::Enter, KeyModifiers::SHIFT, &mut out);
+        assert!(app.modals.overlay.is_none(), "the setting asks nothing");
         assert_eq!(
             app.chrome.flash.as_deref(),
             Some("↗ open http://localhost:5173")
@@ -13302,6 +13397,106 @@ fn settings_hl_cycles_session_idle_timeout_and_persists() {
         let cfg = crate::config::Config::load();
         assert_eq!(cfg.session_idle_timeout, "5m");
     });
+}
+
+/// A VS Code made of fixtures, with one extension theme: what the theme
+/// picker lists, instead of the developer's own.
+fn fixture_vscode(dir: &std::path::Path) -> nebula_config::vscode::Install {
+    let ext = dir.join("extensions").join("acme.theme-1.0.0");
+    std::fs::create_dir_all(ext.join("themes")).unwrap();
+    std::fs::write(
+        ext.join("package.json"),
+        r#"{ "contributes": { "themes": [
+            { "label": "Acme Night", "uiTheme": "vs-dark", "path": "./themes/night.json" }
+        ] } }"#,
+    )
+    .unwrap();
+    std::fs::write(
+        ext.join("themes/night.json"),
+        r##"{ "colors": { "editor.background": "#1E1E2E", "editor.foreground": "#CDD6F4" } }"##,
+    )
+    .unwrap();
+    let settings = dir.join("User").join("settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    std::fs::write(&settings, "{}").unwrap();
+    nebula_config::vscode::Install {
+        name: "VS Code",
+        settings,
+        extensions: dir.join("extensions"),
+        builtin: None,
+    }
+}
+
+/// Enter on the theme row lists every theme, the installed VS Code ones
+/// as `vscode:<label>`, the one worn ticked; picking one saves it, wears
+/// it and puts the settings back on the row. Esc puts them back too.
+#[test]
+fn enter_on_the_theme_row_picks_from_every_theme_installed_vs_code_ones_too() {
+    let dir = tempfile::tempdir().unwrap();
+    let install = fixture_vscode(dir.path());
+    nebula_config::vscode::with_installs(vec![install], || {
+        crate::config::with_config_path(dir.path().join("config.json"), || {
+            let mut app = App::new();
+            let mut out = Vec::new();
+            let (tab, row) = crate::config::locate(crate::config::SettingKind::Theme).unwrap();
+            open_settings_on(&mut app, tab, &mut out);
+            for _ in 0..row {
+                press(&mut app, KeyCode::Char('j'), KeyModifiers::NONE, &mut out);
+            }
+            press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
+            let Some(Overlay::Menu(menu)) = &app.modals.overlay else {
+                panic!("a picker, not {:?}", app.modals.overlay.is_some());
+            };
+            let labels: Vec<&str> = menu.items.iter().map(|i| i.label.as_str()).collect();
+            assert!(labels.contains(&"kete-dark ✓"), "{labels:?}");
+            assert!(labels.contains(&"vscode"));
+            assert_eq!(labels.last(), Some(&"vscode:Acme Night"));
+            assert_eq!(menu.items[menu.hover].label, "kete-dark ✓");
+
+            press(&mut app, KeyCode::Esc, KeyModifiers::NONE, &mut out);
+            assert!(matches!(app.modals.overlay, Some(Overlay::Settings(_))));
+            assert_eq!(crate::config::Config::load().theme, "kete-dark");
+
+            press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
+            if let Some(Overlay::Menu(menu)) = &mut app.modals.overlay {
+                menu.hover = menu.items.len() - 1;
+            }
+            press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
+            assert_eq!(crate::config::Config::load().theme, "vscode:Acme Night");
+            let Some(Overlay::Settings(view)) = &app.modals.overlay else {
+                panic!("the settings back");
+            };
+            assert_eq!((view.tab, view.selected), (tab, row));
+            assert_eq!(
+                app.chrome.theme.bg,
+                Some(ratatui::style::Color::Rgb(0x1e, 0x1e, 0x2e)),
+                "worn at once"
+            );
+        })
+    });
+}
+
+/// `⇧D` on the Appearance tab puts Kete's own look back — the theme, the
+/// file icons, the black background — and leaves the tab's layout rows.
+#[test]
+fn shift_d_on_appearance_puts_kete_s_look_back() {
+    with_config_json(
+        r#"{"theme": "forest", "icons": "ascii", "black_background": false, "animations": false}"#,
+        || {
+            let mut app = App::new();
+            let mut out = Vec::new();
+            let (tab, _) = crate::config::locate(crate::config::SettingKind::Theme).unwrap();
+            assert!(crate::config::is_appearance_tab(tab));
+            open_settings_on(&mut app, tab, &mut out);
+            press(&mut app, KeyCode::Char('D'), KeyModifiers::SHIFT, &mut out);
+            let cfg = crate::config::Config::load();
+            assert_eq!(cfg.theme, "kete-dark");
+            assert_eq!(cfg.icons_word(), "auto");
+            assert!(cfg.black_background, "Kete's own canvas is black");
+            assert!(!cfg.animations, "a layout row stays");
+            assert_eq!(app.chrome.theme, crate::theme::KETE_DARK);
+        },
+    );
 }
 
 /// The WORKTREE BASE BRANCH row is typed, not cycled: Enter opens a
@@ -20117,7 +20312,12 @@ fn hosts_click_on_a_row_connects_and_outside_closes() {
 /// Draw once so the modal writes back its hit-test rect, and return it.
 /// Every variant is inset from the frame, so (0, 0) is always outside.
 fn drawn_modal_area(app: &mut App) -> ratatui::layout::Rect {
-    let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
+    drawn_modal_area_in(app, 40)
+}
+
+/// [`drawn_modal_area`] in a frame `height` rows tall.
+fn drawn_modal_area_in(app: &mut App, height: u16) -> ratatui::layout::Rect {
+    let mut terminal = Terminal::new(TestBackend::new(140, height)).unwrap();
     terminal.draw(|f| ui::draw(f, app)).unwrap();
     let overlay = app.modals.overlay.as_ref().expect("no modal open");
     let area = crate::overlay_close::overlay_area(overlay);
@@ -20911,7 +21111,9 @@ fn click_outside_into_the_pane_focuses_and_locks_it() {
     app.nav.focus = Focus::Sessions;
     let mut out = Vec::new();
     press(&mut app, KeyCode::Char('?'), KeyModifiers::NONE, &mut out);
-    let modal = drawn_modal_area(&mut app);
+    // A session's verbs run past 40 rows since the editor and copy verbs
+    // joined its menu: a taller frame keeps the modal inset.
+    let modal = drawn_modal_area_in(&mut app, 60);
     // The modal is centred over the pane; its bottom-right cell is not.
     let pane = app.pane.term_area;
     let (x, y) = (pane.x + pane.width - 1, pane.y + pane.height - 1);
@@ -21160,6 +21362,12 @@ fn every_overlay() -> Vec<(&'static str, fn(&mut App), Option<&'static str>)> {
             None,
         ),
         (
+            // The critter menu's **Critter log…**.
+            "CritterLog",
+            |app| crate::critters::open_log(app),
+            None,
+        ),
+        (
             // ⇧S from the grid.
             "Subagents",
             |app| {
@@ -21316,6 +21524,7 @@ fn overlay_label(overlay: &Overlay) -> &'static str {
         Overlay::Subagents(_) => "Subagents",
         Overlay::Ado(_) => "Ado",
         Overlay::Ship(_) => "Ship",
+        Overlay::CritterLog(_) => "CritterLog",
     }
 }
 
@@ -21345,7 +21554,7 @@ fn the_overlay_table_covers_every_variant_exactly_once() {
         let mut unique = seen.clone();
         unique.dedup();
         assert_eq!(unique, seen, "two rows for the same variant");
-        assert_eq!(seen.len(), 23, "a variant came or went: {seen:?}");
+        assert_eq!(seen.len(), 24, "a variant came or went: {seen:?}");
     });
 }
 
@@ -22606,8 +22815,11 @@ fn a_desktop_write_waits_for_the_reset_confirm_too() {
 }
 mod board;
 mod buttons;
+mod critters;
 mod dispatch;
+mod editors;
 mod learn;
+mod menus;
 mod orch_view;
 mod pane_stream;
 mod paste_speed;

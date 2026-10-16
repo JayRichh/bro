@@ -29,6 +29,20 @@ pub const THEMES: &[&str] = &[
 pub const AUTO: &str = "auto";
 /// The theme name that reads the theme VS Code is set to.
 pub const VSCODE: &str = "vscode";
+/// `vscode:<name>`: one installed VS Code theme by its label or id,
+/// whichever VS Code itself is set to. Picked from the theme row's list
+/// rather than cycled to, so it is not in [`THEMES`].
+pub const VSCODE_PREFIX: &str = "vscode:";
+
+/// The installed VS Code theme a `vscode:<name>` theme names; None for
+/// any other theme.
+pub fn vscode_theme_name(theme: &str) -> Option<&str> {
+    let theme = theme.trim();
+    let head = theme.get(..VSCODE_PREFIX.len())?;
+    head.eq_ignore_ascii_case(VSCODE_PREFIX)
+        .then(|| theme[VSCODE_PREFIX.len()..].trim())
+        .filter(|name| !name.is_empty())
+}
 
 /// The theme a fresh config starts on, on every OS: Kete Workshop, dark.
 pub const DEFAULT_THEME: &str = "kete-dark";

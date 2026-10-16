@@ -1,0 +1,18 @@
+{
+  "nameShort": "Code",
+  "nameLong": "Visual Studio Code",
+  "applicationName": "code",
+  "dataFolderName": ".vscode",
+  "win32MutexName": "vscode",
+  "win32DirName": "Microsoft VS Code",
+  "win32NameVersion": "Microsoft Visual Studio Code",
+  "win32RegValueName": "VSCode",
+  "win32AppUserModelId": "Microsoft.VisualStudioCode",
+  "win32ShellNameShort": "Code",
+  "win32x64UserAppId": "{{771FD6B0-FA20-440A-A002-3B3BAC16DC50}",
+  "urlProtocol": "vscode",
+  "quality": "stable",
+  "commit": "2a59476c9bfcb90b3ddc372c36762471b7dfad1c",
+  "version": "1.141.0",
+  "date": "2026-10-06T10:15:52+02:00"
+}

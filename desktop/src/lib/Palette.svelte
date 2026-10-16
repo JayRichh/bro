@@ -36,8 +36,11 @@
   }
 
   function pick(it: PaletteItem) {
-    close();
     const t = it.target;
+    // Found before closing: closing empties `commands` (it is derived from
+    // the palette being open), so an action looked up after never ran.
+    const cmd = t.kind === 'action' ? commands.find((c) => c.id === t.id) : undefined;
+    close();
     if (t.kind === 'session') openSession({ Agent: t.id });
     else if (t.kind === 'repo') revealRepo(t.id);
     else if (t.kind === 'worktree') {
@@ -45,7 +48,7 @@
       if (a) openSession({ Agent: a.id });
       else openDiff(t.id);
     } else if (t.kind === 'pr') api.openUrl(t.url).catch((e) => toast(String(e)));
-    else commands.find((c) => c.id === t.id)?.run();
+    else cmd?.run();
   }
 
   function onKey(e: KeyboardEvent) {

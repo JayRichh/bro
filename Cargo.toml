@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/nebula-core", "crates/nebula-config", "crates/kete-ado", "crates/nebula-daemon", "crates/nebula-fuzzy", "crates/nebula-tui", "crates/nebula"]
+members = ["crates/nebula-core", "crates/nebula-config", "crates/kete-ado", "crates/nebula-daemon", "crates/nebula-fuzzy", "crates/kete-critters", "crates/nebula-tui", "crates/nebula"]
 # desktop/ is its own workspace (the Tauri GUI), built by its own CI job.
 exclude = ["vendor/vt100", "desktop"]
 
@@ -13,7 +13,7 @@ exclude = ["vendor/vt100", "desktop"]
 vt100 = { path = "vendor/vt100" }
 
 [workspace.package]
-version = "0.53.1"
+version = "0.54.0"
 edition = "2021"
 license = "MIT"
 
@@ -24,6 +24,7 @@ kete-ado = { path = "crates/kete-ado" }
 nebula-daemon = { path = "crates/nebula-daemon" }
 nebula-tui = { path = "crates/nebula-tui" }
 nebula-fuzzy = { path = "crates/nebula-fuzzy" }
+kete-critters = { path = "crates/kete-critters" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

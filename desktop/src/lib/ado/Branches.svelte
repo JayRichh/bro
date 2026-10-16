@@ -1,8 +1,14 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { app, openDiff, openDiffRange } from '../store.svelte';
+  import { app, openDiff, openDiffRange, openSession, toast } from '../store.svelte';
+  import { api } from '../api';
+  import { revealWorktree } from '../actions';
   import { ownsKey } from './tasks-api';
   import { nav } from '../shell/history.svelte';
+  import { layerOpen } from '../ui/ui.svelte';
+  import { copyText } from '../menus/clipboard';
+  import { ownMenu } from '../menus/router';
+  import { branchItems } from '../menus/rows';
   import Chip from './Chip.svelte';
   import { composeItem } from './prs-api';
   import { branchesApi, filterBranches, shortAge, syncWords, type BranchRow, type BranchTree } from './branches-api';
@@ -107,7 +113,8 @@
   }
 
   function onKey(e: KeyboardEvent) {
-    if (e.ctrlKey || e.altKey || e.metaKey) return;
+    // A menu over the list takes its own keys.
+    if (layerOpen() || e.ctrlKey || e.altKey || e.metaKey) return;
     const t = e.target as HTMLElement;
     if (e.key === 'Escape' && t === filterBox) {
       ui.q = '';
@@ -175,6 +182,65 @@
     // A remote-only branch is read from the remote; a local one as it is.
     const tip = r.local ? r.name : `refs/remotes/origin/${r.name}`;
     openDiffRange(wt, { base: TARGET, tip });
+  }
+
+  /** The branch's page in Azure DevOps. The server sends no web address for
+   *  it, so it is built from the repo's remote as the PR links are; null for
+   *  a branch that is not on the remote, or a repo whose remote is unknown. */
+  function branchUrl(r: BranchRow): string | null {
+    const c = app.adoCtx[repo];
+    if (!c?.orgUrl || !r.remote) return null;
+    const base = `${c.orgUrl.replace(/\/+$/, '')}/${encodeURIComponent(c.project)}/_git/${encodeURIComponent(c.repo)}`;
+    return `${base}?version=GB${encodeURIComponent(r.name)}`;
+  }
+
+  /** A branch row's right-click menu (menus/rows.ts). Each row runs what the
+   *  detail pane's control for it does; the ones that need the pane (check
+   *  out, delete) select the branch first so it shows their progress. */
+  function branchMenu(r: BranchRow) {
+    // The selection follows the click, so j and k walk on from this row.
+    if (selectedName !== r.name) select(r.name);
+    const wt = r.worktree;
+    const agent = r.session ? app.model.agents.find((a) => a.id === r.session) : undefined;
+    const items = branchItems(
+      {
+        name: r.name,
+        local: r.local,
+        worktree: wt ? { id: wt, branch: app.model.worktrees.find((w) => w.id === wt)?.branch ?? r.name } : null,
+        session: r.session ? { id: r.session, name: agent?.name ?? r.session } : null,
+        pr: r.pr ? { id: r.pr.id } : null,
+        task: r.task,
+        canDiff: !!(r.worktree ?? worktree),
+        url: branchUrl(r),
+      },
+      {
+        goWorktree: (id) => {
+          const w = app.model.worktrees.find((x) => x.id === id);
+          if (w) revealWorktree(w);
+          else openDiff(id);
+        },
+        checkout: () => {
+          if (busy) return;
+          select(r.name);
+          void checkout(r);
+        },
+        goSession: (id) => openSession({ Agent: id }),
+        goPr: (id) => nav.go({ view: 'prs', repo, item: String(id) }),
+        draftPr: () => nav.go({ view: 'prs', repo, item: composeItem(r.name, r.task) }),
+        goTask: (id) => nav.go({ view: 'tasks', repo, item: String(id) }),
+        diff: () => diffVsMain(r),
+        copy: (text, said) => void copyText(text, said),
+        open: (url) => void api.openUrl(url).catch((e) => toast(`Could not open the branch in the browser: ${errText(e)}`)),
+        // Not a delete: the pane's own confirm opens, as its Delete local button does.
+        deleteLocal: () => {
+          if (busy) return;
+          select(r.name);
+          unmerged = null;
+          confirmDelete = r.name;
+        },
+      },
+    );
+    return { items, label: r.name };
   }
 
   /** The sync badge's square: trouble filled, one-sided hollow, in step olive. */
@@ -288,6 +354,7 @@
                   {@const short = r.person !== 'other' && r.name.startsWith(r.person + '/') ? r.name.slice(r.person.length + 1) : r.name}
                   <li
                     data-branch={r.name}
+                    use:ownMenu={() => branchMenu(r)}
                     class="relative grid grid-cols-[minmax(0,1fr)_104px_minmax(0,180px)_56px] items-center gap-x-3 border-b border-rule px-6 py-2 {on
                       ? 'bg-surface'
                       : 'hover:bg-surface'}"

@@ -442,6 +442,28 @@ pub struct SessionTurn {
     pub end_at: Option<i64>,
 }
 
+/// A moment the user was at work in a session (`Store::activity_since`),
+/// with what names the session's account.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivityMoment {
+    pub profile: Option<String>,
+    pub kind: AgentKind,
+    pub custom_harness: Option<String>,
+    /// Epoch ms.
+    pub at: i64,
+}
+
+impl ActivityMoment {
+    /// The ACCOUNT it counts against (`usage::account_key`).
+    pub fn account(&self) -> String {
+        let harness = match (&self.kind, self.custom_harness.as_deref()) {
+            (AgentKind::Custom, Some(id)) => id.to_string(),
+            (kind, _) => kind.as_str().to_string(),
+        };
+        nebula_core::usage::account_key(self.profile.as_deref(), &harness)
+    }
+}
+
 pub type TreeRows = (Vec<Project>, Vec<Worktree>, Vec<Agent>, Vec<TerminalTab>);
 
 impl Store {
@@ -1011,6 +1033,16 @@ impl Store {
         Ok(())
     }
 
+    /// The effort the next spawn or resume passes (`--effort`): the
+    /// launch's choice, or what Claude reported it runs at since.
+    pub fn set_agent_effort(&self, id: &AgentId, effort: Option<&str>) -> Result<()> {
+        self.conn.lock().execute(
+            "UPDATE agents SET effort = ?2 WHERE id = ?1",
+            params![id.as_str(), effort],
+        )?;
+        Ok(())
+    }
+
     pub fn delete_agent(&self, id: &AgentId) -> Result<()> {
         self.delete_by_id("agents", id.as_str())
     }
@@ -1399,6 +1431,50 @@ impl Store {
             params![agent.as_str(), n, point.tree, point.at],
         )?;
         Ok(())
+    }
+
+    /// When the user was at work, for an account's USUAL HOURS
+    /// (`nebula_core::wake::activity`): every kept turn's start and every
+    /// session's creation since `since_ms` (epoch ms), with the columns
+    /// that name the session's account. Archived sessions count: the
+    /// work happened.
+    pub fn activity_since(&self, since_ms: i64) -> Result<Vec<ActivityMoment>> {
+        self.activity_query(
+            "SELECT a.profile, a.kind, a.custom_harness, t.start_at
+               FROM session_turns t JOIN agents a ON a.id = t.agent_id
+              WHERE t.start_at >= ?1
+             UNION ALL
+             SELECT profile, kind, custom_harness, created_at
+               FROM agents WHERE created_at >= ?1",
+            since_ms,
+        )
+    }
+
+    /// The latest such moment per account columns, however old.
+    pub fn last_activity(&self) -> Result<Vec<ActivityMoment>> {
+        self.activity_query(
+            "SELECT profile, kind, custom_harness, MAX(at) FROM (
+               SELECT a.profile, a.kind, a.custom_harness, t.start_at AS at
+                 FROM session_turns t JOIN agents a ON a.id = t.agent_id
+               UNION ALL
+               SELECT profile, kind, custom_harness, created_at AS at FROM agents
+             ) WHERE at >= ?1 GROUP BY profile, kind, custom_harness",
+            0,
+        )
+    }
+
+    fn activity_query(&self, sql: &str, since_ms: i64) -> Result<Vec<ActivityMoment>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(sql)?;
+        let rows = stmt.query_map(params![since_ms], |r| {
+            Ok(ActivityMoment {
+                profile: r.get(0)?,
+                kind: parse_agent_kind(&r.get::<_, String>(1)?),
+                custom_harness: r.get(2)?,
+                at: r.get(3)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     /// `agent`'s kept turns, oldest first.

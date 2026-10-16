@@ -1,0 +1,11 @@
+{
+	"$schema": "vscode://schemas/color-theme",
+	"name": "Dark Modern",
+	"include": "./dark_plus.json",
+	"colors": {
+		"editor.background": "#1F1F1F",
+		"editor.foreground": "#CCCCCC",
+		"sideBar.background": "#181818",
+		"focusBorder": "#0078D4"
+	}
+}

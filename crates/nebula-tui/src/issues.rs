@@ -1198,6 +1198,22 @@ fn selected_issue(app: &App) -> Option<(Issue, PathBuf)> {
     Some((issue.clone(), view.dir.clone()))
 }
 
+/// A right-click's first half on a row: the cursor onto it, as a left
+/// click puts it, and the issue there for its menu. Nothing while the
+/// ISSUE EDITOR is up.
+pub(crate) fn select_at(app: &mut App, pos: Position) -> Option<Issue> {
+    let Some(Overlay::Issues(view)) = &app.modals.overlay else {
+        return None;
+    };
+    if view.editor.is_some() {
+        return None;
+    }
+    let row = view.list.hit(pos)?;
+    let index = view.list.matches.get(row)?.item;
+    select(app, index as i64);
+    selected_issue(app).map(|(issue, _)| issue)
+}
+
 /// The URL of the issue under the cursor, for the browser.
 fn selected_url(app: &App) -> Option<String> {
     selected_issue(app).map(|(issue, _)| issue.url)

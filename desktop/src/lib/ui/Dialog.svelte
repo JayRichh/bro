@@ -12,9 +12,12 @@
   let query = $state('');
   let at = $state(0);
   let box = $state<HTMLDivElement>();
+  let list = $state<HTMLUListElement>();
 
   const d = $derived(ui.dialog);
   const picks = $derived(d?.kind === 'pick' ? rank(query, d.items, (i) => `${i.label} ${i.hint ?? ''}`) : []);
+  /** The row under the cursor, for a font's sample. */
+  const current = $derived(picks[at]?.item);
 
   $effect(() => {
     const spec = ui.dialog;
@@ -22,7 +25,8 @@
     values = spec.kind === 'prompt' ? Object.fromEntries(spec.fields.map((f) => [f.key, f.value ?? ''])) : {};
     checked = spec.kind === 'confirm' && !!spec.checked;
     query = '';
-    at = 0;
+    at = spec.kind === 'pick' && spec.selected ? Math.max(0, spec.items.findIndex((i) => i.id === spec.selected)) : 0;
+    if (spec.kind === 'pick') tick().then(() => list?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' }));
     tick().then(() => {
       const first = box ? firstFocus(box) : null;
       first?.focus();
@@ -63,6 +67,7 @@
     if (d?.kind === 'pick' && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
       e.preventDefault();
       at = Math.max(0, Math.min(picks.length - 1, at + (e.key === 'ArrowDown' ? 1 : -1)));
+      tick().then(() => list?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' }));
     }
   }
 
@@ -112,8 +117,9 @@
           </label>
         {/if}
       {:else}
+        {#if d.note}<p class="m-0 text-[13px] text-muted">{d.note}</p>{/if}
         <input class="{field} font-mono text-[12px]" placeholder="Filter" spellcheck="false" bind:value={query} oninput={() => (at = 0)} />
-        <ul class="m-0 max-h-72 list-none overflow-y-auto border border-rule p-0" role="listbox" aria-label={d.title}>
+        <ul bind:this={list} class="m-0 max-h-72 list-none overflow-y-auto border border-rule p-0" role="listbox" aria-label={d.title}>
           {#each picks as p, i (p.item.id)}
             <li role="option" aria-selected={i === at}>
               <button
@@ -123,17 +129,33 @@
               >
                 <span class="min-w-0 flex-1 truncate text-[13px]">{p.item.label}</span>
                 {#if p.item.hint}<span class="flex-none font-mono text-[11px] {i === at ? 'text-bg' : 'text-muted'}">{p.item.hint}</span>{/if}
+                {#if p.item.swatch?.length}
+                  <span class="flex flex-none self-center border border-rule" aria-hidden="true">
+                    {#each p.item.swatch as c, si (si)}<span class="block size-3" style:background-color={c}></span>{/each}
+                  </span>
+                {/if}
               </button>
             </li>
           {:else}
             <li class="px-2 py-1.5 text-[13px] text-muted">Nothing matches.</li>
           {/each}
         </ul>
+        {#if current?.font}
+          <p class="m-0 truncate border border-rule px-2 py-1.5 text-[15px] text-ink" style:font-family={current.font} aria-label="Sample in {current.label}">
+            Kete 0123456789 &#123; [ ( =&gt; ) ] &#125; the quick brown fox
+          </p>
+        {/if}
       {/if}
     </div>
     <div class="flex items-center justify-end gap-2 border-t border-rule px-4 py-2.5">
       {#if d.kind === 'prompt' && d.fields.some((f) => f.multiline)}
         <span class="mr-auto font-mono text-[11px] text-muted">Ctrl+Enter to send</span>
+      {/if}
+      {#if d.kind === 'pick' && d.extra}
+        {@const extra = d.extra}
+        <button class="{btn} mr-auto border-rule bg-transparent text-ink hover:border-rule-strong" onclick={() => d.kind === 'pick' && d.resolve(extra.id)}
+          >{extra.label}</button
+        >
       {/if}
       <button class="{btn} border-rule bg-transparent text-ink hover:border-rule-strong" onclick={cancel}>Cancel</button>
       {#if d.kind !== 'pick'}

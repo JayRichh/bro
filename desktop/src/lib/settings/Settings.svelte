@@ -18,9 +18,17 @@
   import { nav } from '../shell/history.svelte';
   import { chordLabel, hotkeyGroups, matches, segmented, sequence, targetKey } from './settings';
   import DesktopKeys from './DesktopKeys.svelte';
+  import EditorInstalls from '../editors/Installs.svelte';
+  import { editors } from '../editors/store.svelte';
   import Presets from './Presets.svelte';
   import Profiles from './Profiles.svelte';
+  import Appearance from './Appearance.svelte';
   import { exportSettings, importSettings } from './io';
+  import { critters, loadCritters } from '../critters/state.svelte';
+  import { openCritterLog } from '../critters/sheet.svelte';
+  import { adopt, pickFont } from './appearance';
+  import { knownTheme } from '../look';
+  import { look, setLookWord } from '../look.svelte';
 
   /** Tabs the window draws itself, after the schema's: their data is not
    *  settings rows but lists (agent_presets.json, config.json profiles). */
@@ -90,14 +98,24 @@
   function after(row: SettingRow, value: boolean | string) {
     const t = row.target;
     if (t.scope === 'desktop' && typeof value === 'string') {
-      if (t.key === 'theme' && (value === 'system' || value === 'light' || value === 'dark')) app.themePref = value;
+      if (t.key === 'theme' && knownTheme(value, look.prefs.themes)) app.themePref = value;
+      setLookWord(t.key, value);
       if (t.key === 'home' && (value === 'overview' || value === 'board')) app.home = value;
       if (t.key === 'diff_mode' && isDiffMode(value)) app.diffMode = value;
+      // The editor rows and icons follow at once.
+      if (t.key === 'editor_folder') editors.folder = value;
+      if (t.key === 'editor_file') editors.file = value;
+      if (t.key === 'editor_reuse') editors.reuse = value === 'on';
     }
     if (t.scope === 'agent' || (t.scope === 'global' && (t.key === 'quick_prompt_kind' || t.key === 'hide_uninstalled_harnesses' || t.key === 'show_all_worktrees')))
       refreshLaunchables();
     if (t.scope === 'project' && t.field === 'run_command') refreshRunCommands();
     if (t.scope === 'global' && t.key === 'show_tips' && typeof value === 'boolean') setShowTips(value);
+    // The overlay follows its rows at once (Animations is the terminal app's).
+    if (t.scope === 'global' && t.key.startsWith('critters')) {
+      if (t.key === 'critters' && typeof value === 'boolean') critters.prefs = { ...critters.prefs, on: value };
+      loadCritters();
+    }
   }
 
   async function write(row: SettingRow, value: boolean | string, el?: HTMLInputElement) {
@@ -131,7 +149,7 @@
       await api.settingsReset();
       const prefs = await api.desktopPrefs().catch(() => null);
       if (prefs) {
-        if (prefs.theme === 'system' || prefs.theme === 'light' || prefs.theme === 'dark') app.themePref = prefs.theme;
+        adopt(prefs);
         if (prefs.home === 'overview' || prefs.home === 'board') app.home = prefs.home;
         if (isDiffMode(prefs.diff_mode)) app.diffMode = prefs.diff_mode;
       }
@@ -206,6 +224,20 @@
     >
       {#each c.options as opt, i (opt)}<option value={opt}>{c.labels[i] ?? opt}</option>{/each}
     </select>
+  {:else if row.control.type === 'font'}
+    {@const c = row.control}
+    {@const family = String(row.value)}
+    <button
+      class="h-7 max-w-[240px] min-w-[160px] truncate border border-rule bg-bg px-2 text-left text-[13px] text-ink enabled:hover:border-rule-strong disabled:text-faint"
+      style:font-family={`"${family || c.placeholder}"`}
+      aria-label="{row.label}: {family || `${c.placeholder}, Kete's own`}. Pick another"
+      title="Pick any installed font family, or Kete's own ({c.placeholder})"
+      disabled={busy}
+      onclick={async () => {
+        const picked = await pickFont(row);
+        if (picked !== null) write(row, picked);
+      }}>{family || `${c.placeholder} (Kete's own)`}</button
+    >
   {:else if row.control.type === 'text'}
     <input
       class="h-7 w-[260px] border border-rule bg-bg px-2 font-mono text-[12px] text-ink outline-none placeholder:text-faint hover:border-rule-strong focus:border-rule-strong"
@@ -257,7 +289,12 @@
         class="h-7 flex-none border border-rule bg-transparent px-2.5 text-[13px] whitespace-nowrap text-ink enabled:hover:border-rule-strong disabled:text-faint"
         title="Merge a settings file in, as kete config import does: what it changes is shown first"
         disabled={!!blocked}
-        onclick={async () => (await importSettings()) && (await load())}>Import&hellip;</button
+        onclick={async () => {
+          if (!(await importSettings())) return;
+          const prefs = await api.desktopPrefs().catch(() => null);
+          if (prefs) adopt(prefs);
+          await load();
+        }}>Import&hellip;</button
       >
       <button
         class="h-7 flex-none border border-rule bg-transparent px-2.5 text-[13px] whitespace-nowrap text-ink enabled:hover:border-rule-strong disabled:text-faint"
@@ -356,6 +393,9 @@
                 <div class="border-b border-rule-strong"></div>
               {/if}
               <ul class="m-0 list-none p-0">
+                {#if tabId === 'desktop' && g.rows.some((r) => r.target.scope === 'desktop' && r.target.key === 'theme')}
+                  <Appearance onchange={load} />
+                {/if}
                 {#each g.rows as row (targetKey(row.target))}
                   <li class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-6 border-b border-rule px-6 py-3">
                     <div class="min-w-0">
@@ -373,7 +413,26 @@
                     <div class="flex justify-end">{@render control(row)}</div>
                   </li>
                 {/each}
+                {#if g.title === 'Critters' && tab?.id === 'appearance'}
+                  <!-- Not a setting: the visitors so far, from critters.json. -->
+                  <li class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-6 border-b border-rule px-6 py-3">
+                    <div class="min-w-0">
+                      <span class="text-[14px] font-medium text-ink">Critter log</span>
+                      <p class="m-0 mt-0.5 max-w-[68ch] text-[13px] leading-snug text-muted">
+                        Every species that has visited, with pets and names; silhouettes for the ones still to come. Kept on this machine only.
+                      </p>
+                    </div>
+                    <div class="flex justify-end">
+                      <button
+                        class="h-7 flex-none border border-rule bg-transparent px-2.5 text-[13px] whitespace-nowrap text-ink hover:border-rule-strong"
+                        title="Open the critter log"
+                        onclick={() => openCritterLog()}>Open&hellip;</button
+                      >
+                    </div>
+                  </li>
+                {/if}
               </ul>
+              {#if tabId === 'desktop' && g.title === 'Editors'}<EditorInstalls />{/if}
             </section>
           {:else}
             {#if !tab?.hotkeys.length && tabId !== 'hotkeys'}

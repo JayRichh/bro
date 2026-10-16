@@ -1239,10 +1239,15 @@ mod tests {
             rows.iter().all(|r| r.label != "Card line counts"),
             "no row edits it"
         );
+        assert!(
+            rows.iter()
+                .any(|r| r.kind == SettingKind::SourceControlGraph),
+            "Appearance carries SOURCE CONTROL GRAPH"
+        );
         assert_eq!(
             rows.last().map(|r| r.kind),
-            Some(SettingKind::SourceControlGraph),
-            "Appearance ends on SOURCE CONTROL GRAPH"
+            Some(SettingKind::CrittersOften),
+            "Appearance ends on the CRITTERS rows"
         );
     }
 

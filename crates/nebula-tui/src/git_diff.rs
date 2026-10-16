@@ -515,6 +515,61 @@ pub fn discard_change(
     Ok(true)
 }
 
+/// `git <verb> <flags> -- <rel>`, `Ok` with the output on a zero exit. `rel`
+/// is a path, not a pattern: `--literal-pathspecs` keeps `a[1].txt` (a
+/// Next.js `[id]` route is such a name) from also reaching `a1.txt`, and
+/// the `--` keeps a name starting with `-` from being read as a flag.
+fn git_on_path(root: &Path, verb: &str, flags: &[&str], rel: &str) -> Result<Output, String> {
+    let mut args = vec!["--literal-pathspecs", verb];
+    args.extend_from_slice(flags);
+    args.extend(["--", rel]);
+    let output = run_git(root, &args)?;
+    if output.status.success() {
+        Ok(output)
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!("git {verb} failed: {}", stderr.trim()))
+    }
+}
+
+/// ACCEPT a whole FILE: stage everything in it, untracked or not
+/// (`git add -A`, so a file deleted from the worktree stages its deletion
+/// too). The worktree is not touched. `rel` is relative to `root`, with
+/// git's own `/` separators.
+pub fn stage_file(root: &Path, rel: &str) -> Result<(), String> {
+    git_on_path(root, "add", &["-A"], rel).map(|_| ())
+}
+
+/// Take a whole FILE back out of the index, the worktree untouched: it
+/// returns to unstaged, or to untracked if it was new. With a HEAD that is
+/// `git restore --staged`; on an unborn HEAD, which `restore` cannot read,
+/// `git rm --cached`. `--force` there because `rm` refuses a file staged
+/// and then edited again ("staged content different from both the file
+/// and the HEAD") — and with `--cached` it only ever touches the index.
+pub fn unstage_file(root: &Path, rel: &str, head_ok: bool) -> Result<(), String> {
+    let ran = if head_ok {
+        git_on_path(root, "restore", &["--staged"], rel)
+    } else {
+        git_on_path(root, "rm", &["--cached", "--force", "--quiet"], rel)
+    };
+    ran.map(|_| ())
+}
+
+/// REJECT a whole FILE: throw away the worktree's changes that are not
+/// staged (`git restore --worktree`), so the file goes back to what the
+/// index holds — HEAD's, where nothing is staged — and a staged part
+/// stays staged. An untracked file is refused: it has no earlier version
+/// to go back to, and Kete does not delete files. One `git ls-files` asks
+/// the index whether the file is in it.
+pub fn discard_file(root: &Path, rel: &str) -> Result<(), String> {
+    if git_on_path(root, "ls-files", &[], rel)?.stdout.is_empty() {
+        return Err(
+            "an untracked file has nothing to go back to: Kete doesn't delete files".into(),
+        );
+    }
+    git_on_path(root, "restore", &["--worktree"], rel).map(|_| ())
+}
+
 /// What a capped text ends with, so the pane says why it stops short.
 pub const TRUNCATED_MARK: &str = "\n… (truncated)";
 
@@ -1541,6 +1596,200 @@ mod tests {
         let diff = diff_for(&repo, &file, true, None);
         let left = crate::diff_layout::DiffDoc::parse(&diff, "two.txt", false).unwrap();
         assert_eq!(left.changes.len(), 1);
+    }
+
+    /// A file's two porcelain columns ("M ", " M", "??", …); empty when it
+    /// is clean.
+    fn status_of(repo: &Path, path: &str) -> String {
+        changed_files(repo)
+            .unwrap()
+            .iter()
+            .find(|f| f.path == path)
+            .map(DiffFile::status_str)
+            .unwrap_or_default()
+    }
+
+    /// ACCEPT on a whole file stages all of it.
+    #[test]
+    fn accepting_a_file_stages_all_of_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = make_repo(&dir);
+        std::fs::write(repo.join("tracked.txt"), "new line\n").unwrap();
+        assert_eq!(status_of(&repo, "tracked.txt"), " M");
+
+        assert_eq!(stage_file(&repo, "tracked.txt"), Ok(()));
+        assert_eq!(status_of(&repo, "tracked.txt"), "M ");
+        assert!(cached_diff(&repo).contains("+new line"));
+        assert_eq!(
+            std::fs::read_to_string(repo.join("tracked.txt")).unwrap(),
+            "new line\n",
+            "the worktree is not touched"
+        );
+    }
+
+    /// …an untracked file is added…
+    #[test]
+    fn accepting_an_untracked_file_adds_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = make_repo(&dir);
+        std::fs::write(repo.join("fresh.txt"), "hello\n").unwrap();
+        assert_eq!(status_of(&repo, "fresh.txt"), "??");
+
+        assert_eq!(stage_file(&repo, "fresh.txt"), Ok(()));
+        assert_eq!(status_of(&repo, "fresh.txt"), "A ");
+    }
+
+    /// …and a file removed from the worktree stages its removal.
+    #[test]
+    fn accepting_a_deleted_file_stages_the_deletion() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = make_repo(&dir);
+        std::fs::remove_file(repo.join("tracked.txt")).unwrap();
+        assert_eq!(status_of(&repo, "tracked.txt"), " D");
+
+        assert_eq!(stage_file(&repo, "tracked.txt"), Ok(()));
+        assert_eq!(status_of(&repo, "tracked.txt"), "D ");
+    }
+
+    /// A path is a path: a glob character in it does not reach the file's
+    /// neighbours, and a leading `-` is not a flag.
+    #[test]
+    fn a_path_is_taken_literally() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = make_repo(&dir);
+        for name in ["a[1].txt", "a1.txt", "-dash.txt"] {
+            std::fs::write(repo.join(name), "x\n").unwrap();
+        }
+
+        assert_eq!(stage_file(&repo, "a[1].txt"), Ok(()));
+        assert_eq!(status_of(&repo, "a[1].txt"), "A ");
+        assert_eq!(status_of(&repo, "a1.txt"), "??", "not matched as a pattern");
+        assert_eq!(stage_file(&repo, "-dash.txt"), Ok(()));
+        assert_eq!(status_of(&repo, "-dash.txt"), "A ");
+        assert_eq!(unstage_file(&repo, "a[1].txt", true), Ok(()));
+        assert_eq!(status_of(&repo, "a[1].txt"), "??");
+        assert_eq!(status_of(&repo, "-dash.txt"), "A ", "only the one asked");
+    }
+
+    /// Taking a file out of the index leaves it changed in the worktree.
+    #[test]
+    fn unstaging_a_file_puts_it_back_to_unstaged() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = make_repo(&dir);
+        std::fs::write(repo.join("tracked.txt"), "new line\n").unwrap();
+        stage_file(&repo, "tracked.txt").unwrap();
+        assert_eq!(status_of(&repo, "tracked.txt"), "M ");
+
+        assert_eq!(unstage_file(&repo, "tracked.txt", true), Ok(()));
+        assert_eq!(status_of(&repo, "tracked.txt"), " M");
+        assert_eq!(
+            std::fs::read_to_string(repo.join("tracked.txt")).unwrap(),
+            "new line\n",
+            "the worktree is not touched"
+        );
+    }
+
+    /// With no commit yet there is no HEAD to restore from: the file leaves
+    /// the index and is untracked again, even when it was edited after it
+    /// was staged (`git rm --cached` refuses that one without `--force`).
+    #[test]
+    fn unstaging_on_an_unborn_head_leaves_the_file_untracked() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        git(&repo, &["init", "-b", "main"]);
+        assert!(!has_head(&repo));
+        std::fs::write(repo.join("only.txt"), "one\n").unwrap();
+        stage_file(&repo, "only.txt").unwrap();
+        assert_eq!(status_of(&repo, "only.txt"), "A ");
+
+        assert_eq!(unstage_file(&repo, "only.txt", false), Ok(()));
+        assert_eq!(status_of(&repo, "only.txt"), "??");
+
+        stage_file(&repo, "only.txt").unwrap();
+        std::fs::write(repo.join("only.txt"), "two\n").unwrap();
+        assert_eq!(status_of(&repo, "only.txt"), "AM");
+        assert_eq!(unstage_file(&repo, "only.txt", false), Ok(()));
+        assert_eq!(status_of(&repo, "only.txt"), "??");
+        assert_eq!(
+            std::fs::read_to_string(repo.join("only.txt")).unwrap(),
+            "two\n"
+        );
+    }
+
+    /// REJECT on a whole file puts it back as the index (HEAD, with nothing
+    /// staged) has it — an edited file and a deleted one alike.
+    #[test]
+    fn rejecting_a_file_restores_the_committed_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = make_repo(&dir);
+        git(&repo, &["config", "core.autocrlf", "false"]);
+        std::fs::write(repo.join("tracked.txt"), "new line\n").unwrap();
+
+        assert_eq!(discard_file(&repo, "tracked.txt"), Ok(()));
+        assert_eq!(
+            std::fs::read_to_string(repo.join("tracked.txt")).unwrap(),
+            "old line\n"
+        );
+        assert_eq!(status_of(&repo, "tracked.txt"), "");
+
+        std::fs::remove_file(repo.join("tracked.txt")).unwrap();
+        assert_eq!(discard_file(&repo, "tracked.txt"), Ok(()));
+        assert_eq!(
+            std::fs::read_to_string(repo.join("tracked.txt")).unwrap(),
+            "old line\n"
+        );
+    }
+
+    /// What is staged is not the worktree's to throw away: REJECT goes back
+    /// to the staged version, and the staging stays.
+    #[test]
+    fn rejecting_a_file_keeps_what_is_staged() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = make_repo(&dir);
+        git(&repo, &["config", "core.autocrlf", "false"]);
+        std::fs::write(repo.join("tracked.txt"), "staged\n").unwrap();
+        stage_file(&repo, "tracked.txt").unwrap();
+        std::fs::write(repo.join("tracked.txt"), "unstaged\n").unwrap();
+        assert_eq!(status_of(&repo, "tracked.txt"), "MM");
+
+        assert_eq!(discard_file(&repo, "tracked.txt"), Ok(()));
+        assert_eq!(
+            std::fs::read_to_string(repo.join("tracked.txt")).unwrap(),
+            "staged\n"
+        );
+        assert_eq!(status_of(&repo, "tracked.txt"), "M ");
+    }
+
+    /// An untracked file has no earlier version, and Kete does not delete
+    /// files: REJECT is refused and the file is left alone.
+    #[test]
+    fn rejecting_an_untracked_file_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = make_repo(&dir);
+        std::fs::write(repo.join("fresh.txt"), "hello\n").unwrap();
+
+        let err = discard_file(&repo, "fresh.txt").unwrap_err();
+        assert!(err.contains("Kete doesn't delete files"), "{err}");
+        assert_eq!(
+            std::fs::read_to_string(repo.join("fresh.txt")).unwrap(),
+            "hello\n"
+        );
+        assert_eq!(status_of(&repo, "fresh.txt"), "??");
+    }
+
+    /// Outside a repository each operation says which git command failed.
+    #[test]
+    fn whole_file_operations_name_the_git_command_that_failed() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = stage_file(dir.path(), "x.txt").unwrap_err();
+        assert!(err.starts_with("git add failed: "), "{err}");
+        let err = unstage_file(dir.path(), "x.txt", true).unwrap_err();
+        assert!(err.starts_with("git restore failed: "), "{err}");
+        let err = unstage_file(dir.path(), "x.txt", false).unwrap_err();
+        assert!(err.starts_with("git rm failed: "), "{err}");
+        let err = discard_file(dir.path(), "x.txt").unwrap_err();
+        assert!(err.starts_with("git ls-files failed: "), "{err}");
     }
 
     /// FULL CONTEXT reads the whole file as one hunk, leaving `diff_for`'s

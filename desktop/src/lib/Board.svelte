@@ -5,6 +5,7 @@
   import { verbKeys } from './verbs';
   import { LANES, lanes, toneOf, harnessLabel, lastPrompt, age, placeOf, type Lane } from './status';
   import Status from './Status.svelte';
+  import StopBadge from './StopBadge.svelte';
   import { retract } from './motion';
   import Empty from './Empty.svelte';
   import type { Agent, DropTarget } from './api';
@@ -19,6 +20,8 @@
   import { commitsWord, dropHint, dropVerbOf, laneLook, prChip } from './ship/ship';
   import { openComposer, openMerge } from './ship/sheet.svelte';
   import { hiddenTotal } from './scope';
+  // A Files row dropped on a card types its path into that session.
+  import { pathDrop } from './files/drop.svelte';
 
   // The Review lane reads each checkout's changes off the git reads the
   // overview already makes (src-tauri keeps the last one); keep them
@@ -253,7 +256,15 @@
         ondragleave={(e) => leftFor(e) && target?.lane === lane.id && (target = null)}
         ondrop={(e) => dropOn(e, lane.id)}
       >
-        <header class="flex h-10 flex-none items-center gap-2 border-b border-rule-strong px-4">
+        <!-- Its right-click: the lane's own verb (open the next, mark all
+             seen, archive the done ones), menus/rows.ts laneItems. Critters
+             perch on its strong rule. -->
+        <header
+          class="flex h-10 flex-none items-center gap-2 border-b border-rule-strong px-4"
+          data-target="lane:{lane.id}"
+          data-perch="bottom"
+          title="{lane.title}: right-click for the lane's actions"
+        >
           <h2 class="m-0 text-[15px] font-semibold {lane.id === 'needs' && cards.length ? 'text-ember-ink' : 'text-ink'}">{lane.title}</h2>
           <span class="ml-auto font-mono text-[12px] font-bold {cards.length ? 'text-ink' : 'text-muted'}">{cards.length}</span>
         </header>
@@ -272,6 +283,7 @@
             {@const prompt = lastPrompt(a)}
             {@const pr = app.model.prs[a.worktree_id]}
             {@const commits = commitsWord(rows.git[a.worktree_id]?.ahead_of_base)}
+            {@const stop = app.model.stops?.[a.id]}
             {@const sel = cursor !== null && LANES[cursor.lane].id === lane.id && cursor.row === ri}
             {@const alert = lane.id === 'needs'}
             <!-- The card's verbs show on hover or focus; the card keys (Space, A,
@@ -287,6 +299,7 @@
               ondragenter={(e) => overCard(e, lane.id, a)}
               ondragover={(e) => overCard(e, lane.id, a)}
               ondrop={(e) => dropOn(e, lane.id, a)}
+              use:pathDrop={{ target: () => ({ Agent: a.id }) }}
             >
             {#if mark}
               <span class="pointer-events-none absolute inset-x-0 z-10 h-px bg-ember {mark === 'before' ? '-top-px' : '-bottom-px'}" aria-hidden="true"></span>
@@ -294,12 +307,6 @@
             <button
               title="{a.name}: {lane.id === 'unseen' || lane.id === 'pr' ? 'Enter opens its review (the diff against its base, with its verbs); ' : ''}{withKey('drag to reorder beside cards of its worktree', ['move_up', 'move_down'])}, or onto a lane, Archived or a repo in the rail"
               data-card-sel={sel || undefined}
-              oncontextmenu={(e) => {
-                e.preventDefault();
-                selId = a.id;
-                (e.currentTarget as HTMLElement).focus();
-                openMenu(agentMenu(a), { x: e.clientX, y: e.clientY }, a.name);
-              }}
               class="relative flex w-full flex-col gap-1 border-0 border-b border-rule px-4 py-2.5 text-left focus-visible:-outline-offset-2
                 {sel ? 'bg-surface' : 'bg-transparent hover:bg-surface'} {app.review === a.id ? 'shadow-[inset_3px_0_0_var(--color-ink)]' : ''}"
               onclick={() => openCard(a, lane.id)}
@@ -313,12 +320,13 @@
               <Status tone={lane.id === 'pr' ? 'pr' : lane.id === 'done' && pr?.state === 'merged' ? 'merged' : toneOf(a)} />
               <span class="truncate text-[13px] text-muted">{harnessLabel(a)}{a.profile ? ` \u00B7 ${a.profile}` : ''}</span>
               <span class="truncate font-mono text-[12px] text-muted">{where.project} / {where.branch}</span>
-              {#if commits || pr}
+              {#if stop || commits || pr}
                 <span class="flex min-w-0 flex-wrap items-center gap-1.5">
+                  <StopBadge note={stop} />
                   {#if commits}<span class="{chip} border-rule text-muted" title="Commits on this branch since its base">{commits}</span>{/if}
                   {#if pr}
                     {@const c = prChip(pr)}
-                    <span class="{chip} {CHIP_TONE[c.tone]}" title="{pr.title}">{c.word}</span>
+                    <span class="{chip} {CHIP_TONE[c.tone]}" data-target="pr:{a.worktree_id}" title="{pr.title}. Right-click for its menu.">{c.word}</span>
                   {/if}
                 </span>
               {/if}

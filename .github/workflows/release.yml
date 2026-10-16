@@ -45,7 +45,8 @@ jobs:
         run: cargo build --release --locked --target ${{ matrix.target }}
 
       # kete, and bro (its old name) as a copy of the same binary, so the two
-      # commands are byte for byte one program.
+      # commands are byte for byte one program. Windows also ships kete-w.exe,
+      # kete with no console window, which the wake-up's scheduled task runs.
       - name: Package (unix)
         if: runner.os != 'Windows'
         run: |
@@ -58,7 +59,7 @@ jobs:
         run: |
           $dir = "target/${{ matrix.target }}/release"
           Copy-Item "$dir/kete.exe" "$dir/bro.exe" -Force
-          Compress-Archive -Path "$dir/kete.exe", "$dir/bro.exe" -DestinationPath kete-${{ matrix.target }}.zip
+          Compress-Archive -Path "$dir/kete.exe", "$dir/bro.exe", "$dir/kete-w.exe" -DestinationPath kete-${{ matrix.target }}.zip
 
       - uses: actions/upload-artifact@v4
         with:

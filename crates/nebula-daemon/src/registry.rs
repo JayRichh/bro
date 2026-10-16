@@ -257,6 +257,12 @@ pub struct Daemon {
     pub(crate) usage: Mutex<usage::UsageBook>,
     /// The SESSION SNAPSHOTS worker (`snapshots.rs`), taken alone.
     snapshots: snapshots::Snapshotter,
+    /// STOP NOTES and the usage-limit lines sessions' screens showed
+    /// (`stops.rs`), taken alone.
+    stops: Mutex<stops::StopBook>,
+    /// WHAKAOHO's hidden sessions in flight (`wake.rs`), by agent id;
+    /// taken alone. Never in `sessions`.
+    wakes: Mutex<HashMap<AgentId, wake::WakeSession>>,
 }
 
 mod exit;
@@ -269,9 +275,11 @@ mod sessions;
 mod snapshots;
 mod spawn;
 mod status;
+mod stops;
 mod subagents;
 mod terminals;
 mod usage;
+mod wake;
 
 pub use subagents::{SubagentCarry, SubagentHookInfo};
 
@@ -305,6 +313,8 @@ impl Daemon {
             provision_gate: tokio::sync::Mutex::new(()),
             usage: Mutex::new(usage::UsageBook::default()),
             snapshots: snapshots::Snapshotter::default(),
+            stops: Mutex::new(stops::StopBook::default()),
+            wakes: Mutex::new(HashMap::new()),
         })
     }
 
@@ -3723,7 +3733,7 @@ pub(crate) mod tests {
             daemon.relocation_pending(&a1),
             "a tool hook is not a turn end"
         );
-        daemon.complete_pending_move(&a1, &HookEvent::Stop);
+        daemon.complete_pending_move(&a1, &HookEvent::Stop { background: None });
         assert!(!daemon.relocation_pending(&a1));
 
         // Drained, the reparent is live again.
@@ -3791,13 +3801,13 @@ pub(crate) mod tests {
 
         // The turn's Stop lands as the hook loop delivers it: through the
         // status machine first, then the relocation.
-        daemon.apply_hook_event(&id, HookEvent::Stop, Some("s1".into()));
+        daemon.apply_hook_event(&id, HookEvent::Stop { background: None }, Some("s1".into()));
         assert_eq!(
             status(&id),
             AgentStatus::Running,
             "the Stop is held for the relocation"
         );
-        daemon.complete_pending_move(&id, &HookEvent::Stop);
+        daemon.complete_pending_move(&id, &HookEvent::Stop { background: None });
         assert!(!daemon.relocation_pending(&id));
         let second = daemon.session(&sref).expect("respawned in the worktree");
         assert!(!Arc::ptr_eq(&first, &second), "a new PTY");
@@ -3819,7 +3829,7 @@ pub(crate) mod tests {
             );
         }
         // The relocated turn's own end does.
-        daemon.apply_hook_event(&id, HookEvent::Stop, Some("s1".into()));
+        daemon.apply_hook_event(&id, HookEvent::Stop { background: None }, Some("s1".into()));
         assert_eq!(status(&id), AgentStatus::Finished);
         drop(dir);
     }
@@ -3850,10 +3860,10 @@ pub(crate) mod tests {
         );
         let status = |id: &AgentId| daemon.store.get_agent(id).unwrap().unwrap().status;
 
-        daemon.apply_hook_event(&a1, HookEvent::Stop, Some("s1".into()));
+        daemon.apply_hook_event(&a1, HookEvent::Stop { background: None }, Some("s1".into()));
         assert_eq!(status(&a1), AgentStatus::Running, "held while pending");
         // No PTY to relocate: the hold is released and the Stop finishes it.
-        daemon.complete_pending_move(&a1, &HookEvent::Stop);
+        daemon.complete_pending_move(&a1, &HookEvent::Stop { background: None });
         assert!(!daemon.relocation_pending(&a1));
         assert_eq!(status(&a1), AgentStatus::Finished);
     }
@@ -3990,8 +4000,8 @@ pub(crate) mod tests {
         );
         assert!(daemon.relocation_pending(&id));
         let first = daemon.session(&sref).expect("still the first PTY");
-        daemon.apply_hook_event(&id, HookEvent::Stop, Some("s1".into()));
-        daemon.complete_pending_move(&id, &HookEvent::Stop);
+        daemon.apply_hook_event(&id, HookEvent::Stop { background: None }, Some("s1".into()));
+        daemon.complete_pending_move(&id, &HookEvent::Stop { background: None });
         assert!(!daemon.relocation_pending(&id));
         let second = daemon.session(&sref).expect("respawned in the target");
         assert!(!Arc::ptr_eq(&first, &second), "a new PTY");
@@ -5046,7 +5056,11 @@ pub(crate) mod tests {
             HookEvent::SessionStart { source: None },
             Some("sid-9".into()),
         );
-        daemon.apply_hook_event(&AgentId("stranger".into()), HookEvent::Stop, None);
+        daemon.apply_hook_event(
+            &AgentId("stranger".into()),
+            HookEvent::Stop { background: None },
+            None,
+        );
         {
             let pool = daemon.prewarmed.lock();
             let entry = pool.get(&key).unwrap();

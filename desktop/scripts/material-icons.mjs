@@ -18,7 +18,8 @@ const manifest = JSON.parse(
 const OUT_SVG = path.join(ROOT, 'public', 'material-icons');
 const OUT_MAP = path.join(ROOT, 'src', 'lib', 'material-map.json');
 
-const used = new Set([manifest.file]);
+// The generic folder, shut and open, for the Files tree.
+const used = new Set([manifest.file, manifest.folder, manifest.folderExpanded]);
 const pick = (table = {}) => {
   for (const icon of Object.values(table)) used.add(icon);
   return table;
@@ -26,6 +27,8 @@ const pick = (table = {}) => {
 
 const map = {
   file: manifest.file,
+  folder: manifest.folder,
+  folderExpanded: manifest.folderExpanded,
   fileNames: pick(manifest.fileNames),
   fileExtensions: pick(manifest.fileExtensions),
   light: {

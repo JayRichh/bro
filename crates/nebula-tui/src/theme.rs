@@ -51,7 +51,9 @@ pub const PRESETS: &[&str] = &[
 // [`resolve`]) and `vscode` (read out of VS Code's own settings,
 // `crate::vscode_theme`, falling back to `one-dark`) — and the default
 // live in the shared settings crate, so the desktop window offers the same.
-pub use nebula_config::choices::{AUTO, DEFAULT_THEME, THEMES, VSCODE};
+pub use nebula_config::choices::{
+    vscode_theme_name, AUTO, DEFAULT_THEME, THEMES, VSCODE, VSCODE_PREFIX,
+};
 
 /// Semantic color roles for the whole TUI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -642,8 +644,12 @@ pub struct Machine {
 
 /// A theme NAME as the UI draws it: a preset by [`Theme::by_name`];
 /// [`AUTO`] the Kete preset the OS's light or dark asks for; [`VSCODE`]
-/// what VS Code's settings resolved to, or One Dark with nothing to read.
+/// what VS Code's settings resolved to, and a `vscode:<name>` the
+/// installed theme read for it — either One Dark with nothing to read.
 pub fn resolve(name: &str, machine: &Machine) -> Theme {
+    if vscode_theme_name(name).is_some() {
+        return machine.vscode.unwrap_or(ONE_DARK);
+    }
     match name.trim().to_ascii_lowercase().as_str() {
         AUTO => {
             if machine.os_light == Some(true) {
@@ -661,6 +667,7 @@ pub fn resolve(name: &str, machine: &Machine) -> Theme {
 /// the OS and VS Code on a beat only while one of these is picked.
 pub fn is_live(name: &str) -> bool {
     matches!(name.trim().to_ascii_lowercase().as_str(), AUTO | VSCODE)
+        || vscode_theme_name(name).is_some()
 }
 
 /// The NESTED layout's grays (Settings → Appearance → **Worktree layout**

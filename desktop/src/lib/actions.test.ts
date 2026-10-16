@@ -26,6 +26,7 @@ vi.mock('./api', () => {
 const { app } = await import('./store.svelte');
 const { ui } = await import('./ui/ui.svelte');
 const actions = await import('./actions');
+const { leafItems } = await import('./menus/model');
 
 const agent = (id: string, extra: Partial<Agent> = {}): Agent =>
   ({
@@ -109,16 +110,29 @@ describe('session verbs', () => {
 describe('menus from the registry', () => {
   const words = (menu: ReturnType<typeof actions.menuFor>) =>
     menu.flatMap((e) => (typeof e === 'object' && 'label' in e ? [e.label] : []));
+  /** Every row a menu runs, a submenu's in its whole words. */
+  const leaves = (menu: ReturnType<typeof actions.menuFor>) => leafItems(menu).map((e) => e.full ?? e.label);
 
   it('a session menu says what the terminal app says, in its order, keys shown', () => {
     setAgents([agent('a')]);
     const menu = actions.menuFor({ kind: 'agent', id: 'a' });
     const w = words(menu);
-    expect(w.slice(0, 3)).toEqual(['Open', 'Follow-up prompt\u2026', 'Restart agent']);
+    // Its diff is its own row, after the reply (the registry's Go
+    // section), not left to the checkout's rows.
+    expect(w.slice(0, 3)).toEqual(['Open', 'Follow-up prompt\u2026', 'Diff']);
+    expect(w).toContain('Restart agent');
     expect(w).toContain('Rename\u2026');
     expect(w.indexOf('Archive')).toBeLessThan(w.indexOf('Delete\u2026'));
     const rename = menu.find((e) => typeof e === 'object' && 'label' in e && e.label === 'Rename\u2026');
     expect((rename as { keys?: string[] } | undefined)?.keys).toEqual(['r']);
+  });
+
+  it('offers Make orchestrator only while no other session is pinned', () => {
+    setAgents([agent('a'), agent('o', { role: 'orchestrator' })]);
+    expect(words(actions.menuFor({ kind: 'agent', id: 'a' }))).not.toContain('Make orchestrator');
+    expect(words(actions.menuFor({ kind: 'agent', id: 'o' }))).toContain('Unpin orchestrator');
+    setAgents([agent('a'), agent('o')]);
+    expect(words(actions.menuFor({ kind: 'agent', id: 'a' }))).toContain('Make orchestrator');
   });
 
   it('a terminal closes, a repo is removed from Kete', () => {
@@ -129,7 +143,11 @@ describe('menus from the registry', () => {
       worktrees: [{ id: 'w1', project_id: 'p', path: '/p', branch: 'main', is_main: true, sort_order: 0 }],
       projects: [{ id: 'p', name: 'demo', repo_path: '/p', sort_order: 0 }],
     } as unknown as Model;
-    expect(words(actions.menuFor({ kind: 'terminal', id: 't' })).slice(0, 3)).toEqual(['Open', 'Rename\u2026', 'Close terminal\u2026']);
+    // Its checkout's folder to copy (the matrix widened Copy path to
+    // terminals), then the checkout's own menu behind a rule.
+    const term = actions.menuFor({ kind: 'terminal', id: 't' });
+    expect(words(term)).toEqual(['Open', 'Copy path', 'Rename\u2026', 'Close terminal\u2026', 'Checkout main']);
+    expect(term[term.length - 2]).toBe('sep');
     const repo = words(actions.menuFor({ kind: 'project', id: 'p' }));
     expect(repo[0]).toBe('New session\u2026');
     expect(repo).toContain('Remove from Kete\u2026');
@@ -153,22 +171,29 @@ describe('menus from the registry', () => {
       projects: [{ id: 'p', name: 'demo', repo_path: '/p', sort_order: 0 }],
       cards: {},
     } as unknown as Model;
-    // No pull request yet: the composer, no page and no merge.
+    // No pull request yet: Review and the composer fold into Pull
+    // request \u25b8; no page and no merge.
     app.model = { ...base, prs: {} } as Model;
-    let w = words(actions.menuFor({ kind: 'agent', id: 'a' }));
+    let menu = actions.menuFor({ kind: 'agent', id: 'a' });
+    expect(words(menu)).toContain('Pull request');
+    let w = leaves(menu);
     expect(w).toContain('Create pull request\u2026');
+    expect(w).toContain('Review\u2026');
     expect(w).not.toContain('Open pull request');
-    expect(w).not.toContain('Merge pull request\u2026');
-    expect(w).toContain('Focus here');
-    // One open: its page and its merge, once each (no window-only extra).
+    expect(w.some((l) => l.startsWith('Merge'))).toBe(false);
+    // Focus here is the card's checkout's (\u00a75.2), once.
+    expect(w.filter((l) => l === 'Worktree feat \u203a Focus here').length).toBe(1);
+    // One open: its page and its merge, once each; no Create.
     const pr = { number: 7, url: 'https://x/7', title: 't', state: 'open', draft: false };
     app.model = { ...base, prs: { w1: pr } } as unknown as Model;
-    w = words(actions.menuFor({ kind: 'agent', id: 'a' }));
+    menu = actions.menuFor({ kind: 'agent', id: 'a' });
+    w = leaves(menu);
     expect(w).toContain('Open pull request');
     expect(w).not.toContain('Create pull request\u2026');
     expect(w.filter((l) => l.startsWith('Merge')).length).toBe(1);
-    expect(w.filter((l) => l === 'Focus here').length).toBe(1);
     expect(w).not.toContain('Merge PR\u2026');
+    // The link to copy, now there is one.
+    expect(w).toContain('Copy pull request link');
     // Focus here narrows the chip to the checkout.
     expect(actions.runVerb({ kind: 'worktree', id: 'w1' }, 'focus_scope')).toBe(true);
     expect(calls).toEqual(['scope p/w1']);
@@ -195,7 +220,6 @@ describe('menus from the registry', () => {
     rows.git = { ...rows.git, w1: { changed: 0, untracked: 0, upstream: null, ahead: null, behind: null, committed: 0, ahead_of_base: 0, on_default_branch: true } };
     const row = create();
     expect(row?.disabled).toBe(true);
-    expect(row?.label).toContain('(on the base branch)');
     expect(row?.title).toMatch(/base branch/);
     expect(actions.runVerb({ kind: 'worktree', id: 'w1' }, 'create_pull_request')).toBe(false);
     expect(app.toast).toMatch(/base branch/);

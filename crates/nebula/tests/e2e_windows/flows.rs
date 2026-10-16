@@ -49,7 +49,106 @@ pub const TESTS: &[(&str, Test)] = &[
         "a_048_data_dir_upgrades_in_place",
         super::upgrade::a_048_data_dir_upgrades_in_place,
     ),
+    (
+        "a_usage_limit_reads_resumes_on_the_card_until_claude_carries_on",
+        a_usage_limit_reads_resumes_on_the_card_until_claude_carries_on,
+    ),
+    (
+        "a_wake_up_runs_a_hidden_session_no_list_shows",
+        a_wake_up_runs_a_hidden_session_no_list_shows,
+    ),
 ];
+
+/// WHAKAOHO: `kete wake @claude --force` has the daemon run a hidden
+/// session — the fake agent, handed haiku and the one-word prompt, in the
+/// wake folder — whose status line reading lands on the account, that no
+/// session list shows, and that the wake log records with the reset time
+/// before and after.
+fn a_wake_up_runs_a_hidden_session_no_list_shows() {
+    let tui = Tui::spawn(Options {
+        scripts: vec![("hi", "statusline:1800000000;stop".into())],
+        ..Options::default()
+    });
+    tui.wait_for_text("create your first project");
+    // Claude's own login, as far as the account check can tell.
+    let claude = tui.home().join(".claude");
+    std::fs::create_dir_all(&claude).unwrap();
+    std::fs::write(claude.join(".credentials.json"), r#"{"claudeAiOauth": {}}"#).unwrap();
+
+    let text = |out: &std::process::Output| {
+        format!(
+            "stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        )
+    };
+    // Off, so a plain run (and its dry run) skips and runs nothing.
+    let dry = tui.kete(&["wake", "@claude", "--dry-run"]);
+    assert!(dry.status.success(), "{}", text(&dry));
+    assert!(
+        String::from_utf8_lossy(&dry.stdout).contains("would skip: wake-up is off"),
+        "{}",
+        text(&dry)
+    );
+    assert!(
+        !tui.data_dir.join("wake-log.jsonl").exists(),
+        "a dry run logs nothing"
+    );
+
+    let out = tui.kete(&["wake", "@claude", "--force", "--json"]);
+    assert!(out.status.success(), "{}", text(&out));
+    let list: serde_json::Value = serde_json::from_slice(&out.stdout).expect("JSON out");
+    let report = &list[0]["report"];
+    assert_eq!(report["submitted"], true, "{report}");
+    assert_eq!(report["finished"], true, "{report}");
+    assert_eq!(report["read"], true, "{report}");
+    assert_eq!(report["resets_after"], 1_800_000_000, "{report}");
+
+    let log = std::fs::read_to_string(tui.data_dir.join("wake-log.jsonl")).unwrap();
+    let entries: Vec<serde_json::Value> = log
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(entries.len(), 1, "{log}");
+    assert_eq!(entries[0]["account"], "@claude");
+    assert_eq!(entries[0]["decision"], "fired");
+    assert_eq!(entries[0]["forced"], true);
+    assert_eq!(entries[0]["resets_after"], 1_800_000_000);
+
+    // Run as Claude would be: the cheapest model, the one-word prompt, in
+    // the wake folder, its turn reported through the hooks Kete put there.
+    // (The session is killed the moment its Stop lands, so the agent may
+    // not live to log that hook's exit.)
+    let agent_log = std::fs::read_to_string(&tui.agent_log).unwrap();
+    assert!(agent_log.contains(r#""--model", "haiku""#), "{agent_log}");
+    assert!(agent_log.contains(r#"prompt "hi""#), "{agent_log}");
+    assert!(
+        agent_log.contains("hook UserPromptSubmit: Ok(Some(0))"),
+        "{agent_log}"
+    );
+    assert!(agent_log.contains("statusline: Ok(Some(0))"), "{agent_log}");
+    assert!(agent_log.contains("step stop"), "{agent_log}");
+    assert!(tui
+        .data_dir
+        .join("wake")
+        .join(".claude")
+        .join("settings.local.json")
+        .exists());
+
+    // No row: no client's list, board or snapshot has it.
+    let (_, _, agents) = super::upgrade::daemon_tree(&tui.runtime_dir);
+    assert!(agents.is_empty(), "{agents:?}");
+    tui.wait_for_text("create your first project");
+    // The reading is the account's, where the CLI and the apps read it.
+    let reading =
+        nebula_core::usage::read_account_in(&tui.data_dir.join("profiles"), "@claude").unwrap();
+    assert_eq!(
+        reading
+            .window(nebula_core::usage::WindowKind::Session)
+            .and_then(|w| w.resets_at),
+        Some(1_800_000_000)
+    );
+}
 
 /// The feature the fake agent builds: a question, a file, a commit.
 const FEATURE: &str =
@@ -110,7 +209,7 @@ fn quick_prompt_session_runs_needs_you_and_lands_in_review() {
     pane_shows_the_feature(&tui);
 }
 
-/// On a Review card: `?` offers Create pull request and Focus here; `d`
+/// On a Review card: `?` offers Create pull request and Worktree; `d`
 /// diffs the worktree against its base with the agent's committed file;
 /// Focus here narrows the board to the card's worktree, and the lanes
 /// count what that leaves outside.
@@ -128,7 +227,7 @@ fn review_card_verbs_focus_scope_and_diff() {
 
     tui.send(b"?");
     tui.wait_for_text("Create pull request");
-    tui.wait_for_text("Focus here");
+    tui.wait_for_text("Worktree");
     tui.send(ESC);
     tui.wait_for_gone("Create pull request");
 
@@ -146,8 +245,9 @@ fn review_card_verbs_focus_scope_and_diff() {
     tui.wait_for_text("● 1 Done");
 
     tui.send(b"?");
-    tui.wait_for_text("Focus here");
+    tui.wait_for_text("Worktree");
     tui.type_str("focus");
+    tui.wait_for_text("Focus here");
     tui.wait_for_text("⌕ focus");
     tui.send(ENTER);
     tui.wait_for_text("● 0 Review");
@@ -399,6 +499,34 @@ fn the_pane_keeps_every_line_across_board_and_grid() {
     // And through a host resize, which repaints every cell.
     tui.host_repaint();
     pane_shows_the_feature(&tui);
+}
+
+/// A turn that ends on a usage limit (`StopFailure`) Claude then waits
+/// out: running, and its card says when it carries on, in the words the
+/// session's screen printed. Claude's resume clears it and the turn ends
+/// as any other; a failed login after it waits on you, saying so.
+fn a_usage_limit_reads_resumes_on_the_card_until_claude_carries_on() {
+    let tui = Tui::spawn(Options {
+        script: "fail:rate_limit;say:Continuing automatically at 3:45pm;gate:resumed;\
+                 notify:quota_auto_resume_fired;stop;gate:relogin;\
+                 fail:authentication_failed;echo"
+            .into(),
+        ..Options::default()
+    });
+    let repo = tui.make_repo("limit-proj");
+    tui.wait_for_text("create your first project");
+    tui.add_project(&repo, "limit-proj");
+    launch(&tui, "build the feature");
+    tui.wait_for_agent("step gate:resumed");
+    tui.wait_for_text("resumes 3:45pm");
+    tui.wait_for_text("1 running");
+    tui.open_gate("resumed");
+    tui.wait_for_gone("resumes 3:45pm");
+    tui.wait_for_agent("step gate:relogin");
+    tui.wait_for_text("agent-1  done");
+    tui.open_gate("relogin");
+    tui.wait_for_text("logged out");
+    tui.wait_for_text("1 needs you");
 }
 
 /// Every line the FEATURE agent printed, whole, in the screen model. On a

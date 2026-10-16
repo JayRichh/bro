@@ -1187,6 +1187,64 @@ pub fn seed_claude_config(
     crate::settings::write_json(&file, &root)
 }
 
+/// The `.claude.json` Claude keeps an account's state in: inside a
+/// profile's config dir; for the CLI's own login (or an adopted one) in
+/// `$CLAUDE_CONFIG_DIR` when that is set, else beside `~/.claude`.
+pub fn claude_json_for(profile: Option<&Profile>, root: &Path) -> Option<PathBuf> {
+    let var = crate::env::CLAUDE_CONFIG_DIR;
+    if let Some(dir) = profile.and_then(|p| p.dir_for(root, var)) {
+        return Some(dir.join(".claude.json"));
+    }
+    let set = profile
+        .and_then(|p| p.env.get(var).cloned())
+        .filter(|d| !d.trim().is_empty())
+        .or_else(|| crate::env::non_empty(var));
+    match set {
+        Some(dir) => Some(PathBuf::from(dir).join(".claude.json")),
+        None => crate::env::home_dir().map(|home| home.join(".claude.json")),
+    }
+}
+
+/// Mark `folder` trusted in the `.claude.json` at `file`, as answering
+/// Claude's trust dialog there once would: that folder's entry alone,
+/// written only when it isn't trusted yet, and never into a file that is
+/// missing (no login lives there) or isn't a JSON object. Kete's own
+/// empty wake-up folder needs it (`wake::wake_dir`): a hidden session has
+/// no one to answer the dialog. Whether it wrote.
+pub fn trust_folder(file: &Path, folder: &Path) -> std::io::Result<bool> {
+    let text = match std::fs::read_to_string(file) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e),
+    };
+    let Ok(mut root) = serde_json::from_str::<Value>(crate::settings::strip_bom(&text)) else {
+        return Ok(false);
+    };
+    let Some(obj) = root.as_object_mut() else {
+        return Ok(false);
+    };
+    let key = claude_project_key(folder);
+    let projects = obj.entry("projects").or_insert_with(|| json!({}));
+    let Some(projects) = projects.as_object_mut() else {
+        return Ok(false);
+    };
+    let existing = projects
+        .keys()
+        .find(|k| same_project_key(k, &key))
+        .cloned()
+        .unwrap_or(key);
+    let entry = projects.entry(existing).or_insert_with(|| json!({}));
+    let Some(entry) = entry.as_object_mut() else {
+        return Ok(false);
+    };
+    if entry.get("hasTrustDialogAccepted").and_then(Value::as_bool) == Some(true) {
+        return Ok(false);
+    }
+    entry.insert("hasTrustDialogAccepted".into(), json!(true));
+    crate::settings::write_json(file, &root)?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1771,5 +1829,55 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(config.join(".claude.json")).unwrap())
                 .unwrap();
         assert_eq!(kept["oauthAccount"]["x"], 1);
+    }
+
+    #[test]
+    fn the_wake_folder_is_trusted_once_and_nothing_else_moves() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(".claude.json");
+        let folder = dir.path().join("data").join("wake");
+        assert!(!trust_folder(&file, &folder).unwrap(), "no file, no login");
+        assert!(!file.exists(), "never created");
+        std::fs::write(
+            &file,
+            json!({"oauthAccount": {"x": 1}, "projects": {"C:/other": {"hasTrustDialogAccepted": false}}})
+                .to_string(),
+        )
+        .unwrap();
+        assert!(trust_folder(&file, &folder).unwrap());
+        let saved: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        let key = claude_project_key(&folder);
+        assert_eq!(saved["projects"][&key]["hasTrustDialogAccepted"], true);
+        assert_eq!(
+            saved["projects"]["C:/other"]["hasTrustDialogAccepted"],
+            false
+        );
+        assert_eq!(saved["oauthAccount"]["x"], 1);
+        assert!(!trust_folder(&file, &folder).unwrap(), "already trusted");
+        std::fs::write(&file, "[1]").unwrap();
+        assert!(
+            !trust_folder(&file, &folder).unwrap(),
+            "not an object: left alone"
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "[1]");
+    }
+
+    #[test]
+    fn a_profile_keeps_its_claude_json_in_its_home() {
+        let root = Path::new("/kete/profiles");
+        let work = profile("work", "claude");
+        assert_eq!(
+            claude_json_for(Some(&work), root),
+            Some(root.join("work").join("claude").join(".claude.json"))
+        );
+        let mut adopted = profile("main", "claude");
+        adopted.use_default = true;
+        adopted
+            .env
+            .insert(crate::env::CLAUDE_CONFIG_DIR.into(), "/elsewhere".into());
+        assert_eq!(
+            claude_json_for(Some(&adopted), root),
+            Some(PathBuf::from("/elsewhere").join(".claude.json"))
+        );
     }
 }

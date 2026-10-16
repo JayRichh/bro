@@ -1,6 +1,6 @@
 [package]
 name = "kete-desktop"
-version = "0.53.1"
+version = "0.54.0"
 edition = "2021"
 license = "MIT"
 description = "Kete's desktop window: the board, live sessions and diffs over the Kete daemon"
@@ -15,6 +15,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 nebula-core = { path = "../../crates/nebula-core" }
 nebula-config = { path = "../../crates/nebula-config" }
+kete-critters = { path = "../../crates/kete-critters" }
 kete-ado = { path = "../../crates/kete-ado" }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
@@ -30,8 +31,12 @@ async-trait = "0.1"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_System_Diagnostics_Debug", "Win32_UI_WindowsAndMessaging"] }
 # The done / needs-you toast and its click (alerts.rs): WinRT, on the same
-# `windows` crate Tauri already builds, so no new crate in the tree.
-windows = { version = "0.62", features = ["Data_Xml_Dom", "Foundation", "UI_Notifications"] }
+# `windows` crate Tauri already builds, so no new crate in the tree. The
+# installed font list (fonts.rs) reads DirectWrite through it as well.
+windows = { version = "0.62", features = ["Data_Xml_Dom", "Foundation", "UI_Notifications", "Win32_Graphics_DirectWrite"] }
+# WebView2's own menu and browser keys off, the clipboard read granted
+# (quiet.rs): the version Tauri already builds (`cargo tree -i webview2-com`).
+webview2-com = "0.39.1"
 
 [dev-dependencies]
 kete-ado = { path = "../../crates/kete-ado", features = ["test-support"] }

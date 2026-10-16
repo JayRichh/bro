@@ -79,6 +79,7 @@
   bind:shown={app.diffShown}
   keys={active}
   session={review?.id ?? null}
+  lands
 >
   {#snippet lead()}
     <select

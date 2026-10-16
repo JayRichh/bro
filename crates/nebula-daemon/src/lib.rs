@@ -230,14 +230,26 @@ async fn serve(opts: DaemonOpts) -> Result<()> {
                 transcript,
                 prompt,
                 subagent,
+                effort,
             }) = hook_rx.recv().await
             {
+                // A WHAKAOHO session's hooks are its own business
+                // (`registry::wake`): no row to move, no prompt to keep.
+                if daemon.wake_hook(&agent_id, &event) {
+                    continue;
+                }
                 let captures_session = event.captures_session();
+                // The effort Claude runs at now: a `/effort` or the model's
+                // cap, for the next spawn to pass on.
+                if let Some(level) = &effort {
+                    daemon.adopt_claude_effort(&agent_id, level);
+                }
                 // A turn's edges are when a session log has news: Codex's
                 // rollout limits, every harness's context (`registry::usage`).
                 if matches!(
                     event,
-                    crate::status::HookEvent::UserPromptSubmit | crate::status::HookEvent::Stop
+                    crate::status::HookEvent::UserPromptSubmit
+                        | crate::status::HookEvent::Stop { .. }
                 ) {
                     let daemon = daemon.clone();
                     let agent = agent_id.clone();

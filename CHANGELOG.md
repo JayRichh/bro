@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.54.0
+
+Editors, menus, appearance, Files, wake-up scheduling, usage limits and critters ship together in this release.
+
+- **Open in your own editor.** VS Code installations each have their own menu row; Visual Studio appears for checkouts with a solution or project. Open files and folders, choose the default installation, show a checkout in Explorer, or dock an editor beside Kete. The apps launch installed editors as separate windows.
+- **Context menus throughout both apps.** Right-click and the verbs menu follow the selected session, worktree, project, account, file or folder. Open in, Copy, Pull request, Move and View submenus group related actions. State determines what is available, and the desktop explains disabled actions. Menus support filtering, keyboard navigation and focus return.
+- **The desktop's browser menu is gone.** Fields, terminals and code viewers have Kete's own editing menus. Installed builds disable browser print and refresh accelerators while preserving terminal and text editing keys.
+- **Files beside Diff.** Browse tracked and untracked, non-ignored files in a collapsible tree, filter paths, open files in Kete or an installed editor, and drag paths onto sessions or terminals without submitting them. File menus include diff, stage, unstage and discard actions where applicable.
+- **Appearance shared with your tools.** Workshop, One Dark, One Light, live VS Code and imported VS Code palettes are available. Pick interface, code and terminal fonts and sizes, or reset appearance. The terminal app shares the VS Code theme loader. Settings keeps Appearance beside Editors in the Desktop tab.
+- **Whakaoho.** An optional per-account wake-up schedule, timeline and usage bars help plan Claude usage windows. Choose an hour, preview windows, stagger accounts and inspect the decision log. Windows Task Scheduler can run the hidden launcher. Scheduling is off by default; an actual wake uses the selected account's subscription. Restart the daemon after upgrading to use hidden interactive wake sessions.
+- **Usage limits and effort.** Cards distinguish a running session waiting for its usage window, a session needing sign-in or another answer, and a finished turn with an error. Effort changes follow the session. Background work is checked against Claude's reported tasks, and Windows hooks invoke Kete directly.
+- **Critters in both apps.** Optional pixel visitors wander, meet, react to sessions and keep a local collection log. Pet, feed, name, drag, throw or shoo them from their own menu. Discover them in Settings, through the Critters action, the Konami code, or five clicks on the desktop mark. Reduced motion is respected.
+- **Navigation and fixes.** Accounts and scheduling are consolidated without dropping their actions. The command palette runs the selected action again. Theme contrast, narrow settings layouts, menu scrolling and pixel scaling under interface zoom are corrected. Returning to the board refreshes commit counts immediately, even when a turn finished while it was away. The 0.53.1 Windows paste fix is included.
+
 ## 0.53.1
 
 - **Pastes on Windows no longer send early.** When the console paused partway through a large paste, as it can on a busy or slow machine, the closing line break could arrive on its own after the pause. The terminal app then treated it as a typed Enter, so the agent got the paste up to that point and the rest followed as a new message. For a second after a large paste, keys that arrive pressed and released together now count as part of the paste. An Enter you type yourself still sends.

@@ -40,6 +40,9 @@ macro_rules! main_loop_body {
     // when its settings carry one, so an org-restricted machine offers the
     // ids the CLI will accept instead of aliases it refuses.
     crate::claude_catalogue::bootstrap(cfg.claude_enabled);
+    // VS Code and Visual Studio, found off the loop (vswhere takes a
+    // moment), so the first menu already lists them.
+    nebula_core::editors::detect_in_background();
     // The host's events: on Windows the console, its pasted text read in
     // bulk (HOST INPUT, host_input.rs).
     let mut input = host_input::open();
@@ -172,6 +175,9 @@ macro_rules! main_loop_body {
         let drag_autoscroll_deadline = app
             .pane.next_drag_autoscroll
             .map_or_else(tokio::time::Instant::now, tokio::time::Instant::from_std);
+        // When the CRITTERS next tick: the next frame while one is on
+        // screen, else when the next visitor is due (its arm below).
+        let critters_deadline = tokio::time::Instant::from_std(crate::critters::deadline(&app));
         // When the PASTE BURST settles (its arm below).
         let burst_deadline = burst
             .deadline()
@@ -255,6 +261,12 @@ macro_rules! main_loop_body {
                 app.chrome.dirty = true;
                 sweep_was_ticking = app.status_anim_active();
                 next_sweep_frame = tokio::time::Instant::now() + SWEEP_FRAME;
+            }
+            // The CRITTERS: 8 fps while one is on screen, one wake for the
+            // next visitor between visits, nothing at all with the window
+            // out of focus or animations off.
+            _ = tokio::time::sleep_until(critters_deadline), if crate::critters::armed(&app) => {
+                crate::critters::wake(&mut app);
             }
             // "23m ago" labels age on their own with nothing else to
             // repaint an idle app. Only worth a frame once some row carries

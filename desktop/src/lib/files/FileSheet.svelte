@@ -6,7 +6,11 @@
   import { app, toast } from '../store.svelte';
   import { languageOf, fileIcon } from '../icons';
   import { defineMonacoTheme, termFamily } from '../theme';
-  import { closeFiles, filesApi, sheet, showFiles, stepTab, type FileText } from './files.svelte';
+  import { editorOptions, look } from '../look.svelte';
+  import { closeFiles, filesApi, openTabDefault, readTab, sheet, showFiles, stepTab, type FileText } from './files.svelte';
+  import { registerViewer } from '../menus/surfaces';
+  import { ownMenu } from '../menus/router';
+  import { openedFileMenu } from '../menus/targets';
   import type * as Monaco from 'monaco-esm/editor/editor.api.js';
 
   let box = $state<HTMLElement>();
@@ -33,11 +37,11 @@
   // Read the shown tab's file each time it is shown: an agent that opened
   // it may still be writing it.
   $effect(() => {
-    const path = tab?.path;
-    if (!path) return;
+    const t = tab;
+    const path = t?.path;
+    if (!t || !path) return;
     shown = { path, file: null };
-    filesApi
-      .read(path)
+    readTab(t)
       .then((file) => shown.path === path && (shown = { path, file }))
       .catch((e) => shown.path === path && (shown = { path, file: { text: null, note: String(e) } }));
   });
@@ -58,7 +62,7 @@
     }
     if (shown.path !== path || !sheet.open) return;
     // The sheet's body is new each time it opens: the editor goes with it.
-    if (!editor) editor = monaco.editor.create(el, { ...m.readingOptions(termFamily()), renderLineHighlight: 'line' });
+    if (!editor) editor = monaco.editor.create(el, { ...m.readingOptions(termFamily(), editorOptions()), renderLineHighlight: 'line' });
     const old = editor.getModel();
     editor.setModel(monaco.editor.createModel(text, languageOf(path)));
     old?.dispose();
@@ -66,7 +70,10 @@
 
   $effect(() => {
     const dark = app.dark;
-    if (monaco) defineMonacoTheme(monaco, dark);
+    void look.seq;
+    if (!monaco) return;
+    defineMonacoTheme(monaco, dark);
+    editor?.updateOptions({ fontFamily: termFamily(), ...editorOptions() });
   });
 
   function dropEditor() {
@@ -88,6 +95,17 @@
     dropEditor();
   });
 
+  // The viewer's right-click menu (menus/builtin.ts): Copy path:line is
+  // this tab's file.
+  $effect(() => {
+    const el = host;
+    if (!el) return;
+    return registerViewer(el, {
+      editorAt: (n) => (editor?.getDomNode()?.contains(n) ? { editor, old: false } : null),
+      path: () => shown.path || null,
+    });
+  });
+
   function onKey(e: KeyboardEvent) {
     e.stopPropagation();
     if (e.ctrlKey || e.altKey || e.metaKey) return;
@@ -99,7 +117,7 @@
   }
 
   function openDefault() {
-    if (tab) filesApi.openDefault(tab.path).catch((e) => toast(`Could not open it: ${e}`));
+    if (tab) openTabDefault(tab).catch((e) => toast(`Could not open it: ${e}`));
   }
 
   const tool = 'inline-flex h-7 items-center gap-1.5 border border-rule bg-transparent px-2 text-[13px] text-ink hover:border-rule-strong';
@@ -139,7 +157,8 @@
           <button
             role="tab"
             aria-selected={on}
-            title={t.path}
+            title="{t.path}. Right-click to copy its path or open it with its app"
+            use:ownMenu={() => openedFileMenu(t, sheet.root, () => void openTabDefault(t).catch((e) => toast(`Could not open it: ${e}`)))}
             class="-mb-px inline-flex flex-none items-center gap-1.5 border-0 border-b-2 bg-transparent px-3 py-1.5 font-mono text-[12px] {on
               ? 'border-ink text-ink'
               : 'border-transparent text-muted hover:text-ink'}"

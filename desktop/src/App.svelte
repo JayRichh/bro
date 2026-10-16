@@ -36,33 +36,70 @@
   import { onReviewOpened, openOrchestrator } from './lib/orch.svelte';
   import { opensOnOrchestrator, orchestratorOf, placeKey } from './lib/orchestrator';
   import FileSheet from './lib/files/FileSheet.svelte';
+  import FilesView from './lib/files/FilesView.svelte';
+  import FilesToggle from './lib/files/FilesToggle.svelte';
   import AccountsView from './lib/accounts/AccountsView.svelte';
+  import WakeView from './lib/wake/WakeView.svelte';
   import AddAccount from './lib/accounts/AddAccount.svelte';
   import WorktreesView from './lib/worktrees/WorktreesView.svelte';
   import { loadCollapsed } from './lib/worktrees/rows.svelte';
   import { listenAlerts } from './lib/alerts';
   import { noteFocus } from './lib/selection.svelte';
+  import { installMenus } from './lib/menus/builtin';
+  import { startEditors } from './lib/editors/store.svelte';
+  import { installEditorMenus } from './lib/editors/menus';
   import VerbBar from './lib/VerbBar.svelte';
   import TipBar from './lib/TipBar.svelte';
   import WhatsNew from './lib/WhatsNew.svelte';
   import { loadLearn, offerTip } from './lib/learn.svelte';
   import { selection } from './lib/selection.svelte';
   import { isEverything } from './lib/scope';
+  import Critters from './lib/critters/Critters.svelte';
+  import CritterLog from './lib/critters/CritterLog.svelte';
+  import { look, paint, refreshLive } from './lib/look.svelte';
+  import { knownTheme, zoomOf } from './lib/look';
 
   const media = window.matchMedia('(prefers-color-scheme: dark)');
   let osDark = $state(media.matches);
   media.addEventListener('change', (e) => (osDark = e.matches));
 
+  // The look: Workshop's blocks, One's, or an inline palette (VS Code's,
+  // an imported one), and the fonts, on <html>; then the terminals and
+  // the diff editor re-read it (`look.seq`).
   $effect(() => {
-    app.dark = app.themePref === 'system' ? osDark : app.themePref === 'dark';
-    document.documentElement.dataset.theme = app.dark ? 'dark' : 'light';
+    app.dark = paint(app.themePref, osDark);
+    void look.prefs;
+    void look.live;
+    untrack(() => look.seq++);
   });
-  // The native title bar follows an override too, not only the OS.
+  // The native title bar follows the theme too, not only the OS: the OS
+  // itself while Workshop follows it, else the theme's own light or dark.
   $effect(() => {
-    const pref = app.themePref;
+    const follow = app.themePref === 'system';
+    const dark = app.dark;
     getCurrentWindow()
-      .setTheme(pref === 'system' ? null : pref)
+      .setTheme(follow ? null : dark ? 'dark' : 'light')
       .catch(() => {});
+  });
+  // `vscode` follows VS Code: its settings.json is stat'ed every few
+  // seconds and whenever the window takes focus, and read again when the
+  // OS flips light or dark (VS Code's auto-detect follows that).
+  $effect(() => {
+    if (app.themePref !== 'vscode') return;
+    const osLight = !osDark;
+    void refreshLive(osLight, true);
+    const beat = setInterval(() => void refreshLive(osLight), 2500);
+    const onFocus = () => void refreshLive(osLight);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      clearInterval(beat);
+      window.removeEventListener('focus', onFocus);
+    };
+  });
+  // The Interface size scales the whole window (every size in it is px).
+  $effect(() => {
+    const scale = zoomOf(look.prefs.sizes);
+    api.lookZoom(scale).catch(() => {});
   });
 
   // Back and forward land on a place; the selection follows it.
@@ -100,7 +137,7 @@
   // session in the shared pane on the right (one pane per session, so the
   // terminal is never attached twice).
   const orchView = $derived(view === 'orchestrator');
-  const split = $derived(view === 'session' || view === 'diff' || (orchView && !!orch));
+  const split = $derived(view === 'session' || view === 'diff' || view === 'files' || (orchView && !!orch));
   // Full pane (Z, Ctrl+Shift+M): the right side takes the window. Leaving the
   // split brings it back down, so the next split opens beside the list.
   const full = $derived(split && app.paneMax);
@@ -209,7 +246,7 @@
     loadCollapsed(prefs?.collapsed);
     const s = await api.startup().catch(() => null);
     // Flags that need no daemon apply at once.
-    if (s?.theme === 'light' || s?.theme === 'dark' || s?.theme === 'system') app.themePref = s.theme;
+    if (s?.theme && knownTheme(s.theme, look.prefs.themes)) app.themePref = s.theme;
     if (isDiffMode(s?.diff_mode)) app.diffMode = s.diff_mode;
     if (s?.view === 'board') {
       app.home = 'board';
@@ -241,11 +278,20 @@
   }
 
   onMount(() => {
+    // Every right-click: Kete's menu for what is under it, never WebView2's.
+    const stopMenus = installMenus();
+    // VS Code and Visual Studio: found once, followed per checkout.
+    installEditorMenus();
+    const stopEditors = startEditors();
     api.onReview(onReviewOpened).catch(() => {});
     listenAlerts().catch(() => {});
     boot();
     applyStartup();
     loadLearn();
+    return () => {
+      stopMenus();
+      stopEditors();
+    };
   });
 </script>
 
@@ -267,7 +313,7 @@
       {/if}
       <ScopeChip compact={narrow} />
       {#if !narrow}<AttentionStrip tight={split} />{/if}
-      {#if app.home === 'overview' && !adoView && view !== 'settings' && view !== 'worktrees' && view !== 'accounts' && !orchView}
+      {#if app.home === 'overview' && !adoView && view !== 'settings' && view !== 'worktrees' && view !== 'accounts' && view !== 'whakaoho' && !orchView}
         <button
           class="h-6 flex-none border px-2 text-[12px] {app.showArchived ? 'border-ink bg-ink text-bg' : 'border-rule bg-transparent text-muted hover:text-ink'}"
           aria-pressed={app.showArchived}
@@ -286,6 +332,7 @@
         title={withKey(view === 'diff' ? 'Close the diff: back to where it was opened' : 'Diff the checkout in context: the focused row, the session, the repo', ['diff', 'open_diff'])}
         onclick={toggleDiff}><Icon name="diff" size={12} /><span class="hidden @min-[700px]:inline">Diff</span></button
       >
+      <FilesToggle />
       <div class="flex h-6 flex-none border border-rule" role="radiogroup" aria-label="Home view">
         {#each [{ id: 'overview', label: 'Overview' }, { id: 'board', label: 'Board' }] as h, i (h.id)}
           {@const on = app.home === h.id}
@@ -343,6 +390,8 @@
         <Settings />
       {:else if view === 'accounts'}
         <AccountsView />
+      {:else if view === 'whakaoho'}
+        <WakeView />
       {:else if orchView && !orch}
         <StartOrchestrator inline />
       {:else if adoView}
@@ -390,6 +439,7 @@
           {#if diffEverOpened}
             <div class="absolute inset-0 {view === 'diff' ? 'z-10' : 'hidden'}"><Diff /></div>
           {/if}
+          {#if view === 'files'}<div class="absolute inset-0 z-10"><FilesView /></div>{/if}
         </div>
       {/if}
     </div>
@@ -423,6 +473,9 @@
 <FileSheet />
 <AddAccount />
 <ShipSheet />
+<CritterLog />
+<!-- The critters: over the window and the toast, under the scrims. -->
+<Critters />
 
 {#if app.toast}
   <div

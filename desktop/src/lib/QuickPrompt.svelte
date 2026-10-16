@@ -275,6 +275,7 @@
   bind:this={form}
   class="relative flex flex-none flex-col border-t border-rule-strong bg-bg"
   aria-label="Start a session"
+  data-critter-floor
   onfocusin={() => (focused = true)}
   onfocusout={onFocusOut}
   onsubmit={(e) => {

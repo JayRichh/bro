@@ -7,10 +7,12 @@
   // duplicate, remove, make default, make it a project's account. The
   // account spread sits on top, said in words. Shift+U opens it, as the
   // terminal app's accounts overlay.
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { api, type AccountRow, type ProfileForm, type UsageWindow } from '../api';
   import { app, openSession, refreshAccounts, refreshLaunchables, toast } from '../store.svelte';
-  import { ask, openMenu, type MenuEntry } from '../ui/ui.svelte';
+  import { openMenu, type MenuEntry } from '../ui/ui.svelte';
+  import { ownMenu } from '../menus/router';
+  import { useForItems } from '../menus/account';
   import UsageBar from './UsageBar.svelte';
   import ProfileEditor from './ProfileEditor.svelte';
   import {
@@ -27,11 +29,24 @@
     usageTitle,
     windowLabel,
   } from './usage';
-  import { removeWarning } from './pick';
-  import { nameProblem, projectAccount, projectsDefaultingTo, renameBlocker, sessionsFollow, SPREADS, suggestName, THRESHOLDS, viewRows } from './view';
-  import { runLogin, setProjectAccount } from './actions';
+  import { projectAccount, projectsDefaultingTo, SPREADS, THRESHOLDS, viewRows } from './view';
+  import {
+    duplicateAccount,
+    removeAccount,
+    renameAccount,
+    renameBlocked,
+    runLogin,
+    setAccountEnabled,
+    setDefaultAccount,
+    setProjectAccount,
+  } from './actions';
+  import { accountOpened } from './account-menu';
+  import { editRequest } from './edit.svelte';
   import { openAddAccount } from './add.svelte';
   import { allKeysItem } from '../commands';
+  import { nav } from '../shell/history.svelte';
+  import { openWake, refreshWake, scheduleOf, wake } from '../wake/state.svelte';
+  import { hhmm } from '../wake/timeline';
 
   const rows = $derived(viewRows(mergeRows(app.accounts, app.model.accounts ?? {}, ownLoginSessionHarnesses(app.model.agents))));
   const spread = $derived(app.launch.spread ?? 'manual');
@@ -43,8 +58,13 @@
 
   const GLYPH: Record<string, string> = { claude: 'C', codex: 'X', copilot: 'G', cursor: 'U', pi: 'P', opencode: 'O' };
 
+  /** An account's Whakaoho entry, for its Wake-up link (null until the overview is read). */
+  const wakeOf = (key: string) => wake.overview?.accounts.find((a) => a.account === key && a.known) ?? null;
+
   onMount(() => {
     refreshLaunchables();
+    // The Wake-up links name each account's hour: read the overview once if nothing has.
+    if (!wake.overview) void refreshWake();
     api
       .profileHarnesses()
       .then((h) => (harnesses = h))
@@ -75,28 +95,8 @@
     }
   }
 
-  async function setDefault(r: AccountRow) {
-    if (r.default) return;
-    try {
-      await api.profileSetDefault(r.name);
-      refreshLaunchables();
-    } catch (e) {
-      toast(String(e));
-    }
-  }
-
-  async function setEnabled(r: AccountRow) {
-    try {
-      await api.profileSetEnabled(r.name, r.disabled);
-      toast(r.disabled ? `${r.name} is on.` : `${r.name} is off: launches that pick no account skip it.`);
-      refreshLaunchables();
-    } catch (e) {
-      toast(String(e));
-    }
-  }
-
-  function edit(r: AccountRow) {
-    if (editing?.key === r.key) return void (editing = null);
+  /** Open the row's editor (and leave it open when it is). */
+  function openEditor(r: AccountRow) {
     editing = {
       key: r.key,
       form: { name: r.name, harness: r.harness, default: !!r.flaggedDefault || r.default, useDefault: r.useDefault, env: '' },
@@ -104,137 +104,61 @@
     };
   }
 
-  async function duplicate(r: AccountRow) {
-    const taken = app.accounts.filter((x) => x.profile).map((x) => x.name);
-    const v = await ask.prompt({
-      title: `Duplicate ${r.name}`,
-      note: `A new ${r.harness} account with the same variables and kind of login, in a home of its own: it signs in separately.`,
-      fields: [{ key: 'name', label: 'Name', value: suggestName(r.name, taken), mono: true }],
-      confirm: 'Duplicate',
-    });
-    if (!v) return;
-    const why = nameProblem(v.name, taken);
-    if (why) return toast(why);
-    try {
-      const out = await api.profileDuplicate(r.name, v.name.trim());
-      refreshLaunchables();
-      if (out.login) {
-        const go = await ask.confirm({
-          title: `Sign ${v.name.trim()} in`,
-          message: `${v.name.trim()} is added. Sign it in now? The login runs in a new terminal.`,
-          detail: [out.login],
-          confirm: 'Sign in',
-        });
-        if (go.ok) {
-          const rows = await api.accounts();
-          app.accounts = rows;
-          const row = rows.find((x) => x.profile && x.name === v.name.trim());
-          if (row) await runLogin(row);
-        }
-      } else toast(`Added ${v.name.trim()}.`);
-    } catch (e) {
-      toast(String(e));
+  /** The Edit button: opens the editor, or closes it again. */
+  function edit(r: AccountRow) {
+    if (editing?.key === r.key) return void (editing = null);
+    openEditor(r);
+  }
+
+  // The rail's menu asked for a row's editor: open it once the row is here.
+  // A row the loaded list does not have is not coming.
+  $effect(() => {
+    const key = editRequest.key;
+    if (!key) return;
+    const r = rows.find((x) => x.key === key);
+    if (!r) {
+      if (rows.length) editRequest.key = null;
+      return;
     }
-  }
+    editRequest.key = null;
+    if (editing?.key !== key) openEditor(r);
+  });
 
-  async function remove(r: AccountRow) {
-    const projects = projectsDefaultingTo(app.launch, app.model.projects, r.harness, r.name);
-    const detail = [
-      ...(r.home ? [`Its home is ${r.home}: it stays unless you tick the box below.`] : []),
-      ...(projects.length ? [`Default account of ${projects.map((p) => p.name).join(', ')}: those fall back to the spread.`] : []),
-    ];
-    const ok = await ask.confirm({
-      title: 'Remove account',
-      message: removeWarning(r.name, app.model.agents),
-      detail: detail.length ? detail : undefined,
-      confirm: 'Remove',
-      danger: true,
-      // The purge `kete profile remove --purge` does: the login goes too.
-      check: r.home ? `Also delete ${r.home} and the login in it` : undefined,
-    });
-    if (!ok.ok) return;
-    try {
-      const out = await api.profileRemove(r.name, !!r.home && ok.checked);
-      toast(
-        out.purged ? `Removed ${r.name} and deleted ${out.home}.` : out.home ? `Removed ${r.name}. Its home stays at ${out.home}.` : `Removed ${r.name}.`,
-      );
-      if (editing?.key === r.key) editing = null;
-      refreshLaunchables();
-    } catch (e) {
-      toast(String(e));
-    }
-  }
+  // Account details... from elsewhere (a Whakaoho card's menu): that row in view.
+  $effect(() => {
+    const key = nav.current.view === 'accounts' ? nav.current.item : undefined;
+    if (!key || !rows.some((r) => r.key === key)) return;
+    void tick().then(() => document.querySelector(`[data-account="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'nearest' }));
+  });
 
-  const RENAME_OFFLINE = 'Not connected to the kete daemon: a rename checks the sessions on the account first.';
+  // A row that goes (removed, renamed) takes its editor with it, whether
+  // the verb ran from this view or the rail's menu.
+  $effect(() => {
+    const open = editing;
+    if (open && !rows.some((r) => r.key === open.key)) editing = null;
+  });
 
-  /** Rename: refused while a session names it; the home, the repos it is
-   *  the default of and its reading move with the name. */
-  async function rename(r: AccountRow) {
-    const blocked = app.model.connected ? renameBlocker(r.name, app.model.agents, sessionsFollow(app.model)) : RENAME_OFFLINE;
-    if (blocked) return toast(blocked);
-    const taken = app.accounts.filter((x) => x.profile && x.key !== r.key).map((x) => x.name);
-    const v = await ask.prompt({
-      title: `Rename ${r.name}`,
-      note: r.home
-        ? `Its home moves from ${r.home} to the new name; repos that start on it follow.`
-        : `Repos that start on it follow the new name.`,
-      fields: [{ key: 'name', label: 'New name', value: r.name, mono: true }],
-      confirm: 'Rename',
-    });
-    if (!v || v.name.trim() === r.name) return;
-    const why = nameProblem(v.name, taken);
-    if (why) return toast(why);
-    try {
-      const out = await api.profileRename(r.name, v.name.trim());
-      const repos = out.projects.length ? `, the default of ${out.projects.length} ${out.projects.length === 1 ? 'repo' : 'repos'}` : '';
-      const archived = out.archived.length ? ` ${out.archived.length} archived ${out.archived.length === 1 ? 'session still names' : 'sessions still name'} ${r.name}.` : '';
-      const followed = out.followed
-        ? ` ${out.followed} ${out.followed === 1 ? 'session follows' : 'sessions follow'} (a running one on its next restart).`
-        : '';
-      toast(`Renamed ${r.name} to ${out.name}${repos}.${archived}${followed}`);
-      if (editing?.key === r.key) editing = null;
-      refreshLaunchables();
-      refreshAccounts();
-    } catch (e) {
-      toast(String(e));
-    }
-  }
+  /** The row's menu, as a right-click on it and `?` open it; its Edit opens
+   *  the editor in the row. */
+  const menuOf = (r: AccountRow) => accountOpened(r.key, { edit: () => openEditor(r) });
 
-  /** The row's verbs, as its buttons run them: what `?` lists. */
-  function rowVerbs(r: AccountRow, at: HTMLElement): MenuEntry[] {
-    const out: MenuEntry[] = [];
-    if (r.loginHint && !r.problem) out.push({ label: r.login === 'logged_in' ? 'Re-sign in' : 'Sign in', run: () => void signIn(r) });
-    if (!r.profile) return [...out, { label: 'Add as account', run: () => openAddAccount({ harness: r.harness, adopt: true }) }];
-    if (!r.problem)
-      out.push(
-        { label: r.default ? 'The default' : 'Make default', run: () => void setDefault(r), disabled: r.default },
-        { label: r.disabled ? 'Switch on' : 'Switch off', run: () => void setEnabled(r) },
-        { label: 'Edit\u2026', run: () => edit(r) },
-        { label: 'Duplicate\u2026', run: () => void duplicate(r) },
-        { label: 'Use for\u2026', run: () => useFor(r, at) },
-      );
-    if (r.name !== '(no name)') out.push({ label: 'Rename\u2026', run: () => void rename(r), keys: ['r'] });
-    out.push({ label: 'Remove\u2026', run: () => void remove(r), keys: ['delete'], danger: true });
-    return out;
-  }
-
-  /** A row's keys while focus is in it: ? lists its verbs, R renames,
+  /** A row's keys while focus is in it: ? lists its menu, R renames,
    *  Delete removes. */
   function rowKey(e: KeyboardEvent, r: AccountRow) {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const t = e.target as HTMLElement;
     if (t.closest('input, textarea, select, [contenteditable="true"]')) return;
-    // `?`: this account's verbs, searchable, every key last.
+    // `?`: this account's menu, searchable, every key last.
     if (e.key === '?') {
       e.preventDefault();
       e.stopPropagation();
       const at = e.currentTarget as HTMLElement;
-      return openMenu([...rowVerbs(r, at), 'sep', allKeysItem()], at, `account ${r.name}`, { search: true });
+      return openMenu([...(menuOf(r)?.items ?? []), 'sep', allKeysItem()], at, `account ${r.name}`, { search: true });
     }
     if (!r.profile) return;
     // The window's own r and Delete act on the open session: not here.
-    if (e.key === 'r' || e.key === 'R') (e.preventDefault(), e.stopPropagation(), rename(r));
-    else if (e.key === 'Delete') (e.preventDefault(), e.stopPropagation(), remove(r));
+    if (e.key === 'r' || e.key === 'R') (e.preventDefault(), e.stopPropagation(), renameAccount(r));
+    else if (e.key === 'Delete') (e.preventDefault(), e.stopPropagation(), removeAccount(r));
   }
 
   async function signIn(r: AccountRow) {
@@ -244,17 +168,12 @@
   /** "Use for...": each repo, ticked where this account is its default for
    *  the harness; picking a ticked one clears it. */
   function useFor(r: AccountRow, at: HTMLElement) {
-    const projects = app.model.projects;
-    const items: MenuEntry[] = [{ heading: `Default ${r.harness} account of` }];
-    if (!projects.length) items.push({ label: 'No repos yet', run: () => {}, disabled: true });
-    for (const p of projects) {
-      const now = projectAccount(app.launch, p.repo_path, r.harness);
-      const mine = now === r.name;
-      items.push({
-        label: mine ? `\u2713 ${p.name} (clear)` : now ? `${p.name} (now ${now})` : p.name,
-        run: () => setProjectAccount(p.id, r.harness, mine ? null : r.name),
-      });
-    }
+    const repos = app.model.projects.map((p) => ({ id: p.id, name: p.name, now: projectAccount(app.launch, p.repo_path, r.harness) }));
+    const items: MenuEntry[] = [
+      { heading: `Default ${r.harness} account of` },
+      ...useForItems(r.name, repos, (repo, clear) => void setProjectAccount(repo, r.harness, clear ? null : r.name)),
+    ];
+    if (!repos.length) items.push({ label: 'No repos yet', run: () => {}, disabled: true, title: 'Add a repo first' });
     openMenu(items, at, `Use ${r.name} for`);
   }
 
@@ -333,7 +252,7 @@
         {@const st = stateWord(r)}
         {@const projects = r.profile ? projectsDefaultingTo(app.launch, app.model.projects, r.harness, r.name) : []}
         {@const dimStar = !r.default && !!r.flaggedDefault && r.disabled}
-        <li class="border-b border-rule py-3">
+        <li class="border-b border-rule py-3" data-account={r.key} use:ownMenu={() => menuOf(r)}>
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
             onkeydown={(e) => rowKey(e, r)}
@@ -359,7 +278,7 @@
                       : dimStar
                         ? 'text-ember opacity-45'
                         : 'text-faint hover:text-ink'}"
-                    onclick={() => setDefault(r)}
+                    onclick={() => setDefaultAccount(r)}
                     title={starTitle(r)}
                     aria-label={r.default ? `${r.name} is the default` : `Make ${r.name} the default`}
                     aria-pressed={r.default}
@@ -430,6 +349,15 @@
                   <span class="w-[92px] flex-none truncate font-mono text-[10px] text-faint">{resetLine(w)}</span>
                 </div>
               {/each}
+              {#if r.harness === 'claude' && !r.problem}
+                {@const w = wakeOf(r.key)}
+                <button
+                  class="w-fit border-0 bg-transparent p-0 text-left font-mono text-[11px] text-muted underline-offset-4 hover:text-ink hover:underline"
+                  onclick={() => openWake(r.key)}
+                  title="Whakaoho: send one tiny prompt at an hour you pick, so {r.name}'s 5-hour window starts earlier. Open its wake-up schedule"
+                  >{#if w}Wake-up {scheduleOf(w).enabled ? hhmm(scheduleOf(w).anchor_min) : 'off'}{:else}Wake-up&hellip;{/if}</button
+                >
+              {/if}
             </div>
 
             <!-- Verbs. -->
@@ -439,7 +367,7 @@
                   class="relative mr-1 h-[14px] w-[26px] flex-none border p-0 {r.disabled ? 'border-rule bg-transparent' : 'border-rule-strong bg-ink'}"
                   role="switch"
                   aria-checked={!r.disabled}
-                  onclick={() => setEnabled(r)}
+                  onclick={() => setAccountEnabled(r)}
                   title={r.disabled ? `Off: launches that pick no account skip ${r.name}. Switch on` : `On. Switch ${r.name} off`}
                   aria-label="{r.name} enabled"
                 >
@@ -459,21 +387,21 @@
                   >Edit</button
                 >
                 {#if !r.problem}
-                  <button class={btn} onclick={() => duplicate(r)} title="A new {r.harness} account with {r.name}'s variables, signed in separately">Duplicate</button>
+                  <button class={btn} onclick={() => duplicateAccount(r)} title="A new {r.harness} account with {r.name}'s variables, signed in separately">Duplicate</button>
                   <button class={btn} onclick={(e) => useFor(r, e.currentTarget as HTMLElement)} aria-haspopup="menu" title="Make {r.name} the {r.harness} account a repo starts sessions on"
                     >Use for&hellip;</button
                   >
                 {/if}
                 {#if r.name !== '(no name)'}
-                  {@const blocked = app.model.connected ? renameBlocker(r.name, app.model.agents, sessionsFollow(app.model)) : RENAME_OFFLINE}
+                  {@const blocked = renameBlocked(r)}
                   <button
                     class="{btn} {blocked ? 'text-faint' : ''}"
-                    onclick={() => rename(r)}
+                    onclick={() => renameAccount(r)}
                     aria-disabled={!!blocked}
                     title={blocked ?? `Rename ${r.name}: its home and repo defaults follow (R)`}>Rename</button
                   >
                 {/if}
-                <button class="{btn} text-fail hover:border-fail" onclick={() => remove(r)} title="Remove {r.name}, its home kept or deleted as you choose (Delete)">Remove</button>
+                <button class="{btn} text-fail hover:border-fail" onclick={() => removeAccount(r)} title="Remove {r.name}, its home kept or deleted as you choose (Delete)">Remove</button>
               {:else}
                 <button
                   class={btn}

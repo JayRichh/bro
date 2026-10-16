@@ -372,9 +372,11 @@ fn open_project_menu(tui: &mut TuiHarness, tab: &str) {
     tui.wait_for_text(PROJECT_MENU_ROW);
 }
 
-/// Walk the open menu down to the row that reads `label`, and pick it.
+/// Walk the open menu down to the row that reads `label`, and pick it:
+/// by its words, never by its place, so a row added above it (an editor
+/// found on this machine) only lengthens the walk.
 fn choose_menu_row(tui: &mut TuiHarness, label: &str) {
-    for _ in 0..12 {
+    for _ in 0..30 {
         let deadline = Instant::now() + Duration::from_millis(400);
         while Instant::now() < deadline {
             if row_is_selected(tui.parser.lock().unwrap().screen(), label) {

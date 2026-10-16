@@ -4,6 +4,7 @@
 
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import type { WakeNowResult, WakeOverview, WakeSchedule } from './wake/types';
 
 export type AgentStatus =
   | 'fresh'
@@ -118,6 +119,25 @@ export interface ContextUsage {
   source: UsageSource;
   at: number;
 }
+/** Why a Claude session's last turn stopped short: waiting out a usage
+ *  limit, or needing you (logged out, billing, ...), or an API error.
+ *  Core's `StopNote`; `lib/stop.ts` turns it into words and a tone. */
+export interface StopNote {
+  /** Claude's `StopFailure` error (`rate_limit`, `billing_error`, ...) or
+   *  the notification behind the note (`quota_auto_resume_stale`). Free
+   *  text: a value this build has never heard of reads as an API error. */
+  reason: string;
+  /** Claude is waiting out a usage limit and continues on its own. */
+  waiting: boolean;
+  /** The reset as Claude printed it (`3:45pm`), already local time. */
+  resumes: string | null;
+  /** Epoch seconds the account's limit resets, when the screen said nothing. */
+  resets_at: number | null;
+  /** Claude's own words, for a tooltip. */
+  detail: string | null;
+  /** Epoch ms it was noted. */
+  at: number;
+}
 /** One account in the rail (`accounts_list`). */
 export interface AccountRow {
   key: string;
@@ -202,6 +222,9 @@ export interface Model {
   accounts?: Record<string, AccountUsage>;
   /** Context by agent id. */
   contexts?: Record<string, ContextUsage>;
+  /** Why a session's last turn stopped short, by agent id (a 62+ daemon
+   *  pushes it); a session with no entry has nothing to say. */
+  stops?: Record<string, StopNote>;
   /** Each session's lane and tier by agent id, archived ones too. */
   cards: Record<string, Card>;
   /** The board's cards by lane, in the order it shows them: live
@@ -357,7 +380,9 @@ export type SettingTarget =
 export type SettingControl =
   | { type: 'toggle' }
   | { type: 'choice'; options: string[]; labels: string[] }
-  | { type: 'text'; placeholder: string };
+  | { type: 'text'; placeholder: string }
+  /** A font family: an installed one, or empty for Kete's own (`placeholder`). */
+  | { type: 'font'; placeholder: string; mono: boolean };
 export interface SettingRow {
   target: SettingTarget;
   label: string;
@@ -427,6 +452,50 @@ export interface DesktopPrefs {
   startup?: string;
   /** Folded overview groups: `repo:<id>`, `wt:<id>`. */
   collapsed?: string[];
+  /** What opens a folder: `auto`, `vscode`, `visual-studio` or `command`. */
+  editor_folder?: string;
+  /** What opens a file: `auto`, `vscode`, `visual-studio` or `kete`. */
+  editor_file?: string;
+  /** Font families; absent or empty: Kete's own (Geist, Geist Mono, JetBrains Mono). */
+  font_ui?: string;
+  font_mono?: string;
+  font_term?: string;
+  /** Sizes, as the words their rows store: `14`, `13`, `12.5`, `1.12` by default. */
+  ui_size?: string;
+  term_size?: string;
+  editor_size?: string;
+  term_line?: string;
+  /** Imported themes by id, as their derived palettes (`theme` = `import:<id>`). */
+  themes?: Record<string, Palette>;
+}
+/** A theme mapped onto the window's colour tokens (nebula-config look.rs):
+ *  each token is a CSS custom property minus its `--`. */
+export interface Palette {
+  label: string;
+  light: boolean;
+  tokens: Record<string, string>;
+}
+/** `look_vscode`: what VS Code's current theme maps to. */
+export interface VsCodeLook {
+  stamp: number | null;
+  changed: boolean;
+  palette: Palette | null;
+  problem: string | null;
+}
+/** An installed VS Code theme, for the import list. */
+export interface InstalledTheme {
+  name: string;
+  label: string;
+  light: boolean;
+  extension: string;
+  builtin: boolean;
+  /** Canvas, text and four syntax colours. */
+  swatch: string[];
+}
+/** An installed font family (src-tauri fonts.rs). */
+export interface FontFamily {
+  name: string;
+  mono: boolean;
 }
 export interface Startup {
   view: string | null;
@@ -588,6 +657,15 @@ export const api = {
   profileRename: (old: string, name: string) => invoke<ProfileRenamed>('profile_rename', { old, new: name }),
   profileSetDefault: (name: string) => invoke<ProfileRow[]>('profile_set_default', { name }),
   accounts: () => invoke<AccountRow[]>('accounts_list'),
+  /** Whakaoho: every Claude account's wake-up schedule, next run, usual
+   *  hours, suggestion, each anchor's preview and last decisions
+   *  (`kete wake status --json`). */
+  wakeOverview: () => invoke<WakeOverview>('wake_overview'),
+  /** Save an account's wake-up schedule and rewrite the scheduled task;
+   *  the line saying what the task now does. */
+  wakeSet: (account: string, schedule: WakeSchedule) => invoke<string>('wake_set', { account, schedule }),
+  /** Wake an account now, whatever its schedule (`kete wake <account> --force`). */
+  wakeNow: (account: string) => invoke<WakeNowResult[]>('wake_now', { account }),
   profileSetEnabled: (name: string, enabled: boolean) => invoke<null>('profile_set_enabled', { name, enabled }),
   /** A new terminal in `worktree` running the account's login command; its id. */
   accountLoginRun: (worktree: string, key: string) => invoke<string>('account_login_run', { worktree, key }),
@@ -616,6 +694,23 @@ export const api = {
   settingsImportPreview: () => invoke<ImportPreview | null>('settings_import_preview'),
   settingsImport: (path: string) => invoke<string>('settings_import', { path }),
   desktopPrefs: () => invoke<DesktopPrefs>('desktop_prefs'),
+  /** The installed font families, sorted; empty where they can't be listed. */
+  systemFonts: () => invoke<FontFamily[]>('system_fonts'),
+  /** VS Code's current theme as a palette, unless `known` is still its stamp. */
+  lookVscode: (osLight: boolean, known: number | null) => invoke<VsCodeLook>('look_vscode', { osLight, known }),
+  /** Which VS Code the look reads (`VS Code`, `VS Code Insiders`); null: none found. */
+  lookVscodeInstall: () => invoke<string | null>('look_vscode_install'),
+  lookInstalledThemes: () => invoke<InstalledTheme[]>('look_installed_themes'),
+  /** Import an installed theme and wear it. */
+  lookImportInstalled: (name: string) => invoke<DesktopPrefs>('look_import_installed', { name }),
+  /** Open dialog, then import that theme file and wear it; null: cancelled. */
+  lookImportFile: () => invoke<DesktopPrefs | null>('look_import_file'),
+  lookRemoveTheme: (id: string) => invoke<DesktopPrefs>('look_remove_theme', { id }),
+  /** Kete's own look back; the imported themes stay. */
+  lookReset: () => invoke<DesktopPrefs>('look_reset'),
+  lookUseVscodeFonts: () => invoke<{ prefs: DesktopPrefs; said: string }>('look_use_vscode_fonts'),
+  /** Scale the whole window (the Interface size over 14). */
+  lookZoom: (scale: number) => invoke<void>('look_zoom', { scale }),
   /** The verb registry and the window's own key bindings. */
   actionsList: () => invoke<ActionsList>('actions_list'),
   /** Bind one of the window's keys (an empty list unbinds it), or with

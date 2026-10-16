@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { app, openSettings, revealRepo, setThemePref, toast, type ThemePref } from '../store.svelte';
+  import { app, openSettings, revealRepo, setThemePref, toast } from '../store.svelte';
+  import { nextTheme, themeLabel } from '../look';
+  import { look } from '../look.svelte';
   import { api } from '../api';
   import { nav, type View } from './history.svelte';
   import { railOrder, repoRows, tally } from '../overview/repos';
@@ -9,10 +11,12 @@
   import Status from '../Status.svelte';
   import AccountsSection from '../accounts/AccountsSection.svelte';
   import { openAccounts } from '../accounts/actions';
+  import { openWake } from '../wake/state.svelte';
   import VersionPlate from './VersionPlate.svelte';
   import { drag, dropProject, endDrag, leftFor, moveOnto, offsetIn, rootOf, startDrag } from '../reorder.svelte';
   import { dropZone, type Zone } from '../order';
   import { withKey, type ShortcutId } from '../shortcuts';
+  import { discover } from '../critters/state.svelte';
 
   /** Icons only, for a narrow window: the repos as their initials. */
   let { compact = false }: { compact?: boolean } = $props();
@@ -26,6 +30,9 @@
   const digit = (i: number): ShortcutId[] => (i < 9 ? [`repo_${i + 1}` as ShortcutId] : []);
   const here = $derived(nav.current.repo);
   const inSettings = $derived(nav.current.view === 'settings');
+  const inWake = $derived(nav.current.view === 'whakaoho');
+  /** Whakaoho, a middle dot, Wake-up (the dot is built, not typed: sources stay ASCII). */
+  const WAKE_TITLE = `Whakaoho ${String.fromCharCode(0xb7)} Wake-up: start each account's 5-hour window earlier`;
   let adding = $state(false);
   let addPath = $state('');
 
@@ -88,10 +95,22 @@
   }
 
   function cycleTheme() {
-    const order: ThemePref[] = ['system', 'light', 'dark'];
-    setThemePref(order[(order.indexOf(app.themePref) + 1) % order.length]);
+    setThemePref(nextTheme(app.themePref));
   }
-  const THEME_WORD: Record<ThemePref, string> = { system: 'System', light: 'Light', dark: 'Dark' };
+  /** What the theme tile says: the theme worn, and that it cycles Workshop's three. */
+  const themeWord = $derived(themeLabel(app.themePref, look.prefs.themes));
+  const themeTip = $derived(`Theme: ${themeWord}. Press to cycle Workshop: system, light, dark (more themes in Settings, Desktop, Appearance)`);
+
+  // The critters' secret: five quick clicks on the kete mark, and a kiwi
+  // climbs out of the basket (and the critters turn on).
+  let markClicks: number[] = [];
+  function markClick(e: MouseEvent) {
+    const now = Date.now();
+    markClicks = [...markClicks.filter((t) => now - t < 2500), now];
+    if (markClicks.length < 5) return;
+    markClicks = [];
+    discover('mark', (e.currentTarget as Element).getBoundingClientRect());
+  }
 
   const item =
     'flex w-full min-w-0 items-center gap-2 border-0 px-4 py-1.5 text-left text-[14px] hover:bg-surface focus-visible:-outline-offset-2';
@@ -106,10 +125,19 @@
   };
 </script>
 
+{#snippet sunrise()}
+  <!-- Whakaoho's mark: a half sun with three rays rising from behind a kete (a basket). -->
+  <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+    <path d="M5.2 10.5a2.8 2.8 0 0 1 5.6 0M8 4.7v1.8M3.9 6.4l1.3 1.3M12.1 6.4l-1.3 1.3" fill="none" stroke="currentColor" stroke-width="1.2" />
+    <path d="M3.5 10.5h9l-1.4 4H4.9zM4.2 12.5h7.6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="miter" />
+  </svg>
+{/snippet}
+
 <aside class="flex min-h-0 flex-col border-r border-rule bg-bg">
   {#if compact}
     <div class="flex h-10 flex-none items-center justify-center border-b border-rule" title={app.model.connected ? `kete: daemon pid ${app.model.daemon_pid}` : 'kete: not connected to the daemon'}>
-      <svg class="flex-none text-ink" width="20" height="20" viewBox="0 0 64 64" aria-hidden="true">
+      <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+      <svg class="flex-none text-ink" width="20" height="20" viewBox="0 0 64 64" aria-hidden="true" onclick={markClick}>
         <path d="M11 31h42l-6.5 26h-29z" fill="currentColor" />
         <path d="M21 31V22a11 11 0 0 1 22 0a5.5 5.5 0 0 1 -11 0" fill="none" stroke="currentColor" stroke-width="6" />
         <circle class={app.model.connected ? 'fill-ember' : 'fill-fail'} cx="32" cy="22" r="3.2" />
@@ -118,6 +146,7 @@
     <nav class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto py-2" aria-label="Repos">
       <button
         class="{tile} {nav.current.view === 'orchestrator' ? 'bg-surface text-ink' : 'bg-transparent text-ink'}"
+        data-target="orchestrator:rail"
         onclick={() => (orch || canProvision(app.model) ? openOrchestrator() : askStartOrchestrator())}
         title={orch ? `The orchestrator, ${orch.name}${orchNeeds ? `: ${orchNeeds} need you` : ''} (0 or F10)` : 'Start an orchestrator (0 or F10)'}
         aria-label="Orchestrator"
@@ -178,6 +207,15 @@
         <span aria-hidden="true">Ac</span>
       </button>
       <button
+        class="{tile} {inWake ? 'bg-surface text-ink' : 'bg-transparent text-muted hover:text-ink'}"
+        onclick={() => openWake()}
+        title={WAKE_TITLE}
+        aria-label="Whakaoho, wake-up"
+        aria-current={inWake ? 'page' : undefined}
+      >
+        {@render sunrise()}
+      </button>
+      <button
         class="{tile} {inSettings ? 'bg-surface text-ink' : 'bg-transparent text-muted hover:text-ink'}"
         onclick={() => openSettings()}
         title={withKey('Settings', 'settings')}
@@ -197,14 +235,14 @@
       <button
         class="{tile} bg-transparent text-muted hover:text-ink"
         onclick={cycleTheme}
-        title={withKey(`Theme: ${THEME_WORD[app.themePref]}. Press to cycle system, light, dark`, 'cycle_theme')}
-        aria-label="Theme: {THEME_WORD[app.themePref]}"
+        title={withKey(themeTip, 'cycle_theme')}
+        aria-label="Theme: {themeWord}"
       >
         <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
           <rect x="2.5" y="2.5" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.3" />
           {#if app.themePref === 'system'}
             <path d="M8 2.5v11h5.5v-11z" fill="currentColor" />
-          {:else if app.themePref === 'dark'}
+          {:else if app.dark}
             <rect x="2.5" y="2.5" width="11" height="11" fill="currentColor" />
           {/if}
         </svg>
@@ -212,7 +250,8 @@
     </div>
   {:else}
   <div class="flex h-10 flex-none items-center gap-2 border-b border-rule px-4">
-    <svg class="flex-none text-ink" width="20" height="20" viewBox="0 0 64 64" aria-hidden="true">
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+    <svg class="flex-none text-ink" width="20" height="20" viewBox="0 0 64 64" aria-hidden="true" onclick={markClick}>
       <path d="M11 31h42l-6.5 26h-29z" fill="currentColor" />
       <path d="M21 31V22a11 11 0 0 1 22 0a5.5 5.5 0 0 1 -11 0" fill="none" stroke="currentColor" stroke-width="6" />
       <circle class="fill-ember" cx="32" cy="22" r="3.2" />
@@ -233,8 +272,9 @@
         {@const onOrch = nav.current.view === 'orchestrator'}
         <button
           class="{item} {onOrch ? 'bg-surface font-semibold text-ink' : 'bg-transparent text-ink'}"
+          data-target="orchestrator:rail"
           onclick={openOrchestrator}
-          title="The orchestrator, {orch.name} (0 or F10)"
+          title="The orchestrator, {orch.name} (0 or F10); right-click for its menu"
           aria-current={onOrch ? 'page' : undefined}
         >
           <span class="flex-none font-mono text-[12px]" aria-hidden="true">&#9670;</span>
@@ -250,6 +290,7 @@
       {:else}
         <button
           class="{item} bg-transparent text-[13px] text-muted hover:text-ink"
+          data-target="orchestrator:rail"
           onclick={() => (canProvision(app.model) ? openOrchestrator() : askStartOrchestrator())}
           title="Start an orchestrator: one session that coordinates the others (0 or F10)"
         >
@@ -327,6 +368,18 @@
     </div>
 
     <AccountsSection {heading} />
+    <!-- Whakaoho sits with the accounts it wakes. -->
+    <div class="pt-1">
+      <button
+        class="{item} text-[13px] {inWake ? 'bg-surface text-ink' : 'bg-transparent text-muted hover:text-ink'}"
+        onclick={() => openWake()}
+        title={WAKE_TITLE}
+        aria-current={inWake ? 'page' : undefined}
+      >
+        {@render sunrise()}
+        <span class="min-w-0 flex-1 truncate">Whakaoho</span>
+      </button>
+    </div>
   </nav>
 
   <VersionPlate />
@@ -356,17 +409,17 @@
     <button
       class="inline-flex h-7 items-center gap-2 border-0 bg-transparent px-2 text-[13px] text-muted hover:bg-surface hover:text-ink"
       onclick={cycleTheme}
-      title={withKey(`Theme: ${THEME_WORD[app.themePref]}. Press to cycle system, light, dark`, 'cycle_theme')}
+      title={withKey(themeTip, 'cycle_theme')}
     >
       <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
         <rect x="2.5" y="2.5" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.3" />
         {#if app.themePref === 'system'}
           <path d="M8 2.5v11h5.5v-11z" fill="currentColor" />
-        {:else if app.themePref === 'dark'}
+        {:else if app.dark}
           <rect x="2.5" y="2.5" width="11" height="11" fill="currentColor" />
         {/if}
       </svg>
-      Theme: {THEME_WORD[app.themePref]}
+      <span class="min-w-0 truncate">Theme: {themeWord}</span>
     </button>
   </div>
   {/if}

@@ -13,8 +13,10 @@ pub use nebula_config::claude_catalogue;
 pub mod completion;
 pub mod config;
 pub mod config_watch;
+pub mod critters;
 pub mod delete_check;
 pub mod desk;
+pub mod editors;
 pub use nebula_config::cursor_catalogue;
 pub mod diff_layout;
 pub mod diff_tree;
@@ -35,7 +37,9 @@ pub mod icons;
 pub mod icons_table;
 pub mod ipc;
 pub mod issues;
-pub mod jsonc;
+// The JSONC reader lives with the settings now, so the desktop window
+// reads VS Code's files with the same one; this path stays for callers.
+pub use nebula_config::jsonc;
 pub mod key_combo;
 pub mod keymap;
 pub mod keys;
@@ -76,6 +80,7 @@ pub mod update_check;
 pub mod view_jobs;
 pub mod vim_term;
 pub mod vscode_theme;
+pub mod wake_tab;
 pub mod wt_settings;
 
 use anyhow::Result;

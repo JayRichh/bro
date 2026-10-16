@@ -227,22 +227,15 @@ pub fn open_allowed(
     open: &OpenCommand,
     approved: Option<&str>,
 ) -> Res<bool> {
-    use nebula_config::desktop::DesktopPrefs;
-    if !open.from_file {
-        return Ok(true);
-    }
-    let repo = main.to_string_lossy().into_owned();
-    if DesktopPrefs::load_at(path, local).open_approved(&repo, &open.command) {
-        return Ok(true);
-    }
-    if approved != Some(open.command.as_str()) {
-        return Ok(false);
-    }
-    DesktopPrefs::update_in(path, local, |p| {
-        p.approve_open(&repo, &open.command);
-        Ok(())
-    })?;
-    Ok(true)
+    // The TUI's Open command asks through the same approval.
+    nebula_config::desktop::open_allowed_in(
+        path,
+        local,
+        &main.to_string_lossy(),
+        &open.command,
+        open.from_file,
+        approved,
+    )
 }
 
 /// Start `command` through the user's shell in `cwd`, with no console

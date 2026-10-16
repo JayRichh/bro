@@ -2,14 +2,17 @@
   import { app, goHome, openDiff, projectOf, sessionWorktree } from './store.svelte';
   import { toneOf, terminalTone, harnessLabel, placeOf, age, lastPrompt } from './status';
   import Status from './Status.svelte';
+  import StopBadge from './StopBadge.svelte';
   import Terminal from './Terminal.svelte';
   import OrchBadge from './orchestrator/OrchBadge.svelte';
   import ContextBar from './accounts/ContextBar.svelte';
-  import { agentMenu, followUp, newTerminal, openEditor, restartAgent, terminalMenu, unarchiveAgent } from './actions';
+  import { followUp, newTerminal, openTargetMenu, restartAgent, unarchiveAgent } from './actions';
   import { openMenu } from './ui/ui.svelte';
+  import { ownMenu } from './menus/router';
   import { toggleMaximize } from './commands';
   import { withKey } from './shortcuts';
   import IconButton from './ui/IconButton.svelte';
+  import EditorButtons from './editors/EditorButtons.svelte';
   import { accountMenu } from './accounts/actions';
   import { accountLabel, canSwitch } from './accounts/view';
 
@@ -19,8 +22,8 @@
   }
 
   function actions(at: HTMLElement | { x: number; y: number }) {
-    const items = agent ? agentMenu(agent) : terminal ? terminalMenu(terminal) : [];
-    openMenu(items, at, agent?.name ?? terminal?.name ?? 'Session');
+    if (agent) openTargetMenu({ kind: 'agent', id: agent.id }, at);
+    else if (terminal) openTargetMenu({ kind: 'terminal', id: terminal.id }, at);
   }
 
   const s = $derived(app.session);
@@ -43,7 +46,6 @@
     <div
       class="@container flex min-w-0 flex-none flex-col gap-1 border-b border-rule px-4 py-2"
       data-target={target}
-      oncontextmenu={(e) => (e.preventDefault(), actions({ x: e.clientX, y: e.clientY }))}
     >
       <div class="flex min-w-0 items-center gap-3">
         <span class="min-w-0 truncate text-[15px] font-semibold {tone === 'needs' ? 'text-ember-ink' : 'text-ink'}"
@@ -51,6 +53,10 @@
         >
         {#if agent?.role === 'orchestrator'}<OrchBadge />{/if}
         <Status {tone} />
+        <!-- A usage limit it waits out, or why it stopped: "running, resumes 3:45pm".
+             Off in a narrow header, where it would squeeze the name away: the
+             session row and the board card still carry it. -->
+        <StopBadge note={agent ? app.model.stops?.[agent.id] : null} class="self-center @max-[560px]:hidden" />
         <span class="flex-1"></span>
         <div class="flex flex-none items-center gap-1" role="toolbar" aria-label="Session">
           {#if agent?.archived}
@@ -68,7 +74,10 @@
           <!-- Secondary verbs give way in a narrow pane; Actions keeps them. -->
           <span class="hidden items-center gap-1 @min-[560px]:flex">
             <IconButton icon="terminal" label="New terminal in this worktree" title={withKey('New terminal in this worktree', 'new_terminal')} onclick={() => newTerminal(wt ?? undefined)} />
-            <IconButton icon="editor" label="Open the worktree in the editor" title={withKey('Open the worktree in the editor', 'open_editor')} onclick={() => openEditor(wt ?? undefined)} />
+            <EditorButtons
+              worktree={app.model.worktrees.find((x) => x.id === wt)}
+              btn="inline-flex h-7 min-w-7 flex-none items-center justify-center border border-rule bg-transparent px-1.5 text-ink hover:border-rule-strong"
+            />
           </span>
           <IconButton icon="diff" label="Diff this worktree" word="Diff" title={withKey('Diff this worktree', ['diff', 'open_diff'])} onclick={() => openDiff(wt)} />
           <IconButton
@@ -94,6 +103,7 @@
           <button
             class="inline-flex h-5 flex-none items-center gap-1 self-center border border-rule bg-transparent px-1.5 font-mono text-[11px] text-ink hover:border-rule-strong"
             aria-haspopup="menu"
+            use:ownMenu={() => (agent ? { items: accountMenu(agent.id), label: 'Account' } : null)}
             title={canSwitch(app.model)
               ? `Runs on ${agent.profile?.trim() || "its harness's own login"}. Move it to another account (restarts fresh in this worktree)`
               : `Runs on ${agent.profile?.trim() || "its harness's own login"}. Moving accounts needs a newer daemon`}
@@ -102,8 +112,14 @@
             ></button
           >
         {/if}
-        {#if where}
-          <span class="flex-none font-mono text-[12px]" title={where.path}>{where.project} / {where.branch}</span>
+        {#if where && wt}
+          <!-- Its place: the repo's and the checkout's own menus on a
+               right-click (the checkout's lists its sessions to open). -->
+          <span class="flex-none font-mono text-[12px]" title="{where.path}. Right-click the repo or the branch for its menu"
+            ><span data-target="project:{projectOf(wt) ?? ''}">{where.project}</span> / <span data-target="worktree:{wt}" data-menu-jump
+              >{where.branch}</span
+            ></span
+          >
         {/if}
         {#if agent}<ContextBar context={app.model.contexts?.[agent.id]} wide />{/if}
         {#if prompt}<span class="min-w-0 truncate" title={prompt}>{prompt}</span>{/if}

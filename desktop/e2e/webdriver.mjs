@@ -11,7 +11,12 @@ export const Key = {
   Shift: '\uE008',
   Enter: '\uE007',
   Escape: '\uE00C',
+  ArrowLeft: '\uE012',
+  ArrowRight: '\uE014',
+  ArrowUp: '\uE013',
+  ArrowDown: '\uE015',
   F2: '\uE032',
+  F10: '\uE03A',
 };
 
 export class WebDriver {
@@ -81,6 +86,24 @@ export class WebDriver {
     const up = [key, ...mods.reverse()].map((value) => ({ type: 'keyUp', value }));
     await this.call('POST', '/actions', { actions: [{ type: 'key', id: 'kb', actions: [...down, ...up] }] });
     await this.call('DELETE', '/actions');
+  }
+
+  /** A mouse gesture as W3C pointer actions: synthetic input inside the
+   *  WebView, never the OS pointer. `keep` leaves a button down for the
+   *  next call (a drag checked halfway). */
+  async pointer(steps, keep = false) {
+    await this.call('POST', '/actions', { actions: [{ type: 'pointer', id: 'mouse', parameters: { pointerType: 'mouse' }, actions: steps }] });
+    if (!keep) await this.call('DELETE', '/actions');
+  }
+
+  /** A right-click on an element: the mouse moved to its centre (`x`, `y`
+   *  offset from there), button 2 pressed and released. */
+  async contextClick(el, { x = 0, y = 0 } = {}) {
+    await this.pointer([
+      { type: 'pointerMove', duration: 0, origin: { [ELEMENT]: el }, x: Math.round(x), y: Math.round(y) },
+      { type: 'pointerDown', button: 2 },
+      { type: 'pointerUp', button: 2 },
+    ]);
   }
 
   screenshot() {

@@ -4,6 +4,7 @@ pub mod branch_name;
 pub mod clock;
 pub mod codec;
 pub mod crashlog;
+pub mod editors;
 pub mod entities;
 pub mod env;
 pub mod harness;
@@ -23,8 +24,10 @@ pub mod scope;
 pub mod session_snapshot;
 pub mod settings;
 pub mod shell;
+pub mod stop;
 pub mod tracked_settings;
 pub mod usage;
+pub mod wake;
 
 pub use entities::*;
 pub use harness::*;

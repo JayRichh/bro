@@ -1,5 +1,6 @@
 # Kete installer for Windows: installs or updates kete.exe, and bro.exe
-# (Kete's old name, the same program) beside it.
+# (Kete's old name, the same program) beside it, and kete-w.exe (kete with
+# no console window, which the wake-up's scheduled task runs).
 #
 #   irm https://raw.githubusercontent.com/JayRichh/kete/main/install.ps1 | iex
 #
@@ -110,6 +111,10 @@ param([switch]$NoDesktop)
             $dest = Join-Path $InstallDir 'kete.exe'
             Replace-Exe $exe.FullName $dest
             Replace-Exe $exe.FullName (Join-Path $InstallDir 'bro.exe')
+            # Releases from before the wake-up have no kete-w.exe; kete then
+            # runs its scheduled task itself, with a console window.
+            $windowless = Get-ChildItem -Path $unpacked -Filter 'kete-w.exe' -Recurse | Select-Object -First 1
+            if ($windowless) { Replace-Exe $windowless.FullName (Join-Path $InstallDir 'kete-w.exe') }
             return $dest
         } finally {
             Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue

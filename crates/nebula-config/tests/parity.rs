@@ -178,6 +178,7 @@ fn every_global_row_takes_each_of_its_values() {
             Control::Toggle => vec![json!(true), json!(false)],
             Control::Choice { options, .. } => options.iter().map(|o| json!(o)).collect(),
             Control::Text { .. } => vec![json!("develop"), json!("")],
+            Control::Font { .. } => vec![json!("Fira Code"), json!("")],
         };
         for value in values {
             let mut cfg = Config::default();
@@ -215,7 +216,9 @@ fn a_write_from_the_window_changes_one_key_and_keeps_the_rest() {
     assert_eq!(
         read(&path),
         json!({"future_key": {"a": 1}, "editor": "hx", "kanban": true,
-               "desktop": {"theme": "dark", "home": "board", "diff_mode": "side", "startup": "home"}})
+               "desktop": {"theme": "dark", "home": "board", "diff_mode": "side", "startup": "home",
+                           "editor_folder": "auto", "editor_file": "auto",
+                           "editor_reuse": "off"}})
     );
     assert_eq!(read(&local), json!({"session_idle_timeout": "15m"}));
     assert!(set_in(&path, &local, &global("kanban"), &json!("sideways")).is_err());
@@ -335,6 +338,88 @@ fn reset_puts_rows_back_and_keeps_what_it_does_not_show() {
     assert_eq!(raw["desktop"]["later"], true);
 }
 
+/// Every row of the window's own tab takes each of the values it offers
+/// (a font row, a family or empty) and reads it back; the Appearance
+/// group holds the theme, the fonts and the sizes, and the Theme row lists
+/// an imported theme by its name.
+#[test]
+fn every_desktop_row_takes_each_of_its_values() {
+    let mut prefs = DesktopPrefs::default();
+    let palette = nebula_config::look::from_vscode(
+        &nebula_config::vscode::ThemeData::default(),
+        false,
+        "Atom One Dark",
+    );
+    prefs.import_theme(palette).unwrap();
+    let (_dir, path, local) = layers();
+    // The import is on disk, so the Theme row's `import:` value is too.
+    nebula_config::desktop::DesktopPrefs::update_in(&path, &local, |p| {
+        *p = prefs.clone();
+        Ok(())
+    })
+    .unwrap();
+    let schema = export(&Config::default(), &prefs, &[]);
+    let desktop = schema.tabs.iter().find(|t| t.id == "desktop").unwrap();
+    let look = desktop
+        .groups
+        .iter()
+        .find(|g| g.title == "Appearance")
+        .expect("an Appearance group");
+    let keys: Vec<&str> = look
+        .rows
+        .iter()
+        .map(|r| match &r.target {
+            Target::Desktop { key } => key.as_str(),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            "theme",
+            "font_ui",
+            "ui_size",
+            "font_mono",
+            "font_term",
+            "term_size",
+            "term_line",
+            "editor_size"
+        ]
+    );
+    let Control::Choice { options, labels } = &look.rows[0].control else {
+        panic!("the theme is a choice");
+    };
+    assert_eq!(
+        options.last().map(String::as_str),
+        Some("import:atom-one-dark")
+    );
+    assert_eq!(labels.last().map(String::as_str), Some("Atom One Dark"));
+    for row in desktop.groups.iter().flat_map(|g| &g.rows) {
+        let Target::Desktop { key } = &row.target else {
+            panic!("the window's tab writes the window's preferences");
+        };
+        let values: Vec<Value> = match &row.control {
+            Control::Choice { options, .. } => options.iter().map(|o| json!(o)).collect(),
+            Control::Font { .. } => vec![json!("Fira Code"), json!("")],
+            other => panic!("{key}: {other:?}"),
+        };
+        for value in values {
+            set_in(&path, &local, &row.target, &value).unwrap_or_else(|e| panic!("{key}: {e}"));
+            assert_eq!(
+                DesktopPrefs::load_at(&path, &local).get(key),
+                value.as_str().unwrap(),
+                "{key}"
+            );
+        }
+    }
+    // The window's Reset leaves the imported themes to pick again.
+    schema::reset_in(&path, &local).unwrap();
+    let after = DesktopPrefs::load_at(&path, &local);
+    assert_eq!(after.theme, "system");
+    assert_eq!(after.term_size, "13");
+    assert!(after.themes.contains_key("atom-one-dark"));
+}
+
 #[test]
 fn a_project_row_must_name_a_repo_the_daemon_knows() {
     let projects = one_project();
@@ -407,4 +492,105 @@ fn the_account_rows_are_shared_and_the_policy_reads_them() {
     );
     assert_eq!(policy.spread, nebula_core::accounts::Spread::Failover);
     assert_eq!(policy.threshold, 80);
+}
+
+/// The critters are both apps': a Critters group on Appearance, not under
+/// "Terminal app", off by default; the window's editor preferences sit in
+/// an Editors group on its own tab.
+#[test]
+fn the_critters_rows_are_shared_and_the_editors_are_the_windows() {
+    let schema = export(&Config::default(), &DesktopPrefs::default(), &[]);
+    let look = schema
+        .tabs
+        .iter()
+        .find(|t| t.title == "Appearance")
+        .unwrap();
+    let group = look
+        .groups
+        .iter()
+        .find(|g| g.title == "Critters")
+        .expect("a Critters group");
+    assert!(!group.terminal);
+    let rows: Vec<(String, Value)> = group
+        .rows
+        .iter()
+        .map(|r| match &r.target {
+            Target::Global { key } => (key.clone(), r.value.clone()),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("critters".to_string(), json!(false)),
+            ("critters_size".to_string(), json!("medium")),
+            ("critters_often".to_string(), json!("normal")),
+        ]
+    );
+    let desktop = schema.tabs.iter().find(|t| t.id == "desktop").unwrap();
+    let editors = desktop
+        .groups
+        .iter()
+        .find(|g| g.title == "Editors")
+        .expect("an Editors group");
+    let keys: Vec<(&str, &Value)> = editors
+        .rows
+        .iter()
+        .map(|r| match &r.target {
+            Target::Desktop { key } => (key.as_str(), &r.value),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            ("editor_folder", &json!("auto")),
+            ("editor_file", &json!("auto")),
+            ("editor_reuse", &json!("off"))
+        ]
+    );
+
+    let (_dir, path, local) = layers();
+    let global = |key: &str| Target::Global { key: key.into() };
+    set_in(&path, &local, &global("critters"), &json!(true)).unwrap();
+    set_in(&path, &local, &global("critters_size"), &json!("large")).unwrap();
+    assert!(set_in(&path, &local, &global("critters_often"), &json!("never")).is_err());
+    set_in(
+        &path,
+        &local,
+        &Target::Desktop {
+            key: "editor_file".into(),
+        },
+        &json!("kete"),
+    )
+    .unwrap();
+    let cfg = Config::load_at(&path, &local);
+    assert!(cfg.critters);
+    assert_eq!(cfg.critters_size_word(), "large");
+    assert_eq!(cfg.critters_often_word(), "normal");
+    assert_eq!(DesktopPrefs::load_at(&path, &local).editor_file, "kete");
+}
+
+/// WHAKAOHO's schedules live in `config.local.json` under `wake`, which
+/// `Config` has no field for: a settings write from either app keeps them
+/// there and never copies them into `config.json` (which `kete ssh`
+/// carries to other machines), and the wake writer keeps every setting.
+#[test]
+fn the_wake_map_stays_local_through_settings_writes() {
+    let (_dir, path, local) = layers();
+    std::fs::write(&path, r#"{"editor": "hx"}"#).unwrap();
+    let schedule = nebula_core::wake::WakeSchedule {
+        enabled: true,
+        ..Default::default()
+    };
+    nebula_core::wake::set_in(&path, &local, "work", Some(&schedule)).unwrap();
+    let global = |key: &str| Target::Global { key: key.into() };
+    set_in(&path, &local, &global("kanban"), &json!(true)).unwrap();
+    Config::update_in(&path, &local, |c| c.editor = "nvim".into()).unwrap();
+    assert!(read(&path).get("wake").is_none(), "{}", read(&path));
+    assert_eq!(read(&local)["wake"]["work"]["enabled"], true);
+    assert_eq!(nebula_core::wake::load_in(&local)["work"], schedule);
+    nebula_core::wake::set_in(&path, &local, "work", None).unwrap();
+    assert_eq!(read(&path)["editor"], "nvim");
+    assert_eq!(read(&path)["kanban"], true);
 }

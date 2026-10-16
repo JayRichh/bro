@@ -242,6 +242,45 @@ pub enum Action {
     /// Merge a settings file in (`kete config import`), after a confirm
     /// saying what it changes.
     ImportSettings,
+    // 0.54/0.55: the editors, the copy verbs, wake-up and the critters,
+    // unbound by default like the menus' verbs above.
+    /// Open the folder or file in VS Code (or the VS Code family editor
+    /// detected), focusing a window already on it.
+    OpenInVscode,
+    /// Open the checkout's solution (or the file) in Visual Studio.
+    OpenInVisualStudio,
+    /// Snap the checkout's editor window to the half of the screen beside
+    /// Kete's.
+    DockEditor,
+    /// Show the folder or file in Explorer (Finder, the file manager).
+    RevealInExplorer,
+    /// Open the file with the app the system gives its type.
+    OpenWithDefault,
+    /// Open the file in Kete's own viewer.
+    OpenFileInKete,
+    /// Copy the thing's full path.
+    CopyPath,
+    /// Copy the file's or folder's path from its worktree's root.
+    CopyRelativePath,
+    /// Copy the checkout's branch name.
+    CopyBranch,
+    /// WHAKAOHO now: start the account's 5-hour window with one tiny
+    /// prompt.
+    WakeAccount,
+    /// The CRITTERS overlay on or off.
+    Critters,
+    // 0.54, the menu matrix: the menus' own verbs, unbound like the rest.
+    /// Mark a session's finished turn read, or every unread one in the
+    /// checkout, the repo or what the board shows.
+    MarkSeen,
+    /// Copy the link of the checkout's pull request.
+    CopyPrUrl,
+    /// Archive the finished sessions already read, in the checkout, the
+    /// repo or what the board shows, after one confirm listing them.
+    ArchiveDone,
+    /// WHAKAOHO's schedule: the wake-up view, on the account it was asked
+    /// from.
+    WakeSchedule,
 }
 
 /// What a verb acts on.
@@ -257,6 +296,11 @@ pub enum AppliesTo {
     /// A shell terminal (and, in the TUI, the pane's PTY).
     Terminal,
     Account,
+    /// A file in a worktree: a diff's file row, the tree browser's, a
+    /// finder's.
+    File,
+    /// A folder in a worktree.
+    Folder,
 }
 
 /// Where a verb means something.
@@ -910,13 +954,13 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::ScopeAccount,
         id: "scope_account",
         label: "Scope to an account…",
-        hint: "Narrow the scope chip to the sessions of one account, picked from those the board's sessions run on (or back to any account); the chip's @ does the same by click. The desktop's chip menu lists the accounts too",
+        hint: "Narrow the scope chip to the sessions of one account, picked from those the board's sessions run on (or back to any account); the chip's @ does the same by click, and an account's menu narrows to it straight away. The desktop's chip menu lists the accounts too",
         group: "PROJECTS & WORKTREES",
         scope: Scope::Global,
         defaults: &[],
         word: "account",
         destructive: false,
-        applies_to: &[AppliesTo::Global],
+        applies_to: &[AppliesTo::Global, AppliesTo::Account],
         works_in: &[WorksIn::Grid, WorksIn::Board],
         surface: Surface::Tui,
         desktop: &[],
@@ -1087,7 +1131,9 @@ pub const ACTIONS: &[ActionSpec] = &[
         defaults: &["w"],
         word: "browser",
         destructive: false,
-        applies_to: &[AppliesTo::Worktree],
+        // A card's and a repo's too, as their checkout's (the menus' Open
+        // in group).
+        applies_to: &[AppliesTo::Worktree, AppliesTo::Session, AppliesTo::Repo],
         works_in: &[WorksIn::Grid, WorksIn::Board],
         surface: Surface::Tui,
         desktop: &[],
@@ -1461,7 +1507,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         action: Action::TreeBrowser,
         id: "tree_browser",
         label: "File tree browser",
-        hint: "Browse the worktree's files with a preview pane",
+        hint: "Browse the worktree's files as git lists them, folders folded (the terminal app previews beside the tree)",
         group: "FILES",
         scope: Scope::Global,
         defaults: &["b"],
@@ -1469,8 +1515,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         destructive: false,
         applies_to: &[AppliesTo::Worktree],
         works_in: &[WorksIn::Grid, WorksIn::Board],
-        surface: Surface::Tui,
-        desktop: &[],
+        surface: Surface::Both,
+        // The window's Files view, beside Diff in the split.
+        desktop: &[
+            dk("open_files", "Files: the checkout in context as a tree (again: back from it)", "Views", DeskScope::Anywhere, &["ctrl+shift+e"]),
+            dk("files", "Files: the checkout in context as a tree (again: back from it)", "Views", DeskScope::Global, &["b"]),
+        ],
     },
     // ---- TERMINAL ----
     ActionSpec {
@@ -1559,7 +1609,8 @@ pub const ACTIONS: &[ActionSpec] = &[
         defaults: &["shift+u"],
         word: "accounts",
         destructive: false,
-        applies_to: &[AppliesTo::Account],
+        // Global too: the background menu's View group lists it.
+        applies_to: &[AppliesTo::Account, AppliesTo::Global],
         works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
         surface: Surface::Both,
         desktop: &[
@@ -1759,6 +1810,268 @@ pub const ACTIONS: &[ActionSpec] = &[
         destructive: false,
         applies_to: &[AppliesTo::Global],
         works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    // 0.54/0.55, appended: the editors, where else a path opens, the copy
+    // verbs, wake-up and the critters. Unbound: the menus, `?` and the
+    // palette reach them, and a user may bind one.
+    ActionSpec {
+        action: Action::OpenInVscode,
+        id: "open_in_vscode",
+        label: "Open in VS Code",
+        hint: "Open the checkout, folder or file in VS Code (or the Insiders, VSCodium, Cursor or Windsurf install found), focusing a window already open on it; a file opens at its line",
+        group: "FILES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "vs code",
+        destructive: false,
+        applies_to: &[
+            AppliesTo::Worktree,
+            AppliesTo::Repo,
+            AppliesTo::Session,
+            AppliesTo::Folder,
+            AppliesTo::File,
+        ],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff, WorksIn::Overlay],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::OpenInVisualStudio,
+        id: "open_in_visual_studio",
+        label: "Open in Visual Studio",
+        hint: "Open the checkout's solution in Visual Studio (its folder when it has none), or the file in the instance already running; only where Visual Studio is installed",
+        group: "FILES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "visual studio",
+        destructive: false,
+        applies_to: &[
+            AppliesTo::Worktree,
+            AppliesTo::Repo,
+            AppliesTo::Session,
+            AppliesTo::File,
+        ],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff, WorksIn::Overlay],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::DockEditor,
+        id: "dock_editor",
+        label: "Dock editor beside Kete",
+        hint: "Snap the checkout's open editor window to the half of the screen beside Kete's window and fit Kete to the other half; the system's own snap keys undo it",
+        group: "FILES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "dock",
+        destructive: false,
+        applies_to: &[AppliesTo::Worktree, AppliesTo::Repo, AppliesTo::Session],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::RevealInExplorer,
+        id: "reveal_in_explorer",
+        label: "Show in Explorer",
+        hint: "Show the checkout, folder or file in Explorer (Finder on macOS, the file manager elsewhere)",
+        group: "FILES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "reveal",
+        destructive: false,
+        applies_to: &[
+            AppliesTo::Worktree,
+            AppliesTo::Repo,
+            AppliesTo::Session,
+            AppliesTo::Folder,
+            AppliesTo::File,
+        ],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff, WorksIn::Overlay],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::OpenWithDefault,
+        id: "open_with_default",
+        label: "Open with default app",
+        hint: "Open the file with the app the system gives its type",
+        group: "FILES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "open with",
+        destructive: false,
+        applies_to: &[AppliesTo::File],
+        works_in: &[WorksIn::Pane, WorksIn::Diff, WorksIn::Overlay],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::OpenFileInKete,
+        id: "open_file_in_kete",
+        label: "Open in Kete",
+        hint: "Open the file in Kete's own viewer",
+        group: "FILES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "view",
+        destructive: false,
+        applies_to: &[AppliesTo::File],
+        works_in: &[WorksIn::Pane, WorksIn::Diff, WorksIn::Overlay],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::CopyPath,
+        id: "copy_path",
+        label: "Copy path",
+        hint: "Copy the full path of the checkout, folder or file to the clipboard",
+        group: "FILES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "copy path",
+        destructive: false,
+        // A terminal's is its checkout's folder.
+        applies_to: &[
+            AppliesTo::Worktree,
+            AppliesTo::Repo,
+            AppliesTo::Session,
+            AppliesTo::Terminal,
+            AppliesTo::Folder,
+            AppliesTo::File,
+        ],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff, WorksIn::Overlay],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::CopyRelativePath,
+        id: "copy_relative_path",
+        label: "Copy relative path",
+        hint: "Copy the file's or folder's path from its worktree's root to the clipboard",
+        group: "FILES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "copy relative",
+        destructive: false,
+        applies_to: &[AppliesTo::Folder, AppliesTo::File],
+        works_in: &[WorksIn::Pane, WorksIn::Diff, WorksIn::Overlay],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::CopyBranch,
+        id: "copy_branch",
+        label: "Copy branch name",
+        hint: "Copy the checkout's branch name to the clipboard",
+        // Beside the other copies, one Hotkeys section for them all.
+        group: "FILES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "copy branch",
+        destructive: false,
+        applies_to: &[AppliesTo::Worktree, AppliesTo::Session],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::WakeAccount,
+        id: "wake_account",
+        label: "Wake up now",
+        hint: "Whakaoho: send the account one tiny prompt on its cheapest model now, so its 5-hour window starts, and resets, sooner; it runs on your own subscription",
+        group: "ACCOUNTS",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "wake",
+        destructive: false,
+        applies_to: &[AppliesTo::Account],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Overlay],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::Critters,
+        id: "critters",
+        label: "Critters",
+        hint: "Turn the critters overlay on or off: little pixel visitors along the bottom of the window (Settings, Appearance has their size and how often they come)",
+        group: "GENERAL",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "critters",
+        destructive: false,
+        applies_to: &[AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    // 0.54, appended by the menu matrix (docs/superpowers/specs/
+    // 2026-10-16-kete-054-menu-matrix.md): verbs the menus lead with that
+    // `?`, the palette and a user's own key should reach too. Unbound.
+    ActionSpec {
+        action: Action::MarkSeen,
+        id: "mark_seen",
+        label: "Mark seen",
+        hint: "Mark the session's finished turn as read, or every unread session in the checkout, the repo or what the board shows, so the review lane empties without opening each one",
+        group: "SESSIONS",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "seen",
+        destructive: false,
+        applies_to: &[
+            AppliesTo::Session,
+            AppliesTo::Worktree,
+            AppliesTo::Repo,
+            AppliesTo::Global,
+        ],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::CopyPrUrl,
+        id: "copy_pr_url",
+        label: "Copy pull request link",
+        hint: "Copy the link of the checkout's pull request to the clipboard",
+        group: "FILES",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "copy link",
+        destructive: false,
+        applies_to: &[AppliesTo::Session, AppliesTo::Worktree],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Diff],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::ArchiveDone,
+        id: "archive_done",
+        label: "Archive done sessions",
+        hint: "Archive every finished session you have already read, in the checkout, the repo or what the board shows, after one confirm listing them; unread, running and waiting ones stay, and U brings any back",
+        group: "SESSIONS",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "archive done",
+        destructive: false,
+        applies_to: &[AppliesTo::Worktree, AppliesTo::Repo, AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board],
+        surface: Surface::Both,
+        desktop: &[],
+    },
+    ActionSpec {
+        action: Action::WakeSchedule,
+        id: "wake_schedule",
+        label: "Wake-up schedule",
+        hint: "Whakaoho: each account's wake-up switch, hour and days, and where its 5-hour windows fall across the day; from an account, on that account",
+        group: "ACCOUNTS",
+        scope: Scope::Global,
+        defaults: &[],
+        word: "wake-up",
+        destructive: false,
+        applies_to: &[AppliesTo::Account, AppliesTo::Global],
+        works_in: &[WorksIn::Grid, WorksIn::Board, WorksIn::Pane, WorksIn::Overlay],
         surface: Surface::Both,
         desktop: &[],
     },
@@ -1982,6 +2295,8 @@ pub const DESKTOP_ORDER: &[&str] = &[
     "open_session",
     "open_diff",
     "diff",
+    "open_files",
+    "files",
     "repo_1",
     "repo_2",
     "repo_3",
@@ -2085,6 +2400,31 @@ pub const MENU_LABELS: &[(&str, Option<AppliesTo>, &str)] = &[
     ("toggle_full_screen", None, "Full screen"),
     ("accounts", None, "Accounts\u{2026}"),
     ("add_project", None, "Add project…"),
+    // A row standing alone says the whole thing; inside its submenu
+    // ([`MENU_GROUPS`]) it says the short word the group gives it.
+    ("open_in_vscode", None, "Open in VS Code"),
+    ("open_in_visual_studio", None, "Open in Visual Studio"),
+    ("reveal_in_explorer", None, "Show in Explorer"),
+    ("copy_path", None, "Copy path"),
+    ("copy_relative_path", None, "Copy relative path"),
+    ("copy_branch", None, "Copy branch name"),
+    ("dock_editor", None, "Dock editor beside Kete"),
+    ("mark_seen", Some(AppliesTo::Worktree), "Mark all seen"),
+    ("mark_seen", Some(AppliesTo::Repo), "Mark all seen"),
+    ("mark_seen", Some(AppliesTo::Global), "Mark all seen"),
+    ("archive_done", None, "Archive done sessions\u{2026}"),
+    ("wake_schedule", Some(AppliesTo::Global), "Whakaoho\u{2026}"),
+    ("wake_schedule", None, "Wake-up schedule\u{2026}"),
+    (
+        "scope_account",
+        Some(AppliesTo::Account),
+        "Show its sessions",
+    ),
+    (
+        "accounts",
+        Some(AppliesTo::Account),
+        "Account details\u{2026}",
+    ),
 ];
 
 /// The words a menu row for verb `id` on a thing of kind `on` says.
@@ -2112,25 +2452,40 @@ fn verbs_label(id: &str) -> Option<&'static str> {
 /// Each kind's menu, in order: what a right-click (or the row's `⋯`) on
 /// one lists, in both apps. Each app leaves out a row it has no verb
 /// for, or one that means nothing on this thing now (Unarchive on a live
-/// session, Delete worktree on a root checkout). A session's or a
-/// terminal's menu goes on with its checkout's.
+/// session, Delete worktree on a root checkout). A live session's or a
+/// terminal's menu ends on its checkout's, as one `Worktree <branch> ▸`
+/// row less the rows the card already has. The order runs through the
+/// [`MenuSection`]s, so a menu reads do, go, open, copy, change,
+/// organise, then what takes the thing away; [`MENU_GROUPS`] folds a run
+/// of rows into one submenu row. The matrix behind it, with each row's
+/// state rules: docs/superpowers/specs/2026-10-16-kete-054-menu-matrix.md.
 pub const MENUS: &[(AppliesTo, &[&str])] = &[
     (
         AppliesTo::Session,
         &[
             "activate",
             "follow_up",
-            "restart",
-            "duplicate_session",
-            "move_session",
-            "move_to_account",
-            "rename",
-            "pin_orchestrator",
+            "git_diff",
             "open_pull_request",
             "create_pull_request",
             "merge_pull_request",
+            "comment_pull_request",
             "open_issue",
-            "focus_scope",
+            "open_in_vscode",
+            "open_in_visual_studio",
+            "reveal_in_explorer",
+            "open_in_browser",
+            "dock_editor",
+            "copy_path",
+            "copy_branch",
+            "copy_pr_url",
+            "mark_seen",
+            "restart",
+            "duplicate_session",
+            "rename",
+            "pin_orchestrator",
+            "move_session",
+            "move_to_account",
             "reorder_up",
             "reorder_down",
             "unarchive",
@@ -2138,7 +2493,10 @@ pub const MENUS: &[(AppliesTo, &[&str])] = &[
             "delete",
         ],
     ),
-    (AppliesTo::Terminal, &["activate", "rename", "delete"]),
+    (
+        AppliesTo::Terminal,
+        &["activate", "copy_path", "rename", "delete"],
+    ),
     (
         AppliesTo::Worktree,
         &[
@@ -2147,14 +2505,26 @@ pub const MENUS: &[(AppliesTo, &[&str])] = &[
             "new_terminal",
             "toggle_run",
             "git_diff",
-            "open_worktree",
-            "open_repo",
-            "switch_branch",
+            "open_pull_request",
             "create_pull_request",
             "merge_pull_request",
+            "comment_pull_request",
             "focus_scope",
+            "open_repo",
+            "open_worktree",
+            "open_in_vscode",
+            "open_in_visual_studio",
+            "reveal_in_explorer",
+            "open_in_browser",
+            "dock_editor",
+            "copy_path",
+            "copy_branch",
+            "copy_pr_url",
+            "mark_seen",
+            "switch_branch",
             "reorder_up",
             "reorder_down",
+            "archive_done",
             "delete_all",
             "delete_worktree",
         ],
@@ -2164,21 +2534,298 @@ pub const MENUS: &[(AppliesTo, &[&str])] = &[
         &[
             "quick_prompt",
             "new_worktree",
-            "switch_branch",
             "toggle_run",
-            "open_worktree",
-            "open_repo",
-            "refresh_pull_requests",
             "focus_scope",
+            "open_repo",
+            "pull_requests",
+            "issues",
+            "azure_devops",
+            "refresh_pull_requests",
+            "open_worktree",
+            "open_in_vscode",
+            "open_in_visual_studio",
+            "reveal_in_explorer",
+            "open_in_browser",
+            "dock_editor",
+            "copy_path",
+            "mark_seen",
+            "switch_branch",
             "rename",
             "reorder_up",
             "reorder_down",
-            "delete_worktree",
+            "archive_done",
             "sweep_worktrees",
             "remove_project",
         ],
     ),
+    // A file's and a folder's rows in a worktree (a diff's file list, the
+    // tree, a finder); each app adds its own local rows after these (Diff
+    // this file, Stage, Mark reviewed, Expand all). Short menus: flat,
+    // never folded.
+    (
+        AppliesTo::Folder,
+        &[
+            "open_in_vscode",
+            "reveal_in_explorer",
+            "copy_path",
+            "copy_relative_path",
+        ],
+    ),
+    (
+        AppliesTo::File,
+        &[
+            "open_file_in_kete",
+            "open_in_vscode",
+            "open_in_visual_studio",
+            "open_with_default",
+            "reveal_in_explorer",
+            "copy_path",
+            "copy_relative_path",
+        ],
+    ),
+    // An account's own rows (Use as default, Switch on or off, Log in
+    // again…) are each app's, placed by the matrix among these.
+    (
+        AppliesTo::Account,
+        &["scope_account", "accounts", "wake_account", "wake_schedule"],
+    ),
+    // The background: a right-click on no row (the overview's, the
+    // board's or the panels' empty space), each app's views in View ▸.
+    (
+        AppliesTo::Global,
+        &[
+            "quick_prompt",
+            "add_project",
+            "command_palette",
+            "home_overview",
+            "home_board",
+            "toggle_kanban",
+            "toggle_orchestrator_view",
+            "accounts",
+            "wake_schedule",
+            "toggle_archived",
+            "settings",
+            "mark_seen",
+            "critters",
+            "archive_done",
+        ],
+    ),
 ];
+
+/// Where a menu row sits, top to bottom. Every kind's [`MENUS`] runs
+/// through these in order; the desktop draws a rule where the section
+/// changes (the terminal app has no rules), so what takes the thing away
+/// is always last, behind one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MenuSection {
+    /// The thing's own verb: open it, reply, start something in it.
+    Act,
+    /// Look at what it is connected to: its diff, its pull request, the
+    /// scope narrowed to it, its remote.
+    Go,
+    /// Open it in another app: an editor, Explorer, a browser.
+    Open,
+    Copy,
+    /// Change it in place: restart, rename, its account, its branch.
+    Change,
+    /// Move it among the rest.
+    Organise,
+    /// Take it away: archive, delete, remove.
+    Away,
+}
+
+/// Each menu verb's [`MenuSection`]; a row with a kind says it on that
+/// kind only, ahead of the row without one ([`section_of`]).
+pub const MENU_SECTIONS: &[(&str, Option<AppliesTo>, MenuSection)] = &[
+    ("activate", None, MenuSection::Act),
+    ("follow_up", None, MenuSection::Act),
+    ("new", None, MenuSection::Act),
+    ("quick_prompt", None, MenuSection::Act),
+    ("new_terminal", None, MenuSection::Act),
+    ("toggle_run", None, MenuSection::Act),
+    ("new_worktree", None, MenuSection::Act),
+    ("add_project", None, MenuSection::Act),
+    ("command_palette", None, MenuSection::Act),
+    ("open_file_in_kete", None, MenuSection::Act),
+    ("git_diff", None, MenuSection::Go),
+    ("open_pull_request", None, MenuSection::Go),
+    ("create_pull_request", None, MenuSection::Go),
+    ("merge_pull_request", None, MenuSection::Go),
+    ("comment_pull_request", None, MenuSection::Go),
+    ("open_issue", None, MenuSection::Go),
+    ("focus_scope", None, MenuSection::Go),
+    ("open_repo", None, MenuSection::Go),
+    ("pull_requests", None, MenuSection::Go),
+    ("issues", None, MenuSection::Go),
+    ("azure_devops", None, MenuSection::Go),
+    ("refresh_pull_requests", None, MenuSection::Go),
+    ("scope_account", None, MenuSection::Go),
+    ("accounts", None, MenuSection::Go),
+    ("home_overview", None, MenuSection::Go),
+    ("home_board", None, MenuSection::Go),
+    ("toggle_kanban", None, MenuSection::Go),
+    ("toggle_orchestrator_view", None, MenuSection::Go),
+    ("toggle_archived", None, MenuSection::Go),
+    ("settings", None, MenuSection::Go),
+    // The view on the background; beside Wake up now on an account.
+    (
+        "wake_schedule",
+        Some(AppliesTo::Account),
+        MenuSection::Change,
+    ),
+    ("wake_schedule", None, MenuSection::Go),
+    ("open_worktree", None, MenuSection::Open),
+    ("open_in_vscode", None, MenuSection::Open),
+    ("open_in_visual_studio", None, MenuSection::Open),
+    ("reveal_in_explorer", None, MenuSection::Open),
+    ("open_in_browser", None, MenuSection::Open),
+    ("open_with_default", None, MenuSection::Open),
+    ("dock_editor", None, MenuSection::Open),
+    ("copy_path", None, MenuSection::Copy),
+    ("copy_relative_path", None, MenuSection::Copy),
+    ("copy_branch", None, MenuSection::Copy),
+    ("copy_pr_url", None, MenuSection::Copy),
+    ("mark_seen", None, MenuSection::Change),
+    ("restart", None, MenuSection::Change),
+    ("duplicate_session", None, MenuSection::Change),
+    ("rename", None, MenuSection::Change),
+    ("pin_orchestrator", None, MenuSection::Change),
+    ("switch_branch", None, MenuSection::Change),
+    ("wake_account", None, MenuSection::Change),
+    ("critters", None, MenuSection::Change),
+    ("move_session", None, MenuSection::Organise),
+    // A fresh restart on another login: moved, as far as the menus go.
+    ("move_to_account", None, MenuSection::Organise),
+    ("reorder_up", None, MenuSection::Organise),
+    ("reorder_down", None, MenuSection::Organise),
+    ("unarchive", None, MenuSection::Away),
+    ("archive", None, MenuSection::Away),
+    ("delete", None, MenuSection::Away),
+    ("archive_done", None, MenuSection::Away),
+    ("delete_all", None, MenuSection::Away),
+    ("delete_worktree", None, MenuSection::Away),
+    ("sweep_worktrees", None, MenuSection::Away),
+    ("remove_project", None, MenuSection::Away),
+];
+
+/// The section verb `id`'s row sits in on a thing of kind `on`.
+pub fn section_of(id: &str, on: AppliesTo) -> Option<MenuSection> {
+    let mine = |kind: Option<AppliesTo>| {
+        MENU_SECTIONS
+            .iter()
+            .find(|(i, k, _)| *i == id && *k == kind)
+            .map(|(_, _, s)| *s)
+    };
+    mine(Some(on)).or_else(|| mine(None))
+}
+
+/// A submenu: the run of a menu's rows it folds into one `title ▸` row,
+/// on the kinds in `on`. It folds where two or more of its rows mean
+/// something on the thing now, at the place of the first; one alone
+/// stays a plain row in its whole words ([`menu_label`]). Inside, each
+/// row says its short word. Both apps fold the same way, and a menu's
+/// type-ahead searches the folded rows too.
+#[derive(Debug, Serialize)]
+pub struct MenuGroup {
+    pub id: &'static str,
+    pub title: &'static str,
+    pub on: &'static [AppliesTo],
+    /// Verb id and its word inside the submenu, in [`MENUS`] order.
+    pub rows: &'static [(&'static str, &'static str)],
+}
+
+pub const MENU_GROUPS: &[MenuGroup] = &[
+    MenuGroup {
+        id: "pull_request",
+        title: "Pull request",
+        on: &[AppliesTo::Session, AppliesTo::Worktree],
+        rows: &[
+            ("open_pull_request", "Open in browser"),
+            ("create_pull_request", "Create\u{2026}"),
+            ("merge_pull_request", "Merge\u{2026}"),
+            ("comment_pull_request", "Comment\u{2026}"),
+            ("open_issue", "Open the issue"),
+        ],
+    },
+    // A repo's remote: its page, its pull requests and issues (GitHub)
+    // or its Azure DevOps lists. An app that knows the host may title it
+    // GitHub or Azure DevOps.
+    MenuGroup {
+        id: "remote",
+        title: "Remote",
+        on: &[AppliesTo::Repo],
+        rows: &[
+            ("open_repo", "Open in browser"),
+            ("pull_requests", "Pull requests\u{2026}"),
+            ("issues", "Issues\u{2026}"),
+            ("azure_devops", "Azure DevOps\u{2026}"),
+            ("refresh_pull_requests", "Refresh pull requests"),
+        ],
+    },
+    MenuGroup {
+        id: "open_in",
+        title: "Open in",
+        on: &[AppliesTo::Session, AppliesTo::Worktree, AppliesTo::Repo],
+        rows: &[
+            ("open_worktree", "Open command"),
+            ("open_in_vscode", "VS Code"),
+            ("open_in_visual_studio", "Visual Studio"),
+            ("reveal_in_explorer", "Explorer"),
+            ("open_in_browser", "Browser"),
+            ("dock_editor", "Dock editor beside Kete"),
+        ],
+    },
+    MenuGroup {
+        id: "copy",
+        title: "Copy",
+        on: &[AppliesTo::Session, AppliesTo::Worktree],
+        rows: &[
+            ("copy_path", "Path"),
+            ("copy_branch", "Branch name"),
+            ("copy_pr_url", "Pull request link"),
+        ],
+    },
+    MenuGroup {
+        id: "move",
+        title: "Move",
+        on: &[AppliesTo::Session, AppliesTo::Worktree, AppliesTo::Repo],
+        rows: &[
+            ("move_session", "To another worktree\u{2026}"),
+            ("move_to_account", "To another account\u{2026}"),
+            ("reorder_up", "Up"),
+            ("reorder_down", "Down"),
+        ],
+    },
+    MenuGroup {
+        id: "view",
+        title: "View",
+        on: &[AppliesTo::Global],
+        rows: &[
+            ("home_overview", "Overview"),
+            ("home_board", "Board"),
+            ("toggle_kanban", "Board or bands"),
+            ("toggle_orchestrator_view", "Orchestrator"),
+            ("accounts", "Accounts"),
+            ("wake_schedule", "Whakaoho"),
+            ("toggle_archived", "Archived sessions"),
+        ],
+    },
+];
+
+/// The submenu verb `id`'s row folds into on a thing of kind `on`, and
+/// the row's word there.
+pub fn group_of(id: &str, on: AppliesTo) -> Option<(&'static MenuGroup, &'static str)> {
+    MENU_GROUPS
+        .iter()
+        .filter(|g| g.on.contains(&on))
+        .find_map(|g| {
+            g.rows
+                .iter()
+                .find(|(i, _)| *i == id)
+                .map(|(_, word)| (g, *word))
+        })
+}
 
 /// The verbs a footer and the verb bar lead with, per kind, best first:
 /// each app shows the first four it can run on the selection, then `?`
@@ -2575,6 +3222,8 @@ pub fn render_ts() -> String {
         AppliesTo::Session,
         AppliesTo::Terminal,
         AppliesTo::Account,
+        AppliesTo::File,
+        AppliesTo::Folder,
     ];
     let works = [
         WorksIn::Grid,
@@ -2674,7 +3323,65 @@ pub fn render_ts() -> String {
     out.push_str(&format!(
         "\n/** How many verbs the verb bar shows before `? more`. */\nexport const PRIMARY_SHOWN = {PRIMARY_SHOWN};\n"
     ));
+    out.push_str(&render_menu_layout_ts());
     out.push_str(&render_learn_ts());
+    out
+}
+
+/// The menus' sections and submenus ([`MENU_SECTIONS`], [`MENU_GROUPS`])
+/// as the window imports them.
+fn render_menu_layout_ts() -> String {
+    let sections = [
+        MenuSection::Act,
+        MenuSection::Go,
+        MenuSection::Open,
+        MenuSection::Copy,
+        MenuSection::Change,
+        MenuSection::Organise,
+        MenuSection::Away,
+    ];
+    let names: Vec<String> = sections.iter().map(ts_enum).collect();
+    let mut out = format!(
+        "\n/** Where a menu row sits, top to bottom; the window draws a rule where it changes. */\nexport type MenuSection = {};\n",
+        names.join(" | ")
+    );
+    out.push_str(&format!(
+        "/** The sections in their order. */\nexport const MENU_SECTION_ORDER: readonly MenuSection[] = {};\n",
+        ts_list(&sections)
+    ));
+    out.push_str("\n/** Each menu verb's section; `on`: that kind only. */\n");
+    out.push_str(
+        "export const MENU_SECTIONS: readonly { id: ActionId; on: AppliesTo | null; section: MenuSection }[] = [\n",
+    );
+    for (id, on, section) in MENU_SECTIONS {
+        let on = on.map(|k| ts_enum(&k)).unwrap_or_else(|| "null".into());
+        out.push_str(&format!(
+            "  {{ id: {}, on: {on}, section: {} }},\n",
+            ts_str(id),
+            ts_enum(section)
+        ));
+    }
+    out.push_str("];\n");
+    out.push_str(
+        "\n/** A submenu: on the kinds in `on`, two or more of its rows that mean something now fold into one `title` row at the first one's place; one alone stays a plain row. `label` is a row's word inside it. */\n",
+    );
+    out.push_str("export interface MenuGroup {\n  id: string;\n  title: string;\n  on: readonly AppliesTo[];\n  rows: readonly { id: ActionId; label: string }[];\n}\n");
+    out.push_str("export const MENU_GROUPS: readonly MenuGroup[] = [\n");
+    for g in MENU_GROUPS {
+        let rows: Vec<String> = g
+            .rows
+            .iter()
+            .map(|(id, label)| format!("{{ id: {}, label: {} }}", ts_str(id), ts_str(label)))
+            .collect();
+        out.push_str(&format!(
+            "  {{ id: {}, title: {}, on: {}, rows: [{}] }},\n",
+            ts_str(g.id),
+            ts_str(g.title),
+            ts_list(g.on),
+            rows.join(", ")
+        ));
+    }
+    out.push_str("];\n");
     out
 }
 
@@ -2804,7 +3511,34 @@ mod tests {
         // jump, the window's Ctrl+K is `command_palette`; `move_up` walks
         // the cursor where the window's reorders, `reorder_up`): the
         // window's key ids are their own namespace.
-        assert_eq!(ACTIONS.len(), 91);
+        assert_eq!(ACTIONS.len(), 106);
+        // The 0.54/0.55 slots, appended in this order and unbound.
+        let tail: Vec<&str> = ACTIONS[91..102].iter().map(|s| s.id).collect();
+        assert_eq!(
+            tail,
+            [
+                "open_in_vscode",
+                "open_in_visual_studio",
+                "dock_editor",
+                "reveal_in_explorer",
+                "open_with_default",
+                "open_file_in_kete",
+                "copy_path",
+                "copy_relative_path",
+                "copy_branch",
+                "wake_account",
+                "critters",
+            ]
+        );
+        // The menu matrix's, after them.
+        let matrix: Vec<&str> = ACTIONS[102..].iter().map(|s| s.id).collect();
+        assert_eq!(
+            matrix,
+            ["mark_seen", "copy_pr_url", "archive_done", "wake_schedule"]
+        );
+        assert!(ACTIONS[91..]
+            .iter()
+            .all(|s| s.defaults.is_empty() && s.desktop.is_empty() && !s.destructive));
         for id in [
             "palette",
             "move_up",
@@ -2913,10 +3647,182 @@ mod tests {
             menu_label("subagents", AppliesTo::Session),
             "Subagents and session tree"
         );
-        assert!(menu_of(AppliesTo::Account).is_empty());
+        // A file's, a folder's and an account's menus: the registry's rows
+        // (each app adds its local ones among them).
+        assert_eq!(
+            menu_of(AppliesTo::Account),
+            ["scope_account", "accounts", "wake_account", "wake_schedule"]
+        );
+        assert_eq!(
+            menu_of(AppliesTo::Folder),
+            [
+                "open_in_vscode",
+                "reveal_in_explorer",
+                "copy_path",
+                "copy_relative_path"
+            ]
+        );
+        assert_eq!(
+            menu_of(AppliesTo::File),
+            [
+                "open_file_in_kete",
+                "open_in_vscode",
+                "open_in_visual_studio",
+                "open_with_default",
+                "reveal_in_explorer",
+                "copy_path",
+                "copy_relative_path"
+            ]
+        );
+        // Standing alone a row says the whole thing; in its submenu, the
+        // group's short word.
+        assert_eq!(
+            menu_label("open_in_vscode", AppliesTo::File),
+            "Open in VS Code"
+        );
+        assert_eq!(
+            group_of("open_in_vscode", AppliesTo::Worktree).map(|(g, w)| (g.title, w)),
+            Some(("Open in", "VS Code"))
+        );
+        assert!(group_of("open_in_vscode", AppliesTo::File).is_none());
+        assert_eq!(
+            menu_label("open_file_in_kete", AppliesTo::File),
+            "Open in Kete"
+        );
+        assert_eq!(menu_label("mark_seen", AppliesTo::Repo), "Mark all seen");
+        assert_eq!(menu_label("mark_seen", AppliesTo::Session), "Mark seen");
+        // The editor and copy verbs sit after a checkout's diff and pull
+        // request, ahead of Switch branch.
+        let worktree = menu_of(AppliesTo::Worktree);
+        let at = |id: &str| worktree.iter().position(|i| *i == id).unwrap();
+        assert!(at("git_diff") < at("open_in_vscode"));
+        assert!(at("open_repo") < at("open_in_vscode"));
+        assert!(at("copy_branch") < at("switch_branch"));
+        assert!(!menu_of(AppliesTo::Repo).contains(&"copy_branch"));
+        // A card's Diff and a checkout's pull request page are their own
+        // rows, not left to the checkout's.
+        assert!(menu_of(AppliesTo::Session).contains(&"git_diff"));
+        assert!(menu_of(AppliesTo::Worktree).contains(&"open_pull_request"));
         assert_eq!(
             primary_of(AppliesTo::Session)[..2],
             ["activate", "follow_up"]
+        );
+    }
+
+    /// Every menu reads do, go, open, copy, change, organise, away, with
+    /// what destroys last; each submenu's rows sit together in one section
+    /// of every menu it folds on; and folded, no menu runs long.
+    #[test]
+    fn menus_follow_their_sections_and_fold_into_groups() {
+        for (kind, ids) in MENUS {
+            let mut last = MenuSection::Act;
+            for id in *ids {
+                let s = section_of(id, *kind).unwrap_or_else(|| panic!("{id} has no section"));
+                assert!(
+                    s >= last,
+                    "{id} ({s:?}) comes after a {last:?} row on {kind:?}"
+                );
+                last = s;
+                if verbs().iter().any(|v| v.id == *id && v.destructive) {
+                    assert_eq!(s, MenuSection::Away, "{id} destroys: it goes last");
+                }
+            }
+        }
+        for (id, on, _) in MENU_SECTIONS {
+            assert!(
+                MENUS
+                    .iter()
+                    .any(|(k, ids)| ids.contains(id) && on.is_none_or(|o| o == *k)),
+                "{id} has a section but is on no menu"
+            );
+        }
+        for g in MENU_GROUPS {
+            assert!(g.rows.len() >= 2 && !g.title.is_empty(), "{}", g.id);
+            for kind in g.on {
+                let ids = menu_of(*kind);
+                let at: Vec<usize> = g
+                    .rows
+                    .iter()
+                    .filter_map(|(id, _)| ids.iter().position(|i| i == id))
+                    .collect();
+                assert!(at.len() >= 2, "{} folds nothing on {kind:?}", g.id);
+                // Together, in the group's order, in one section.
+                assert!(
+                    at.windows(2).all(|w| w[1] == w[0] + 1),
+                    "{}'s rows are split on {kind:?}",
+                    g.id
+                );
+                let sections: BTreeSet<MenuSection> = at
+                    .iter()
+                    .filter_map(|i| section_of(ids[*i], *kind))
+                    .collect();
+                assert_eq!(sections.len(), 1, "{} straddles a rule on {kind:?}", g.id);
+                // No row in two submenus of one menu.
+                for (id, _) in g.rows {
+                    let homes = MENU_GROUPS
+                        .iter()
+                        .filter(|o| o.on.contains(kind) && o.rows.iter().any(|(i, _)| i == id))
+                        .count();
+                    assert!(homes <= 1, "{id} folds two ways on {kind:?}");
+                }
+            }
+        }
+        // Folded, at its fullest, no menu runs long. The fullest session is
+        // a live card (Unarchive is an archived one's), the fullest
+        // checkout a linked one (Switch branch is the root's). A live
+        // card's 14 are its registry rows with Mark seen and Make
+        // orchestrator both showing; read, with another session pinned,
+        // it is 12, and each app adds the checkout's row after (13). A
+        // file's and a folder's never fold.
+        let top = |kind: AppliesTo| {
+            let not_with = match kind {
+                AppliesTo::Session => "unarchive",
+                AppliesTo::Worktree => "switch_branch",
+                _ => "",
+            };
+            let ids: Vec<&str> = menu_of(kind)
+                .iter()
+                .copied()
+                .filter(|id| *id != not_with)
+                .collect();
+            let folded: usize = MENU_GROUPS
+                .iter()
+                .filter(|g| g.on.contains(&kind))
+                .map(|g| {
+                    g.rows
+                        .iter()
+                        .filter(|(id, _)| ids.contains(id))
+                        .count()
+                        .saturating_sub(1)
+                })
+                .sum();
+            ids.len() - folded
+        };
+        for (kind, most) in [
+            (AppliesTo::Session, 14),
+            (AppliesTo::Worktree, 15),
+            (AppliesTo::Repo, 14),
+            (AppliesTo::Terminal, 4),
+            (AppliesTo::File, 7),
+            (AppliesTo::Folder, 4),
+            (AppliesTo::Account, 4),
+            (AppliesTo::Global, 8),
+        ] {
+            assert!(top(kind) <= most, "{kind:?} runs to {} rows", top(kind));
+        }
+        // The account move is one of Move's rows, not a menu row of its
+        // own.
+        assert_eq!(
+            group_of("move_to_account", AppliesTo::Session).map(|(g, w)| (g.id, w)),
+            Some(("move", "To another account\u{2026}"))
+        );
+        assert_eq!(
+            section_of("wake_schedule", AppliesTo::Account),
+            Some(MenuSection::Change)
+        );
+        assert_eq!(
+            section_of("wake_schedule", AppliesTo::Global),
+            Some(MenuSection::Go)
         );
     }
 

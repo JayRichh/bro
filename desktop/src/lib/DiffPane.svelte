@@ -19,6 +19,8 @@
   - `session`: the session a review is of. With more than one session's
     snapshots in the worktree, the header offers "This session / All in
     this worktree" (L); all by default.
+  - `lands`: open on the file the Files tree's Diff this file names
+    (files/landing.svelte.ts); the Diff view's own pane only.
 -->
 <script lang="ts">
   import { onDestroy, onMount, tick, type Snippet } from 'svelte';
@@ -39,6 +41,12 @@
   import { fileIcon, languageOf } from './icons';
   import { blockLine, replacementModel, type ReplacementModel } from './replacement';
   import { defineMonacoTheme, termFamily, token } from './theme';
+  import { editorOptions, look } from './look.svelte';
+  import { joinPath, registerViewer, type ViewerSurface } from './menus/surfaces';
+  import { ownMenu, type Opened } from './menus/router';
+  import { diffFileMenu } from './menus/targets';
+  import { ask } from './ui/ui.svelte';
+  import { diffLanding, takeLanding } from './files/landing.svelte';
   import type * as Monaco from 'monaco-esm/editor/editor.api.js';
 
   let {
@@ -52,6 +60,7 @@
     trail,
     pick,
     session = null,
+    lands = false,
   }: {
     worktree: string | null;
     range?: DiffRange | null;
@@ -63,6 +72,7 @@
     trail?: Snippet;
     pick?: Snippet;
     session?: string | null;
+    lands?: boolean;
   } = $props();
 
   /** `absent`: the status says this side has no file, so why. */
@@ -177,8 +187,12 @@
         }
       }
       files = list;
-      const again = keep && current ? list.find((f) => f.path === current!.path) : undefined;
-      await show(again ?? list[0] ?? null, !!again);
+      // Diff this file from the Files tree: that file first.
+      const landing = lands && !r ? takeLanding(wt) : null;
+      const landed = landing ? list.find((f) => f.path === landing) : undefined;
+      const again = landed ?? (keep && current ? list.find((f) => f.path === current!.path) : undefined);
+      await show(again ?? list[0] ?? null, !!again && !landed);
+      if (landed) scrollFile();
     } catch (e) {
       if (mine !== loadSeq) return;
       error = String(e);
@@ -490,6 +504,57 @@
     onlySession = only;
   }
 
+  // ---- a file row's menu ---------------------------------------------------
+
+  /** Stage, unstage or discard every hunk of `f` that `action` takes (the
+   *  unstaged ones, or the staged ones to unstage), the last first, so the
+   *  ones above keep their line numbers. */
+  async function applyAll(wt: string, f: DiffFile, action: HunkAction) {
+    if (busy) return;
+    busy = true;
+    confirming = null;
+    try {
+      const hs = await diffApi.hunks(wt, f.path, action === 'unstage');
+      const at = (h: Hunk) => (action === 'stage' ? h.oldStart : h.newStart);
+      for (const h of [...hs].sort((a, b) => at(b) - at(a))) await diffApi.applyHunk(wt, h, action);
+      const done = action === 'stage' ? 'Staged' : action === 'unstage' ? 'Unstaged' : 'Discarded the changes to';
+      toast(`${done} ${f.path}`);
+      await load(true);
+    } catch (e) {
+      toast(String(e));
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function discardFile(wt: string, f: DiffFile) {
+    const r = await ask.confirm({
+      title: 'Discard changes',
+      message: `Discard the unstaged changes to ${f.path}? They go from the file on disk; staged changes stay. This can't be undone.`,
+      confirm: 'Discard',
+      danger: true,
+    });
+    if (r.ok) await applyAll(wt, f, 'discard');
+  }
+
+  /** A changed file's menu (the menu matrix, \u00a75.8): its path to copy,
+   *  and where this diff reads the working tree against HEAD, Stage file,
+   *  Unstage file and Discard changes. Which of those it has (unstaged or
+   *  staged hunks) is read as the menu opens; until then Stage and Discard
+   *  show, as an unknown is not a no. */
+  function fileMenu(f: DiffFile): Opened | null {
+    const wt = worktree;
+    if (!wt) return null;
+    const verbs = { stage: () => void applyAll(wt, f, 'stage'), unstage: () => void applyAll(wt, f, 'unstage'), discard: () => void discardFile(wt, f) };
+    if (!working || f.status === 'D') return diffFileMenu(wt, f, null, verbs);
+    const first = diffFileMenu(wt, f, { unstaged: true, staged: false }, verbs);
+    if (!first || f.status === 'U') return first;
+    const later = Promise.all([diffApi.hunks(wt, f.path, false), diffApi.hunks(wt, f.path, true)]).then(
+      ([u, s]) => diffFileMenu(wt, f, { unstaged: u.length > 0, staged: s.length > 0 }, verbs)?.items ?? null,
+    );
+    return { ...first, later };
+  }
+
   async function act(h: Hunk, action: HunkAction) {
     if (!worktree || busy) return;
     busy = true;
@@ -542,7 +607,7 @@
     const m = (await import('./monaco')) as typeof import('./monaco');
     monaco = m.monaco;
     defineMonacoTheme(monaco, app.dark);
-    const base = m.readingOptions(termFamily());
+    const base = m.readingOptions(termFamily(), editorOptions());
     diffEditor = monaco.editor.createDiffEditor(diffHost, {
       ...base,
       originalEditable: false,
@@ -559,8 +624,28 @@
     });
     repEditor = monaco.editor.create(repHost, { ...base, glyphMargin: false, folding: false, lineDecorationsWidth: 8 });
     repDecorations = repEditor.createDecorationsCollection();
+    // The viewers' right-click menu (menus/builtin.ts): which editor, and
+    // the shown file on disk.
+    const viewer: ViewerSurface = {
+      editorAt: (el) => {
+        const sides: { editor: Monaco.editor.ICodeEditor; old: boolean }[] = diffEditor
+          ? [
+              { editor: diffEditor.getOriginalEditor(), old: true },
+              { editor: diffEditor.getModifiedEditor(), old: false },
+            ]
+          : [];
+        if (repEditor) sides.push({ editor: repEditor, old: false });
+        return sides.find((s) => s.editor.getDomNode()?.contains(el)) ?? null;
+      },
+      path: () => {
+        const root = app.model.worktrees.find((w) => w.id === worktree)?.path;
+        return root && shown ? joinPath(root, shown.path) : null;
+      },
+    };
+    unregisterViewers = [registerViewer(diffHost, viewer), registerViewer(repHost, viewer)];
     ready = true;
   });
+  let unregisterViewers: (() => void)[] = [];
 
   let loadedFor = '';
   // Another session (or none): the whole worktree again.
@@ -581,6 +666,18 @@
       load(false);
     }
   });
+  // Diff this file on the checkout already shown: that file, or the list
+  // read again when it isn't in it yet (the load lands on it).
+  $effect(() => {
+    void diffLanding.seq;
+    const wt = worktree;
+    if (!lands || range || !ready || loading || diffLanding.worktree !== wt || !diffLanding.path) return;
+    const f = files.find((x) => x.path === diffLanding.path);
+    if (!f) return void load(true);
+    takeLanding(wt);
+    void show(f);
+    scrollFile();
+  });
   $effect(() => {
     const m = mode;
     if (!ready) return;
@@ -592,16 +689,23 @@
       syncStops();
     });
   });
+  // The look moved (a theme, a family, a size): re-theme both editors and
+  // give them the font.
   $effect(() => {
     const dark = app.dark;
+    void look.seq;
     requestAnimationFrame(() => {
       if (!monaco) return;
       defineMonacoTheme(monaco, dark);
+      const font = { fontFamily: termFamily(), ...editorOptions() };
+      diffEditor?.updateOptions(font);
+      repEditor?.updateOptions(font);
       decorateReplacement();
     });
   });
 
   onDestroy(() => {
+    for (const off of unregisterViewers) off();
     const pair = diffEditor?.getModel();
     const one = repEditor?.getModel();
     diffEditor?.dispose();
@@ -843,12 +947,15 @@
           {@const p = split(f.path)}
           {@const cur = current?.path === f.path}
           <li>
+            <!-- The file's own menu on a right-click (fileMenu: the editors' rows, then Stage, Unstage, Discard).
+                 No `file:` target here: the row keys would take the diff's own s/i/e/r. -->
             <button
               data-file-cur={cur || undefined}
               class="flex min-h-7 w-full items-center gap-2 border-0 border-b border-rule px-3 py-1 text-left text-[13px]
                 focus-visible:-outline-offset-2 {cur ? 'bg-raised' : 'bg-transparent hover:bg-surface'}"
               onclick={() => show(f)}
-              title={f.from ? `${f.from} -> ${f.path}` : f.path}
+              use:ownMenu={() => fileMenu(f)}
+              title="{f.from ? `${f.from} -> ${f.path}` : f.path}. Right-click to copy its path{working ? ', stage or discard it' : ''}"
               aria-current={cur || undefined}
             >
               <img class="flex-none" src={fileIcon(f.path, app.dark)} alt="" width="16" height="16" draggable="false" />

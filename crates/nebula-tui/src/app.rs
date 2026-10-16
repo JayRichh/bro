@@ -331,6 +331,8 @@ pub fn clamp_files_width(area: Rect, boundary_x: i32) -> Option<u16> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum MenuAction {
+    /// A row of the CRITTER MENU (right-click on a critter).
+    Critter(crate::critters::CritterAct),
     Attach(SessionRef),
     RestartAgent(AgentId),
     /// Pin this session as the machine's ORCHESTRATOR (`SetOrchestrator`).
@@ -493,15 +495,101 @@ pub enum MenuAction {
     /// accounts'): the overlay put back as it was, then this key pressed
     /// in it.
     OverlayKey(crossterm::event::KeyCode, crossterm::event::KeyModifiers),
+    /// The same with several keys, pressed in turn: a row that is a key
+    /// and then its answer (Azure DevOps' `v` and the vote's letter, `s`
+    /// that arms a task's start and `s` again that starts it).
+    OverlayKeys(Vec<(crossterm::event::KeyCode, crossterm::event::KeyModifiers)>),
+    /// A row that opens a submenu of `items`, drawn `title ▸`: one of the
+    /// menu matrix's folded groups (Open in, Copy, Pull request, Move…), a
+    /// card's checkout, the verbs menu's More. Enter, → or a click opens
+    /// it in the parent's place (drill-in); it never runs anything itself.
+    Submenu {
+        title: String,
+        items: Vec<MenuItem>,
+    },
+    /// Registry verb `action` on `target`, addressed by the row rather
+    /// than the cursor: the verbs with no older action of their own (Mark
+    /// seen, Archive done sessions, the editors, wake-up) and every verb on
+    /// a file, a folder or an account. One dispatcher runs them
+    /// (`event_loop::verbs::run_verb`), however the row was reached.
+    Verb {
+        action: crate::keymap::Action,
+        target: crate::event_loop::verbs::Target,
+    },
+    /// Copy `text` to the clipboard (OSC 52 where the local tool is
+    /// missing or the app runs remote), flashing `Copied <text>`.
+    Copy(String),
+    /// Land where a `/` palette row lands: a worktree's band, a pull
+    /// request's row. The connections the menus draw between a pull
+    /// request, a branch, a worktree and its sessions.
+    Jump(crate::palette::PaletteTarget),
+    /// Check `branch` out in a worktree of its own in `project`, cut from
+    /// `remote` when only the remote has it: what Enter on an Azure DevOps
+    /// branch does, from a pull request's menu or a branch's.
+    CheckoutBranch {
+        project: ProjectId,
+        branch: String,
+        remote: Option<String>,
+    },
+    /// A file of checkout `root` staged, unstaged, or (after a confirm
+    /// naming it) its unstaged changes thrown away: the diff's file menu.
+    FileGit {
+        root: PathBuf,
+        rel: String,
+        op: FileOp,
+    },
+    /// The TREE BROWSER's folder under its cursor and every folder in it
+    /// opened (`true`) or folded: a folder's **Expand all** / **Collapse
+    /// all**.
+    FoldTree(bool),
+    /// A file's **Diff this file** from the tree browser or a finder: the
+    /// DIFF VIEWER on the selected checkout, landed on this file.
+    DiffThisFile(String),
+    /// **Log in to ‹account›…** on a session stopped on its login: the
+    /// account's sign-in, in a terminal (`accounts::sign_in`).
+    LogIn(String),
+    /// An editor row: Open in VS Code / Visual Studio, Show in Explorer,
+    /// Dock editor beside Kete, Open with default app, Open in Kete
+    /// (`crate::editors`).
+    Editor(crate::editors::EditorAct),
+    /// A row of the THEME PICKER (Enter on Settings → Appearance → Color
+    /// theme): this theme saved and worn, the settings put back.
+    PickTheme(String),
+}
+
+/// What a diff file row's git row does to the file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileOp {
+    /// `git add`: all of it, untracked or not.
+    Stage,
+    /// `git restore --staged`: out of the index, the worktree kept.
+    Unstage,
+    /// `git restore`: the worktree's changes not staged yet thrown away,
+    /// once the confirm naming the file is answered.
+    Discard,
 }
 
 /// The first row a menu of `len` rows draws in `visible` of them, so
 /// the hovered row is on screen: the draw and the click's hit test agree.
 pub fn menu_scroll(hover: usize, len: usize, visible: usize) -> usize {
+    menu_window(0, hover, len, visible)
+}
+
+/// [`menu_scroll`] from a window already at `scroll`: it moves only as
+/// far as it must to keep `hover` on screen, so a row the pointer lights
+/// stays under the pointer.
+pub fn menu_window(scroll: usize, hover: usize, len: usize, visible: usize) -> usize {
     if visible == 0 || len <= visible {
         return 0;
     }
-    (hover + 1).saturating_sub(visible).min(len - visible)
+    let scroll = scroll.min(len - visible);
+    if hover < scroll {
+        hover
+    } else if hover >= scroll + visible {
+        (hover + 1 - visible).min(len - visible)
+    } else {
+        scroll
+    }
 }
 
 /// Which submenu → (right arrow) opens from a menu row.
@@ -511,6 +599,8 @@ pub enum SubmenuKind {
     Models,
     /// Effort list, offered once a model row is highlighted.
     Efforts,
+    /// A [`MenuAction::Submenu`]'s own rows.
+    Rows,
 }
 
 impl MenuAction {
@@ -521,6 +611,7 @@ impl MenuAction {
     /// effort variants, like `auto`).
     pub fn submenu(&self) -> Option<SubmenuKind> {
         match self {
+            MenuAction::Submenu { .. } => Some(SubmenuKind::Rows),
             MenuAction::NewAgentOfKind {
                 kind,
                 custom,
@@ -547,7 +638,7 @@ impl MenuAction {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MenuItem {
     pub label: String,
     pub action: MenuAction,
@@ -661,6 +752,10 @@ pub struct ContextMenu {
     pub hover: usize,
     /// Set during draw for click hit-testing.
     pub area: Rect,
+    /// The first row drawn, written back during draw ([`menu_window`]): a
+    /// long menu's window moves only as far as its hover needs, and the
+    /// pointer's hit test reads the rows where they are on screen.
+    pub scroll: usize,
     /// The menu ← returns to when this one is a submenu.
     pub parent: Option<Box<ContextMenu>>,
     /// Type-ahead over the rows — set on the MODEL / EFFORT submenus, where
@@ -688,8 +783,24 @@ impl ContextMenu {
         // The VERBS MENU's **All keys…** stays its last row whatever is
         // typed: the way on when the verb wanted is not in the list.
         let pinned = |i: &MenuItem| matches!(i.action, MenuAction::AllKeys);
-        let (rows, tail): (Vec<&MenuItem>, Vec<&MenuItem>) =
-            filter.all.iter().partition(|i| !pinned(i));
+        // A query searches inside the submenus too: their rows, by the
+        // path to them (`Open in › VS Code`), so the keyboard loses nothing
+        // to the fold, and Enter runs the hit itself.
+        let searching = !query.trim().is_empty();
+        let mut rows: Vec<MenuItem> = Vec::new();
+        let mut tail: Vec<MenuItem> = Vec::new();
+        for item in &filter.all {
+            match &item.action {
+                _ if pinned(item) => tail.push(item.clone()),
+                MenuAction::Submenu { title, items } if searching => {
+                    rows.extend(items.iter().map(|child| MenuItem {
+                        label: format!("{title} \u{203a} {}", child.label),
+                        ..child.clone()
+                    }))
+                }
+                _ => rows.push(item.clone()),
+            }
+        }
         let labels: Vec<&str> = rows.iter().map(|i| i.label.as_str()).collect();
         let ranked = crate::fuzzy::rank(query, labels.iter().copied());
         if ranked.is_empty() {
@@ -698,7 +809,7 @@ impl ContextMenu {
         let items: Vec<MenuItem> = ranked
             .iter()
             .map(|(i, _)| rows[*i].clone())
-            .chain(tail.into_iter().cloned())
+            .chain(tail)
             .collect();
         self.hover = if query.trim().is_empty() {
             items
@@ -735,15 +846,6 @@ impl ContextMenu {
 
     pub fn has_filter_text(&self) -> bool {
         !self.filter_query().is_empty()
-    }
-
-    /// Is this a VERBS MENU `?` opened over another overlay (the diff's,
-    /// the accounts')? Its rows press that overlay's keys, and closing it
-    /// puts that overlay back (`ModalState::verbs_under`).
-    pub fn is_over_overlay(&self) -> bool {
-        self.items
-            .iter()
-            .any(|i| matches!(i.action, MenuAction::OverlayKey(..)))
     }
 
     /// Is this the LAUNCHER VIEW's PROJECT DROPDOWN? Its rows are
@@ -974,6 +1076,20 @@ pub enum PendingAction {
     /// (every setting and every hotkey), then reopen the overlay on them.
     ResetSettings,
     Quit,
+    /// A diff file menu's **Discard changes…**: the worktree's changes to
+    /// `rel` not staged yet thrown away (`git restore`). Either answer
+    /// puts the diff it was asked from back (`ModalState::verbs_under`).
+    DiscardFile {
+        root: std::path::PathBuf,
+        rel: String,
+    },
+    /// A checkout's Open command from its repo's `.kete.json`, shown and
+    /// answered yes: run it if it is still the command shown, and keep the
+    /// approval (`nebula_config::desktop::open_allowed`).
+    RunOpenCommand {
+        worktree: WorktreeId,
+        command: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -1099,6 +1215,11 @@ impl HelpView {
 #[derive(Debug, Clone, PartialEq)]
 pub enum PromptKind {
     AddProject,
+    /// The critter menu's **Name…**: what to call this visitor (and its
+    /// species, next time).
+    CritterName {
+        id: u32,
+    },
     /// Point an existing project at its new main checkout after its
     /// original `repo_path` disappeared from disk.
     SetProjectPath {
@@ -2773,6 +2894,8 @@ pub struct SettingsView {
     /// The bottom row's Export and Import buttons, written during draw;
     /// `true` is Import.
     pub io_hits: Vec<(Rect, bool)>,
+    /// The Appearance tab's `[⇧D Kete look]` button, written during draw.
+    pub look_hit: Option<Rect>,
     /// Transient line under the body: duplicate warnings, host-terminal
     /// warnings, "reset to default".
     pub notice: Option<(String, NoticeLevel)>,
@@ -2885,6 +3008,8 @@ pub enum Overlay {
     /// The SHIP OVERLAY: the pull request composer, or the merge
     /// confirm, for one checkout (`ship_view`).
     Ship(crate::ship_view::ShipView),
+    /// The CRITTER LOG: every species, seen or a silhouette.
+    CritterLog(crate::critters::LogView),
 }
 
 /// Rows optimistically removed for an in-flight DeleteWorktree, kept so an
@@ -4625,6 +4750,10 @@ pub struct LauncherState {
     /// Each session's context window (`ServerEvent::SessionContexts`).
     pub session_contexts:
         std::collections::HashMap<nebula_core::AgentId, nebula_core::usage::ContextUsage>,
+    /// Why each session's last turn stopped short — `resumes 3:45pm`,
+    /// `logged out` (`ServerEvent::SessionStops`). The daemon sends the
+    /// whole list again after every Snapshot, so a Snapshot clears it.
+    pub session_stops: std::collections::HashMap<nebula_core::AgentId, nebula_core::stop::StopNote>,
 }
 
 pub struct ChromeState {
@@ -4784,10 +4913,18 @@ impl Default for ChromeState {
 
 pub struct ModalState {
     pub overlay: Option<Overlay>,
-    /// The overlay a VERBS MENU (`?`) was opened over — the diff's, the
-    /// accounts' — put back when the menu goes, and before its row's key
-    /// is pressed in it (`MenuAction::OverlayKey`).
+    /// The overlay a menu was opened over — `?` or a right-click on a row
+    /// of the diff, the accounts, the tree, Azure DevOps… — put back when
+    /// the menu goes, and before its row's key is pressed in it
+    /// (`MenuAction::OverlayKey`). Set only by the opening over an overlay
+    /// (`event_loop::verbs::open_over`) and taken by every way the menu
+    /// goes (Esc, a click off it, a row chosen, the unlock), so it never
+    /// comes back under a later menu.
     pub verbs_under: Option<Box<Overlay>>,
+    /// The file a menu's **Diff this file** asked for (the tree browser's, a
+    /// finder's): the DIFF VIEWER's cursor lands there once its list is
+    /// read (`event_loop::land_diff_listing`), and lets it go.
+    pub diff_land_on: Option<String>,
     /// When a modal's BUTTON was last clicked (a confirm's `[Enter/y]`, a
     /// prompt's `[Esc]`). A button click inside the double-click window
     /// after it is dropped: the answer can put another dialog up in the
@@ -4858,6 +4995,7 @@ impl Default for ModalState {
         Self {
             overlay: None,
             verbs_under: None,
+            diff_land_on: None,
             button_clicked_at: None,
             button_hover: None,
             follow_up: None,
@@ -5181,6 +5319,8 @@ pub struct App {
     pub desk: crate::desk::DeskState,
     /// LEARN IN PLACE: the first-use tip on the footer's padding row.
     pub learn: crate::learn::Learn,
+    /// The CRITTERS overlay (an easter egg; `crate::critters`).
+    pub critters: crate::critters::Critters,
 }
 
 impl Default for App {
@@ -5204,6 +5344,7 @@ impl App {
             orch: crate::orchestrator_view::OrchState::default(),
             desk: crate::desk::DeskState::default(),
             learn: crate::learn::Learn::default(),
+            critters: crate::critters::Critters::new(),
         };
         app.launcher.columns_recent_prompts_count = 3;
         app

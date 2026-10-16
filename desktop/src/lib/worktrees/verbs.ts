@@ -1,17 +1,18 @@
-// What a worktree row offers, as buttons and as its right-click menu:
-// the overview's worktree groups and the Worktrees view share this list.
-// Each verb is the one the session menus already run (actions.ts); this
-// adds the ones only a checkout has: a session started there, its folder,
-// its path, and the bulk delete of merged or clean checkouts, which goes
-// through the same non-forced `git worktree remove` the single delete
-// does without Force, so git still refuses anything with work in it.
+// What a worktree row offers as its hover buttons: the overview's
+// worktree groups and the Worktrees view share this list. Its right-click
+// menu is the registry's, the same as every other way in (actions.ts
+// `checkoutMenu`). Each verb is the one the menus run; this adds the ones
+// only a checkout has: a session started there, its folder, its path, and
+// the bulk delete of merged or clean checkouts, which goes through the
+// same non-forced `git worktree remove` the single delete does without
+// Force, so git still refuses anything with work in it.
 
 import { api, type Worktree } from '../api';
 import { app, focusQuickPrompt, openDiff, setScope, toast } from '../store.svelte';
 import { dropPart, worktreeScope } from '../scope';
-import { ask, type MenuEntry } from '../ui/ui.svelte';
+import { ask } from '../ui/ui.svelte';
 import { keyLabel, keysOf, type ShortcutId } from '../shortcuts';
-import { deleteWorktree, moveItems, newTerminal, openEditor, openRemote } from '../actions';
+import { deleteWorktree, newTerminal, openEditor } from '../actions';
 import { canSwitchBranch, openBranchSwitch } from './switcher.svelte';
 import { worktreeApi, type CheckoutState } from './api';
 import { stateLines } from './offer';
@@ -101,22 +102,6 @@ export function verbsFor(w: Worktree): Verb[] {
   if (!w.is_main)
     out.push({ id: 'delete', label: say('delete_worktree'), short: 'delete', run: () => deleteWorktree(w.id), rowKey: 'delete', danger: true });
   return out;
-}
-
-/** The row's right-click menu. */
-export function worktreeMenu(w: Worktree): MenuEntry[] {
-  const verbs = verbsFor(w);
-  const entries: MenuEntry[] = [{ heading: `${w.is_main ? 'checkout' : 'worktree'} ${w.branch}` }];
-  for (const v of verbs) {
-    if (v.id === 'delete') entries.push('sep');
-    entries.push({ label: v.label, run: () => void v.run(), keys: v.key ? keysOf(v.key) : v.rowKey ? [v.rowKey] : undefined, danger: v.danger });
-    if (v.id === 'copy') {
-      entries.push({ label: say('open_repo'), run: () => void openRemote(w.id), keys: keysOf('open_remote') });
-      // The keyboard's drag of the group (the root stays first).
-      if (!w.is_main) entries.push(...moveItems({ kind: 'worktree', id: w.id }));
-    }
-  }
-  return entries;
 }
 
 /** The tooltip a verb button carries: what it does, and its key. */

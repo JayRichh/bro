@@ -227,6 +227,14 @@ model.contexts = {
     a5: { percent: 83, tokens: 166_000, window: 200_000, compactions: 1, last_compact_at: now - 3_600_000, source: 'transcript', at: now - 90_000 },
   } : {}),
 };
+// Why a session's last turn stopped short: a running one waiting out a
+// usage limit (resumes 3:45pm), and one that needs a login.
+model.stops = {
+  a1: { reason: 'rate_limit', waiting: true, resumes: '3:45pm', resets_at: nowS + 3 * H1 + 12 * 60, detail: null, at: now - 90_000 },
+  ...(W2 ? {
+    a2: { reason: 'authentication_failed', waiting: false, resumes: null, resets_at: null, detail: 'OAuth token has expired', at: now - 30_000 },
+  } : {}),
+};
 
 // ---- Tasks (synthetic sprint) ----
 const sprints = [
@@ -458,6 +466,10 @@ const handlers = {
   settings_reset: () => null,
   desktop_prefs: () => ({ theme: 'system', diff_mode: 'side', home: BOARD ? 'board' : 'overview' }),
   config_problem: () => null,
+  // The critters stay off in the demo (the screenshots are of the app).
+  critters_prefs: () => ({ on: false, size: 'medium', often: 'normal', animations: true, debug: false }),
+  critters_log: () => ({ version: 1, species: {}, lamps: 0 }),
+  critters_log_update: () => ({ version: 1, species: {}, lamps: 0 }),
   run_commands: () => ({ w1: 'dotnet watch run', w2: 'dotnet watch run' }),
   start_run: () => 't9',
   stop_run: () => null,

@@ -10,22 +10,30 @@ mod ado;
 mod alerts;
 mod board;
 mod branches;
+mod critters;
 mod daemon;
+mod editors;
 mod files;
+mod fonts;
 mod git;
 mod launch;
 mod learn;
+mod look;
 mod orchestrator;
 mod order;
 mod pr_poll;
 mod presets;
 mod profiles;
 mod projects;
+#[cfg(windows)]
+mod quiet;
 mod sessions;
 mod settings;
 mod settings_io;
 mod ship;
+mod tree;
 mod update;
+mod wake;
 
 use ado::client::CmdError;
 use ado::prs::{self, PrCtx, PrCtxExt};
@@ -871,6 +879,9 @@ fn main() {
             // cursor-agent list (never a fresh probe from a GUI window).
             let cfg = nebula_config::Config::load();
             nebula_config::claude_catalogue::bootstrap(cfg.claude_enabled);
+            // VS Code and Visual Studio found off the main thread (vswhere
+            // takes a moment), so the first menu already lists them.
+            nebula_core::editors::detect_in_background();
             if cfg.cursor_enabled {
                 nebula_config::cursor_catalogue::install_cached();
             }
@@ -888,6 +899,9 @@ fn main() {
             tauri::async_runtime::spawn(pr_poll::poll_prs(client.clone(), handle));
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.set_title("kete");
+                // WebView2's own menu and browser keys off (quiet.rs).
+                #[cfg(windows)]
+                quiet::quiet(&w);
             }
             Ok(())
         })
@@ -948,6 +962,10 @@ fn main() {
             profiles::profile_remove,
             profiles::profile_set_default,
             accounts::accounts_list,
+            // Whakaoho (wake-up)
+            wake::wake_overview,
+            wake::wake_now,
+            wake::wake_set,
             accounts::account_switch,
             accounts::project_set_account,
             profiles::profile_duplicate,
@@ -961,6 +979,16 @@ fn main() {
             settings_io::settings_import_preview,
             settings_io::settings_import,
             settings::desktop_prefs,
+            fonts::system_fonts,
+            look::look_vscode,
+            look::look_vscode_install,
+            look::look_installed_themes,
+            look::look_import_installed,
+            look::look_import_file,
+            look::look_remove_theme,
+            look::look_reset,
+            look::look_use_vscode_fonts,
+            look::look_zoom,
             settings::desktop_set_collapsed,
             learn::learn_state,
             learn::learn_seen,
@@ -969,6 +997,9 @@ fn main() {
             settings::actions_list,
             settings::desktop_key_set,
             settings::run_commands,
+            critters::critters_log,
+            critters::critters_log_update,
+            critters::critters_prefs,
             diff_files,
             diff_review,
             diff_session,
@@ -980,6 +1011,18 @@ fn main() {
             open_url,
             files::opened_file_read,
             files::opened_file_open,
+            // The user's own editors (editors.rs)
+            editors::editors_list,
+            editors::editors_rescan,
+            editors::editor_icon,
+            editors::editor_targets,
+            editors::editor_windows,
+            editors::editor_open,
+            editors::editor_dock,
+            editors::path_reveal,
+            editors::path_open_default,
+            editors::worktree_file_read,
+            tree::worktree_tree,
             update::update_status,
             launchables,
             startup,

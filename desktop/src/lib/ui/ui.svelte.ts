@@ -6,21 +6,43 @@ import { sheet as files } from '../files/files.svelte';
 import { addSheet } from '../accounts/add.svelte';
 import { shipSheet } from '../ship/state.svelte';
 import { learn } from '../learn.svelte';
+import { logSheet } from '../critters/sheet.svelte';
 
 export type MenuItem = {
   label: string;
   run: () => void;
-  /** Chords from the shortcut table, shown at the right. */
+  /** Chords from the shortcut table, shown at the right, every one. */
   keys?: string[];
   danger?: boolean;
   disabled?: boolean;
-  /** Why it is greyed out, as its tooltip. */
+  /** Why it is greyed out, as its tooltip; on a live row, what it acts on. */
   title?: string;
   /** Kept last whatever a searchable menu's query (the verbs menu's All
    *  keys). */
   pinned?: boolean;
+  /** A submenu (`Open in \u25b8`): the row opens these and runs nothing.
+   *  Submenus never nest: a child's own `children` are ignored. */
+  children?: MenuEntry[];
+  /** A checkbox row (or a radio row with `radio`): ticked or not. */
+  checked?: boolean;
+  /** One of a set (View \u25b8 Overview / Board): a radio, not a checkbox. */
+  radio?: boolean;
+  /** The icon slot ahead of the words. */
+  icon?: MenuIcon;
+  /** The row's whole words outside its submenu ("Open in VS Code" for the
+   *  submenu's "VS Code"): what the palette lists. */
+  full?: string;
 };
-export type MenuEntry = MenuItem | { heading: string } | 'sep';
+/** A status dot (its tone a theme colour), an image (an editor's icon, a
+ *  file's), or a glyph (an account's harness letter). */
+export type MenuIcon =
+  | { dot: 'ember' | 'ink' | 'muted' | 'faint' | 'done' | 'fail' | 'merged' | 'unread' }
+  | { src: string }
+  | { glyph: string };
+/** A heading: small caps, faint; `ember` for a state that needs you (a
+ *  menu's state banner, \u00a71.7 of the menu matrix). */
+export type MenuHeading = { heading: string; ember?: boolean };
+export type MenuEntry = MenuItem | MenuHeading | 'sep';
 
 export type Field = {
   key: string;
@@ -57,14 +79,32 @@ export type DialogSpec =
   | {
       kind: 'pick';
       title: string;
-      items: { id: string; label: string; hint?: string }[];
+      /** A line above the list. */
+      note?: string;
+      items: PickItem[];
+      /** The row the cursor starts on, by id. */
+      selected?: string;
+      /** A button beside Cancel that answers its own id (From a file). */
+      extra?: { id: string; label: string };
       resolve: (id: string | null) => void;
     };
 
+export type PickItem = {
+  id: string;
+  label: string;
+  hint?: string;
+  /** Colour squares after the label: a theme's canvas, text and syntax. */
+  swatch?: string[];
+  /** A font family: the row under the cursor shows a sample in it. */
+  font?: string;
+};
+
 export const ui = $state({
   /** `search`: a field over the rows narrows them as you type (the
-   *  verbs menu, `?`). */
-  menu: null as { x: number; y: number; items: MenuEntry[]; label: string; search?: boolean } | null,
+   *  verbs menu, `?`). `keep`: the focus stays where it was (a field, the
+   *  terminal, an editor) and the menu takes the keys from the window, as
+   *  a native menu does (menus/router.ts). */
+  menu: null as { x: number; y: number; items: MenuEntry[]; label: string; search?: boolean; keep?: boolean } | null,
   dialog: null as DialogSpec | null,
   palette: false,
   help: false,
@@ -79,8 +119,14 @@ export const ui = $state({
 export type ReviewTab = 'terminal' | 'diff' | 'history' | 'pr';
 export type ReviewSheet = { sessions: string[]; at: number; tab: ReviewTab };
 
-/** Open a context menu at the pointer (or under an element). */
-export function openMenu(items: MenuEntry[], at: { x: number; y: number } | HTMLElement, label = 'Actions', opts: { search?: boolean } = {}) {
+/** Open a context menu at the pointer (or under an element). `label`
+ *  names it for a screen reader: the thing it acts on. */
+export function openMenu(
+  items: MenuEntry[],
+  at: { x: number; y: number } | HTMLElement,
+  label = 'Actions',
+  opts: { search?: boolean; keep?: boolean } = {},
+) {
   if (!items.length) return;
   let x: number, y: number;
   if (at instanceof HTMLElement) {
@@ -88,7 +134,7 @@ export function openMenu(items: MenuEntry[], at: { x: number; y: number } | HTML
     x = r.left;
     y = r.bottom;
   } else ({ x, y } = at);
-  ui.menu = { x, y, items, label, ...(opts.search ? { search: true } : {}) };
+  ui.menu = { x, y, items, label, ...(opts.search ? { search: true } : {}), ...(opts.keep ? { keep: true } : {}) };
 }
 
 export function closeMenu() {
@@ -109,7 +155,7 @@ export const ask = {
     settle<Record<string, string> | null>((resolve) => ({ kind: 'prompt', confirm: 'Save', ...o, resolve })),
   confirm: (o: { title: string; message: string; detail?: string[]; confirm: string; danger?: boolean; check?: string; checked?: boolean }) =>
     settle<{ ok: boolean; checked: boolean }>((resolve) => ({ kind: 'confirm', ...o, resolve })),
-  pick: (o: { title: string; items: { id: string; label: string; hint?: string }[] }) =>
+  pick: (o: { title: string; note?: string; items: PickItem[]; selected?: string; extra?: { id: string; label: string } }) =>
     settle<string | null>((resolve) => ({ kind: 'pick', ...o, resolve })),
 };
 
@@ -126,6 +172,7 @@ export function layerOpen(): boolean {
     ui.branchSwitch ||
     files.open ||
     addSheet.phase === 'form' ||
+    logSheet.open ||
     !!shipSheet.mode
   );
 }

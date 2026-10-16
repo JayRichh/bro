@@ -15,6 +15,14 @@ pub(super) fn draw_overlay(f: &mut Frame, app: &mut App) {
         Some(ModalUnder::PullRequests(view)) => crate::pr_modal::draw(f, app, &view, th, true),
         None => {}
     }
+    // A menu opened over an overlay (`?`, or a right-click on one of its
+    // rows) stands on it: the diff, the tree or the accounts stay on
+    // screen under the menu, so the row it was opened on is still seen.
+    if matches!(overlay, Overlay::Menu(_)) {
+        if let Some(under) = app.modals.verbs_under.as_deref().cloned() {
+            under.draw(f, app);
+        }
+    }
     overlay.draw(f, app);
 }
 
@@ -49,6 +57,13 @@ impl Overlay {
             Overlay::Subagents(view) => super::subagents_view::draw(f, app, view),
             Overlay::Ado(view) => super::ado_view::draw(f, app, view),
             Overlay::Ship(view) => super::ship_view::draw(f, app, view),
+            Overlay::CritterLog(mut view) => {
+                let area = f.area();
+                crate::critters::draw_log(f.buffer_mut(), app, &mut view, area);
+                if let Some(Overlay::CritterLog(live)) = &mut app.modals.overlay {
+                    live.area = view.area;
+                }
+            }
         }
     }
 }
@@ -115,10 +130,21 @@ fn draw_menu_overlay(f: &mut Frame, app: &mut App, menu: crate::app::ContextMenu
         .as_deref()
         .map(|t| t.chars().count() + 2)
         .unwrap_or(0);
+    // An editor row leads with its editor's glyph (VS Code's, Visual
+    // Studio's; `VSC` / `VS` without a Nerd Font).
+    let glyphs: Vec<Option<(String, ratatui::style::Color)>> = menu
+        .items
+        .iter()
+        .map(|i| crate::editors::glyph(i, app.chrome.icons))
+        .collect();
+    let glyph_w = |g: &Option<(String, ratatui::style::Color)>| {
+        g.as_ref().map_or(0, |(t, _)| t.chars().count())
+    };
     let label_w = menu
         .items
         .iter()
-        .map(|i| i.label.chars().count())
+        .zip(&glyphs)
+        .map(|(i, g)| i.label.chars().count() + glyph_w(g))
         .max()
         .unwrap_or(8);
     // Each verb's key at the row's right, as the keymap has it now (a
@@ -176,8 +202,14 @@ fn draw_menu_overlay(f: &mut Frame, app: &mut App, menu: crate::app::ContextMenu
     // wider than the rows leaves no ragged gap beside them.
     let row_w = inner.width as usize;
     let label_w = row_w.saturating_sub(if any_submenu { 4 } else { 2 } + key_col);
-    // A list taller than the screen scrolls with its hover.
-    let skip = crate::app::menu_scroll(menu.hover, menu.items.len(), inner.height as usize);
+    // A list taller than the screen scrolls with its hover, only as far
+    // as the hover needs: a row lit by the pointer stays under it.
+    let skip = crate::app::menu_window(
+        menu.scroll,
+        menu.hover,
+        menu.items.len(),
+        inner.height as usize,
+    );
     for (i, item) in menu.items.iter().enumerate().skip(skip) {
         let Some(row) = row_rect(inner, i - skip) else {
             break;
@@ -190,18 +222,20 @@ fn draw_menu_overlay(f: &mut Frame, app: &mut App, menu: crate::app::ContextMenu
         if i == menu.hover {
             style = style.bg(th.sel_bg).add_modifier(Modifier::BOLD);
         }
-        let label: String = item.label.chars().take(label_w).collect();
+        let glyph = &glyphs[i];
+        let room = label_w.saturating_sub(glyph_w(glyph));
+        let label: String = item.label.chars().take(room).collect();
         let key = if key_col > 0 {
             format!("{:>key_w$}  ", keys[i])
         } else {
             String::new()
         };
         let (text, tail) = if item.action.submenu().is_some() {
-            (format!(" {label:<label_w$}"), format!("{key}▸ "))
+            (format!("{label:<room$}"), format!("{key}▸ "))
         } else if any_submenu {
-            (format!(" {label:<label_w$}"), format!("{key}  "))
+            (format!("{label:<room$}"), format!("{key}  "))
         } else {
-            (format!(" {label:<label_w$}"), key)
+            (format!("{label:<room$}"), key)
         };
         let dim = if i == menu.hover {
             style
@@ -209,17 +243,18 @@ fn draw_menu_overlay(f: &mut Frame, app: &mut App, menu: crate::app::ContextMenu
             style.fg(th.dim)
         };
         let tail = format!(" {tail}");
-        f.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(text, style),
-                Span::styled(tail, dim),
-            ])),
-            row,
-        );
+        let mut spans = vec![Span::styled(" ", style)];
+        if let Some((g, color)) = glyph {
+            spans.push(Span::styled(g.clone(), style.fg(*color)));
+        }
+        spans.push(Span::styled(text, style));
+        spans.push(Span::styled(tail, dim));
+        f.render_widget(Paragraph::new(Line::from(spans)), row);
     }
-    // Record the drawn area for click hit-testing.
+    // Record the drawn area and window for the pointer's hit test.
     if let Some(Overlay::Menu(m)) = &mut app.modals.overlay {
         m.area = area;
+        m.scroll = skip;
     }
 }
 
@@ -881,7 +916,11 @@ fn draw_settings_overlay(f: &mut Frame, app: &mut App, view: crate::app::Setting
                     Style::default().fg(th.warn),
                 ))),
                 None => {
-                    let hint = crate::config::hint_at(tab, view.selected);
+                    let mut hint = crate::config::hint_at(tab, view.selected);
+                    // The CRITTERS rows lead to the collection log.
+                    if crate::critters::is_critters_row(tab, view.selected) {
+                        hint.push_str("  ⇧L critter log");
+                    }
                     lines.push(Line::from(Span::styled(
                         truncate(&format!(" {hint}"), inner.width as usize),
                         dim,
@@ -900,9 +939,15 @@ fn draw_settings_overlay(f: &mut Frame, app: &mut App, view: crate::app::Setting
     // The file's path, and on the same row the buttons that carry the
     // settings to a file and back (`kete config export / import`).
     let path = nebula_core::paths::config_path();
-    let buttons = [("⇧E export", false), ("⇧I import", true)];
+    // On the Appearance tab, Kete's own look is a button too (`⇧D`).
+    let look = crate::config::is_appearance_tab(tab);
+    let mut buttons = vec![("⇧E export", Some(false)), ("⇧I import", Some(true))];
+    if look {
+        buttons.insert(0, ("⇧D Kete look", None));
+    }
     let room: usize = buttons.iter().map(|(l, _)| l.chars().count() + 3).sum();
     let mut io_hits = Vec::new();
+    let mut look_hit = None;
     let mut last = vec![Span::styled(
         format!(
             "{:<w$}",
@@ -924,15 +969,16 @@ fn draw_settings_overlay(f: &mut Frame, app: &mut App, view: crate::app::Setting
                 format!("[{label}]"),
                 Style::default().fg(th.accent),
             ));
-            io_hits.push((
-                Rect {
-                    x: x + 1,
-                    y: row,
-                    width: w,
-                    height: 1,
-                },
-                import,
-            ));
+            let hit = Rect {
+                x: x + 1,
+                y: row,
+                width: w,
+                height: 1,
+            };
+            match import {
+                Some(import) => io_hits.push((hit, import)),
+                None => look_hit = Some(hit),
+            }
             x += w + 1;
         }
     }
@@ -941,6 +987,7 @@ fn draw_settings_overlay(f: &mut Frame, app: &mut App, view: crate::app::Setting
     if let Some(Overlay::Settings(v)) = &mut app.modals.overlay {
         v.area = area;
         v.io_hits = io_hits;
+        v.look_hit = look_hit;
         v.tab_hits = hits;
         v.first_row = first_row;
         v.body_area = Rect {

@@ -238,8 +238,13 @@ fn overlay_footer_hint(app: &App, overlay: &Overlay, th: Theme) -> FooterHint {
         }
         Overlay::Accounts(view) => dim_hint(
             match view.mode {
+                crate::accounts_overlay::Mode::List
+                    if view.tab == crate::accounts_overlay::Tab::Wake =>
+                {
+                    crate::wake_tab::FOOTER_HINT
+                }
                 crate::accounts_overlay::Mode::List => {
-                    "↑/↓: move  a: add  Enter: edit  Space: on/off  d: default  r: rename  l: sign in  x: remove  Esc: close"
+                    "↑/↓: move  a: add  Enter: edit  Space: on/off  d: default  r: rename  l: sign in  x: remove  w: wake now  Tab: wake-up  Esc: close"
                 }
                 crate::accounts_overlay::Mode::Form(_) => {
                     "Tab/↑/↓: field  ←/→/Space: change  type: fill  Del: clear variables  Enter: save  Esc: back"

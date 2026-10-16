@@ -1,0 +1,22 @@
+{
+	"name": "vscode-theme-onedark",
+	"displayName": "Atom One Dark Theme",
+	"description": "Atom One Dark theme for Visual Studio Code",
+	"version": "2.3.0",
+	"publisher": "akamud",
+	"engines": {
+		"vscode": "^1.0.0"
+	},
+	"categories": [
+		"Themes"
+	],
+	"contributes": {
+		"themes": [
+			{
+				"label": "Atom One Dark",
+				"uiTheme": "vs-dark",
+				"path": "./themes/OneDark.json"
+			}
+		]
+	}
+}

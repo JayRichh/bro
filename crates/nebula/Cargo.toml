@@ -15,6 +15,13 @@ path = "src/main.rs"
 name = "bro"
 path = "src/bro.rs"
 
+# kete with no console window (Windows): what the WHAKAOHO scheduled task
+# runs, so a wake-up never opens a window or takes the focus. It starts the
+# kete beside it hidden and exits with its code (src/kete_w.rs).
+[[bin]]
+name = "kete-w"
+path = "src/kete_w.rs"
+
 [dependencies]
 nebula-core = { workspace = true }
 nebula-daemon = { workspace = true }

@@ -725,8 +725,20 @@ fn cards_offer_make_orchestrator_and_the_orchestrator_card_wears_the_badge() {
                 .map(|i| i.label.to_string())
                 .collect()
         };
-        assert!(labels(&worker).contains(&"Make orchestrator".to_string()));
+        // Another session is pinned: the worker's card leaves Make
+        // orchestrator out (the menu matrix), its key and `?` still reach
+        // it; with none pinned, the card offers it.
+        assert!(!labels(&worker).contains(&"Make orchestrator".to_string()));
         assert!(labels(&pinned).contains(&"Unpin orchestrator".to_string()));
+        let pin = |app: &mut App, role| {
+            for a in app.tree.agents.iter_mut().filter(|a| a.id == pinned.id) {
+                a.role = role;
+            }
+        };
+        pin(&mut app, nebula_core::AgentRole::Worker);
+        let free = menu_items_for_session_in(&app, &worker);
+        assert!(free.iter().any(|i| i.label == "Make orchestrator"));
+        pin(&mut app, nebula_core::AgentRole::Orchestrator);
 
         let mut out = Vec::new();
         run_menu_action(

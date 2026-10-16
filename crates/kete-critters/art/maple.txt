@@ -1,0 +1,397 @@
+# Mushroom-kingdom archetypes (originals, not copies). Frames face right.
+# Cartoon shell snails in three shells, a bouncing orange cap, a piglet
+# with a bow, a walking stump.
+
+== snail_green
+size 11 9
+pal h #b8ec8c
+pal S #5cbc48
+pal s #3a8a38
+pal d #23562a
+pal b #f4dfb4
+pal B #cfb184
+pal a #e8c890
+pal e #2a2230
+lid B
+-- idle
+..hhhh.....
+.hSSSSs....
+hSdddSSs.a.
+hSdSSdSsbbb
+hSdSdSSsbeb
+.sSddSssbbb
+..ssssBbbb.
+.bbbbbbbbbb
+BBBBBBBBBB.
+-- walk
+..hhhh.....
+.hSSSSs..a.
+hSdddSSs.bb
+hSdSSdSsbbe
+hSdSdSSsbbb
+.sSddSssbbb
+..ssssBbbbb
+..bbbbbbbbb
+.BBBBBBBBBB
+-- sit
+...........
+...........
+..hhhh.....
+.hSSSSs....
+hSdddSSs...
+hSdSSdSs...
+hSdSdSSs...
+.sSddSss...
+BBssssBB...
+-- eat
+..hhhh.....
+.hSSSSs....
+hSdddSSs...
+hSdSSdSs...
+hSdSdSSs.a.
+.sSddSss.bb
+..ssssBbbbe
+.bbbbbbbbbb
+BBBBBBBBBBB
+-- held
+..hhhh.....
+.hSSSSs....
+hSdddSSs.a.
+hSdSSdSsbbb
+hSdSdSSsbeb
+.sSddSssbbb
+..ssssBbbb.
+..bbbbbbbb.
+...BB..BB..
+
+== snail_blue
+size 11 9
+pal h #a8d4fa
+pal S #4c8ee0
+pal s #2e5ea8
+pal d #1c3468
+pal b #f4dfb4
+pal B #cfb184
+pal a #e8c890
+pal e #2a2230
+lid B
+-- idle
+..hhhh.....
+.hSSSSs....
+hSdddSSs.a.
+hSdSSdSsbbb
+hSdSdSSsbeb
+.sSddSssbbb
+..ssssBbbb.
+.bbbbbbbbbb
+BBBBBBBBBB.
+-- walk
+..hhhh.....
+.hSSSSs..a.
+hSdddSSs.bb
+hSdSSdSsbbe
+hSdSdSSsbbb
+.sSddSssbbb
+..ssssBbbbb
+..bbbbbbbbb
+.BBBBBBBBBB
+-- sit
+...........
+...........
+..hhhh.....
+.hSSSSs....
+hSdddSSs...
+hSdSSdSs...
+hSdSdSSs...
+.sSddSss...
+BBssssBB...
+-- eat
+..hhhh.....
+.hSSSSs....
+hSdddSSs...
+hSdSSdSs...
+hSdSdSSs.a.
+.sSddSss.bb
+..ssssBbbbe
+.bbbbbbbbbb
+BBBBBBBBBBB
+-- held
+..hhhh.....
+.hSSSSs....
+hSdddSSs.a.
+hSdSSdSsbbb
+hSdSdSSsbeb
+.sSddSssbbb
+..ssssBbbb.
+..bbbbbbbb.
+...BB..BB..
+
+== snail_red
+size 11 9
+pal h #fbb0a0
+pal S #e0503c
+pal s #a83030
+pal d #6a1c24
+pal b #f4dfb4
+pal B #cfb184
+pal a #e8c890
+pal e #2a2230
+lid B
+-- idle
+..hhhh.....
+.hSSSSs....
+hSdddSSs.a.
+hSdSSdSsbbb
+hSdSdSSsbeb
+.sSddSssbbb
+..ssssBbbb.
+.bbbbbbbbbb
+BBBBBBBBBB.
+-- walk
+..hhhh.....
+.hSSSSs..a.
+hSdddSSs.bb
+hSdSSdSsbbe
+hSdSdSSsbbb
+.sSddSssbbb
+..ssssBbbbb
+..bbbbbbbbb
+.BBBBBBBBBB
+-- sit
+...........
+...........
+..hhhh.....
+.hSSSSs....
+hSdddSSs...
+hSdSSdSs...
+hSdSdSSs...
+.sSddSss...
+BBssssBB...
+-- eat
+..hhhh.....
+.hSSSSs....
+hSdddSSs...
+hSdSSdSs...
+hSdSdSSs.a.
+.sSddSss.bb
+..ssssBbbbe
+.bbbbbbbbbb
+BBBBBBBBBBB
+-- held
+..hhhh.....
+.hSSSSs....
+hSdddSSs.a.
+hSdSSdSsbbb
+hSdSdSSsbeb
+.sSddSssbbb
+..ssssBbbb.
+..bbbbbbbb.
+...BB..BB..
+
+== orange_mushroom
+size 12 11
+pal Y #ffd88a
+pal O #f08a2c
+pal o #c8601c
+pal r #9a4418
+pal c #f6e6c4
+pal C #d4bc94
+pal e #2a2230
+pal f #a8865c
+lid C
+-- idle
+....YOOOO...
+..YYOOOOYOo.
+.YOOOOOOYYOo
+OOOYYOOOOOOo
+OYYYOOOOOooo
+oOOOOOOOoooo
+.rrrrrrrrrr.
+...cecceCC..
+...cecceCC..
+...ccccccC..
+...ff..ff...
+-- walk
+....YOOOO...
+..YYOOOOYOo.
+.YOOOOOOYYOo
+OOOYYOOOOOOo
+OYYYOOOOOooo
+oOOOOOOOoooo
+.rrrrrrrrrr.
+...cecceCC..
+...cecceCC..
+...ccccccC..
+....f..f....
+-- sit
+............
+............
+....YOOOO...
+..YYOOOOYOo.
+.YOOOOOOYYOo
+OOOYYOOOOOOo
+OYYYOOOOOooo
+oOOOOOOOoooo
+.rrrrrrrrrr.
+...cecceCC..
+..ffccccCff.
+-- eat
+............
+.....YOOOO..
+...YYOOOOYOo
+..YOOOOOOYYO
+.OOOYYOOOOOo
+.OYYYOOOOOoo
+.oOOOOOOOooo
+..rrrrrrrrr.
+....ccccCC..
+....cecceC..
+....ff..ff..
+-- held
+....YOOOO...
+..YYOOOOYOo.
+.YOOOOOOYYOo
+OOOYYOOOOOOo
+OYYYOOOOOooo
+oOOOOOOOoooo
+.rrrrrrrrrr.
+...cecceCC..
+...cecceCC..
+...ccccccC..
+...f.....f..
+
+== ribbon_pig
+size 12 9
+pal R #e8344a
+pal r #a82236
+pal h #ffd8de
+pal p #f6b2c0
+pal P #dc8a9e
+pal n #ec7e92
+pal N #a84a62
+pal e #2a2230
+pal f #c86a80
+lid P
+-- idle
+.....RR.RR..
+......RrR...
+...hhhPhhp..
+..hpppppppp.
+P.pppppppep.
+.Ppppppppnnn
+..PpppppppnN
+..PPPPPPPPP.
+..ff.f..f.ff
+-- walk
+.....RR.RR..
+......RrR...
+...hhhPhhp..
+..hpppppppp.
+P.pppppppep.
+.Ppppppppnnn
+..PpppppppnN
+..PPPPPPPPP.
+...ff.ff.ff.
+-- sit
+............
+............
+.....RR.RR..
+......RrR...
+...hhhPhhp..
+..hpppppppp.
+P.pppppppep.
+.Ppppppppnnn
+.PPPPPPPPPnN
+-- eat
+............
+............
+....RR.RR...
+.....RrRhp..
+..hhhPpppppp
+.hppppppppep
+P.pppppppppp
+.PpppppppPnn
+..PPPPPPPfnN
+-- held
+.....RR.RR..
+......RrR...
+...hhhPhhp..
+..hpppppppp.
+P.pppppppep.
+.Ppppppppnnn
+..PpppppppnN
+..PPPPPPPPP.
+..f..f..f..f
+
+== stump
+size 11 11
+pal l #7cc054
+pal L #3f8a3a
+pal t #e2c08a
+pal T #b08850
+pal b #8a5a34
+pal B #64401f
+pal k #3e2616
+pal e #1e1626
+pal f #5a3a22
+lid B
+-- idle
+..lL.......
+...L.......
+.tttttttt..
+tTtTTTtTtt.
+tttTttTttt.
+bttttttttb.
+kbbebbbebbk
+.bbbbbbbbB.
+.bBbbkbbBB.
+.BbbbbbbBB.
+..ff...ff..
+-- walk
+..lL.......
+...L.......
+.tttttttt..
+tTtTTTtTtt.
+tttTttTttt.
+bttttttttb.
+kbbebbbebbk
+.bbbbbbbbB.
+.bBbbkbbBB.
+.BbbbbbbBB.
+...ff.ff...
+-- sit
+...........
+..lL.......
+...L.......
+.tttttttt..
+tTtTTTtTtt.
+tttTttTttt.
+bttttttttb.
+kbbebbbebbk
+.bbbbbbbbB.
+.bBbbkbbBB.
+fBbbbbbbBBf
+-- eat
+...........
+...lL......
+....L......
+..tttttttt.
+.tTtTTTtTtt
+.tttTttTttt
+.bttttttttb
+kbbbbbebbek
+.bBbbkbbBB.
+.BbbbbbbBB.
+..ff...ff..
+-- held
+..lL.......
+...L.......
+.tttttttt..
+tTtTTTtTtt.
+tttTttTttt.
+bttttttttb.
+kbbebbbebbk
+.bbbbbbbbB.
+.bBbbkbbBB.
+.BbbbbbbBB.
+..f.....f..

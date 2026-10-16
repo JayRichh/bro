@@ -116,7 +116,7 @@ pub fn probe(
 /// (`nebula_core::shell::launch`), with no console window, and a timeout
 /// ends its process tree.
 #[cfg(windows)]
-fn run_captured(
+pub fn run_captured(
     program: &str,
     args: &[String],
     env: &nebula_core::profiles::LaunchEnv,
@@ -159,7 +159,7 @@ fn run_captured(
 }
 
 #[cfg(unix)]
-fn run_captured(
+pub fn run_captured(
     program: &str,
     args: &[String],
     env: &nebula_core::profiles::LaunchEnv,

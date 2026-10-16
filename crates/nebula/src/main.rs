@@ -2,6 +2,7 @@ mod ado;
 mod browser;
 mod cli;
 mod desktop;
+mod editors;
 mod hook;
 mod profile;
 mod setup;
@@ -10,15 +11,25 @@ mod ssh;
 mod statusline;
 mod tunnel;
 mod upgrade;
+mod wake;
 
 use anyhow::Result;
 use cli::{
-    Command, ConfigCommand, OrchestratorCommand, ProfileCommand, SessionCommand, SetupCommand,
+    Command, ConfigCommand, EditorsCommand, OrchestratorCommand, ProfileCommand, SessionCommand,
+    SetupCommand, WakeAction,
 };
 use std::path::Path;
 
 fn main() -> Result<()> {
     let cli = cli::parse_as_invoked();
+    // A Claude Code too old for exec-form hooks (before 2.1.139) ignores a
+    // hook's `args` and runs its `command` — this binary — bare, with the
+    // payload on a pipe. Inside a session that is never someone asking for
+    // the TUI, which would sit on the hook until it timed out: exit quietly,
+    // as `_hook` does where it has nothing to do (`hooks::installer`).
+    if cli.command.is_none() && cli.dir.is_none() && run_bare_by_a_hook() {
+        return Ok(());
+    }
     // Kete was Bro: carry Bro's data and runtime dirs over before anything
     // opens a file in them. A no-op once moved, so the note shows once.
     if opens_state(&cli.command) {
@@ -118,6 +129,45 @@ fn main() -> Result<()> {
             ProfileCommand::Enable { name } => profile::ProfileOp::Enable { name, on: true },
             ProfileCommand::Disable { name } => profile::ProfileOp::Enable { name, on: false },
             ProfileCommand::Login { name, args } => profile::ProfileOp::Login { name, args },
+        }),
+        Some(Command::Wake {
+            account,
+            all,
+            force,
+            dry_run,
+            mode,
+            json,
+            action,
+        }) => wake::run(match action {
+            Some(WakeAction::Set {
+                account,
+                at,
+                days,
+                keep_rolling,
+                no_keep_rolling,
+                skip_idle,
+                mode,
+                wake_pc,
+                no_wake_pc,
+            }) => wake::WakeOp::Set(wake::SetArgs {
+                account,
+                at,
+                days,
+                keep_rolling: flag(keep_rolling, no_keep_rolling),
+                skip_idle,
+                mode,
+                wake_pc: flag(wake_pc, no_wake_pc),
+            }),
+            Some(WakeAction::Off { account }) => wake::WakeOp::Off { account },
+            Some(WakeAction::Status { json }) => wake::WakeOp::Status { json },
+            None => wake::WakeOp::Run {
+                account,
+                all,
+                force,
+                dry_run,
+                mode,
+                json,
+            },
         }),
         Some(Command::Kill) => nebula_tui::run_kill(),
         Some(Command::Rename { title, force }) => {
@@ -271,6 +321,12 @@ fn main() -> Result<()> {
             wt_settings,
         }),
         Some(Command::Desktop { args }) => desktop::run_desktop(&args),
+        Some(Command::Editors { command }) => match command {
+            EditorsCommand::List { json } => editors::run_list(json),
+            EditorsCommand::Open { path, with, line } => {
+                editors::run_open(&path, with.as_deref(), line)
+            }
+        },
         Some(Command::Upgrade { force }) => upgrade::run_upgrade(force),
         Some(Command::StaleDaemonNote) => {
             if nebula_daemon::lifecycle::daemon_is_stale() {
@@ -318,6 +374,23 @@ fn main() -> Result<()> {
                 }
             }
         },
+    }
+}
+
+/// Run with no arguments from inside a Kete session with stdin a pipe:
+/// what an exec-form hook looks like to a CLI that drops its `args`.
+fn run_bare_by_a_hook() -> bool {
+    use std::io::IsTerminal;
+    nebula_core::env::non_empty(nebula_core::env::AGENT_ID).is_some()
+        && !std::io::stdin().is_terminal()
+}
+
+/// A `--x` / `--no-x` pair as a change: None when neither was given.
+fn flag(on: bool, off: bool) -> Option<bool> {
+    match (on, off) {
+        (true, _) => Some(true),
+        (_, true) => Some(false),
+        _ => None,
     }
 }
 

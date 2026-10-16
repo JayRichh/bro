@@ -6,15 +6,15 @@
   import { repoKey, worktreeGroups } from '../worktrees/groups';
   import { isCollapsed, rows, toggleCollapsed } from '../worktrees/rows.svelte';
   import RunButton from './RunButton.svelte';
-  import { newWorktree, openEditor, projectMenu } from '../actions';
+  import { newWorktree, openTargetMenu } from '../actions';
   import { canSwitchBranch, openBranchSwitch } from '../worktrees/switcher.svelte';
   import { withKey } from '../shortcuts';
   import Icon from '../ui/Icon.svelte';
-  import { openMenu } from '../ui/ui.svelte';
   import { prWord } from '../status';
   import { drag, dropProject, endDrag, leftFor, offsetIn, startDrag } from '../reorder.svelte';
   import { dropZone, type Place } from '../order';
   import { scopeModel } from '../scope';
+  import EditorButtons from '../editors/EditorButtons.svelte';
 
   let { row }: { row: RepoRow } = $props();
 
@@ -78,7 +78,6 @@
     ondragover={over}
     ondragleave={(e) => leftFor(e) && (mark = null)}
     ondrop={drop}
-    oncontextmenu={(e) => (e.preventDefault(), openMenu(projectMenu(row.project.id), { x: e.clientX, y: e.clientY }, row.name))}
   >
     <button
       class="-mr-3.5 grid size-4 flex-none place-items-center self-center border-0 bg-transparent p-0 text-muted hover:text-ink"
@@ -111,7 +110,8 @@
       {#each row.ports as port (port)}
         <button
           class="{label} border-0 bg-transparent p-0 hover:text-ink hover:underline hover:underline-offset-4"
-          title="Open http://localhost:{port}"
+          data-target="port:{row.portOf[port] ?? ''}:{port}"
+          title="Open http://localhost:{port}; right-click for its menu"
           onclick={() => api.openUrl(`http://localhost:${port}`).catch((e) => toast(String(e)))}>:{port}</button
         >
       {/each}
@@ -123,7 +123,8 @@
               : p.pr.state === 'closed'
                 ? 'text-muted line-through'
                 : 'text-ink'}"
-            title="{p.pr.title} ({p.branch}, {prWord(p.pr)})"
+            data-target="pr:{p.worktree}"
+            title="{p.pr.title} ({p.branch}, {prWord(p.pr)}). Open it; right-click for its menu."
             onclick={() => api.openUrl(p.pr.url).catch((e) => toast(String(e)))}
             >{prWord(p.pr).replace(/PR$/, '')}PR #{p.pr.number}</button
           >
@@ -147,16 +148,15 @@
           onclick={() => openBranchSwitch(row.project.id)}><Icon name="switch" size={12} /></button
         >
       {/if}
-      <button class="{verb} @max-[640px]:hidden" title={withKey('Open in the editor', 'open_editor')} aria-label="Open {row.name} in the editor" onclick={() => openEditor(main?.id)}
-        ><Icon name="editor" size={12} /></button
-      >
+      <!-- The default editor's own icon (and Visual Studio's where there is a solution). -->
+      <EditorButtons worktree={main} btn="{verb} @max-[640px]:hidden" size={13} />
     </span>
     <button
       class={verb}
       title="{withKey('Repo actions: open remote, refresh pull requests, rename, locate, remove, worktrees', 'row_menu')}; or right-click"
       aria-label="{row.name} actions"
       aria-haspopup="menu"
-      onclick={(e) => openMenu(projectMenu(row.project.id), e.currentTarget as HTMLElement, row.name)}
+      onclick={(e) => openTargetMenu({ kind: 'project', id: row.project.id }, e.currentTarget as HTMLElement)}
     >
       <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="5" width="2" height="2" fill="currentColor" /><rect x="5" y="5" width="2" height="2" fill="currentColor" /><rect x="9" y="5" width="2" height="2" fill="currentColor" /></svg>
     </button>

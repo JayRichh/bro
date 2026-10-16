@@ -44,6 +44,7 @@ mod host_terminal;
 mod key_modes;
 mod launcher;
 mod loop_run;
+mod menus;
 mod mouse_modes;
 mod optimistic;
 mod orchestrator;
@@ -79,6 +80,7 @@ use host_terminal::{
 };
 use key_modes::{handle_key, run_action};
 pub(crate) use loop_run::*;
+pub(crate) use menus::{issue_row_menu_items, pr_row_menu_items};
 use mouse_modes::handle_mouse;
 pub(crate) use overlays::handle_overlay_key;
 pub(crate) use prompts::*;

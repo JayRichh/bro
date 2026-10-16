@@ -5,8 +5,16 @@
   import { parseItem } from '../ado/prs-api';
   import { parseDiffItem } from '../diff-api';
   import { withKey } from '../shortcuts';
+  import { ownMenu, type Opened } from '../menus/router';
+  import { menuFor, targetLabel, type Target } from '../actions';
+  import { viewMenu } from '../menus/targets';
 
-  type Crumb = { label: string; mono?: boolean; go?: () => void };
+  /** `menu`: its right-click (\u00a75.18): a repo's, a checkout's (with its
+   *  sessions to open), a session's menu; a view's the views to go to. */
+  type Crumb = { label: string; mono?: boolean; go?: () => void; menu?: () => Opened | null };
+
+  const of = (t: Target, jump = false) => () => ({ items: menuFor(t, { jump }), label: targetLabel(t) });
+  const views = () => ({ items: viewMenu(), label: 'View' });
 
   const VIEW_LABEL: Record<string, string> = {
     tasks: 'Tasks',
@@ -15,16 +23,17 @@
     settings: 'Settings',
     orchestrator: 'Orchestrator',
     accounts: 'Accounts',
+    whakaoho: 'Whakaoho',
     worktrees: 'Worktrees',
   };
 
   const crumbs = $derived.by((): Crumb[] => {
     const p = nav.current;
     const m = app.model;
-    const out: Crumb[] = [{ label: app.home === 'board' ? 'Board' : 'Overview', go: () => goHome() }];
+    const out: Crumb[] = [{ label: app.home === 'board' ? 'Board' : 'Overview', go: () => goHome(), menu: views }];
     const project = p.repo ? m.projects.find((x) => x.id === p.repo) : undefined;
-    if (project) out.push({ label: project.name, go: () => goHome(project.id) });
-    if (VIEW_LABEL[p.view]) out.push({ label: VIEW_LABEL[p.view], go: () => nav.go({ view: p.view, repo: p.repo }) });
+    if (project) out.push({ label: project.name, go: () => goHome(project.id), menu: of({ kind: 'project', id: project.id }) });
+    if (VIEW_LABEL[p.view]) out.push({ label: VIEW_LABEL[p.view], go: () => nav.go({ view: p.view, repo: p.repo }), menu: views });
     if (p.view === 'branches' && p.item) {
       // `repo / Branches / jari / gst-rounding`: the person, then the rest.
       const cut = p.item.indexOf('/');
@@ -45,15 +54,18 @@
           : s
             ? m.terminals.find((t) => t.id === s.Terminal)?.name
             : undefined;
-      if (name) out.push({ label: name });
+      if (name && s) out.push({ label: name, menu: of('Agent' in s ? { kind: 'agent', id: s.Agent } : { kind: 'terminal', id: s.Terminal }) });
     } else if (p.view === 'diff') {
-      out.push({ label: 'Diff' });
+      out.push({ label: 'Diff', menu: views });
       const d = parseDiffItem(p.item);
       // A range reads commits, so it names its two ends, not the worktree
       // it happens to be read in.
       const ref = (r: string) => r.replace(/^refs\/(heads|remotes)\//, '');
       if (d.range) out.push({ label: `${ref(d.range.base)}...${ref(d.range.tip)}`, mono: true });
-      else if (d.worktree) out.push({ label: placeOf(m, d.worktree).branch, mono: true });
+      else if (d.worktree) out.push({ label: placeOf(m, d.worktree).branch, mono: true, menu: of({ kind: 'worktree', id: d.worktree }, true) });
+    } else if (p.view === 'files') {
+      out.push({ label: 'Files', menu: views });
+      if (p.item && m.worktrees.some((w) => w.id === p.item)) out.push({ label: placeOf(m, p.item).branch, mono: true, menu: of({ kind: 'worktree', id: p.item }, true) });
     }
     return out;
   });
@@ -84,11 +96,16 @@
         {#if c.go && !last}
           <button
             class="min-w-0 truncate border-0 bg-transparent p-0 text-[14px] text-muted hover:text-ink hover:underline hover:underline-offset-4 {c.mono ? 'font-mono text-[13px]' : ''}"
+            use:ownMenu={() => c.menu?.() ?? null}
+            title={c.menu ? 'Go there; right-click for its menu' : undefined}
             onclick={c.go}>{c.label}</button
           >
         {:else}
-          <span class="min-w-0 truncate text-[14px] font-semibold text-ink {c.mono ? 'font-mono text-[13px] font-medium' : ''}" aria-current={last ? 'page' : undefined}
-            >{c.label}</span
+          <span
+            class="min-w-0 truncate text-[14px] font-semibold text-ink {c.mono ? 'font-mono text-[13px] font-medium' : ''}"
+            aria-current={last ? 'page' : undefined}
+            use:ownMenu={() => c.menu?.() ?? null}
+            title={c.menu ? 'Right-click for its menu' : undefined}>{c.label}</span
           >
         {/if}
       </li>

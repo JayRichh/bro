@@ -1,0 +1,18 @@
+{
+  "nameShort": "VSCodium",
+  "nameLong": "VSCodium",
+  "applicationName": "codium",
+  "dataFolderName": ".vscode-oss",
+  "win32MutexName": "vscodium",
+  "win32DirName": "VSCodium",
+  "win32NameVersion": "VSCodium",
+  "win32RegValueName": "VSCodium",
+  "win32AppUserModelId": "VSCodium.VSCodium",
+  "win32ShellNameShort": "VSCodium",
+  "win32x64AppId": "{{88DA3577-054F-4CA1-8122-7D820494CFFB}",
+  "urlProtocol": "vscodium",
+  "quality": "stable",
+  "commit": "8a1d6c3f5e0b92741d3a7c58e6f20b94d1c7a3e5",
+  "version": "1.140.26280",
+  "date": "2026-10-02T21:08:33.000Z"
+}

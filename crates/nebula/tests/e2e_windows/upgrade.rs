@@ -166,7 +166,7 @@ fn copy_tree(from: &Path, to: &Path, fill: &dyn Fn(&str) -> String) {
 }
 
 /// The daemon's tree over its pipe, as a client gets it on Subscribe.
-fn daemon_tree(
+pub(crate) fn daemon_tree(
     runtime_dir: &Path,
 ) -> (
     Vec<nebula_core::Project>,
