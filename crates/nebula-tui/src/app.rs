@@ -495,6 +495,9 @@ pub enum MenuAction {
     /// accounts'): the overlay put back as it was, then this key pressed
     /// in it.
     OverlayKey(crossterm::event::KeyCode, crossterm::event::KeyModifiers),
+    /// A row of the THEME PICKER (Enter on Settings → Appearance → Color
+    /// theme): this theme saved and worn, the settings put back.
+    PickTheme(String),
 }
 
 /// The first row a menu of `len` rows draws in `visible` of them, so
@@ -740,12 +743,15 @@ impl ContextMenu {
     }
 
     /// Is this a VERBS MENU `?` opened over another overlay (the diff's,
-    /// the accounts')? Its rows press that overlay's keys, and closing it
+    /// the accounts'), or the THEME PICKER over the settings? Closing it
     /// puts that overlay back (`ModalState::verbs_under`).
     pub fn is_over_overlay(&self) -> bool {
-        self.items
-            .iter()
-            .any(|i| matches!(i.action, MenuAction::OverlayKey(..)))
+        self.items.iter().any(|i| {
+            matches!(
+                i.action,
+                MenuAction::OverlayKey(..) | MenuAction::PickTheme(_)
+            )
+        })
     }
 
     /// Is this the LAUNCHER VIEW's PROJECT DROPDOWN? Its rows are
@@ -2780,6 +2786,8 @@ pub struct SettingsView {
     /// The bottom row's Export and Import buttons, written during draw;
     /// `true` is Import.
     pub io_hits: Vec<(Rect, bool)>,
+    /// The Appearance tab's `[⇧D Kete look]` button, written during draw.
+    pub look_hit: Option<Rect>,
     /// Transient line under the body: duplicate warnings, host-terminal
     /// warnings, "reset to default".
     pub notice: Option<(String, NoticeLevel)>,

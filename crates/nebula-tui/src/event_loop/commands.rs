@@ -848,5 +848,6 @@ pub(crate) fn run_menu_action(app: &mut App, action: MenuAction, out: &mut Vec<C
                 handle_overlay_key(app, KeyEvent::new(code, mods), out);
             }
         }
+        MenuAction::PickTheme(name) => pick_theme(app, &name),
     }
 }

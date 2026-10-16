@@ -140,7 +140,10 @@ impl LiveTheme {
 
     fn inputs(name: &str) -> Inputs {
         let live = crate::theme::is_live(name);
-        let vscode = name.trim().eq_ignore_ascii_case(crate::theme::VSCODE);
+        // `vscode:<name>` reads the settings too: VS Code's colour
+        // customizations for that theme live there.
+        let vscode = name.trim().eq_ignore_ascii_case(crate::theme::VSCODE)
+            || crate::theme::vscode_theme_name(name).is_some();
         Inputs {
             name: name.to_string(),
             os_light: if live { os_prefers_light() } else { None },
@@ -153,17 +156,17 @@ impl LiveTheme {
     }
 
     fn build(inputs: &Inputs) -> Theme {
-        let vscode = inputs
-            .name
-            .trim()
-            .eq_ignore_ascii_case(crate::theme::VSCODE);
+        let name = inputs.name.trim();
+        let vscode = if let Some(theme) = crate::theme::vscode_theme_name(name) {
+            crate::vscode_theme::load_named(theme)
+        } else if name.eq_ignore_ascii_case(crate::theme::VSCODE) {
+            crate::vscode_theme::load(inputs.os_light)
+        } else {
+            None
+        };
         let machine = Machine {
             os_light: inputs.os_light,
-            vscode: if vscode {
-                crate::vscode_theme::load(inputs.os_light)
-            } else {
-                None
-            },
+            vscode,
         };
         crate::theme::resolve(&inputs.name, &machine)
     }

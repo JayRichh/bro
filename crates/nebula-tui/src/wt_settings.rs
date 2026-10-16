@@ -185,6 +185,12 @@ pub fn kete_workshop_scheme() -> Value {
 /// line), its `icon` (an absolute path) when there is one, the Nerd Font,
 /// the Kete Workshop scheme.
 pub fn kete_profile(commandline: &str, icon: Option<&str>) -> Value {
+    kete_profile_with_font(commandline, icon, FONT_FACE)
+}
+
+/// [`kete_profile`] drawing with `font`: the Nerd Font the user picked as
+/// Kete's terminal font, where they picked one (`kete setup terminal`).
+pub fn kete_profile_with_font(commandline: &str, icon: Option<&str>, font: &str) -> Value {
     let commandline = if commandline.contains(' ') && !commandline.starts_with('"') {
         format!("\"{commandline}\"")
     } else {
@@ -194,7 +200,7 @@ pub fn kete_profile(commandline: &str, icon: Option<&str>) -> Value {
         "guid": PROFILE_GUID,
         "name": PROFILE_NAME,
         "commandline": commandline,
-        "font": { "face": FONT_FACE },
+        "font": { "face": font },
         "colorScheme": SCHEME_NAME,
         "hidden": false
     });
@@ -226,6 +232,16 @@ pub fn add_kete_profile(
     commandline: &str,
     icon: Option<&str>,
 ) -> Vec<String> {
+    add_kete_profile_with_font(settings, commandline, icon, FONT_FACE)
+}
+
+/// [`add_kete_profile`], the profile drawing with `font`.
+pub fn add_kete_profile_with_font(
+    settings: &mut Value,
+    commandline: &str,
+    icon: Option<&str>,
+    font: &str,
+) -> Vec<String> {
     let mut changes = Vec::new();
     if !settings.is_object() {
         *settings = Value::Object(Map::new());
@@ -247,7 +263,7 @@ pub fn add_kete_profile(
 
     // The profile, by GUID — in `profiles.list`, or in the bare array an
     // older file keeps its profiles in.
-    let profile = kete_profile(commandline, icon);
+    let profile = kete_profile_with_font(commandline, icon, font);
     let profiles = root
         .entry("profiles")
         .or_insert_with(|| json!({ "defaults": {}, "list": [] }));
@@ -462,10 +478,20 @@ fn append(text: &str, node: &Node, item: impl Fn(&str) -> String) -> Vec<Edit> {
 /// would not come out as the parsed change says — then nothing should be
 /// written, and the caller says so.
 pub fn plan(text: &str, commandline: &str, icon: Option<&str>) -> Result<Plan, String> {
+    plan_with_font(text, commandline, icon, FONT_FACE)
+}
+
+/// [`plan`], the profile drawing with `font`.
+pub fn plan_with_font(
+    text: &str,
+    commandline: &str,
+    icon: Option<&str>,
+    font: &str,
+) -> Result<Plan, String> {
     let text = if text.trim().is_empty() { "{}" } else { text };
     let before = crate::jsonc::parse(text)?;
     let mut want = before.clone();
-    let changes = add_kete_profile(&mut want, commandline, icon);
+    let changes = add_kete_profile_with_font(&mut want, commandline, icon, font);
     if changes.is_empty() {
         return Ok(Plan {
             changes,
@@ -476,7 +502,7 @@ pub fn plan(text: &str, commandline: &str, icon: Option<&str>) -> Result<Plan, S
     if !matches!(root.shape, Shape::Object(_)) {
         return Err("the settings are not a JSON object".into());
     }
-    let profile = kete_profile(commandline, icon);
+    let profile = kete_profile_with_font(commandline, icon, font);
     let mut edits = Vec::new();
     // Members the root object lacks, added in one splice: two splices at
     // the one place would each think they were the first.

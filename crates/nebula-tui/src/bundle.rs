@@ -136,6 +136,12 @@ pub fn export(paths: &Paths, scope: Scope) -> (Value, Vec<String>) {
                     stripped.join(", ")
                 ));
             }
+            // The desktop window's imported themes are a few KiB each and
+            // no use to a remote terminal: left behind, so the bundle stays
+            // under the command line's MAX_FORWARD_BYTES.
+            if let Some(Value::Object(desktop)) = config.get_mut(nebula_config::desktop::KEY) {
+                desktop.remove("themes");
+            }
         }
     }
     (Value::Object(bundle), warnings)
@@ -752,6 +758,30 @@ mod tests {
         assert!(remote["config"].get("harnesses").is_none());
         assert!(remote["config"].get("custom_harnesses").is_none());
         assert_eq!(remote["config"]["theme"], "ocean");
+    }
+
+    /// The desktop window's look rides in a backup — its theme, fonts,
+    /// sizes and imported themes, none of them a path on this machine —
+    /// and a remote gets all but the imported themes, which are bulk it
+    /// has no window to paint with.
+    #[test]
+    fn the_window_s_look_travels_and_its_imported_themes_stay_off_remotes() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = paths(dir.path());
+        let look = json!({
+            "theme": "import:atom-one-dark",
+            "font_term": "JetBrains Mono",
+            "term_size": "15",
+            "themes": {"atom-one-dark": {"label": "Atom One Dark", "light": false, "tokens": {}}},
+        });
+        put(&p.config, json!({"theme": "kete-dark", "desktop": look}));
+        let (backup, _) = export(&p, Scope::Backup);
+        assert_eq!(backup["config"]["desktop"], look);
+        let (remote, _) = export(&p, Scope::Remote);
+        let desktop = &remote["config"]["desktop"];
+        assert!(desktop.get("themes").is_none());
+        assert_eq!(desktop["font_term"], "JetBrains Mono");
+        assert_eq!(desktop["term_size"], "15");
     }
 
     #[test]

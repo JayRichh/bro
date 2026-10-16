@@ -911,9 +911,15 @@ fn draw_settings_overlay(f: &mut Frame, app: &mut App, view: crate::app::Setting
     // The file's path, and on the same row the buttons that carry the
     // settings to a file and back (`kete config export / import`).
     let path = nebula_core::paths::config_path();
-    let buttons = [("⇧E export", false), ("⇧I import", true)];
+    // On the Appearance tab, Kete's own look is a button too (`⇧D`).
+    let look = crate::config::is_appearance_tab(tab);
+    let mut buttons = vec![("⇧E export", Some(false)), ("⇧I import", Some(true))];
+    if look {
+        buttons.insert(0, ("⇧D Kete look", None));
+    }
     let room: usize = buttons.iter().map(|(l, _)| l.chars().count() + 3).sum();
     let mut io_hits = Vec::new();
+    let mut look_hit = None;
     let mut last = vec![Span::styled(
         format!(
             "{:<w$}",
@@ -935,15 +941,16 @@ fn draw_settings_overlay(f: &mut Frame, app: &mut App, view: crate::app::Setting
                 format!("[{label}]"),
                 Style::default().fg(th.accent),
             ));
-            io_hits.push((
-                Rect {
-                    x: x + 1,
-                    y: row,
-                    width: w,
-                    height: 1,
-                },
-                import,
-            ));
+            let hit = Rect {
+                x: x + 1,
+                y: row,
+                width: w,
+                height: 1,
+            };
+            match import {
+                Some(import) => io_hits.push((hit, import)),
+                None => look_hit = Some(hit),
+            }
             x += w + 1;
         }
     }
@@ -952,6 +959,7 @@ fn draw_settings_overlay(f: &mut Frame, app: &mut App, view: crate::app::Setting
     if let Some(Overlay::Settings(v)) = &mut app.modals.overlay {
         v.area = area;
         v.io_hits = io_hits;
+        v.look_hit = look_hit;
         v.tab_hits = hits;
         v.first_row = first_row;
         v.body_area = Rect {

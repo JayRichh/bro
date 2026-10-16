@@ -247,15 +247,34 @@ fn repair(th: &mut Theme, base: &Theme) {
 }
 
 /// What the `vscode` source resolves to on this machine right now: the
-/// theme its settings name, found and derived. None when VS Code, its
-/// settings or the theme can't be found — the caller falls back to One
-/// Dark.
+/// theme its settings name, found, customized as VS Code customizes it
+/// and derived. None when VS Code, its settings or the theme can't be
+/// found — the caller falls back to One Dark.
 pub fn load(os_light: Option<bool>) -> Option<Theme> {
-    let settings = crate::jsonc::read(&settings_path()?)?;
-    let label = chosen_theme(&settings, os_light);
-    let file = find_theme(&label, &extension_dirs())?;
-    let data = load_theme(&file.path)?;
-    Some(derive(&data, file.light))
+    let shown = nebula_config::vscode::current(os_light)?;
+    Some(derive(&shown.data, shown.file.light))
+}
+
+/// A `vscode:<name>` theme: the installed VS Code theme `name` (an id or
+/// a label), whichever theme VS Code itself is set to, derived the same
+/// way. None when it is not installed.
+pub fn load_named(name: &str) -> Option<Theme> {
+    let shown = nebula_config::vscode::named(name)?;
+    Some(derive(&shown.data, shown.file.light))
+}
+
+/// The installed VS Code themes, as the `vscode:<label>` names the theme
+/// picker offers, the user's before VS Code's own.
+pub fn installed_names() -> Vec<(String, bool)> {
+    nebula_config::vscode::installed_themes()
+        .into_iter()
+        .map(|t| {
+            (
+                format!("{}{}", crate::theme::VSCODE_PREFIX, t.label),
+                t.light,
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]
