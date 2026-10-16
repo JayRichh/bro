@@ -27,7 +27,7 @@ The audits behind this spec are in `.superpowers/sdd/2026-10-16-release-054/audi
 | Real app icons for each detected editor | **0.54** | The exe's own icon (Insiders green, Cursor, VS Community purple) beats a drawn logo, and no brand marks are shipped. |
 | Editions and versions: VS 2017/2019/2022/2026, Community/Professional/Enterprise/Preview; VS Code Stable/Insiders, VSCodium, Cursor, Windsurf | **0.54** | vswhere and known install paths cover all of them; the edition doesn't change how Kete launches. Build Tools (no IDE) is filtered out. |
 | Track open editor windows, focus instead of reopening | **0.54** | VS Code already focuses an open folder's window; Visual Studio windows are matched by title and solution, then focused. |
-| VS Code inside a Kete tab via `code serve-web` | **Later (spike)** | Possible with the user's own install, but it's a second editor runtime to babysit (ports, tokens, extensions). Revisit if docking isn't enough. |
+| VS Code inside a Kete tab via `code serve-web` | **Cut** | It doesn't use the user's install (own server build, own data, no desktop extensions), and its license bars combining it with another app. |
 | Collapsed file tree per worktree | **0.56** | Git-listed files, collapsed by default, right-click menus; the TUI already has a tree browser. |
 | Code outline ("structs") | **Cut** | Needs a language server per language. The editor already does it, one click away. |
 | Context menus on every surface, one registry, both apps | **0.54** | Most of the plumbing exists (registry `MENUS`, `ui/Menu.svelte`, TUI `ContextMenu`); the gaps are targets, submenus, and surfaces with no menu. |
@@ -42,7 +42,22 @@ The audits behind this spec are in `.superpowers/sdd/2026-10-16-release-054/audi
 
 ## Embedding
 
-Pending the research report; filled before lanes start.
+Research is in .superpowers/sdd/2026-10-16-release-054/ (the editor research report). The verdict is **no**, for these reasons:
+
+- **Reparenting another app's window into Kete** (`SetParent` across processes) is "technically legal" but unsupported:
+  - It joins the two apps' input queues, so a hung IDE freezes Kete.
+  - It resets the child's DPI awareness.
+  - DWM on Windows 11 can keep drawing the window as top-level.
+  - UIPI blocks it outright for an elevated Visual Studio.
+  - WebView2 is already a three-process stack, so focus would bounce between four.
+  - VS Code's popups and Visual Studio's floating tool windows stay top-level anyway.
+- **`code serve-web`** downloads its own server build, keeps its own data folder, and ignores the desktop install's settings and extensions. Its license also bars combining it with another app. openvscode-server and code-server are Linux/Docker-only and use Open VSX.
+- **Visual Studio** has no web host and no embedding surface.
+
+What Kete does instead:
+- launches the user's own editors and focuses an already-open window
+- docks the editor beside Kete with a snap
+- keeps Monaco for read-only views inside the app
 
 ## Release map
 
@@ -218,19 +233,30 @@ A `nebula_core::editors` module (no UI), with:
   - **Test fixtures:** captured from this machine's real vswhere output and VS Code layout, with Insiders/Cursor/VSCodium fixtures written by hand.
 - **Launch.**
   - Spawn the detected exe directly with argv, not through the shell: detached, no console, no `code.cmd` flash, and no `%`/`"` rejection from `shell.rs`.
+  - Strip Kete's own environment before launch (`ELECTRON_RUN_AS_NODE`, `NEBULA_*`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GH_CONFIG_DIR`, the statusline/hook variables). A cold-started VS Code passes its environment to its terminals, which would leak a Kete profile into a user's own shell.
+  - Read each VS Code-family install's `product.json` (`applicationName`, `nameShort`, `dataFolderName`). It lives under the versioned `<install>\<commit10>\resources\app\` folder, so don't hard-code the path. This covers Stable, Insiders, VSCodium, Cursor, Windsurf and other Code-OSS forks (Kiro, Trae) without special cases.
   - VS Code variants: `Code.exe <folder>` (focuses an existing window for that folder), `-g file:line:col` for files, and `-r` when the setting says reuse.
   - Visual Studio:
-    - open the chosen solution (`.slnx` only on versions that support it)
-    - with no solution, open the folder (`devenv.exe <folder>`)
-    - `devenv.exe /Edit <file>` reuses a running instance
+    - open the chosen solution or project (`.slnx` from 17.14 on)
+    - `devenv.exe /Edit <file>` sends files to the most recent running instance
+    - The Visual Studio verb and icon appear only where a `.sln`/`.slnx`/`.csproj`/`.vcxproj` exists: Jay's "icon for the API project". `devenv <folder>` (Open Folder) isn't a documented switch, so it isn't offered.
+    - Going to a line in a running Visual Studio needs DTE over COM (Running Object Table). That is later, not this lane.
 - **Solution finder.**
   - Searches the worktree root and one level down for `.sln`/`.slnx`, skipping `node_modules`/`bin`/`obj`.
   - The pick is remembered per worktree in desktop prefs, keyed by repo. With several solutions, the menu shows a submenu.
 - **Instances.**
-  - On Windows: `EnumWindows` on `Code.exe`/`devenv.exe` processes, matching titles to the folder or solution name. VS Code's default title contains the folder name. Visual Studio's contains the solution name.
-  - "Open" focuses a matching window (`SetForegroundWindow`, with `AllowSetForegroundWindow` granted by the launching process) instead of starting another instance.
+  - On Windows: `EnumWindows` (visible, unowned, not cloaked) on `Code.exe`/`devenv.exe` processes, matching titles to the folder or solution name. Titles are a heuristic: a custom `window.title` or two worktrees with the same folder name defeat them. So titles only drive the "open" dot, never which window gets focus.
+  - Focus works by relaunching:
+    - `Code.exe <folder>` makes VS Code focus the window that already has that folder.
+    - `devenv /Edit` focuses the most recent Visual Studio.
+  - Kete calls `AllowSetForegroundWindow(<child pid>)` before spawning, while it still has the foreground.
+  - No `AttachThreadInput` (it can hang).
   - The editor icon shows a dot when a window for that worktree is open. The check is cheap and runs on hover or menu open, not polled.
-- **Dock beside Kete.** Snap the found editor window to the half of Kete's monitor opposite Kete's window and fit Kete to the other half. Restored by the OS (Win+arrows) like any snap.
+- **Dock beside Kete.**
+  - Snap the editor window to the half of Kete's monitor opposite Kete's window, and fit Kete to the other half.
+  - Uses `rcWork` from `GetMonitorInfo`, restores a maximised window first, and compensates for the invisible resize borders with `DWMWA_EXTENDED_FRAME_BOUNDS`.
+  - The OS restores it (Win+arrows) like any snap.
+  - An elevated Visual Studio can't be moved (UIPI); the command says so instead of failing silently.
 - **Icons.**
   - Each detected exe's own icon is extracted once (shell icon API) to a cached PNG and served to the desktop as a data URL.
   - The TUI uses the Nerd Font glyphs for VS Code / Visual Studio, falling back to the ASCII "VSC" / "VS".
@@ -402,20 +428,30 @@ Jay's framing: "if enabled and conditions warrant it, send the smallest message 
   - Schedules (switch, anchor, days, options) go in `config.local.json` under a `wake` map keyed by account. That map is listed in `NOT_ROWS` because it is edited in its own view. It must be written to the local layer only, never config.json, which goes to remotes on `kete ssh`.
   - Runs are appended to `<data>/wake-log.jsonl`, one line per decision (fired, skipped and why, failed), with a lock. The apps read and watch it.
   - Usual-activity hours come from the account's turn timestamps. If reading them needs the daemon, the lane adds one additive request at protocol 61 and says so.
-- **Runner.**
-  - A `kete wake <account> [--force] [--dry-run]` subcommand checks the conditions above, then runs a minimal headless `claude -p` under the profile's `CLAUDE_CONFIG_DIR` (profile env via `profile.prepare` + `launch_env`, base `claude_bg::run_captured`):
+- **Runner.** Research found that `claude -p` billing moved in 2026. Max plans now get monthly API credits that cover `claude -p`, while the help page still says it can use subscription limits. A `-p` ping may therefore not start the 5-hour window at all. So the runner has two modes.
+  - **Interactive (the default).** `kete wake` asks the daemon (starting it if needed, as the CLI always does) to run a hidden, unlisted Claude session:
+    - under the account's profile, in an empty trusted `<data>/wake` folder, with Kete's statusline settings
+    - it types a one-word prompt, waits for the turn to finish (Stop hook or idle), then ends the session
+    - Interactive use is plainly subscription use, and Kete's statusline hook then records a real `rate_limits` reading with the true `resets_at`. No estimate needed.
+    - This takes one additive daemon request at protocol 61 (`WakeAccount { account }` → done with the reading or an error). The lane may take it.
+    - The folder-trust prompt is handled the way Kete already handles worktree trust (check `registry/spawn.rs`), or by pre-seeding trust for the wake folder in the profile.
+  - **Print** (fallback, a per-account option). It runs a minimal headless `claude -p` under the profile's `CLAUDE_CONFIG_DIR` (profile env via `profile.prepare` + `launch_env`, base `claude_bg::run_captured`):
     - the cheapest model alias, one turn, a one-word prompt
     - no session persistence
     - the slimmest flags the installed CLI supports, checked with `claude --help` only. Never `--bare`, which likely needs an API key.
     - cwd is an empty `<data>/wake` folder, so no project hooks, CLAUDE.md or worktree are touched
     - a timeout, with the process tree killed on timeout
-  - It records the decision, and any reset time the CLI reports, in the wake log, never in the usage cache that account spread reads. The timeline marks a window started by a heartbeat as estimated until a real statusline reading replaces it.
+  - In print mode it records the decision and any reset time the CLI reports in the wake log, never in the usage cache that account spread reads. The timeline marks such a window as estimated until a real statusline reading replaces it.
+  - **Verification:** the wake log records `resets_at` before and after every heartbeat, so a ping that didn't move the window shows up as "didn't start a window" in the view. Jay's first real morning run confirms the mode works on his plan.
   - `kete wake --all` evaluates every switched-on account; it's what the scheduled task runs.
 - **Trigger.**
   - On Windows, one Task Scheduler task `Kete\Whakaoho` is created from an XML definition, so it can set `WakeToRun` (when the user allows it) and `StartWhenAvailable` (catch-up after sleep). It runs `kete wake --all`. Its triggers are each switched-on anchor, plus the anchor + 5h, + 10h… inside active hours when "keep the chain rolling" is on, since that chain sits on a fixed grid.
   - The task is rewritten whenever a schedule changes and removed when no account is switched on.
   - On macOS and Linux the lane prints the equivalent crontab line in the view instead of installing anything (YAGNI for now).
-- **Terms.** The view says plainly what it does: it sends one tiny prompt with the user's own subscription at the chosen time. The research note on Anthropic's terms is linked from the spec.
+- **Terms.**
+  - The view says plainly what it does: it sends one tiny prompt with the user's own subscription at the chosen time.
+  - Research found no Anthropic statement on warm-ups. The Consumer Terms bar automated access except where Anthropic explicitly permits it. Claude Code, including `-p`, is a permitted client.
+  - The feature stays off by default, per account, with that note in its help text.
 - **Timeline.**
   - One row per account. Each row shows:
     - the live 5-hour window as a band from start (`resets_at` − 5h) to reset
