@@ -16,9 +16,12 @@
 //! app's own pages.
 //!
 //! Tauri doesn't pass these settings to wry, so they are set on the live
-//! webview. WebView2 applies most settings at the next navigation, and the
-//! first one has started by the time the window exists: one reload, before
-//! the page has drawn, makes them hold.
+//! webview, and WebView2 applies a setting changed after a navigation has
+//! started from the next one. The app's first navigation is under way by
+//! the time the window exists (`settle`): it is restarted under the
+//! settings when it already shows, and reloaded once it has loaded only
+//! when it had started before them. A bare reload while it is still
+//! pending would reload the blank page before it and drop the app.
 
 /// Whether WebView2's browser keys stay on: in debug builds (F12 opens the
 /// devtools there, F5 reloads), unless `KETE_BROWSER_KEYS=off` asks for the
@@ -44,7 +47,38 @@ pub fn own_page(uri: &str) -> bool {
     matches!(host, "tauri.localhost" | "localhost" | "127.0.0.1")
 }
 
+/// What the first navigation needs, from the webview's current source:
+/// restarted at once when the app's page is already its document (or on
+/// its way), left to finish when the source is still the blank page the
+/// webview starts on (the handlers in `settle` decide then).
+pub fn restart_now(source: &str) -> bool {
+    !source.is_empty() && source != "about:blank"
+}
+
+/// Quiet `w`'s webview. Debug builds can hold this back
+/// (`KETE_QUIET_DELAY_MS`), so the e2e suite sees the late path work.
 pub fn quiet(w: &tauri::WebviewWindow) {
+    let delay = cfg!(debug_assertions)
+        .then(|| {
+            std::env::var("KETE_QUIET_DELAY_MS")
+                .ok()?
+                .parse::<u64>()
+                .ok()
+        })
+        .flatten();
+    match delay {
+        Some(ms) => {
+            let w = w.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(ms));
+                apply(&w);
+            });
+        }
+        None => apply(w),
+    }
+}
+
+fn apply(w: &tauri::WebviewWindow) {
     use webview2_com::Microsoft::Web::WebView2::Win32::{
         ICoreWebView2Settings3, COREWEBVIEW2_PERMISSION_KIND,
         COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ, COREWEBVIEW2_PERMISSION_STATE_ALLOW,
@@ -87,8 +121,57 @@ pub fn quiet(w: &tauri::WebviewWindow) {
         }));
         let mut token = 0i64;
         let _ = core.add_PermissionRequested(&grant, &mut token);
-        let _ = core.Reload();
+        let _ = settle(&core);
     });
+}
+
+/// Make the settings hold for the app's page (see the module docs).
+unsafe fn settle(
+    core: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2,
+) -> windows::core::Result<()> {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use webview2_com::{NavigationCompletedEventHandler, NavigationStartingEventHandler};
+    use windows::core::{HSTRING, PWSTR};
+
+    let mut source = PWSTR::null();
+    core.Source(&mut source)?;
+    let source = webview2_com::take_pwstr(source);
+    if restart_now(&source) {
+        eprintln!("kete-desktop: webview settings set, restarting {source}");
+        return core.Navigate(&HSTRING::from(source.as_str()));
+    }
+    // Still on the blank page: if the app's navigation starts from here,
+    // it starts under the settings; if it had already started, reload it
+    // once it has loaded.
+    let started = Rc::new(Cell::new(false));
+    let seen = started.clone();
+    let mut token = 0i64;
+    core.add_NavigationStarting(
+        &NavigationStartingEventHandler::create(Box::new(move |_, _| {
+            seen.set(true);
+            Ok(())
+        })),
+        &mut token,
+    )?;
+    let done = Cell::new(false);
+    core.add_NavigationCompleted(
+        &NavigationCompletedEventHandler::create(Box::new(move |sender, _| {
+            if done.replace(true) {
+                return Ok(());
+            }
+            if started.get() {
+                eprintln!("kete-desktop: webview settings set before the first navigation");
+                return Ok(());
+            }
+            eprintln!("kete-desktop: webview settings set late, reloading once");
+            match sender {
+                Some(core) => core.Reload(),
+                None => Ok(()),
+            }
+        })),
+        &mut token,
+    )
 }
 
 #[cfg(test)]
@@ -103,6 +186,14 @@ mod tests {
         assert!(!browser_keys(true, Some("OFF")));
         assert!(!browser_keys(false, None));
         assert!(!browser_keys(false, Some("on")));
+    }
+
+    #[test]
+    fn restarts_only_once_the_app_page_is_the_source() {
+        assert!(restart_now("http://tauri.localhost/"));
+        assert!(restart_now("http://localhost:1420/"));
+        assert!(!restart_now("about:blank"));
+        assert!(!restart_now(""));
     }
 
     #[test]

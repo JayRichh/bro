@@ -283,16 +283,14 @@ flow("right-click a field opens Kete's Edit menu, never WebView2's; Paste fills 
   await d.press(Key.ArrowRight, Key.Alt);
   await d.waitFor('forward to Settings', async () => (await place()) === 'Settings');
   await d.waitForText('Hotkeys');
-  // F5 doesn't reload. WebDriver's keys may not pass WebView2's accelerator
-  // layer, so this is a floor, not proof: real keys are checked by hand.
-  await d.wd.exec('window.__kete_e2e_no_reload = true;');
-  await blur();
-  await d.press(Key.F5);
-  await new Promise((r) => setTimeout(r, 1000));
-  assert.equal(await d.wd.exec('return window.__kete_e2e_no_reload === true;'), true, 'F5 reloaded the page');
+  // WebDriver's keys reach the page without passing WebView2's browser-key
+  // layer (F5 and Ctrl+P do nothing here even with the keys on), so F5,
+  // Ctrl+P and the like are checked with real keystrokes, not here.
 });
 
-flow("right-click a terminal, a board card and Shift+F10 open Kete's menus, one at a time", { script: 'stop;echo' }, async (d) => {
+// The webview's settings land late here (KETE_QUIET_DELAY_MS, debug
+// builds): the app's page is restarted under them and still comes up.
+flow("right-click a terminal, a board card and Shift+F10 open Kete's menus, one at a time", { script: 'stop;echo', env: { KETE_QUIET_DELAY_MS: '1500' } }, async (d) => {
   const repo = d.makeRepo('menu-board-proj');
   await d.addRepo(repo);
   await toBoard(d);
