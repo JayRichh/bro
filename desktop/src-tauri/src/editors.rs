@@ -110,13 +110,22 @@ pub struct SolutionRow {
     pub kind: nebula_core::editors::SolutionKind,
 }
 
-/// What Visual Studio would open in each of `worktrees`, best first, the
-/// one last opened in that repo first of all.
+/// What a checkout can be opened with, besides VS Code.
+#[derive(Debug, Clone, Serialize)]
+pub struct Targets {
+    /// What Visual Studio would open, best first, the one last opened in
+    /// the repo first of all.
+    pub solutions: Vec<SolutionRow>,
+    /// It has an Open command (the project's setting or a `.kete.json`).
+    pub open_command: bool,
+}
+
+/// What each of `worktrees` can be opened with.
 #[tauri::command]
 pub async fn editor_targets(
     client: State<'_, Arc<Client>>,
     worktrees: Vec<String>,
-) -> Res<HashMap<String, Vec<SolutionRow>>> {
+) -> Res<HashMap<String, Targets>> {
     let model = client.snapshot();
     let roots: Vec<(String, PathBuf, String)> = worktrees
         .iter()
@@ -136,19 +145,28 @@ pub async fn editor_targets(
         .collect();
     blocking(move || {
         let prefs = DesktopPrefs::load();
+        let cfg = nebula_config::Config::load();
         roots
             .into_iter()
             .map(|(id, root, repo)| {
                 let mut found = editors::solutions(&root);
                 remembered_first(&mut found, prefs.solution_for(&repo));
-                let rows = found
+                let solutions = found
                     .into_iter()
                     .map(|s| SolutionRow {
                         rel: s.rel,
                         kind: s.kind,
                     })
                     .collect();
-                (id, rows)
+                let open_command =
+                    crate::projects::open_command_for(&cfg, &root, Path::new(&repo)).is_ok();
+                (
+                    id,
+                    Targets {
+                        solutions,
+                        open_command,
+                    },
+                )
             })
             .collect()
     })
@@ -290,17 +308,24 @@ fn place(
             })
         }
         (None, Some(p)) => {
-            let path = opened.check_path(p)?;
-            // The checkout it is in, when it is in one Kete knows.
+            // A file a session opened, or a path in a checkout Kete knows
+            // (a viewer's file, which knows its path, not its worktree):
+            // the innermost checkout it is in.
             let model = client.snapshot();
             let w = model
                 .worktrees
                 .iter()
-                .filter(|w| path.starts_with(&w.path))
+                .filter(|w| Path::new(p).starts_with(&w.path))
                 .max_by_key(|w| w.path.as_os_str().len());
+            let path = match (opened.check_path(p), w) {
+                (Ok(path), _) => path,
+                (Err(_), Some(w)) => inside(&w.path, p)?,
+                (Err(e), None) => return Err(e),
+            };
+            let repo = w.and_then(|w| model.projects.iter().find(|x| x.id == w.project_id));
             Ok(Place {
                 root: w.map(|w| w.path.clone()),
-                repo: None,
+                repo: repo.map(|x| x.repo_path.clone()),
                 path,
             })
         }

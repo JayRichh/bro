@@ -140,7 +140,8 @@ describe('menus from the registry', () => {
       worktrees: [{ id: 'w1', project_id: 'p', path: '/p', branch: 'main', is_main: true, sort_order: 0 }],
       projects: [{ id: 'p', name: 'demo', repo_path: '/p', sort_order: 0 }],
     } as unknown as Model;
-    expect(words(actions.menuFor({ kind: 'terminal', id: 't' })).slice(0, 3)).toEqual(['Open', 'Rename\u2026', 'Close terminal\u2026']);
+    // The matrix's terminal row: its checkout's folder copied too.
+    expect(words(actions.menuFor({ kind: 'terminal', id: 't' })).slice(0, 4)).toEqual(['Open', 'Copy path', 'Rename\u2026', 'Close terminal\u2026']);
     const repo = words(actions.menuFor({ kind: 'project', id: 'p' }));
     expect(repo[0]).toBe('New session\u2026');
     expect(repo).toContain('Remove from Kete\u2026');

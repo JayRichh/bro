@@ -865,7 +865,10 @@
           {@const p = split(f.path)}
           {@const cur = current?.path === f.path}
           <li>
+            <!-- The file's own menu on a right-click (editors/menus.ts): Open in Kete, VS Code, Explorer, Copy path. -->
             <button
+              data-target={worktree ? `file:${worktree}:${f.path}` : undefined}
+              data-deleted={f.status === 'D' || undefined}
               data-file-cur={cur || undefined}
               class="flex min-h-7 w-full items-center gap-2 border-0 border-b border-rule px-3 py-1 text-left text-[13px]
                 focus-visible:-outline-offset-2 {cur ? 'bg-raised' : 'bg-transparent hover:bg-surface'}"

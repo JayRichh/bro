@@ -18,6 +18,8 @@
   import { nav } from '../shell/history.svelte';
   import { chordLabel, hotkeyGroups, matches, segmented, sequence, targetKey } from './settings';
   import DesktopKeys from './DesktopKeys.svelte';
+  import EditorInstalls from '../editors/Installs.svelte';
+  import { editors } from '../editors/store.svelte';
   import Presets from './Presets.svelte';
   import Profiles from './Profiles.svelte';
   import { exportSettings, importSettings } from './io';
@@ -93,6 +95,10 @@
       if (t.key === 'theme' && (value === 'system' || value === 'light' || value === 'dark')) app.themePref = value;
       if (t.key === 'home' && (value === 'overview' || value === 'board')) app.home = value;
       if (t.key === 'diff_mode' && isDiffMode(value)) app.diffMode = value;
+      // The editor rows and icons follow at once.
+      if (t.key === 'editor_folder') editors.folder = value;
+      if (t.key === 'editor_file') editors.file = value;
+      if (t.key === 'editor_reuse') editors.reuse = value === 'on';
     }
     if (t.scope === 'agent' || (t.scope === 'global' && (t.key === 'quick_prompt_kind' || t.key === 'hide_uninstalled_harnesses' || t.key === 'show_all_worktrees')))
       refreshLaunchables();
@@ -374,6 +380,7 @@
                   </li>
                 {/each}
               </ul>
+              {#if tabId === 'desktop' && g.title === 'Editors'}<EditorInstalls />{/if}
             </section>
           {:else}
             {#if !tab?.hotkeys.length && tabId !== 'hotkeys'}

@@ -20,6 +20,7 @@
   import { drag, dropWorktree, endDrag, leftFor, moveOnto, offsetIn, startDrag, worktreeDropOk } from '../reorder.svelte';
   import { dropZone, type Zone } from '../order';
   import { withKey } from '../shortcuts';
+  import EditorButtons from '../editors/EditorButtons.svelte';
 
   let { repo, group }: { repo: string; group: WorktreeGroup } = $props();
 
@@ -171,7 +172,9 @@
     <span
       class="flex flex-none items-center gap-0.5 opacity-0 group-focus-within/wt:opacity-100 group-hover/wt:opacity-100 @max-[960px]/wt:hidden"
     >
-      {#each verbs.filter((v) => v.id !== 'run') as v (v.id)}
+      <!-- The editor word is the default editor's own icon now (and Visual Studio's beside it). -->
+      <EditorButtons worktree={w} btn="grid size-6 flex-none place-items-center border border-transparent bg-transparent p-0 text-muted hover:border-rule hover:text-ink" size={13} />
+      {#each verbs.filter((v) => v.id !== 'run' && v.id !== 'editor') as v (v.id)}
         <button
           class="h-6 border border-transparent bg-transparent px-1.5 text-[12px] hover:border-rule {v.danger
             ? 'text-fail'

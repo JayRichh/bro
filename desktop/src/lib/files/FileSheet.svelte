@@ -6,7 +6,7 @@
   import { app, toast } from '../store.svelte';
   import { languageOf, fileIcon } from '../icons';
   import { defineMonacoTheme, termFamily } from '../theme';
-  import { closeFiles, filesApi, sheet, showFiles, stepTab, type FileText } from './files.svelte';
+  import { closeFiles, filesApi, openTabDefault, readTab, sheet, showFiles, stepTab, type FileText } from './files.svelte';
   import { registerViewer } from '../menus/surfaces';
   import type * as Monaco from 'monaco-esm/editor/editor.api.js';
 
@@ -34,11 +34,11 @@
   // Read the shown tab's file each time it is shown: an agent that opened
   // it may still be writing it.
   $effect(() => {
-    const path = tab?.path;
-    if (!path) return;
+    const t = tab;
+    const path = t?.path;
+    if (!t || !path) return;
     shown = { path, file: null };
-    filesApi
-      .read(path)
+    readTab(t)
       .then((file) => shown.path === path && (shown = { path, file }))
       .catch((e) => shown.path === path && (shown = { path, file: { text: null, note: String(e) } }));
   });
@@ -111,7 +111,7 @@
   }
 
   function openDefault() {
-    if (tab) filesApi.openDefault(tab.path).catch((e) => toast(`Could not open it: ${e}`));
+    if (tab) openTabDefault(tab).catch((e) => toast(`Could not open it: ${e}`));
   }
 
   const tool = 'inline-flex h-7 items-center gap-1.5 border border-rule bg-transparent px-2 text-[13px] text-ink hover:border-rule-strong';

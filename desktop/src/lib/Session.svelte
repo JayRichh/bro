@@ -5,11 +5,12 @@
   import Terminal from './Terminal.svelte';
   import OrchBadge from './orchestrator/OrchBadge.svelte';
   import ContextBar from './accounts/ContextBar.svelte';
-  import { agentMenu, followUp, newTerminal, openEditor, restartAgent, terminalMenu, unarchiveAgent } from './actions';
+  import { agentMenu, followUp, newTerminal, restartAgent, terminalMenu, unarchiveAgent } from './actions';
   import { openMenu } from './ui/ui.svelte';
   import { toggleMaximize } from './commands';
   import { withKey } from './shortcuts';
   import IconButton from './ui/IconButton.svelte';
+  import EditorButtons from './editors/EditorButtons.svelte';
   import { accountMenu } from './accounts/actions';
   import { accountLabel, canSwitch } from './accounts/view';
 
@@ -67,7 +68,10 @@
           <!-- Secondary verbs give way in a narrow pane; Actions keeps them. -->
           <span class="hidden items-center gap-1 @min-[560px]:flex">
             <IconButton icon="terminal" label="New terminal in this worktree" title={withKey('New terminal in this worktree', 'new_terminal')} onclick={() => newTerminal(wt ?? undefined)} />
-            <IconButton icon="editor" label="Open the worktree in the editor" title={withKey('Open the worktree in the editor', 'open_editor')} onclick={() => openEditor(wt ?? undefined)} />
+            <EditorButtons
+              worktree={app.model.worktrees.find((x) => x.id === wt)}
+              btn="inline-flex h-7 min-w-7 flex-none items-center justify-center border border-rule bg-transparent px-1.5 text-ink hover:border-rule-strong"
+            />
           </span>
           <IconButton icon="diff" label="Diff this worktree" word="Diff" title={withKey('Diff this worktree', ['diff', 'open_diff'])} onclick={() => openDiff(wt)} />
           <IconButton

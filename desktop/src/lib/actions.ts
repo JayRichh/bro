@@ -26,6 +26,7 @@ import { openComposer, openMerge } from './ship/sheet.svelte';
 import { reviewVerbs } from './ship/ship';
 import { repoScope, worktreeScope } from './scope';
 import { groupOf } from './worktrees/groups';
+import { checkoutVerbs, factsFor, openCommandRow, touch } from './editors/verbs';
 
 export type Target =
   /** `viaSub`: picked from one of its subagents' rows, so it acts on
@@ -437,30 +438,49 @@ export async function removeProject(id: string) {
 // account, Locate folder) sit among the registry's rows.
 
 /** What the window does for a registry verb on one thing. */
-interface VerbImpl {
+export interface VerbImpl {
   run: () => unknown;
   /** Words where the verb turns (Run or Stop run, Unpin orchestrator). */
   label?: string;
   disabled?: boolean;
   /** Why it is disabled: the row's tooltip, and what its key says. */
   why?: string;
+  /** Its words inside a submenu, where they turn ("Cursor" for Open in
+   *  VS Code when Cursor is the editor). */
+  word?: string;
+  /** The row's icon: an editor's own (a data URL). */
+  icon?: string;
+  /** Checked: the default (the editor a checkout opens in). */
+  checked?: boolean;
+  /** More rows of the same verb right after it: each other install of an
+   *  editor (Insiders, Cursor; another Visual Studio). */
+  also?: VerbImpl[];
 }
 export type VerbTable = Partial<Record<ActionId, VerbImpl>>;
 
-const entry = (id: ActionId, on: AppliesTo, v: VerbImpl): MenuItem => ({
-  label: v.label ?? menuLabel(id, on),
-  run: () => void v.run(),
-  keys: verbKeys(id),
-  danger: destructive(id),
-  ...(v.disabled ? { disabled: true } : {}),
-  ...(v.disabled && v.why ? { title: v.why } : {}),
-});
+/** A row as the menus draw it. The editor rows also carry `verb`, `word`,
+ *  `icon` and `checked` for the menu primitive's icon slot, checked state
+ *  and submenu fold. */
+export type VerbRow = MenuItem & { verb?: ActionId; word?: string; icon?: string; checked?: boolean };
+
+const entry = (id: ActionId, on: AppliesTo, v: VerbImpl): VerbRow =>
+  Object.assign(
+    {
+      label: v.label ?? menuLabel(id, on),
+      run: () => void v.run(),
+      keys: verbKeys(id),
+      danger: destructive(id),
+      ...(v.disabled ? { disabled: true } : {}),
+      ...(v.disabled && v.why ? { title: v.why } : {}),
+    },
+    v.icon || v.checked !== undefined || v.word ? { verb: id, word: v.word, icon: v.icon, checked: v.checked } : {},
+  );
 
 /** The registry's rows of `on`'s menu that `table` has, in its order. */
-function rows(on: AppliesTo, table: VerbTable): MenuItem[] {
+export function rows(on: AppliesTo, table: VerbTable): MenuItem[] {
   return menuIds(on).flatMap((id) => {
     const v = table[id];
-    return v ? [entry(id, on, v)] : [];
+    return v ? [entry(id, on, v), ...(v.also ?? []).map((x) => entry(id, on, x))] : [];
   });
 }
 
@@ -530,6 +550,9 @@ function agentVerbs(a: Agent, viaSub = false, where: StepIn = stepInFor()): Verb
     archive: { run: () => archiveAgent(a.id, viaSub), label: viaSub ? 'Archive parent session\u2026' : undefined },
     delete: { run: () => deleteAgent(a.id) },
   };
+  // Its checkout in an editor, Explorer, beside the window, copied.
+  const w = worktreeOf(a.worktree_id);
+  if (w) Object.assign(t, checkoutVerbs(w, 'session'));
   // Its worktree's pull request, and the scope chip on its checkout.
   Object.assign(t, prVerbs(a.worktree_id, a.id));
   t.focus_scope = focusVerb({ worktree: a.worktree_id });
@@ -541,8 +564,11 @@ function agentVerbs(a: Agent, viaSub = false, where: StepIn = stepInFor()): Verb
 }
 
 function terminalVerbs(x: TerminalTab): VerbTable {
+  const w = worktreeOf(x.worktree_id);
   return {
     activate: { run: () => openSession({ Terminal: x.id }) },
+    // Its checkout's folder.
+    ...(w ? { copy_path: checkoutVerbs(w, 'terminal').copy_path } : {}),
     rename: { run: () => renameTerminal(x.id) },
     delete: { run: () => closeTerminal(x.id) },
   };
@@ -567,10 +593,12 @@ function worktreeVerbs(w: Worktree): VerbTable {
     new_terminal: { run: () => newTerminal(w.id) },
     toggle_run: runVerbOf(w),
     git_diff: { run: () => openDiff(w.id) },
-    open_worktree: { run: () => openEditor(w.id) },
+    // The Open command, only where there is one.
+    open_worktree: openCommandRow(factsFor(w.id), () => openEditor(w.id)),
     open_repo: { run: () => openRemote(w.id) },
     ...prVerbs(w.id),
     focus_scope: focusVerb({ worktree: w.id }),
+    ...checkoutVerbs(w, 'worktree'),
   };
   if (w.is_main && canSwitchBranch(project)) t.switch_branch = { run: () => openBranchSwitch(project) };
   if (!w.is_main) {
@@ -588,7 +616,7 @@ function projectVerbs(project: string): VerbTable {
     quick_prompt: { run: () => focusQuickPrompt({ project }) },
     new_worktree: { run: () => newWorktree(project) },
     toggle_run: runVerbOf(main),
-    open_worktree: { run: () => openEditor(main?.id) },
+    open_worktree: main ? openCommandRow(factsFor(main.id), () => openEditor(main.id)) : { run: () => openEditor(undefined) },
     open_repo: { run: () => openRemote(main?.id) },
     refresh_pull_requests: { run: refreshPrs },
     focus_scope: focusVerb({ repo: project }),
@@ -597,6 +625,8 @@ function projectVerbs(project: string): VerbTable {
     reorder_down: { run: () => moveStep({ kind: 'project', id: project }, 1) },
     remove_project: { run: () => removeProject(project) },
   };
+  // Its main checkout in an editor, Explorer, beside the window, copied.
+  if (main) Object.assign(t, checkoutVerbs(main, 'repo'));
   if (canSwitchBranch(project)) t.switch_branch = { run: () => openBranchSwitch(project) };
   // The Worktrees view's sweep, with a linked checkout to look at. Its
   // module imports this one, so it loads when asked.
@@ -704,6 +734,9 @@ export function projectMenu(project: string): MenuEntry[] {
 }
 
 export function menuFor(t: Target): MenuEntry[] {
+  // Whether an editor window is open on its checkout, for Dock and the
+  // icons' dot: asked as the menu opens, never polled.
+  touch(t.kind === 'agent' ? agentOf(t.id)?.worktree_id : t.kind === 'terminal' ? terminalOf(t.id)?.worktree_id : t.kind === 'worktree' ? t.id : mainOf(t.id)?.id);
   switch (t.kind) {
     case 'agent': {
       const a = agentOf(t.id);
