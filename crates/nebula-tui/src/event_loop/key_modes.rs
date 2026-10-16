@@ -438,15 +438,18 @@ fn handle_global_action(
         | Action::CreatePullRequest
         | Action::MergePullRequest
         | Action::FocusScope => super::verbs::run_on_selection(app, action, out),
-        // The 0.54/0.55 verbs whose lanes have not landed yet: a word in
-        // the footer, never a dead key.
+        // The editor verbs on a key the user gave one: on the selection's
+        // checkout (or the file's, once file rows have menus), as its menu
+        // row runs it (`crate::editors`).
         Action::OpenInVscode
         | Action::OpenInVisualStudio
         | Action::DockEditor
         | Action::RevealInExplorer
         | Action::OpenWithDefault
-        | Action::OpenFileInKete
-        | Action::CopyPath
+        | Action::OpenFileInKete => super::verbs::run_on_selection(app, action, out),
+        // The 0.54/0.55 verbs whose lanes have not landed yet: a word in
+        // the footer, never a dead key.
+        Action::CopyPath
         | Action::CopyRelativePath
         | Action::CopyBranch
         | Action::WakeAccount

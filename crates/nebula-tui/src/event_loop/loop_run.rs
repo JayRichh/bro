@@ -40,6 +40,9 @@ macro_rules! main_loop_body {
     // when its settings carry one, so an org-restricted machine offers the
     // ids the CLI will accept instead of aliases it refuses.
     crate::claude_catalogue::bootstrap(cfg.claude_enabled);
+    // VS Code and Visual Studio, found off the loop (vswhere takes a
+    // moment), so the first menu already lists them.
+    nebula_core::editors::detect_in_background();
     // The host's events: on Windows the console, its pasted text read in
     // bulk (HOST INPUT, host_input.rs).
     let mut input = host_input::open();

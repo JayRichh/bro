@@ -222,6 +222,15 @@ pub(crate) fn menu_action(app: &App, action: Action, t: &Target) -> Option<MenuA
                     ))
                 }
                 Action::ReorderUp | Action::ReorderDown => None,
+                // Its checkout in an editor, Explorer or docked: a local,
+                // live card's (`crate::editors` says where else not).
+                Action::OpenInVscode
+                | Action::OpenInVisualStudio
+                | Action::DockEditor
+                | Action::RevealInExplorer => {
+                    let root = checkout_root(app, t).filter(|_| local)?;
+                    crate::editors::checkout_action(app, action, &root)
+                }
                 _ => keyed(app),
             }
         }
@@ -296,6 +305,10 @@ pub(crate) fn menu_action(app: &App, action: Action, t: &Target) -> Option<MenuA
                         if action == Action::ReorderUp { -1 } else { 1 },
                     )
                 }),
+                Action::OpenInVscode
+                | Action::OpenInVisualStudio
+                | Action::DockEditor
+                | Action::RevealInExplorer => crate::editors::checkout_action(app, action, &w.path),
                 // Only with something to delete.
                 Action::DeleteAll => {
                     let any =
@@ -348,10 +361,45 @@ pub(crate) fn menu_action(app: &App, action: Action, t: &Target) -> Option<MenuA
                 Action::OpenInBrowser => None,
                 Action::MarkSeen if !in_project(app, id, unread) => None,
                 Action::ArchiveDone if !in_project(app, id, done) => None,
+                // The repo's main checkout, row-addressed (not the grid's).
+                Action::OpenInVscode
+                | Action::OpenInVisualStudio
+                | Action::DockEditor
+                | Action::RevealInExplorer => {
+                    let root = checkout_root(app, t)?;
+                    crate::editors::checkout_action(app, action, &root)
+                }
                 _ => keyed(app),
             }
         }
     }
+}
+
+/// The folder `t`'s editor rows open: a card's or a worktree's checkout,
+/// a repo's main one. None for a checkout still being cut.
+fn checkout_root(app: &App, t: &Target) -> Option<std::path::PathBuf> {
+    let w = match t {
+        Target::Repo(p) => match app.root_worktree(p) {
+            Some(w) => w,
+            None => {
+                return app
+                    .tree
+                    .projects
+                    .iter()
+                    .find(|x| &x.id == p)
+                    .map(|x| x.repo_path.clone())
+            }
+        },
+        _ => worktree_of(app, t)?,
+    };
+    if app.is_placeholder_worktree(&w) {
+        return None;
+    }
+    app.tree
+        .worktrees
+        .iter()
+        .find(|x| x.id == w)
+        .map(|x| x.path.clone())
 }
 
 /// Is something listening on checkout `w`'s ports: its dev server up.
@@ -454,6 +502,13 @@ fn label(app: &App, action: Action, t: &Target) -> String {
                 "Send to cloud session".into()
             }
         }
+        // The editor the row opens, by name where it isn't VS Code
+        // (Cursor); Visual Studio's year beside another, and its pick.
+        (Action::OpenInVscode, _) => crate::editors::code_label(menu_label(id, t.kind())),
+        (Action::OpenInVisualStudio, _) => match checkout_root(app, t) {
+            Some(root) => crate::editors::vs_label(menu_label(id, t.kind()), &root),
+            None => menu_label(id, t.kind()).to_string(),
+        },
         _ => menu_label(id, t.kind()).to_string(),
     }
 }
@@ -473,9 +528,16 @@ fn row(app: &App, id: &str, t: &Target) -> Option<MenuItem> {
     })
 }
 
-/// The rows of `ids` that mean something on `t`, in that order.
+/// The rows of `ids` that mean something on `t`, in that order; an
+/// editor's other installs right after its row (Cursor after VS Code).
 fn rows(app: &App, ids: &[&str], t: &Target) -> Vec<MenuItem> {
-    ids.iter().filter_map(|id| row(app, id, t)).collect()
+    ids.iter()
+        .filter_map(|id| row(app, id, t))
+        .flat_map(|item| {
+            let more = crate::editors::more_installs(&item.action);
+            std::iter::once(item).chain(more)
+        })
+        .collect()
 }
 
 /// `t`'s menu: its kind's rows ([`MENUS`](nebula_config::actions::MENUS)),
@@ -503,10 +565,23 @@ pub(crate) fn menu_for(app: &App, t: &Target) -> Vec<MenuItem> {
         Target::Session(id) => app.tree.agents.iter().any(|a| &a.id == id && !a.archived),
         _ => true,
     };
+    // A Cloud card's agent runs in the cloud sandbox: its menu offers no
+    // editor for the checkout it is listed under (the matrix's state rule).
+    let cloud = match t {
+        Target::Session(id) => app
+            .tree
+            .agents
+            .iter()
+            .any(|a| &a.id == id && a.cloud_session_url().is_some()),
+        _ => false,
+    };
     if card && live {
         if let Some(w) = worktree_of(app, t) {
             let checkout = Target::Worktree(w);
             for mut item in rows(app, menu_of(AppliesTo::Worktree), &checkout) {
+                if cloud && matches!(item.action, MenuAction::Editor(_)) {
+                    continue;
+                }
                 if items.iter().any(|i| i.verb == item.verb) {
                     item.label = match item.verb {
                         Some(Action::ReorderUp) => "Move worktree up".into(),
@@ -554,7 +629,11 @@ fn more_rows(app: &App, t: &Target, shown: &[MenuItem]) -> Vec<MenuItem> {
                 continue;
             }
             if let Some(item) = row(app, spec.id, &on) {
-                out.push(item);
+                // The editors are the menu's to offer (an archived or Cloud
+                // card offers none for the checkout it sits under).
+                if !matches!(item.action, MenuAction::Editor(_)) {
+                    out.push(item);
+                }
             }
         }
     }

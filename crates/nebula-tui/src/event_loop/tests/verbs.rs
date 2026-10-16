@@ -746,11 +746,14 @@ fn the_panels_footer_leads_with_the_registrys_verbs() {
     });
 }
 
-/// The 0.54/0.55 verbs ahead of their lanes: the editor and copy rows
-/// sit in a card's menu after its Open group, and running one (a key, a
-/// row, the palette) says it is coming rather than doing nothing.
+/// The 0.54/0.55 verbs whose lanes have not landed: the copy rows sit in
+/// a card's menu before Restart, and running one (a key, a row, the
+/// palette) says it is coming rather than doing nothing. The editor verbs
+/// are routed and have their tests in `editors.rs`.
 #[test]
-fn the_new_verbs_have_rows_and_say_they_are_coming() {
+fn the_copy_and_critter_verbs_have_rows_and_say_they_are_coming() {
+    // The menu below lists editor rows too: name the installs it sees.
+    crate::editors::test::installs(None);
     let mut app = bench();
     let rows = app.visible_session_rows();
     let at = rows
@@ -766,13 +769,10 @@ fn the_new_verbs_have_rows_and_say_they_are_coming() {
             .position(|x| *x == l)
             .unwrap_or_else(|| panic!("{l}: {labels:?}"))
     };
-    assert!(pos("Follow-up prompt\u{2026}") < pos("Open in VS Code"));
-    assert!(pos("Open in VS Code") < pos("Open in Visual Studio"));
     assert!(pos("Copy branch name") < pos("Restart agent"));
     assert_eq!(labels.iter().filter(|l| **l == "Copy path").count(), 1);
     let mut out = Vec::new();
     for action in [
-        Action::OpenInVscode,
         Action::CopyPath,
         Action::Critters,
         Action::MarkSeen,

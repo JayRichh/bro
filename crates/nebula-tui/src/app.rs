@@ -493,6 +493,10 @@ pub enum MenuAction {
     /// accounts'): the overlay put back as it was, then this key pressed
     /// in it.
     OverlayKey(crossterm::event::KeyCode, crossterm::event::KeyModifiers),
+    /// An editor row: Open in VS Code / Visual Studio, Show in Explorer,
+    /// Dock editor beside Kete, Open with default app, Open in Kete
+    /// (`crate::editors`).
+    Editor(crate::editors::EditorAct),
 }
 
 /// The first row a menu of `len` rows draws in `visible` of them, so
@@ -974,6 +978,13 @@ pub enum PendingAction {
     /// (every setting and every hotkey), then reopen the overlay on them.
     ResetSettings,
     Quit,
+    /// A checkout's Open command from its repo's `.kete.json`, shown and
+    /// answered yes: run it if it is still the command shown, and keep the
+    /// approval (`nebula_config::desktop::open_allowed`).
+    RunOpenCommand {
+        worktree: WorktreeId,
+        command: String,
+    },
 }
 
 #[derive(Debug, Clone)]

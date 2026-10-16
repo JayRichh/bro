@@ -7314,9 +7314,12 @@ fn a_run_ack_ahead_of_its_terminal_names_the_command_when_it_lands() {
 
 /// `Shift+Enter` on a worktree fires its OPEN COMMAND — the project's
 /// **Open command** setting first, else `.nebula.json`'s `open` — and
-/// with neither says where to put one, without Enter's drill-in. The
-/// key answers from the Sessions panel too, where the cursor's
-/// worktree is just as much the context, and `Shift+O` beside it.
+/// with neither says where to put one, without Enter's drill-in. A
+/// command from the file asks once per repo and command (a changed one
+/// asks again, and a file that changes under the dialog runs nothing);
+/// the setting is the user's own and never asks. The key answers from the
+/// Sessions panel too, where the cursor's worktree is just as much the
+/// context, and `Shift+O` beside it.
 #[test]
 fn shift_enter_on_a_worktree_fires_its_open_command() {
     use crate::config::SettingKind::OpenCommand;
@@ -7337,22 +7340,113 @@ fn shift_enter_on_a_worktree_fires_its_open_command() {
         );
         assert_eq!(app.nav.focus, Focus::Worktrees, "not Enter's drill-in");
 
-        std::fs::write(
-            dir.path().join(".kete.json"),
-            r#"{"open": "open http://localhost:3000"}"#,
-        )
-        .unwrap();
+        // A command from the repo's file (anyone who can push wrote it)
+        // asks first: nothing runs until the yes.
+        let ran = |app: &App| {
+            app.chrome
+                .flash
+                .as_deref()
+                .is_some_and(|f| f.starts_with('↗'))
+        };
+        let kete_json = dir.path().join(".kete.json");
+        std::fs::write(&kete_json, r#"{"open": "open http://localhost:3000"}"#).unwrap();
+        app.chrome.flash = None;
         press(&mut app, KeyCode::Enter, KeyModifiers::SHIFT, &mut out);
+        let Some(Overlay::Confirm(confirm)) = &app.modals.overlay else {
+            panic!(
+                "no confirm for the file's command: {:?} {:?}",
+                app.modals.overlay, app.chrome.flash
+            );
+        };
+        assert_eq!(confirm.title, "Run the repo's open command?");
+        assert!(
+            confirm.message.contains("open http://localhost:3000"),
+            "{}",
+            confirm.message
+        );
+        assert!(
+            !ran(&app),
+            "nothing ran before the yes: {:?}",
+            app.chrome.flash
+        );
+        press(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut out);
+        assert!(app.modals.overlay.is_none());
         assert_eq!(
             app.chrome.flash.as_deref(),
             Some("↗ open http://localhost:3000")
         );
 
-        // The setting wins over the file, and is read fresh per press.
+        // The approval is kept: the same command runs at once.
+        app.chrome.flash = None;
+        press(&mut app, KeyCode::Enter, KeyModifiers::SHIFT, &mut out);
+        assert!(app.modals.overlay.is_none(), "no second ask");
+        assert_eq!(
+            app.chrome.flash.as_deref(),
+            Some("↗ open http://localhost:3000")
+        );
+
+        // A changed command asks again (a different length, whatever the
+        // file's stamp says).
+        std::fs::write(&kete_json, r#"{"open": "open http://localhost:3000/docs"}"#).unwrap();
+        app.chrome.flash = None;
+        press(&mut app, KeyCode::Enter, KeyModifiers::SHIFT, &mut out);
+        let Some(Overlay::Confirm(confirm)) = &app.modals.overlay else {
+            panic!(
+                "no confirm for the changed command: {:?}",
+                app.modals.overlay
+            );
+        };
+        assert!(
+            confirm.message.contains("open http://localhost:3000/docs"),
+            "{}",
+            confirm.message
+        );
+        assert!(
+            !ran(&app),
+            "nothing ran before the yes: {:?}",
+            app.chrome.flash
+        );
+
+        // The file changes under the dialog: the yes runs nothing, and the
+        // next press asks about what is there now.
+        std::fs::write(
+            &kete_json,
+            r#"{"open": "open http://localhost:3000/admin/login"}"#,
+        )
+        .unwrap();
+        press(&mut app, KeyCode::Char('y'), KeyModifiers::NONE, &mut out);
+        assert!(app.modals.overlay.is_none());
+        assert_eq!(
+            app.chrome.flash.as_deref(),
+            Some("the repo's open command changed before it ran: open again to review it")
+        );
+        app.chrome.flash = None;
+        press(&mut app, KeyCode::Enter, KeyModifiers::SHIFT, &mut out);
+        let Some(Overlay::Confirm(confirm)) = &app.modals.overlay else {
+            panic!("no confirm after the change: {:?}", app.modals.overlay);
+        };
+        assert!(
+            confirm
+                .message
+                .contains("open http://localhost:3000/admin/login"),
+            "{}",
+            confirm.message
+        );
+        press(&mut app, KeyCode::Esc, KeyModifiers::NONE, &mut out);
+        assert!(app.modals.overlay.is_none());
+        assert!(
+            !ran(&app),
+            "backing out runs nothing: {:?}",
+            app.chrome.flash
+        );
+
+        // The setting wins over the file, is the user's own (no confirm),
+        // and is read fresh per press.
         let mut cfg = crate::config::Config::load();
         assert!(cfg.set_project_text(dir.path(), OpenCommand, "open http://localhost:5173"));
         cfg.save_to(&config_path).unwrap();
         press(&mut app, KeyCode::Enter, KeyModifiers::SHIFT, &mut out);
+        assert!(app.modals.overlay.is_none(), "the setting asks nothing");
         assert_eq!(
             app.chrome.flash.as_deref(),
             Some("↗ open http://localhost:5173")
@@ -22614,6 +22708,7 @@ fn a_desktop_write_waits_for_the_reset_confirm_too() {
 mod board;
 mod buttons;
 mod dispatch;
+mod editors;
 mod learn;
 mod orch_view;
 mod pane_stream;
