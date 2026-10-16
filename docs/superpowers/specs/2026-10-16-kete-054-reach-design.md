@@ -38,7 +38,7 @@ The audits behind this spec are in `.superpowers/sdd/2026-10-16-release-054/audi
 | Whakaoho (wake-up) at rail level: when switched on and the conditions hold, send the smallest prompt to the cheapest model at a chosen hour, so the 5-hour window starts and resets earlier | **0.54, first** | Jay wants it for tomorrow morning. It is opt-in per account, and Windows Task Scheduler runs it even when Kete is closed. |
 | Hour slider with a preview of how the windows line up against the user's usual hours; usage windows timeline for every account beside the capacity bars | **0.54** | All the data exists (`resets_at`, nominal window length); it's a presentation job. |
 | Critters overlay in both apps | **0.55 (lane starts with 0.54)** | Self-contained: a new crate plus two overlays, touching shared code only at the settings toggle. |
-| Claude Code release gaps | **Pending** | Research agent running; this row is filled from its triage. |
+| Claude Code release gaps: `StopFailure`, auto-continue and blocking-dialog notifications, effort sync, exec-form hooks on Windows, `background_tasks` | **0.54** (`lane/limits`) | Rate-limited and auto-continuing sessions show as done today, and `/effort` is lost on restart. See "Claude Code releases". |
 
 ## Embedding
 
@@ -63,9 +63,10 @@ What Kete does instead:
 
 The releases are ordered by dependency. Up to four lanes run at once, each in its own worktree. Each release ships when its lanes land, with the same gates as before: per-crate tests locally, then CI on three OSes.
 
-1. **0.54 Whakaoho.** Foundation commit, then two lanes:
+1. **0.54 Whakaoho.** Foundation commit, then three lanes:
    - **wake-up:** the runner, the conditions, Task Scheduler, the hour slider and the windows timeline in both apps
    - **quiet browser:** WebView2's own menu and browser keys off, replaced by Kete's Copy/Paste menus for text fields, the terminal and Monaco
+   - **limits:** the Claude Code release gaps B1–B4 (see the last section). B1 is what makes a limited session read "resumes 15:45" next to Whakaoho's windows.
    - Whakaoho comes first because Jay wants tomorrow's accounts warmed. The browser fix is small and unambiguous.
 2. **0.55 Reach.** Four lanes:
    - desktop menus
@@ -78,7 +79,7 @@ The releases are ordered by dependency. Up to four lanes run at once, each in it
    - files (tree, drag a path into a session)
    - UI consolidation
 4. **0.57.** Two lanes:
-   - the Claude Code gaps marked BUILD by the release review
+   - the Claude Code "Later" items that prove worth it
    - visual QA of everything above
 
 ## 0.54 foundation (one commit on release/0.54 before any lane branches)
@@ -119,7 +120,11 @@ The registry is append-only and position-indexed, and parallel lanes appending t
 - **Desktop prefs.**
   - `editor_folder` (`auto|vscode|visual-studio|command`) and `editor_file` (`auto|vscode|visual-studio|kete`) are Choice values.
   - They go under `desktop` and in `DesktopPrefs::choices`.
-- **Protocol and DB slots.**
+- **Protocol slots** (allocated now so the lanes don't collide):
+  - 61 for `lane/wake` (`WakeAccount` request)
+  - 62 for `lane/limits` (limit/stop-reason fields or event)
+  - Each lane defines its own `*_PROTOCOL` constant with its number. The orchestrator sets `PROTOCOL_VERSION` when merging. New `ClientRequest`/`ServerEvent` variants are appended in lane order: wake first, then limits.
+- **DB slots.**
   - None. Editor launch runs in the clients, and each app calls core.
   - Whakaoho keeps its state in machine-local files (see its lane), so `kete wake` runs with or without a daemon.
   - Protocol 61 is taken only if a lane needs a daemon request, and that lane must say so.
@@ -507,4 +512,41 @@ Jay's framing: "if enabled and conditions warrant it, send the smallest message 
 
 ## Claude Code releases
 
-Pending the release review; filled before 0.57 is planned.
+The release review read every weekly digest from W13 to W37 and the changelog up to the installed 2.1.301. The full report is in `.superpowers/sdd/2026-10-16-release-054/research-claude-releases.md`. Most new features are already covered or don't fit an interactive multi-account manager: agent view headlines, cross-session messaging, push notifications, model-picker settings, `worktree.baseRef` and `--restricted`/`--safe-mode` are cut. `--safe-mode` also disables hooks and the statusline, so Kete must never pass it, and the wake runner doesn't either.
+
+Four real gaps go into 0.54 as `lane/limits`:
+
+- **B1. Usage-limit and API-error state.**
+  - **Why:**
+    - A turn that ends on an API error fires `StopFailure` instead of `Stop`. Kete doesn't install that hook.
+    - Auto-continue at a usage limit has been on by default since 2.1.234. It sends no `idle_prompt` while it waits.
+    - Kete also ignores the `quota_auto_resume_*` notifications.
+    - So a rate-limited or logged-out session lands in Review or Done as if it had finished, and a session waiting to resume at 15:45 looks done.
+  - **The fix:**
+    - Install `StopFailure` and map its `error`:
+      - `rate_limit`: Running with "resumes 15:45"
+      - auth, billing or account-hold errors: Needs you, with the reason
+      - overloaded and similar: Done with an error badge
+    - Handle `quota_auto_resume_fired/stale/disabled`.
+    - Treat `agent_needs_input` and `elicitation_*` as waiting on the user. Auto mode has been the default since 2.1.284, and those dialogs used to be dropped.
+    - The reset time comes from the footer text ("Continuing automatically at 3:45pm") via the existing `pty/usage.rs` scanner, falling back to the account's `resets_at`.
+  - **Wire format:** no new `AgentStatus` variant, because older clients break on one. Instead, `limit_until` and `stop_reason` side fields go behind a protocol gate, in memory only.
+- **B2. Effort sync.**
+  - **Why:** Kete re-passes the stored `--effort` on every spawn and resume. A mid-session `/effort` change is lost on restart or relocation, and the card shows `max` when the `maxEffortLevel` cap runs it at `high`.
+  - **The fix:** read `effort.level` from the statusline and from hook payloads, then store and broadcast it, as the model already is.
+- **B3. Windows hook hygiene.**
+  - On Windows, write Claude hooks in exec form (`command` + `args`). That removes a shell process and a quoting workaround per hook. `PostToolUse` currently fires on every tool call.
+  - Add `PowerShell(kete …)` allow rules beside the `Bash(kete …)` ones, for machines without Git Bash.
+  - 2.1.299 makes some hooks fail closed when Git for Windows is absent (reading unverified). Exec form removes that exposure.
+- **B4. `Stop.background_tasks`.** Use the real list of in-flight subagents and workflows at turn end, instead of the 180-second drain and 30-minute quiet-grace guesses. Shells and monitors never hold a row Running.
+
+**Later:**
+- `--resume <transcript>` to continue a session on another account after a limit. Spike whether it writes into the second profile's folder.
+- `claude purge` as an opt-in on worktree delete.
+- `CwdChanged`.
+- Claude's `dark-ansi` theme via Kete's settings file.
+- Session recap: it needs focus forwarding and costs quota.
+
+**Strains to watch:**
+- Kete relies on OSC 9;4 progress, which the docs list only for ConEmu, Ghostty and iTerm2. A per-release canary against the real CLI belongs in Jay's manual checklist.
+- A `/fork` copy that inherits `NEBULA_*` might take over a row's session id. Reproduce before changing anything.
