@@ -782,3 +782,105 @@ fn the_new_verbs_have_rows_and_say_they_are_coming() {
     }
     assert!(out.is_empty(), "nothing sent: {out:?}");
 }
+
+/// The registry's wake-up verb: with the accounts overlay up and a Claude
+/// account picked it wakes that account (the footer says so at once, and
+/// no thread starts under a unit test); from anywhere else it opens the
+/// overlay on its Wake view. It is no longer a word about the next release.
+#[test]
+fn wake_account_wakes_the_picked_account_or_opens_the_wake_view() {
+    use crate::accounts_overlay::Tab;
+    with_config_json(
+        r#"{"profiles":[{"name":"work","harness":"claude"},{"name":"gpt","harness":"codex"}]}"#,
+        || {
+            let mut app = bench();
+            let mut out = Vec::new();
+            // From the grid: nothing picked, so the Wake view opens.
+            run_action(&mut app, Action::WakeAccount, &mut out);
+            match &app.modals.overlay {
+                Some(Overlay::Accounts(v)) => assert_eq!(v.tab, Tab::Wake),
+                other => panic!("no Wake view: {other:?}"),
+            }
+            assert!(
+                !app.chrome.flash.as_deref().unwrap_or("").contains("coming"),
+                "{:?}",
+                app.chrome.flash
+            );
+            // Run again from the Accounts view with a Claude account picked.
+            let Some(Overlay::Accounts(v)) = &mut app.modals.overlay else {
+                panic!("closed");
+            };
+            v.tab = Tab::Accounts;
+            v.cursor = v.rows.iter().position(|r| r.key == "work").unwrap();
+            run_action(&mut app, Action::WakeAccount, &mut out);
+            assert_eq!(app.chrome.flash.as_deref(), Some("waking work\u{2026}"));
+            // Another harness's account is refused, not woken.
+            let Some(Overlay::Accounts(v)) = &mut app.modals.overlay else {
+                panic!("closed");
+            };
+            v.cursor = v.rows.iter().position(|r| r.key == "gpt").unwrap();
+            run_action(&mut app, Action::WakeAccount, &mut out);
+            let flash = app.chrome.flash.clone().unwrap_or_default();
+            assert!(flash.contains("Claude accounts only"), "{flash}");
+            assert!(out.is_empty(), "nothing sent to the daemon: {out:?}");
+        },
+    );
+}
+
+/// `?` over the Wake view lists the Wake view's own keys, not the
+/// Accounts list's, and over the list it names the wake-up ones too.
+#[test]
+fn question_mark_over_the_wake_view_lists_its_own_verbs() {
+    with_config_json(
+        r#"{"profiles":[{"name":"work","harness":"claude"}]}"#,
+        || {
+            let mut app = bench();
+            let mut out = Vec::new();
+            accounts::open(&mut app);
+            let ask = |app: &mut App, out: &mut Vec<ClientRequest>| {
+                handle_overlay_key(
+                    app,
+                    KeyEvent::new(KeyCode::Char('?'), KeyModifiers::SHIFT),
+                    out,
+                );
+                match &app.modals.overlay {
+                    Some(Overlay::Menu(menu)) => menu
+                        .items
+                        .iter()
+                        .map(|i| i.label.clone())
+                        .collect::<Vec<_>>(),
+                    other => panic!("no verbs menu: {other:?}"),
+                }
+            };
+            let labels = ask(&mut app, &mut out);
+            for want in ["Wake up now", "Wake-up schedule\u{2026}", "Rename\u{2026}"] {
+                assert!(labels.iter().any(|l| l == want), "{want}: {labels:?}");
+            }
+            handle_overlay_key(
+                &mut app,
+                KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+                &mut out,
+            );
+            handle_overlay_key(
+                &mut app,
+                KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+                &mut out,
+            );
+            let labels = ask(&mut app, &mut out);
+            for want in [
+                "On or off",
+                "Earlier",
+                "Later",
+                "Wake up now",
+                "Accounts",
+                "Close",
+            ] {
+                assert!(labels.iter().any(|l| l == want), "{want}: {labels:?}");
+            }
+            assert!(
+                !labels.iter().any(|l| l == "Rename\u{2026}"),
+                "the list's verbs don't apply here: {labels:?}"
+            );
+        },
+    );
+}

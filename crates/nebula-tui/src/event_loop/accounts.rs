@@ -4,8 +4,9 @@
 
 use super::*;
 use crate::accounts_overlay::{
-    build_rows, AccountForm, AccountsHit, AccountsView, Field, FormKind, Mode, Outcome,
+    build_rows, AccountForm, AccountsHit, AccountsView, Field, FormKind, Mode, Outcome, Tab,
 };
+use crate::wake_tab::Saving;
 
 /// The accounts to show: the pushed list, or the kept files when the
 /// daemon is too old to push one.
@@ -77,6 +78,105 @@ pub(crate) fn refresh(app: &mut App) {
     app.modals.overlay = Some(Overlay::Accounts(view));
 }
 
+/// Turn the overlay to `tab`. The Wake view reads its status again each
+/// time it comes up, with the cursor on the account the Accounts view had
+/// picked; going back, the Accounts cursor follows the Wake one.
+fn show_tab(app: &mut App, tab: Tab) {
+    let jobs = app.jobs.view_jobs.clone();
+    let Some(Overlay::Accounts(view)) = &mut app.modals.overlay else {
+        return;
+    };
+    view.tab = tab;
+    match tab {
+        Tab::Wake => {
+            view.wake.focus = view.selected().map(|r| r.key.clone());
+            view.wake.select_focus();
+            view.wake.loading = true;
+            if let Some(jobs) = &jobs {
+                crate::wake_tab::spawn_status(jobs, &view.wake.inbox);
+            }
+        }
+        Tab::Accounts => {
+            let at = view
+                .wake
+                .selected_key()
+                .and_then(|key| view.rows.iter().position(|r| r.key == key));
+            if let Some(at) = at {
+                view.cursor = at;
+            }
+        }
+    }
+    app.chrome.dirty = true;
+}
+
+/// Open the overlay straight onto its Wake view: what the registry's
+/// wake-up schedule verb does.
+pub(crate) fn open_wake_tab(app: &mut App) {
+    if !matches!(app.modals.overlay, Some(Overlay::Accounts(_))) {
+        open(app);
+    }
+    if let Some(Overlay::Accounts(view)) = &mut app.modals.overlay {
+        view.mode = Mode::List;
+    }
+    show_tab(app, Tab::Wake);
+}
+
+/// The registry's `wake_account` verb: Wake now on the account the open
+/// overlay has picked, else the overlay opened on its Wake view to pick one.
+pub(crate) fn wake_account_verb(app: &mut App) {
+    let picked = matches!(
+        &app.modals.overlay,
+        Some(Overlay::Accounts(v)) if v.mode == Mode::List && v.has_account()
+    );
+    if picked {
+        wake_selected(app);
+    } else {
+        open_wake_tab(app);
+    }
+}
+
+/// `w`: wake the picked account now, on a thread (`kete wake <account>
+/// --force` can take two minutes). The footer says so at once, then how it
+/// went; a second press while it runs waits.
+fn wake_selected(app: &mut App) {
+    let jobs = app.jobs.view_jobs.clone();
+    let Some(Overlay::Accounts(view)) = &mut app.modals.overlay else {
+        return;
+    };
+    let account = match view.wake_target() {
+        Ok(account) => account,
+        Err(why) => {
+            app.chrome.flash = Some(why);
+            return;
+        }
+    };
+    if !view.wake.inbox.begin_wake(&account) {
+        app.chrome.flash = Some(format!("already waking {account}\u{2026}"));
+        return;
+    }
+    app.chrome.flash = Some(format!("waking {account}\u{2026}"));
+    match jobs {
+        Some(jobs) => crate::wake_tab::spawn_wake(&jobs, &view.wake.inbox, account),
+        // No loop to answer (the unit tests): nothing is started.
+        None => view.wake.inbox.end_wake(&account),
+    }
+}
+
+/// An edit on the Wake view was queued: start the thread that waits out
+/// the debounce and saves, when none is waiting. With no loop to run it
+/// (the unit tests) nothing is started, and nothing is ever saved.
+fn start_saving(app: &mut App, saving: Saving) {
+    if saving != Saving::Start {
+        return;
+    }
+    let Some(jobs) = app.jobs.view_jobs.clone() else {
+        return;
+    };
+    if let Some(Overlay::Accounts(view)) = &app.modals.overlay {
+        crate::wake_tab::spawn_flush(&jobs, &view.wake.inbox);
+    }
+}
+
 /// What a key did: a message for the footer, an account to sign in.
 type Done = Option<Result<Outcome, String>>;
 
@@ -88,7 +188,8 @@ const RENAME_OFFLINE: &str =
 /// The list's keys: j/k move, Space/e switch a profile on or off, d/*
 /// make it the default, a add, Enter edit, c duplicate, r rename, x/Delete
 /// remove, l sign in, p use for a repo, m move the grid's session onto it,
-/// s/t the spread and its threshold, Esc (or q) closes.
+/// s/t the spread and its threshold, w wakes the account now, Tab turns to
+/// the Wake view, Esc (or q) closes.
 fn list_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) -> Done {
     let agents = app.tree.agents.clone();
     let connected = !matches!(app.chrome.conn, crate::app::ConnState::Disconnected);
@@ -139,8 +240,61 @@ fn list_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientRequest>) -> Done 
             move_session_here(app);
             None
         }
+        KeyCode::Char('w') => {
+            wake_selected(app);
+            None
+        }
+        KeyCode::Tab | KeyCode::BackTab => {
+            show_tab(app, Tab::Wake);
+            None
+        }
         _ => None,
     }
+}
+
+/// The Wake view's keys: j/k (or ↑/↓) walk the accounts, Space or Enter
+/// switch the account's wake-up on or off, ←/→ move its hour a quarter
+/// hour (⇧ an hour), s snaps it to the suggested hour, w wakes the account
+/// now, Tab turns back to the accounts, Esc (or q) closes. An edit shows
+/// at once and is saved on a thread (`crate::wake_tab`).
+fn wake_key(app: &mut App, key: KeyEvent) -> Done {
+    let shifted = key.modifiers.contains(KeyModifiers::SHIFT);
+    let steps = |delta: i32| if shifted { delta * 4 } else { delta };
+    let Some(Overlay::Accounts(view)) = &mut app.modals.overlay else {
+        return None;
+    };
+    let saving = match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => {
+            app.modals.overlay = None;
+            return None;
+        }
+        KeyCode::Tab | KeyCode::BackTab => {
+            show_tab(app, Tab::Accounts);
+            return None;
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            view.wake.step(1);
+            return None;
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            view.wake.step(-1);
+            return None;
+        }
+        KeyCode::Left => view.wake.nudge(steps(-1)),
+        KeyCode::Right => view.wake.nudge(steps(1)),
+        KeyCode::Char(' ') | KeyCode::Enter => view.wake.toggle(),
+        KeyCode::Char('s') => match view.wake.snap() {
+            Ok(saving) => saving,
+            Err(why) => return Some(Err(why)),
+        },
+        KeyCode::Char('w') => {
+            wake_selected(app);
+            return None;
+        }
+        _ => return None,
+    };
+    start_saving(app, saving);
+    None
 }
 
 /// A form's keys: Tab / ↓ / ↑ walk the fields, ←/→ (or Space) step the
@@ -280,6 +434,7 @@ pub(crate) fn handle_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientReque
         return;
     };
     let done = match view.mode {
+        Mode::List if view.tab == Tab::Wake => wake_key(app, key),
         Mode::List => list_key(app, key, out),
         Mode::Form(_) => form_key(app, key),
         Mode::Remove { .. } => remove_key(app, key),
@@ -346,6 +501,25 @@ pub(crate) fn handle_mouse(app: &mut App, mouse: MouseEvent, out: &mut Vec<Clien
                             *cursor = i;
                         }
                     }
+                }
+                AccountsHit::Tab(tab) => show_tab(app, tab),
+                AccountsHit::WakeRow(i) => view.wake.select(i),
+                AccountsHit::WakeSwitch(i) => {
+                    view.wake.select(i);
+                    handle_key(
+                        app,
+                        KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE),
+                        out,
+                    );
+                }
+                AccountsHit::WakeAnchor(i, direction) => {
+                    view.wake.select(i);
+                    let code = if direction < 0 {
+                        KeyCode::Left
+                    } else {
+                        KeyCode::Right
+                    };
+                    handle_key(app, KeyEvent::new(code, KeyModifiers::NONE), out);
                 }
                 AccountsHit::Spread(i) => {
                     let word = nebula_core::accounts::SPREADS[i.min(2)];
@@ -1382,6 +1556,402 @@ mod tests {
                 assert!(!draw(&mut app).contains("delete its home"));
                 key(&mut app, KeyCode::Char('y'), &mut out);
                 assert_eq!(saved()["profiles"], serde_json::json!([]));
+            },
+        );
+    }
+
+    // ---- the Wake view ----
+
+    fn view_mut(app: &mut App) -> &mut AccountsView {
+        match &mut app.modals.overlay {
+            Some(Overlay::Accounts(v)) => v,
+            other => panic!("the accounts overlay is not up: {other:?}"),
+        }
+    }
+
+    /// The overlay turned to its Wake view, a fixed status standing in for
+    /// the read: a unit test starts no `kete`, saves nothing, and has no
+    /// loop to answer a thread.
+    fn open_wake(app: &mut App, out: &mut Vec<ClientRequest>) {
+        open_overlay(app, out);
+        key(app, KeyCode::Tab, out);
+        let status =
+            crate::wake_tab::parse_status(crate::wake_tab::fixture::status_json().as_bytes())
+                .unwrap();
+        let v = view_mut(app);
+        assert_eq!(v.tab, Tab::Wake);
+        v.wake.status = Some(status);
+        v.wake.loading = false;
+        assert!(
+            app.jobs.view_jobs.is_none(),
+            "no thread, no save, no kete under test"
+        );
+    }
+
+    fn draw_at(app: &mut App, w: u16, h: u16) -> String {
+        let mut terminal = ratatui::Terminal::new(TestBackend::new(w, h)).unwrap();
+        terminal.draw(|f| crate::ui::draw(f, app)).unwrap();
+        buffer_text(&terminal)
+    }
+
+    fn anchor(app: &App) -> u16 {
+        view(app).wake.selected().unwrap().schedule.anchor()
+    }
+
+    /// Two accounts at the two sizes the 0.54 visual pass walks: the
+    /// switch, the hour, the next run, the strip with its marks, the last
+    /// decision and what stops the heartbeat, in words that are not cut.
+    #[test]
+    fn the_wake_view_draws_both_accounts_at_80x24_and_120x40() {
+        with_config_json("{}", || {
+            let mut app = App::new();
+            seed_tree(&mut app);
+            let mut out = Vec::new();
+            open_wake(&mut app, &mut out);
+            for (w, h) in [(80u16, 24u16), (120, 40)] {
+                let text = draw_at(&mut app, w, h);
+                // The box's own columns: the screen's rows run on past it,
+                // into whatever the launcher draws behind.
+                let area = view(&app).area;
+                let inside: Vec<String> = text
+                    .lines()
+                    .map(|l| {
+                        l.chars()
+                            .skip(usize::from(area.x))
+                            .take(usize::from(area.width))
+                            .collect()
+                    })
+                    .collect();
+                for want in [
+                    "Accounts",
+                    "Wake",
+                    "work",
+                    "home",
+                    "[x] on",
+                    "[ ] off",
+                    "\u{2039} 05:30 \u{203a}",
+                    "\u{2039} 05:00 \u{203a}",
+                    "every day",
+                    "next Sat 05:30",
+                    "last 05:32 fired \u{b7} window to 10:32",
+                    "no wake-ups yet",
+                    "not logged in: kete profile login home",
+                    "usual 09:00\u{2013}17:00",
+                    "one tiny prompt with your own subscription",
+                    "Task Scheduler: Kete\\Whakaoho",
+                    "[Space] on/off",
+                    "[w] wake now",
+                    "[Tab] accounts",
+                ] {
+                    assert!(text.contains(want), "{w}x{h}: {want}\n{text}");
+                }
+                // The strip: windows as blocks, now and the hour marked.
+                assert!(
+                    inside.iter().any(|l| l.matches('\u{2580}').count() >= 8
+                        && l.contains('\u{2503}')
+                        && l.contains('\u{25c6}')),
+                    "{w}x{h}: no strip\n{text}"
+                );
+                assert!(text.contains("00"), "the scale: {text}");
+                // Nothing the user reads is cut with an ellipsis.
+                for line in inside.iter().filter(|l| {
+                    l.contains("05:30")
+                        || l.contains("fired")
+                        || l.contains("[ ] off")
+                        || l.contains("not logged in")
+                }) {
+                    assert!(!line.contains('\u{2026}'), "{w}x{h}: cut: {line}");
+                }
+                assert_eq!(
+                    text.contains("suggested 05:30"),
+                    w >= 120,
+                    "{w}x{h}: {text}"
+                );
+                // Every spot to click lies inside the box.
+                let v = view(&app);
+                assert!(
+                    v.area.right() <= w && v.area.bottom() <= h,
+                    "{w}x{h}: {:?}",
+                    v.area
+                );
+                assert!(v
+                    .hits
+                    .iter()
+                    .any(|(_, h)| *h == AccountsHit::Tab(Tab::Accounts)));
+                assert!(v
+                    .hits
+                    .iter()
+                    .any(|(_, h)| *h == AccountsHit::Tab(Tab::Wake)));
+                assert!(v.hits.iter().any(|(_, h)| *h == AccountsHit::WakeSwitch(1)));
+                for (rect, hit) in &v.hits {
+                    assert!(
+                        rect.x >= v.area.x
+                            && rect.y >= v.area.y
+                            && rect.right() <= v.area.right()
+                            && rect.bottom() <= v.area.bottom(),
+                        "{w}x{h}: {hit:?} {rect:?} outside {:?}",
+                        v.area
+                    );
+                }
+            }
+            // A terminal too small for it still draws.
+            for (w, h) in [(40u16, 12u16), (20, 3)] {
+                draw_at(&mut app, w, h);
+            }
+        });
+    }
+
+    /// Before anything lands the view says it is reading; a read that
+    /// failed says why. Both keep the keys.
+    #[test]
+    fn the_wake_view_says_when_it_is_reading_or_could_not() {
+        with_config_json("{}", || {
+            let mut app = App::new();
+            seed_tree(&mut app);
+            let mut out = Vec::new();
+            open_overlay(&mut app, &mut out);
+            key(&mut app, KeyCode::Tab, &mut out);
+            assert!(view(&app).wake.loading);
+            let text = draw_at(&mut app, 100, 30);
+            assert!(text.contains("Reading the wake-up status"), "{text}");
+            assert!(text.contains("one tiny prompt"), "the words stay: {text}");
+            view_mut(&mut app)
+                .wake
+                .inbox
+                .land(0, Err("couldn't run kete: nope".into()));
+            let text = draw_at(&mut app, 100, 30);
+            assert!(text.contains("Couldn't read the wake-up status"), "{text}");
+            assert!(text.contains("couldn't run kete: nope"), "{text}");
+            key(&mut app, KeyCode::Tab, &mut out);
+            assert_eq!(view(&app).tab, Tab::Accounts, "Tab still turns back");
+        });
+    }
+
+    /// ←/→ move the hour a quarter hour, round the clock; Space (or Enter)
+    /// flips the switch. The row shows it at once and the save is queued,
+    /// one an account; with no loop nothing runs and nothing is written.
+    #[test]
+    fn arrows_move_the_hour_a_quarter_hour_and_space_flips_the_switch() {
+        use crate::wake_tab::Edit;
+        with_config_json("{}", || {
+            let mut app = App::new();
+            seed_tree(&mut app);
+            let mut out = Vec::new();
+            open_wake(&mut app, &mut out);
+            assert_eq!(anchor(&app), 330);
+            key(&mut app, KeyCode::Right, &mut out);
+            assert_eq!(anchor(&app), 345);
+            assert!(draw(&mut app).contains("\u{2039} 05:45 \u{203a}"));
+            key(&mut app, KeyCode::Left, &mut out);
+            key(&mut app, KeyCode::Left, &mut out);
+            assert_eq!(anchor(&app), 315);
+            let text = draw(&mut app);
+            assert!(text.contains("\u{2039} 05:15 \u{203a}"), "{text}");
+            assert!(
+                text.contains("next Sat 05:15"),
+                "the next run follows: {text}"
+            );
+            // Shift moves an hour.
+            press(&mut app, KeyCode::Right, KeyModifiers::SHIFT, &mut out);
+            assert_eq!(anchor(&app), 375);
+            press(&mut app, KeyCode::Left, KeyModifiers::SHIFT, &mut out);
+            assert_eq!(anchor(&app), 315);
+            // Round the clock, both ways.
+            view_mut(&mut app).wake.status.as_mut().unwrap().accounts[0]
+                .schedule
+                .anchor_min = 0;
+            key(&mut app, KeyCode::Left, &mut out);
+            assert_eq!(anchor(&app), 1425);
+            assert!(draw(&mut app).contains("\u{2039} 23:45 \u{203a}"));
+            key(&mut app, KeyCode::Right, &mut out);
+            assert_eq!(anchor(&app), 0);
+            assert!(draw(&mut app).contains("\u{2039} 00:00 \u{203a}"));
+            // The switch.
+            view_mut(&mut app).wake.status.as_mut().unwrap().accounts[0]
+                .schedule
+                .anchor_min = 315;
+            key(&mut app, KeyCode::Char(' '), &mut out);
+            assert!(!view(&app).wake.selected().unwrap().schedule.enabled);
+            assert_eq!(draw(&mut app).matches("[ ] off").count(), 2);
+            assert!(!draw(&mut app).contains("next Sat"), "off: nothing next");
+            key(&mut app, KeyCode::Enter, &mut out);
+            assert!(view(&app).wake.selected().unwrap().schedule.enabled);
+            assert_eq!(draw(&mut app).matches("[x] on").count(), 1);
+            // One save queued an account, the latest of each.
+            key(&mut app, KeyCode::Char(' '), &mut out);
+            assert_eq!(
+                view(&app).wake.inbox.pending(),
+                vec![(
+                    "work".to_string(),
+                    Edit {
+                        enabled: false,
+                        anchor_min: 315
+                    }
+                )]
+            );
+            key(&mut app, KeyCode::Down, &mut out);
+            assert_eq!(view(&app).wake.cursor, 1);
+            key(&mut app, KeyCode::Char(' '), &mut out);
+            key(&mut app, KeyCode::Right, &mut out);
+            assert_eq!(anchor(&app), 315);
+            assert_eq!(
+                view(&app).wake.inbox.pending()[0],
+                (
+                    "home".to_string(),
+                    Edit {
+                        enabled: true,
+                        anchor_min: 315
+                    }
+                )
+            );
+            // s snaps to the suggestion where there is one.
+            key(&mut app, KeyCode::Char('s'), &mut out);
+            assert!(
+                app.chrome
+                    .flash
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("no suggested hour"),
+                "{:?}",
+                app.chrome.flash
+            );
+            key(&mut app, KeyCode::Up, &mut out);
+            key(&mut app, KeyCode::Char('s'), &mut out);
+            assert_eq!(anchor(&app), 330);
+            assert!(out.is_empty(), "nothing goes to the daemon: {out:?}");
+            // Esc closes; the queued saves belong to the threads, not the view.
+            key(&mut app, KeyCode::Esc, &mut out);
+            assert!(app.modals.overlay.is_none());
+        });
+    }
+
+    /// A click on a tab turns the view, on a row picks it, on a switch
+    /// flips it, on an arrow moves the hour; the keys' buttons press their
+    /// keys.
+    #[test]
+    fn clicks_turn_the_tab_pick_a_row_flip_a_switch_and_move_the_hour() {
+        with_config_json("{}", || {
+            let mut app = App::new();
+            seed_tree(&mut app);
+            let mut out = Vec::new();
+            open_wake(&mut app, &mut out);
+            click(&mut app, AccountsHit::WakeRow(1), &mut out);
+            assert_eq!(view(&app).wake.cursor, 1);
+            click(&mut app, AccountsHit::WakeSwitch(0), &mut out);
+            assert_eq!(view(&app).wake.cursor, 0, "the click picked the row too");
+            assert!(!view(&app).wake.rows()[0].schedule.enabled);
+            click(&mut app, AccountsHit::WakeAnchor(0, 1), &mut out);
+            assert_eq!(anchor(&app), 345);
+            click(&mut app, AccountsHit::WakeAnchor(0, -1), &mut out);
+            click(&mut app, AccountsHit::WakeAnchor(0, -1), &mut out);
+            assert_eq!(anchor(&app), 315);
+            click(&mut app, AccountsHit::Key(KeyCode::Char('s')), &mut out);
+            assert_eq!(anchor(&app), 330, "the suggested button");
+            click(&mut app, AccountsHit::Key(KeyCode::Right), &mut out);
+            assert_eq!(anchor(&app), 345, "the later button");
+            // Tabs, there and back.
+            click(&mut app, AccountsHit::Tab(Tab::Accounts), &mut out);
+            assert_eq!(view(&app).tab, Tab::Accounts);
+            let text = draw(&mut app);
+            assert!(
+                text.contains("Spread [s]") && text.contains("[Tab] wake-up"),
+                "{text}"
+            );
+            click(&mut app, AccountsHit::Key(KeyCode::Tab), &mut out);
+            assert_eq!(view(&app).tab, Tab::Wake, "the Accounts view's Tab button");
+            assert_eq!(anchor(&app), 345, "what was edited is still there");
+            click(&mut app, AccountsHit::Key(KeyCode::Tab), &mut out);
+            assert_eq!(view(&app).tab, Tab::Accounts, "the Wake view's Tab button");
+            // The wheel walks the Wake rows when that is the view, over the box.
+            key(&mut app, KeyCode::Tab, &mut out);
+            draw(&mut app);
+            let area = view(&app).area;
+            let wheel = |app: &mut App, kind: MouseEventKind, out: &mut Vec<ClientRequest>| {
+                let event = crossterm::event::MouseEvent {
+                    kind,
+                    column: area.x + area.width / 2,
+                    row: area.y + area.height / 2,
+                    modifiers: KeyModifiers::NONE,
+                };
+                handle_terminal_event(app, crossterm::event::Event::Mouse(event), out);
+            };
+            wheel(&mut app, MouseEventKind::ScrollDown, &mut out);
+            assert_eq!(view(&app).wake.cursor, 1);
+            wheel(&mut app, MouseEventKind::ScrollUp, &mut out);
+            assert_eq!(view(&app).wake.cursor, 0);
+            assert!(out.is_empty());
+        });
+    }
+
+    /// The Wake view keeps the cursor on the account the Accounts view had
+    /// picked, and the Accounts view follows it back.
+    #[test]
+    fn the_two_views_share_the_picked_account() {
+        with_config_json(
+            r#"{"profiles":[{"name":"home","harness":"claude"},{"name":"work","harness":"claude"}]}"#,
+            || {
+                let mut app = App::new();
+                seed_tree(&mut app);
+                let mut out = Vec::new();
+                open_overlay(&mut app, &mut out);
+                let at = view(&app)
+                    .rows
+                    .iter()
+                    .position(|r| r.key == "work")
+                    .unwrap();
+                click(&mut app, AccountsHit::Row(at), &mut out);
+                key(&mut app, KeyCode::Tab, &mut out);
+                assert_eq!(view(&app).wake.focus.as_deref(), Some("work"));
+                // The status lands: the cursor goes to the account asked for.
+                let status = crate::wake_tab::parse_status(
+                    crate::wake_tab::fixture::status_json().as_bytes(),
+                )
+                .unwrap();
+                view_mut(&mut app).wake.inbox.land(0, Ok(status));
+                draw(&mut app);
+                assert_eq!(view(&app).wake.selected_key().as_deref(), Some("work"));
+                key(&mut app, KeyCode::Down, &mut out);
+                assert_eq!(view(&app).wake.selected_key().as_deref(), Some("home"));
+                key(&mut app, KeyCode::Tab, &mut out);
+                assert_eq!(view(&app).selected().map(|r| r.key.as_str()), Some("home"));
+            },
+        );
+    }
+
+    /// `w` wakes the picked Claude account (the footer says so at once);
+    /// another harness's account is refused in words; the Wake view with
+    /// nothing read yet has none to wake. With no loop no thread starts, so
+    /// a second press is not held back.
+    #[test]
+    fn w_wakes_the_picked_claude_account_and_refuses_the_others() {
+        with_config_json(
+            r#"{"profiles":[{"name":"gpt","harness":"codex"},{"name":"work","harness":"claude"}]}"#,
+            || {
+                let mut app = App::new();
+                seed_tree(&mut app);
+                let mut out = Vec::new();
+                open_overlay(&mut app, &mut out);
+                let at = |app: &App, key: &str| {
+                    view(app).rows.iter().position(|r| r.key == key).unwrap()
+                };
+                let gpt = at(&app, "gpt");
+                view_mut(&mut app).cursor = gpt;
+                key(&mut app, KeyCode::Char('w'), &mut out);
+                let flash = app.chrome.flash.clone().unwrap_or_default();
+                assert!(flash.contains("Claude accounts only"), "{flash}");
+                let work = at(&app, "work");
+                view_mut(&mut app).cursor = work;
+                key(&mut app, KeyCode::Char('w'), &mut out);
+                assert_eq!(app.chrome.flash.as_deref(), Some("waking work\u{2026}"));
+                app.chrome.flash = None;
+                click(&mut app, AccountsHit::Key(KeyCode::Char('w')), &mut out);
+                assert_eq!(app.chrome.flash.as_deref(), Some("waking work\u{2026}"));
+                // The Wake view, before a status has landed.
+                key(&mut app, KeyCode::Tab, &mut out);
+                key(&mut app, KeyCode::Char('w'), &mut out);
+                let flash = app.chrome.flash.clone().unwrap_or_default();
+                assert!(flash.contains("still loading"), "{flash}");
+                assert!(out.is_empty());
             },
         );
     }

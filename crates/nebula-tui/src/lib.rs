@@ -76,6 +76,7 @@ pub mod update_check;
 pub mod view_jobs;
 pub mod vim_term;
 pub mod vscode_theme;
+pub mod wake_tab;
 pub mod wt_settings;
 
 use anyhow::Result;

@@ -10,6 +10,10 @@
 //! the profiles in place (`nebula_core::profiles`), which the config beat
 //! then reloads everywhere. A login is never run from here: an account
 //! that needs one shows the command to type.
+//!
+//! `Tab` turns the overlay to its other view, the WAKE tab
+//! (`crate::wake_tab`): each Claude account's wake-up switch and hour,
+//! on a strip of the day, with Wake now (`w`) from either view.
 
 use std::path::PathBuf;
 
@@ -468,12 +472,31 @@ pub enum Mode {
     },
 }
 
+/// The overlay's two views. Forms, confirms and the repo picker belong to
+/// the Accounts one: the Wake view is only ever up with the list's mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Tab {
+    #[default]
+    Accounts,
+    /// WHAKAOHO (wake-up), for the Claude accounts.
+    Wake,
+}
+
 /// A clickable spot on the overlay, written at draw time: a click on a
 /// key's button is that key, pressed, so the click and the key can never
 /// do different things.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccountsHit {
     Key(crossterm::event::KeyCode),
+    /// A tab of the header.
+    Tab(Tab),
+    /// An account's row on the Wake view: the cursor goes there.
+    WakeRow(usize),
+    /// A Wake row's switch: the cursor goes there and the switch flips.
+    WakeSwitch(usize),
+    /// A Wake row's arrow, earlier (-1) or later (1): the cursor goes there
+    /// and the hour moves a quarter hour.
+    WakeAnchor(usize, i8),
     /// An account's row: the cursor goes there.
     Row(usize),
     /// A form's field: the form's cursor goes there.
@@ -509,6 +532,11 @@ impl Outcome {
 pub struct AccountsView {
     pub rows: Vec<AccountRow>,
     pub cursor: usize,
+    /// Which view is up.
+    pub tab: Tab,
+    /// The Wake view's state: the rows of the last wake-up status, its
+    /// cursor, and the inbox its background reads and saves answer into.
+    pub wake: crate::wake_tab::WakeTab,
     /// config.json, and config.local.json beside it: edits go to the
     /// layer whose `profiles` list is in force (`Self::on_profiles_layer`).
     pub config: PathBuf,
@@ -560,6 +588,8 @@ impl AccountsView {
         Self {
             rows,
             cursor: 0,
+            tab: Tab::Accounts,
+            wake: crate::wake_tab::WakeTab::default(),
             root: root_for(&config),
             config,
             local,
@@ -1053,7 +1083,45 @@ impl AccountsView {
         self.rows.get(self.cursor)
     }
 
+    /// Is an account picked on the view that is up?
+    pub fn has_account(&self) -> bool {
+        match self.tab {
+            Tab::Wake => self.wake.selected().is_some(),
+            Tab::Accounts => self.selected().is_some(),
+        }
+    }
+
+    /// The account `w` wakes now: the Wake view's row, or the Accounts
+    /// view's picked one when it is a Claude account (wake-up runs those
+    /// only).
+    pub fn wake_target(&self) -> Result<String, String> {
+        match self.tab {
+            Tab::Wake => self
+                .wake
+                .selected_key()
+                .ok_or_else(|| "no account to wake yet: the list is still loading".to_string()),
+            Tab::Accounts => {
+                let row = self.selected().ok_or("no account selected")?;
+                if row.harness != "claude" {
+                    return Err(format!(
+                        "wake-up runs Claude accounts only: {} is a {} account",
+                        row.label(),
+                        row.harness
+                    ));
+                }
+                if let Some(problem) = &row.problem {
+                    return Err(format!("{}: {problem}", row.label()));
+                }
+                Ok(row.key.clone())
+            }
+        }
+    }
+
     pub fn step(&mut self, delta: i32) {
+        if self.tab == Tab::Wake {
+            self.wake.step(delta);
+            return;
+        }
         if self.rows.is_empty() {
             self.cursor = 0;
             return;
