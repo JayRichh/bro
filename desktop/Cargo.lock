@@ -2219,6 +2219,7 @@ name = "nebula-core"
 version = "0.53.1"
 dependencies = [
  "directories",
+ "png 0.17.16",
  "rmp-serde",
  "serde",
  "serde_bytes",

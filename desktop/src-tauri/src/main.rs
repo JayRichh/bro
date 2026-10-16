@@ -11,6 +11,7 @@ mod alerts;
 mod board;
 mod branches;
 mod daemon;
+mod editors;
 mod files;
 mod git;
 mod launch;
@@ -873,6 +874,9 @@ fn main() {
             // cursor-agent list (never a fresh probe from a GUI window).
             let cfg = nebula_config::Config::load();
             nebula_config::claude_catalogue::bootstrap(cfg.claude_enabled);
+            // VS Code and Visual Studio found off the main thread (vswhere
+            // takes a moment), so the first menu already lists them.
+            nebula_core::editors::detect_in_background();
             if cfg.cursor_enabled {
                 nebula_config::cursor_catalogue::install_cached();
             }
@@ -985,6 +989,17 @@ fn main() {
             open_url,
             files::opened_file_read,
             files::opened_file_open,
+            // The user's own editors (editors.rs)
+            editors::editors_list,
+            editors::editors_rescan,
+            editors::editor_icon,
+            editors::editor_targets,
+            editors::editor_windows,
+            editors::editor_open,
+            editors::editor_dock,
+            editors::path_reveal,
+            editors::path_open_default,
+            editors::worktree_file_read,
             update::update_status,
             launchables,
             startup,

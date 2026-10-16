@@ -1,8 +1,11 @@
 //! The desktop window's own preferences, kept under one `desktop` object
-//! in `config.json` that [`crate::Config`] has no field for: the TUI never
-//! writes it (an unknown key rides through its saves untouched) and the
-//! window never writes a TUI key for them — its light/dark choice is not
-//! the TUI's `theme`.
+//! in `config.json` that [`crate::Config`] has no field for: an unknown key
+//! rides through the TUI's saves untouched, and the window never writes a
+//! TUI key for them — its light/dark choice is not the TUI's `theme`. The
+//! TUI reads the editor choices here and writes one thing: a repo's
+//! `.kete.json` Open command the user allowed ([`open_allowed_in`]), the
+//! same approval the window keeps, so a command allowed in one app runs in
+//! the other.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -25,6 +28,9 @@ pub const EDITOR_FOLDERS: &[&str] = &["auto", "vscode", "visual-studio", "comman
 /// What opens a file: the editor found, VS Code, Visual Studio, or Kete's
 /// own viewer.
 pub const EDITOR_FILES: &[&str] = &["auto", "vscode", "visual-studio", "kete"];
+/// Whether VS Code opens a folder in the window it last used (`-r`)
+/// rather than a window of its own.
+pub const EDITOR_REUSE: &[&str] = &["off", "on"];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -46,6 +52,13 @@ pub struct DesktopPrefs {
     pub editor_folder: String,
     /// What Open in editor uses on a file ([`EDITOR_FILES`]).
     pub editor_file: String,
+    /// VS Code's "reuse window" ([`EDITOR_REUSE`]).
+    pub editor_reuse: String,
+    /// The solution Visual Studio last opened from a repo with several, by
+    /// repo path: its path from the checkout's root, picked first next time
+    /// in any of the repo's worktrees.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub solution: BTreeMap<String, String>,
     /// Keys a newer window wrote, kept through a save.
     #[serde(flatten)]
     pub other: BTreeMap<String, serde_json::Value>,
@@ -62,6 +75,8 @@ impl Default for DesktopPrefs {
             collapsed: Vec::new(),
             editor_folder: EDITOR_FOLDERS[0].into(),
             editor_file: EDITOR_FILES[0].into(),
+            editor_reuse: EDITOR_REUSE[0].into(),
+            solution: BTreeMap::new(),
             other: BTreeMap::new(),
         }
     }
@@ -76,6 +91,7 @@ pub fn choices(key: &str) -> Option<&'static [&'static str]> {
         "startup" => Some(STARTUPS),
         "editor_folder" => Some(EDITOR_FOLDERS),
         "editor_file" => Some(EDITOR_FILES),
+        "editor_reuse" => Some(EDITOR_REUSE),
         _ => None,
     }
 }
@@ -102,6 +118,7 @@ impl DesktopPrefs {
             "startup",
             "editor_folder",
             "editor_file",
+            "editor_reuse",
         ] {
             let ok = choices(key).is_some_and(|list| list.contains(&prefs.get(key)));
             if !ok {
@@ -124,6 +141,7 @@ impl DesktopPrefs {
             "startup" => &self.startup,
             "editor_folder" => &self.editor_folder,
             "editor_file" => &self.editor_file,
+            "editor_reuse" => &self.editor_reuse,
             _ => "",
         }
     }
@@ -136,6 +154,7 @@ impl DesktopPrefs {
             "startup" => self.startup = value.into(),
             "editor_folder" => self.editor_folder = value.into(),
             "editor_file" => self.editor_file = value.into(),
+            "editor_reuse" => self.editor_reuse = value.into(),
             _ => {}
         }
     }
@@ -153,6 +172,11 @@ impl DesktopPrefs {
         if !list.iter().any(|c| c == command) {
             list.push(command.to_string());
         }
+    }
+
+    /// The solution remembered for the repo at `repo`.
+    pub fn solution_for(&self, repo: &str) -> Option<&str> {
+        self.solution.get(repo).map(String::as_str)
     }
 
     /// Set one preference to one of its choices.
@@ -192,6 +216,49 @@ impl DesktopPrefs {
         let (path, local) = crate::layer_paths();
         Self::update_in(&path, &local, change)
     }
+}
+
+/// Whether a checkout's Open command may run now, for the repo at `repo`,
+/// in the layers at `path` / `local`: one from the user's own setting
+/// (`from_file` false) always may; one from a `.kete.json` (anyone who can
+/// push to the repo wrote it) only once allowed for that repo. `approved`
+/// is the command the app showed and the user said yes to: it allows the
+/// command only when it is the one resolved now (the file can change
+/// between the ask and the yes), and the approval is kept, so the same
+/// command doesn't ask again in either app (a changed one does).
+pub fn open_allowed_in(
+    path: &Path,
+    local: &Path,
+    repo: &str,
+    command: &str,
+    from_file: bool,
+    approved: Option<&str>,
+) -> Result<bool, String> {
+    if !from_file {
+        return Ok(true);
+    }
+    if DesktopPrefs::load_at(path, local).open_approved(repo, command) {
+        return Ok(true);
+    }
+    if approved != Some(command) {
+        return Ok(false);
+    }
+    DesktopPrefs::update_in(path, local, |p| {
+        p.approve_open(repo, command);
+        Ok(())
+    })?;
+    Ok(true)
+}
+
+/// [`open_allowed_in`] in the layers on disk.
+pub fn open_allowed(
+    repo: &str,
+    command: &str,
+    from_file: bool,
+    approved: Option<&str>,
+) -> Result<bool, String> {
+    let (path, local) = crate::layer_paths();
+    open_allowed_in(&path, &local, repo, command, from_file, approved)
 }
 
 #[cfg(test)]
@@ -312,5 +379,48 @@ mod tests {
         let prefs = DesktopPrefs::load_at(&path, &local);
         assert_eq!(prefs.editor_folder, "auto");
         assert_eq!(prefs.editor_file, "vscode");
+    }
+
+    #[test]
+    fn reuse_window_is_off_until_turned_on_and_a_solution_is_remembered_per_repo() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let local = dir.path().join("config.local.json");
+        assert_eq!(DesktopPrefs::load_at(&path, &local).editor_reuse, "off");
+        DesktopPrefs::update_in(&path, &local, |p| {
+            p.solution
+                .insert("C:/Code/api".into(), "src/Api.slnx".into());
+            p.set("editor_reuse", "on")
+        })
+        .unwrap();
+        let prefs = DesktopPrefs::load_at(&path, &local);
+        assert_eq!(prefs.editor_reuse, "on");
+        assert_eq!(prefs.solution_for("C:/Code/api"), Some("src/Api.slnx"));
+        assert_eq!(prefs.solution_for("C:/Code/other"), None);
+        assert!(
+            DesktopPrefs::update_in(&path, &local, |p| p.set("editor_reuse", "always")).is_err()
+        );
+        std::fs::write(&path, r#"{"desktop": {"editor_reuse": "sometimes"}}"#).unwrap();
+        assert_eq!(DesktopPrefs::load_at(&path, &local).editor_reuse, "off");
+    }
+
+    #[test]
+    fn a_repo_file_open_command_runs_once_allowed_and_asks_again_when_it_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let local = dir.path().join("config.local.json");
+        let allowed = |cmd: &str, approved: Option<&str>| {
+            open_allowed_in(&path, &local, "C:/Code/api", cmd, true, approved).unwrap()
+        };
+        // The user's own setting never asks.
+        assert!(open_allowed_in(&path, &local, "C:/Code/api", "code .", false, None).unwrap());
+        assert!(!allowed("code .", None));
+        // A yes to another command (the file changed under the dialog)
+        // allows nothing.
+        assert!(!allowed("code .", Some("rm -rf /")));
+        assert!(allowed("code .", Some("code .")));
+        assert!(allowed("code .", None), "kept");
+        assert!(!allowed("code . && curl x", None), "a changed command asks");
+        assert!(!open_allowed_in(&path, &local, "C:/Code/web", "code .", true, None).unwrap());
     }
 }

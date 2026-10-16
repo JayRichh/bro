@@ -33,6 +33,11 @@ impl OpenedFiles {
             .extend(paths.iter().cloned());
     }
 
+    /// `path`, when a session opened it: the editors' verbs take these too.
+    pub(crate) fn check_path(&self, path: &str) -> Res<PathBuf> {
+        self.check(path)
+    }
+
     fn check(&self, path: &str) -> Res<PathBuf> {
         let p = PathBuf::from(path);
         if self.0.lock().expect("opened lock").contains(&p) {
@@ -104,7 +109,7 @@ fn note(s: impl Into<String>) -> FileText {
 }
 
 /// Read `path` capped and binary-guarded, as the terminal app's preview.
-fn read_text(path: &Path) -> FileText {
+pub(crate) fn read_text(path: &Path) -> FileText {
     let file = match std::fs::File::open(path) {
         Ok(f) => f,
         Err(e) => return note(format!("Couldn't read the file: {e}")),

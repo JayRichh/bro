@@ -330,6 +330,48 @@ pub fn icon(editor: &Editor, size: u32, cache_dir: &Path) -> Option<PathBuf> {
     }
 }
 
+/// Kinds of file Open with default app refuses: what the system would run
+/// rather than show (GitHub Desktop's rule). Show in Explorer instead.
+const RUNS: &[&str] = &[
+    "exe",
+    "com",
+    "bat",
+    "cmd",
+    "ps1",
+    "psm1",
+    "msi",
+    "msix",
+    "appx",
+    "lnk",
+    "pif",
+    "scr",
+    "vbs",
+    "vbe",
+    "js",
+    "jse",
+    "wsf",
+    "wsh",
+    "hta",
+    "cpl",
+    "msc",
+    "jar",
+    "reg",
+    "sh",
+    "application",
+    "appref-ms",
+    "url",
+];
+
+/// Why Open with default app refuses a file.
+pub const RUNS_PROGRAM: &str = "Kete doesn't run programs: use Show in Explorer";
+
+/// Whether Open with default app refuses `path`: a program or a script.
+pub fn runs_program(path: &Path) -> bool {
+    path.extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .is_some_and(|e| RUNS.contains(&e.as_str()))
+}
+
 /// Where the icons are cached under Kete's data dir.
 pub fn icon_cache_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("cache").join("editor-icons")
