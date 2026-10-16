@@ -59,7 +59,10 @@ impl Daemon {
         };
         let signal = match event {
             HookEvent::UserPromptSubmit => Some(WakeSignal::Submitted),
-            HookEvent::Stop => Some(WakeSignal::TurnEnded),
+            HookEvent::Stop { .. } => Some(WakeSignal::TurnEnded),
+            // An API error ends the turn too (a usage limit, a login): the
+            // report then carries no fresh reading, and the log says so.
+            HookEvent::StopFailure { .. } => Some(WakeSignal::TurnEnded),
             HookEvent::Notification { notification_type }
                 if notification_type.as_deref() == Some("idle_prompt") =>
             {
@@ -433,11 +436,14 @@ mod tests {
         let id = AgentId("wake-1".into());
         assert!(daemon.wake_hook(&id, &HookEvent::UserPromptSubmit));
         assert!(daemon.wake_hook(&id, &HookEvent::SessionStart { source: None }));
-        assert!(daemon.wake_hook(&id, &HookEvent::Stop));
+        assert!(daemon.wake_hook(&id, &HookEvent::Stop { background: None }));
         assert_eq!(rx.try_recv(), Ok(WakeSignal::Submitted));
         assert_eq!(rx.try_recv(), Ok(WakeSignal::TurnEnded));
         assert!(rx.try_recv().is_err(), "SessionStart says nothing");
-        assert!(!daemon.wake_hook(&AgentId("row-1".into()), &HookEvent::Stop));
+        assert!(!daemon.wake_hook(
+            &AgentId("row-1".into()),
+            &HookEvent::Stop { background: None }
+        ));
     }
 
     #[test]
