@@ -1,0 +1,458 @@
+# Old-school RPG archetypes (originals, not copies). Frames face right.
+
+== adventurer
+size 12 14
+pal h #cdd0da
+pal m #9096ac
+pal M #5f6584
+pal s #f0c49a
+pal S #c98e6c
+pal B #6f9de0
+pal b #4a78c4
+pal n #2f4e92
+pal l #5a5578
+pal t #8f5c36
+pal T #5c3a26
+pal y #f0c440
+pal w #b07c4c
+pal W #7e5434
+pal e #18121e
+lid S
+-- idle
+...hh.......
+..hm..hhh...
+.hm..hmmmM..
+hm.w.msses..
+...w.msssS..
+....wMssS...
+....Bwbbn...
+....bbsbn...
+....ttyWT...
+....bbbnn...
+....ll.ll...
+....ll.ll...
+....tt.tt...
+....TT.TTT..
+-- walk
+...hh.......
+..hm..hhh...
+.hm..hmmmM..
+hm.w.msses..
+...w.msssS..
+....wMssS...
+....Bwbbn...
+....bbsbn...
+....ttyWT...
+....bbbnn...
+....ll..ll..
+...ll....ll.
+...tt....tt.
+..TTT...TTT.
+-- sit
+............
+............
+............
+............
+...hh.......
+..hm..hhh...
+.hm..hmmmM..
+hm.w.msses..
+...w.msssS..
+....wMssS...
+....Bwbbn...
+....bbsbn...
+...lllllll..
+..ttTttTtt..
+-- eat
+............
+......hhh...
+.....hmmmM..
+.....msses..
+.....msssS..
+.....MssS...
+....Bbbbn...
+....bbbbnW..
+....ttyTts..
+....bbbnnw..
+....ll.ll.w.
+....ll.ll.w.
+....tt.tthhm
+....TT.TT.mM
+-- held
+...hh.......
+..hm..hhh...
+.hm..hmmmM..
+hm.w.msses..
+...w.msssS..
+....wMssS...
+....Bwbbn...
+....bbsbn...
+....ttyWT...
+....ll.ll...
+....ll.ll...
+....ll.ll...
+....tt.tt...
+....TT.TT...
+
+== goblin
+size 10 11
+pal A #b4d868
+pal a #82ae44
+pal v #52793a
+pal D #2c3622
+pal B #94704a
+pal b #704f36
+pal o #4c3828
+pal n #2e2018
+pal w #e2c47e
+pal W #a8803f
+pal k #f2ede4
+pal e #f6d040
+pal R #c0563e
+lid v
+-- idle
+a.........
+aa..AAAA..
+avaAaaaaa.
+.aaaaDDDa.
+...aaaeaaA
+....avvkav
+...Bbbbnww
+...bbbbbwW
+...bobbbaW
+...aa.aa.W
+...vv.vvvW
+-- walk
+a.........
+aa..AAAA..
+avaAaaaaa.
+.aaaaDDDa.
+...aaaeaaA
+....avvkav
+...Bbbbnww
+...bbbbbwW
+...bobbbaW
+..aa...aaW
+.vvv...vvW
+-- sit
+..........
+..........
+a.........
+aa..AAAA..
+avaAaaaaa.
+.aaaaDDDa.
+...aaaeaaA
+....avvkav
+...BbbbnwW
+...bbobbaW
+..vvbbbbvW
+-- eat
+..........
+..........
+a.........
+aa..AAAA..
+avaAaaaaa.
+.aaaaDDDa.
+...aaaeaaA
+....aDDkav
+...BbbbnaR
+...bbobbRk
+..vvbbbbvv
+-- held
+a.........
+aa..AAAA..
+avaAaaaaa.
+.aaaaDDDa.
+...aaaeaaA
+....avvkav
+...Bbbbn..
+...bobbbaW
+...aa.aa.W
+...aa.aaww
+...vv.vvwW
+
+== imp
+size 11 11
+pal o #f78e54
+pal r #e0522e
+pal R #a02e34
+pal h #f6e2b4
+pal H #c49a6a
+pal p #7e2f66
+pal P #c0588a
+pal k #f6f0e6
+pal e #ffe45a
+lid R
+-- idle
+....h....h.
+.....H..H..
+p...oorrrR.
+pP..orrrerR
+pPP.RrkkkkR
+pPPP.rRRRr.
+.pPP.orrR..
+R.p..rrRRr.
+r...rrrRR..
+.rrr..r.r..
+.....RR.RR.
+-- walk
+p...h....h.
+pP...H..H..
+pPP.oorrrR.
+pPP.orrrerR
+.pP.RrkkkkR
+..p..rRRRr.
+.....orrRr.
+...r.rrRR..
+..r..RR.RR.
+.r.........
+R..........
+-- sit
+...........
+...........
+....h....h.
+.....H..H..
+.p..oorrrR.
+.pP.orrrerR
+.pP.RrkkkkR
+..p..rRRRr.
+....orrrRr.
+...rrrrRRr.
+Rrrr.RRRRR.
+-- eat
+...........
+...........
+...........
+....h....h.
+.....H..H..
+p...oorrrR.
+pP.porrrerR
+pPPpRrkkkkR
+.pP.rRRRr..
+.rr.rrrRRr.
+R.r.RR.RR..
+-- held
+....h....h.
+.....H..H..
+p...oorrrR.
+pP..orrrerR
+pPP.RrkkkkR
+pPPP.rRRRr.
+.pPP.orrR..
+R.p..rrRRr.
+r...rrrRR..
+.rr..r..r..
+..r..r..r..
+
+== mole
+size 12 8
+pal m #54506a
+pal M #7e7a98
+pal d #35314a
+pal p #f0a0aa
+pal P #c8788a
+pal q #f9d8d4
+pal e #18121e
+pal D #8a6a50
+lid d
+-- idle
+...MMMMM....
+..MmmmmmMM..
+.MmmmmmMMeMp
+MmmmmmmmMMpP
+PdmmmmmmmmMd
+..dmmmpppq..
+......pppqPq
+..pp....PPPq
+-- walk
+...MMMMM....
+..MmmmmmMM..
+.MmmmmmMMeMp
+MmmmmmmmMMpP
+PdmmmmmmmmMd
+..dmmm..pppq
+....PPPqpppq
+pp..PPPq....
+-- walk
+...MMMMM....
+..MmmmmmMM..
+.MmmmmmMMeMp
+MmmmmmmmMMpP
+PdmmmmmmmmMd
+..dmpppq....
+....pppqPPPq
+...pp...PPPq
+-- sit
+............
+............
+............
+...MMMMM....
+..MmmmmmMM..
+.MmmmmmMMeMp
+MdmmmmmmpqqP
+.ddddpppPqq.
+-- eat
+...MMMMM....
+..MmmmmmMM..
+.MmmmmmMMeMp
+MmmmmmmmMMpP
+PdmmmmmmmmMd
+..dmmm..pppq
+.....D.Dpppq
+..ppD.D.PPPq
+-- held
+...MMMMM....
+..MmmmmmMM..
+.MmmmmmMMeMp
+MmmmmmmmMMpP
+PdmmmmmmmmMd
+..dmmmmppPP.
+..ppdmmppPP.
+..qq...qqqq.
+
+== pet_rock
+size 8 6
+pal H #dcdae4
+pal h #b9b6c6
+pal r #8f8ca2
+pal s #6e6a86
+pal d #4c4864
+pal e #18121e
+lid s
+-- idle
+........
+..Hhhh..
+.hhhrrrs
+hhrrerer
+hrrrrdrs
+.ssdssss
+-- walk
+........
+...Hhhh.
+..hhhrrs
+hhrrerer
+hrrrrdrs
+.ssdssss
+-- sit
+........
+........
+.Hhhhrrs
+hhrrerer
+hrrrrdrs
+ssssdsss
+-- eat
+........
+..Hhhh..
+.hhhrrrs
+hhrrrrrr
+hrrrerer
+.ssdssss
+-- held
+........
+..Hhhh..
+.hhhrrrs
+hhrrerer
+hrrrrdrs
+.ssdssss
+
+== genie
+size 14 16
+pal U #a98ae8
+pal u #7a56c0
+pal v #4e3490
+pal B #8cc4f6
+pal b #4c92dc
+pal n #2d5fb0
+pal N #1f3c82
+pal S #b6dcf8
+pal s #78b2ec
+pal y #f6cc48
+pal Y #b88a2a
+pal k #2a2658
+pal e #18121e
+lid n
+-- idle
+.....UUuu.....
+....UUuuuu....
+...vvvvyvvv...
+....bbebeb....
+....bbbkkb....
+.....bbkb.....
+..BBBbnnnbbn..
+..yYbbnnbbYy..
+..bBBBBbbbbb..
+...nbbbBBbn...
+....nbbbbn....
+...nbbbbs.....
+..sbbbbS......
+...sbbbS......
+.....SsbbS....
+........SSs...
+-- walk
+.....UUuu.....
+....UUuuuu....
+...vvvvyvvv...
+....bbebeb....
+....bbbkkb....
+.....bbkb.....
+..BBBbnnnbbn..
+..yYbbnnbbYy..
+..bBBBBbbbbb..
+...nbbbBBbn...
+....nbbbbn....
+.....nbbbbs...
+......sbbbbS..
+.....sbbbS....
+...SsbbbS.....
+..SSs.........
+-- sit
+..............
+..............
+..............
+.....UUuu.....
+....UUuuuu....
+...vvvvyvvv...
+....bbebeb....
+....bbbkkb....
+.....bbkb.....
+..BBBbnnnbbn..
+..yYbbnnbbYy..
+..bBBBBbbbbb..
+...nbbbBBbn...
+...sbbbbbbs...
+..sSbbbbbbSs..
+.SSsSSSSSSsSS.
+-- eat
+.....UUuu.....
+....UUuuuu....
+...vvvvyvvv...
+....bbebeb....
+....bbbkkb....
+.....bbkb..Y.y
+..BBBbnnnbyyyy
+..yYbbnnbbbYYY
+..bBBBBbbbbbbb
+...nbbbBBbn...
+....nbbbbn....
+...nbbbbs.....
+..sbbbbS......
+...sbbbS......
+.....SsbbS....
+........SSs...
+-- held
+.....UUuu.....
+....UUuuuu....
+...vvvvyvvv...
+....bbebeb....
+....bbbkkb....
+.....bbkb.....
+..BBBbnnnbbn..
+..yYbbnnbbYy..
+..bBBBBbbbbb..
+...nbbbBBbn...
+....nbbbbn....
+.....sbbs.....
+.....sbbs.....
+......sb......
+......Ss......
+......SS......

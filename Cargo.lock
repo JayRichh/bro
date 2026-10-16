@@ -1649,6 +1649,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "kete-critters"
+version = "0.53.1"
+dependencies = [
+ "png",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "kv-log-macro"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
