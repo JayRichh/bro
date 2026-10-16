@@ -197,14 +197,16 @@ flow('a Review card opens the review split: the diff against base with its commi
   // A changed file's row in the list: its own menu, Copy path the file on
   // disk. A diff against the base reads commits: no staging rows.
   await d.contextClick('[aria-label="Changed files"] button', 'feature.txt');
-  const fileRows = await d.menu('feature.txt');
+  const fileRows = await d.menu('src/feature.txt');
   for (const row of ['Copy path', 'Copy relative path']) assert.ok(fileRows.some((r) => r.label === row), `the file's ${row}`);
   assert.ok(!fileRows.some((r) => /Stage|Discard/.test(r.label)), 'no staging against the base');
   assert.equal((await lastRightClick(d)).kind, 'own');
   const before = clipboardText();
   try {
     await d.click(ROW, 'Copy path');
-    await d.waitFor('the file path on the clipboard', () => clipboardText() === `${wt}${path.sep}feature.txt`);
+    // The worktree's own separators (git may hand them over as slashes).
+    const slash = (x) => x.split(String.fromCharCode(92)).join('/');
+    await d.waitFor('the file path on the clipboard', () => slash(clipboardText()) === slash(wt) + '/src/feature.txt');
     await d.waitForText(`Copied ${wt}`);
   } finally {
     if (before) setClipboard(before);

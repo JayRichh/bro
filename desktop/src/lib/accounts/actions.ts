@@ -17,7 +17,6 @@ import { removeWarning } from './pick';
 import {
   canSwitch,
   nameProblem,
-  projectAccount,
   projectsDefaultingTo,
   renameBlocker,
   sessionsFollow,
@@ -85,35 +84,6 @@ export async function moveToAccount(id: string) {
   const to = targets.find((t) => (t.profile ?? own) === pick);
   const now = agentOf(id);
   if (to && now) await confirmSwitch(now, to);
-}
-
-/** A repo's "Default account...": per harness with accounts, pick one (or
- *  none, back to the spread). */
-export async function pickProjectAccount(project: string) {
-  const p = app.model.projects.find((x) => x.id === project);
-  if (!p) return;
-  const profiles = app.launch.profiles;
-  if (!profiles.length) return toast(`No accounts to pick from yet. Add one in ${withKey('Accounts', 'accounts')}.`);
-  const harnesses = [...new Set(profiles.map((x) => x.harness))];
-  const CLEAR = '\u0000clear\u0000';
-  const clear = (h: string) => `${CLEAR}${h}`;
-  const items: { id: string; label: string; hint?: string }[] = [];
-  for (const h of harnesses) {
-    const now = projectAccount(app.launch, p.repo_path, h);
-    for (const x of profiles.filter((y) => y.harness === h)) {
-      items.push({
-        id: `${h}\u0000${x.name}`,
-        label: `${h}: ${x.name}${x.disabled ? ' (off)' : ''}`,
-        hint: x.name === now ? 'current' : undefined,
-      });
-    }
-    if (now) items.push({ id: clear(h), label: `${h}: no project default (the spread picks)` });
-  }
-  const pick = await ask.pick({ title: `Default account for ${p.name}`, items });
-  if (pick == null) return;
-  if (pick.startsWith(CLEAR)) return setProjectAccount(project, pick.slice(CLEAR.length), null);
-  const [harness, name] = pick.split('\u0000');
-  await setProjectAccount(project, harness, name);
 }
 
 /** Write a project's default account for a harness (null clears). */
