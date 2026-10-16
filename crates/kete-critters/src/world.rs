@@ -557,6 +557,11 @@ impl Critter {
         &SPECIES[self.species]
     }
 
+    /// The genie is holding out its lamp (a click takes it).
+    pub fn offering(&self) -> bool {
+        self.offering
+    }
+
     fn half_w(&self) -> f64 {
         sprite(self.species).w as f64 / 2.0
     }

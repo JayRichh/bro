@@ -730,7 +730,7 @@ pub fn open_menu(app: &mut App, id: u32, at: (u16, u16)) {
     let mut items = Vec::new();
     let pet = if sp.has(flag::INANIMATE) {
         "Pop"
-    } else if sp.special == Special::Lamp {
+    } else if sp.special == Special::Lamp && cr.offering() {
         "Take the lamp"
     } else if asleep {
         "Pet (wakes it)"
