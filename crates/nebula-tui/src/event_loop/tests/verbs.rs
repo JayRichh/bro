@@ -901,3 +901,249 @@ fn the_matrix_rows_follow_their_state() {
         labels(&app, &repo)
     );
 }
+
+/// The card's own rows, without its checkout's `Worktree ‹branch› ▸`,
+/// flattened out of their submenus.
+fn card_rows(app: &App, id: &str) -> Vec<MenuItem> {
+    let menu = verbs::menu_for(app, &Target::Session(AgentId(id.into())));
+    verbs::flat(&menu[..menu.len() - 1])
+}
+
+fn pr_on_feat(state: &str, draft: bool) -> crate::pull_request::PullRequest {
+    crate::pull_request::PullRequest {
+        number: 12,
+        url: "https://github.com/o/r/pull/12".into(),
+        title: "Polish the nav".into(),
+        state: state.into(),
+        is_draft: draft,
+        head: "feat".into(),
+        head_sha: String::new(),
+        base: "main".into(),
+        health: Default::default(),
+        activity: Vec::new(),
+    }
+}
+
+/// A checkout's pull request by its state (matrix §5.1): none, Create
+/// standing alone; open, the browser, the merge and a comment in `Pull
+/// request ▸`; a draft, no merge until it is published; merged or closed,
+/// only its own row, in words that say so, and never Create beside it.
+#[test]
+fn pull_request_rows_follow_its_state() {
+    use crate::pull_request::{STATE_CLOSED, STATE_MERGED, STATE_OPEN};
+    let mut app = bench();
+    let has = |app: &App, a: Action| card_rows(app, "a3").iter().any(|i| i.verb == Some(a));
+    let top = |app: &App| -> Vec<String> {
+        verbs::menu_for(app, &Target::Session(AgentId("a3".into())))
+            .into_iter()
+            .map(|i| i.label)
+            .collect()
+    };
+    let feat = WorktreeId("w2".into());
+    assert!(top(&app).contains(&"Create pull request\u{2026}".to_string()));
+
+    app.github
+        .pull_requests
+        .insert(feat.clone(), Some(pr_on_feat(STATE_OPEN, false)));
+    assert!(!has(&app, Action::CreatePullRequest));
+    assert!(has(&app, Action::MergePullRequest));
+    assert!(has(&app, Action::OpenPullRequest));
+    assert!(top(&app).contains(&"Pull request".to_string()), "{:?}", top(&app));
+
+    app.github
+        .pull_requests
+        .insert(feat.clone(), Some(pr_on_feat(STATE_OPEN, true)));
+    assert!(!has(&app, Action::MergePullRequest), "a draft is published first");
+    assert!(has(&app, Action::OpenPullRequest));
+
+    for (state, words) in [
+        (STATE_MERGED, "Open merged pull request"),
+        (STATE_CLOSED, "Open closed pull request"),
+    ] {
+        app.github
+            .pull_requests
+            .insert(feat.clone(), Some(pr_on_feat(state, false)));
+        assert!(top(&app).contains(&words.to_string()), "{:?}", top(&app));
+        for gone in [
+            Action::CreatePullRequest,
+            Action::MergePullRequest,
+            Action::CommentPullRequest,
+        ] {
+            assert!(!has(&app, gone), "{state}: {gone:?}");
+        }
+    }
+    // A merged checkout says so on its delete and in its banner.
+    app.github
+        .pull_requests
+        .insert(feat.clone(), Some(pr_on_feat(STATE_MERGED, false)));
+    let band: Vec<String> = verbs::menu_for(&app, &Target::Worktree(feat.clone()))
+        .into_iter()
+        .map(|i| i.label)
+        .collect();
+    assert!(
+        band.contains(&"Delete worktree (pull request merged)\u{2026}".to_string()),
+        "{band:?}"
+    );
+    assert_eq!(
+        verbs::banner(&app, &Target::Worktree(feat)).as_deref(),
+        Some("merged")
+    );
+}
+
+/// A repo's menu reaches its linked worktrees (`Worktrees ▸`, each landing
+/// on its band) after its remote's lists and ahead of what opens another
+/// app; a checkout's reaches its live run terminal, on the band and in a
+/// card's `Worktree ‹branch› ▸`.
+#[test]
+fn the_go_rows_connect_a_repo_and_a_checkout_to_their_parts() {
+    let mut app = bench();
+    let rows = app.visible_session_rows();
+    app.nav.sel_session = rows
+        .iter()
+        .position(|r| r.sref() == Some(SessionRef::Agent(AgentId("a1".into()))))
+        .unwrap();
+    let repo = verbs::menu_for(&app, &Target::Repo(ProjectId("p1".into())));
+    let labels: Vec<&str> = repo.iter().map(|i| i.label.as_str()).collect();
+    let pos = |l: &str| {
+        labels
+            .iter()
+            .position(|x| *x == l)
+            .unwrap_or_else(|| panic!("{l}: {labels:?}"))
+    };
+    assert!(pos("Remote") < pos("Worktrees"));
+    assert!(pos("Worktrees") < pos("Open in"));
+    let MenuAction::Submenu { items, .. } = &repo[pos("Worktrees")].action else {
+        panic!("Worktrees is a submenu");
+    };
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].label, "feat");
+    assert_eq!(
+        items[0].action,
+        MenuAction::Jump(crate::palette::PaletteTarget::Worktree(WorktreeId(
+            "w2".into()
+        )))
+    );
+
+    hse(
+        &mut app,
+        ServerEvent::EntityUpserted {
+            entity: Entity::Terminal(TerminalTab {
+                id: TerminalId("dev".into()),
+                worktree_id: WorktreeId("w2".into()),
+                name: "dev".into(),
+                sort_order: 1,
+                alive: true,
+                run_command: Some("npm run dev".into()),
+            }),
+        },
+    );
+    let show = MenuAction::Attach(SessionRef::Terminal(TerminalId("dev".into())));
+    let band = verbs::menu_for(&app, &Target::Worktree(WorktreeId("w2".into())));
+    assert!(band
+        .iter()
+        .any(|i| i.label == "Show run terminal" && i.action == show));
+    let card = verbs::menu_for(&app, &Target::Session(AgentId("a3".into())));
+    assert!(verbs::flat(&card[card.len() - 1..])
+        .iter()
+        .any(|i| i.action == show));
+}
+
+/// Diff this file (from the tree browser or a finder) opens the
+/// checkout's diff on that file; a file with nothing changed says so.
+#[test]
+fn diff_this_file_lands_the_diff_on_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = test_repo(&dir);
+    std::fs::write(repo.join("a.txt"), "changed\n").unwrap();
+    std::fs::write(repo.join("z.txt"), "fresh\n").unwrap();
+    let mut app = App::new();
+    seed_repo_tree(&mut app, &repo);
+    let mut out = Vec::new();
+    run_menu_action(&mut app, MenuAction::DiffThisFile("z.txt".into()), &mut out);
+    match &app.modals.overlay {
+        Some(Overlay::Diff(v)) => assert_eq!(v.selected_path(), Some("z.txt")),
+        other => panic!("no diff: {other:?}"),
+    }
+    assert!(app.modals.diff_land_on.is_none());
+    app.modals.overlay = None;
+    run_menu_action(
+        &mut app,
+        MenuAction::DiffThisFile("untouched.txt".into()),
+        &mut out,
+    );
+    assert_eq!(
+        app.chrome.flash.as_deref(),
+        Some("no changes in untouched.txt")
+    );
+}
+
+/// `?` over Azure DevOps lists the pull request under its cursor's menu
+/// (the browser, its threads, the worktree on its branch, its copies, a
+/// vote, the merge), then the overlay's own keys; a vote presses `v` and
+/// its letter in the overlay put back.
+#[test]
+fn azure_devops_rows_have_their_own_menus() {
+    use crate::ado::{AdoBranch, AdoPr, AdoTab, AdoView, Load};
+    let mut app = bench();
+    app.modals.overlay = Some(Overlay::Ado(AdoView {
+        project: Some(ProjectId("p1".into())),
+        tab: AdoTab::PullRequests,
+        prs: Load::Ready(vec![AdoPr {
+            id: 7,
+            title: "Polish".into(),
+            source: "refs/heads/feat".into(),
+            target: "refs/heads/main".into(),
+            is_draft: false,
+            created_by: "someone".into(),
+            url: "https://dev.azure.com/o/p/_git/r/pullrequest/7".into(),
+            mine: false,
+        }]),
+        branches: Load::Ready(vec![AdoBranch {
+            name: "feat".into(),
+            local: true,
+            remote: None,
+        }]),
+        ..AdoView::default()
+    }));
+    let mut out = Vec::new();
+    handle_overlay_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+        &mut out,
+    );
+    let Some(Overlay::Menu(menu)) = &app.modals.overlay else {
+        panic!("no menu over Azure DevOps: {:?}", app.modals.overlay);
+    };
+    assert_eq!(menu.title.as_deref(), Some("pull request !7"));
+    let labels: Vec<String> = menu.items.iter().map(|i| i.label.clone()).collect();
+    for want in [
+        "Open in browser",
+        "Review comments\u{2026}",
+        "Go to worktree feat",
+        "Copy",
+        "Vote",
+        "Merge\u{2026}",
+        "Refresh",
+        "Branches",
+        "All keys\u{2026}",
+    ] {
+        assert!(labels.iter().any(|l| l == want), "{want}: {labels:?}");
+    }
+    assert!(matches!(
+        app.modals.verbs_under.as_deref(),
+        Some(Overlay::Ado(_))
+    ));
+    let vote = labels.iter().position(|l| l == "Vote").unwrap();
+    activate::menu_row(&mut app, vote, &mut out);
+    let Some(Overlay::Menu(sub)) = &app.modals.overlay else {
+        panic!("the vote submenu");
+    };
+    assert_eq!(sub.title.as_deref(), Some("pull request !7 \u{203a} Vote"));
+    assert_eq!(sub.items[0].label, "Approve");
+    activate::menu_row(&mut app, 0, &mut out);
+    assert!(matches!(app.modals.overlay, Some(Overlay::Ado(_))));
+    assert_eq!(
+        app.chrome.flash.as_deref(),
+        Some("voting approve on !7\u{2026}")
+    );
+}
