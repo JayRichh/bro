@@ -67,7 +67,7 @@ impl Family {
     /// for `auto`, `command`, `kete` and anything else.
     pub fn from_word(word: &str) -> Option<Self> {
         match word.trim() {
-            "vscode" | "code" => Some(Family::Code),
+            "vscode" => Some(Family::Code),
             "visual-studio" | "vs" => Some(Family::VisualStudio),
             _ => None,
         }

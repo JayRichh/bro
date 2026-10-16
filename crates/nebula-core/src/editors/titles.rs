@@ -46,15 +46,21 @@ pub fn matches(title: &str, family: Family, folder: &Path, stems: &[String]) -> 
                 return false;
             };
             // The last part is the app's name; the root folder is
-            // before it, a workspace reads "name (Workspace)".
+            // before it, a workspace reads "name (Workspace)". A title of
+            // the app's name alone has no folder open.
             let ws = format!("{name} (workspace)");
-            parts[..parts.len().saturating_sub(1).max(1)]
+            parts[..parts.len() - 1]
                 .iter()
                 .any(|p| *p == name || *p == ws)
         }
         Family::VisualStudio => {
-            let first = &parts[0];
-            stems.iter().any(|s| s.to_lowercase() == *first)
+            // The solution's name, then its state while it runs
+            // ("Api (Running)", "Api (Debugging)").
+            let mut first = parts[0].as_str();
+            while let Some(open) = first.strip_suffix(')').and_then(|f| f.rfind(" (")) {
+                first = first[..open].trim_end();
+            }
+            stems.iter().any(|s| s.to_lowercase() == first)
         }
     }
 }
