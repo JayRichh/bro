@@ -15,7 +15,9 @@ export type RepoRow = {
   /** Ports something listens on, across the repo's worktrees. */
   ports: number[];
   /** Pull requests by worktree branch, in any state (`state` says which). */
-  prs: { branch: string; pr: PrInfo }[];
+  prs: { branch: string; worktree: string; pr: PrInfo }[];
+  /** The checkout each port listens in. */
+  portOf: Record<number, string>;
 };
 
 /** Rows for every repo. `archived` lists archived sessions too (the
@@ -34,7 +36,9 @@ export function repoRows(m: Model, opts: { archived?: boolean } = {}): RepoRow[]
     const outside = new Map(m.agents.filter((a) => !wids.has(a.worktree_id)).map((a) => [a.id, a]));
     const subs = m.subagents.filter((s) => ids.has(s.parent_agent));
     const ports = [...new Set(m.ports.filter((p) => wids.has(p.worktree)).flatMap((p) => p.live))].sort((a, b) => a - b);
-    const prs = worktrees.flatMap((w) => (m.prs[w.id] ? [{ branch: w.branch, pr: m.prs[w.id] }] : []));
+    const prs = worktrees.flatMap((w) => (m.prs[w.id] ? [{ branch: w.branch, worktree: w.id, pr: m.prs[w.id] }] : []));
+    const portOf: Record<number, string> = {};
+    for (const p of m.ports) if (wids.has(p.worktree)) for (const n of p.live) portOf[n] ??= p.worktree;
     return {
       project,
       name: project.name,
@@ -44,6 +48,7 @@ export function repoRows(m: Model, opts: { archived?: boolean } = {}): RepoRow[]
       main: worktrees.find((w) => w.is_main) ?? worktrees[0],
       ports,
       prs,
+      portOf,
     };
   });
   return orderRepos(rows);

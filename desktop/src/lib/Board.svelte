@@ -253,7 +253,9 @@
         ondragleave={(e) => leftFor(e) && target?.lane === lane.id && (target = null)}
         ondrop={(e) => dropOn(e, lane.id)}
       >
-        <header class="flex h-10 flex-none items-center gap-2 border-b border-rule-strong px-4">
+        <!-- Its right-click: the lane's own verb (open the next, mark all
+             seen, archive the done ones), menus/rows.ts laneItems. -->
+        <header class="flex h-10 flex-none items-center gap-2 border-b border-rule-strong px-4" data-target="lane:{lane.id}" title="{lane.title}: right-click for the lane's actions">
           <h2 class="m-0 text-[15px] font-semibold {lane.id === 'needs' && cards.length ? 'text-ember-ink' : 'text-ink'}">{lane.title}</h2>
           <span class="ml-auto font-mono text-[12px] font-bold {cards.length ? 'text-ink' : 'text-muted'}">{cards.length}</span>
         </header>
@@ -312,7 +314,7 @@
                   {#if commits}<span class="{chip} border-rule text-muted" title="Commits on this branch since its base">{commits}</span>{/if}
                   {#if pr}
                     {@const c = prChip(pr)}
-                    <span class="{chip} {CHIP_TONE[c.tone]}" title="{pr.title}">{c.word}</span>
+                    <span class="{chip} {CHIP_TONE[c.tone]}" data-target="pr:{a.worktree_id}" title="{pr.title}. Right-click for its menu.">{c.word}</span>
                   {/if}
                 </span>
               {/if}

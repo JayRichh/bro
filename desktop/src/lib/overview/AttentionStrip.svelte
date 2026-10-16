@@ -48,8 +48,9 @@
       class="{show} items-baseline gap-1.5 border-0 bg-transparent p-0 text-[14px] enabled:hover:underline enabled:hover:underline-offset-4
         {hot ? (it.status === 'needs' ? 'text-ember-ink' : 'text-fail') : n ? 'text-ink' : 'text-muted'}"
       disabled={!n}
+      data-target="attention:{it.status}"
       onclick={() => jump(it.status)}
-      title={n ? `Open the next session that is ${it.word(1)}` : undefined}
+      title={n ? `Open the next session that is ${it.word(1)}; right-click to pick one` : undefined}
     >
       <span class="font-bold tabular-nums">{n}</span>
       <span class={hot ? 'font-medium' : ''}>{it.word(n)}</span>

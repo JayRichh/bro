@@ -40,6 +40,9 @@
   import { blockLine, replacementModel, type ReplacementModel } from './replacement';
   import { defineMonacoTheme, termFamily, token } from './theme';
   import { joinPath, registerViewer, type ViewerSurface } from './menus/surfaces';
+  import { ownMenu, type Opened } from './menus/router';
+  import { diffFileMenu } from './menus/targets';
+  import { ask } from './ui/ui.svelte';
   import type * as Monaco from 'monaco-esm/editor/editor.api.js';
 
   let {
@@ -491,6 +494,57 @@
     onlySession = only;
   }
 
+  // ---- a file row's menu ---------------------------------------------------
+
+  /** Stage, unstage or discard every hunk of `f` that `action` takes (the
+   *  unstaged ones, or the staged ones to unstage), the last first, so the
+   *  ones above keep their line numbers. */
+  async function applyAll(wt: string, f: DiffFile, action: HunkAction) {
+    if (busy) return;
+    busy = true;
+    confirming = null;
+    try {
+      const hs = await diffApi.hunks(wt, f.path, action === 'unstage');
+      const at = (h: Hunk) => (action === 'stage' ? h.oldStart : h.newStart);
+      for (const h of [...hs].sort((a, b) => at(b) - at(a))) await diffApi.applyHunk(wt, h, action);
+      const done = action === 'stage' ? 'Staged' : action === 'unstage' ? 'Unstaged' : 'Discarded the changes to';
+      toast(`${done} ${f.path}`);
+      await load(true);
+    } catch (e) {
+      toast(String(e));
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function discardFile(wt: string, f: DiffFile) {
+    const r = await ask.confirm({
+      title: 'Discard changes',
+      message: `Discard the unstaged changes to ${f.path}? They go from the file on disk; staged changes stay. This can't be undone.`,
+      confirm: 'Discard',
+      danger: true,
+    });
+    if (r.ok) await applyAll(wt, f, 'discard');
+  }
+
+  /** A changed file's menu (the menu matrix, \u00a75.8): its path to copy,
+   *  and where this diff reads the working tree against HEAD, Stage file,
+   *  Unstage file and Discard changes. Which of those it has (unstaged or
+   *  staged hunks) is read as the menu opens; until then Stage and Discard
+   *  show, as an unknown is not a no. */
+  function fileMenu(f: DiffFile): Opened | null {
+    const wt = worktree;
+    if (!wt) return null;
+    const verbs = { stage: () => void applyAll(wt, f, 'stage'), unstage: () => void applyAll(wt, f, 'unstage'), discard: () => void discardFile(wt, f) };
+    if (!working || f.status === 'D') return diffFileMenu(wt, f, null, verbs);
+    const first = diffFileMenu(wt, f, { unstaged: true, staged: false }, verbs);
+    if (!first || f.status === 'U') return first;
+    const later = Promise.all([diffApi.hunks(wt, f.path, false), diffApi.hunks(wt, f.path, true)]).then(
+      ([u, s]) => diffFileMenu(wt, f, { unstaged: u.length > 0, staged: s.length > 0 }, verbs)?.items ?? null,
+    );
+    return { ...first, later };
+  }
+
   async function act(h: Hunk, action: HunkAction) {
     if (!worktree || busy) return;
     busy = true;
@@ -870,7 +924,8 @@
               class="flex min-h-7 w-full items-center gap-2 border-0 border-b border-rule px-3 py-1 text-left text-[13px]
                 focus-visible:-outline-offset-2 {cur ? 'bg-raised' : 'bg-transparent hover:bg-surface'}"
               onclick={() => show(f)}
-              title={f.from ? `${f.from} -> ${f.path}` : f.path}
+              use:ownMenu={() => fileMenu(f)}
+              title="{f.from ? `${f.from} -> ${f.path}` : f.path}. Right-click to copy its path{working ? ', stage or discard it' : ''}"
               aria-current={cur || undefined}
             >
               <img class="flex-none" src={fileIcon(f.path, app.dark)} alt="" width="16" height="16" draggable="false" />

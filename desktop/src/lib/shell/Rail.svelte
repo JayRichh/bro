@@ -118,6 +118,7 @@
     <nav class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto py-2" aria-label="Repos">
       <button
         class="{tile} {nav.current.view === 'orchestrator' ? 'bg-surface text-ink' : 'bg-transparent text-ink'}"
+        data-target="orchestrator:rail"
         onclick={() => (orch || canProvision(app.model) ? openOrchestrator() : askStartOrchestrator())}
         title={orch ? `The orchestrator, ${orch.name}${orchNeeds ? `: ${orchNeeds} need you` : ''} (0 or F10)` : 'Start an orchestrator (0 or F10)'}
         aria-label="Orchestrator"
@@ -233,8 +234,9 @@
         {@const onOrch = nav.current.view === 'orchestrator'}
         <button
           class="{item} {onOrch ? 'bg-surface font-semibold text-ink' : 'bg-transparent text-ink'}"
+          data-target="orchestrator:rail"
           onclick={openOrchestrator}
-          title="The orchestrator, {orch.name} (0 or F10)"
+          title="The orchestrator, {orch.name} (0 or F10); right-click for its menu"
           aria-current={onOrch ? 'page' : undefined}
         >
           <span class="flex-none font-mono text-[12px]" aria-hidden="true">&#9670;</span>
@@ -250,6 +252,7 @@
       {:else}
         <button
           class="{item} bg-transparent text-[13px] text-muted hover:text-ink"
+          data-target="orchestrator:rail"
           onclick={() => (canProvision(app.model) ? openOrchestrator() : askStartOrchestrator())}
           title="Start an orchestrator: one session that coordinates the others (0 or F10)"
         >
