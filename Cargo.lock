@@ -1988,6 +1988,7 @@ dependencies = [
  "futures",
  "image",
  "kete-ado",
+ "kete-critters",
  "nebula-config",
  "nebula-core",
  "nebula-fuzzy",

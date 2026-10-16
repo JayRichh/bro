@@ -62,6 +62,12 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, out: &mut Vec<ClientReque
         return;
     }
 
+    // ↑↑↓↓←→←→BA toggles the CRITTERS (the arrows still move; the B and
+    // the A that finish it are taken).
+    if crate::critters::konami(app, &key) {
+        return;
+    }
+
     if handle_preview_scroll_key(app, key) {
         return;
     }
@@ -449,8 +455,8 @@ fn handle_global_action(
         | Action::CopyPath
         | Action::CopyRelativePath
         | Action::CopyBranch
-        | Action::WakeAccount
-        | Action::Critters => super::verbs::pending_verb(app, action),
+        | Action::WakeAccount => super::verbs::pending_verb(app, action),
+        Action::Critters => crate::critters::toggle(app),
         // `Shift+←` / `Shift+→` on the board: the card onto the next lane.
         Action::MoveCardLeft => board::move_card(app, -1, out),
         Action::MoveCardRight => board::move_card(app, 1, out),

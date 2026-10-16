@@ -13,6 +13,7 @@ pub use nebula_config::claude_catalogue;
 pub mod completion;
 pub mod config;
 pub mod config_watch;
+pub mod critters;
 pub mod delete_check;
 pub mod desk;
 pub use nebula_config::cursor_catalogue;

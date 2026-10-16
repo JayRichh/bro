@@ -261,6 +261,7 @@ fn dispatch_prompt(
         }
         PromptKind::RenameAgent { id } => optimistic::rename_agent(app, id, value, out),
         PromptKind::RenameTerminal { id } => optimistic::rename_terminal(app, id, value, out),
+        PromptKind::CritterName { id } => crate::critters::rename(app, id, &value),
         PromptKind::RenameProject { id } => optimistic::rename_project(app, id, value, out),
         PromptKind::SettingText { kind, project } => {
             // Same path as a toggled row (`apply_setting_at`): write the
@@ -664,6 +665,7 @@ pub(crate) fn run_menu_action(app: &mut App, action: MenuAction, out: &mut Vec<C
         MenuAction::NewAgent(worktree) => open_new_agent_picker(app, worktree),
         MenuAction::NewTerminal(worktree) => create_terminal(app, worktree, out),
         MenuAction::RenameTerminal(id) => open_prompt(app, PromptKind::RenameTerminal { id }),
+        MenuAction::Critter(act) => crate::critters::run(app, act),
         MenuAction::CloseTerminal(id) => {
             if let Some(t) = app.tree.terminals.iter().find(|t| t.id == id).cloned() {
                 app.modals.overlay = Some(Overlay::Confirm(confirm_close_terminal_in(app, &t)));

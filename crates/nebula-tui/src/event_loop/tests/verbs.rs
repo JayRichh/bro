@@ -771,7 +771,7 @@ fn the_new_verbs_have_rows_and_say_they_are_coming() {
     assert!(pos("Copy branch") < pos("Restart agent"));
     assert_eq!(labels.iter().filter(|l| **l == "Copy path").count(), 1);
     let mut out = Vec::new();
-    for action in [Action::OpenInVscode, Action::CopyPath, Action::Critters] {
+    for action in [Action::OpenInVscode, Action::CopyPath] {
         app.chrome.flash = None;
         run_action(&mut app, action, &mut out);
         let label = crate::keymap::spec_of(action).unwrap().label;
