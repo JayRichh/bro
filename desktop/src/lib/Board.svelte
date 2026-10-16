@@ -294,12 +294,6 @@
             <button
               title="{a.name}: {lane.id === 'unseen' || lane.id === 'pr' ? 'Enter opens its review (the diff against its base, with its verbs); ' : ''}{withKey('drag to reorder beside cards of its worktree', ['move_up', 'move_down'])}, or onto a lane, Archived or a repo in the rail"
               data-card-sel={sel || undefined}
-              oncontextmenu={(e) => {
-                e.preventDefault();
-                selId = a.id;
-                (e.currentTarget as HTMLElement).focus();
-                openMenu(agentMenu(a), { x: e.clientX, y: e.clientY }, a.name);
-              }}
               class="relative flex w-full flex-col gap-1 border-0 border-b border-rule px-4 py-2.5 text-left focus-visible:-outline-offset-2
                 {sel ? 'bg-surface' : 'bg-transparent hover:bg-surface'} {app.review === a.id ? 'shadow-[inset_3px_0_0_var(--color-ink)]' : ''}"
               onclick={() => openCard(a, lane.id)}

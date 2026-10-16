@@ -43,7 +43,6 @@
     <div
       class="@container flex min-w-0 flex-none flex-col gap-1 border-b border-rule px-4 py-2"
       data-target={target}
-      oncontextmenu={(e) => (e.preventDefault(), actions({ x: e.clientX, y: e.clientY }))}
     >
       <div class="flex min-w-0 items-center gap-3">
         <span class="min-w-0 truncate text-[15px] font-semibold {tone === 'needs' ? 'text-ember-ink' : 'text-ink'}"

@@ -8,8 +8,7 @@
   import RunButton from './RunButton.svelte';
   import ContextBar from '../accounts/ContextBar.svelte';
   import { flatten, type Node } from './tree';
-  import { menuFor, type Target } from '../actions';
-  import { openMenu } from '../ui/ui.svelte';
+  // A row's right-click menu comes from its data-target (menus/router.ts).
   import OrchBadge from '../orchestrator/OrchBadge.svelte';
   import { openOrchestrator } from '../orch.svelte';
   import { agentDropOk, drag, dropAgent, endDrag, leftFor, offsetIn, startDrag } from '../reorder.svelte';
@@ -55,12 +54,6 @@
       e.preventDefault();
       toggle(n, false);
     }
-  }
-
-  function menu(e: MouseEvent, t: Target) {
-    e.preventDefault();
-    (e.currentTarget as HTMLElement).focus();
-    openMenu(menuFor(t), { x: e.clientX, y: e.clientY });
   }
 
   function meta(n: Node): string {
@@ -135,7 +128,6 @@
       ondragleave={(e) => leftFor(e) && mark?.id === n.agent?.id && (mark = null)}
       ondrop={(e) => dropOn(e, n)}
       onclick={() => openNode(n)}
-      oncontextmenu={(e) => menu(e, { kind: 'agent', id: n.agent?.id ?? n.sub?.parent_agent ?? '', viaSub: !n.agent && !!n.sub })}
       onkeydown={(e) => onRowKey(e, n, expanded, hasKids)}
     >
       {#if mark && drag.item && mark.id === n.agent?.id}
@@ -226,7 +218,6 @@
       data-target="terminal:{t.id}"
       class="{ROW} {sel ? 'bg-surface' : 'hover:bg-surface'}"
       onclick={() => openSession({ Terminal: t.id })}
-      oncontextmenu={(e) => menu(e, { kind: 'terminal', id: t.id })}
       onkeydown={(e) => (e.key === 'Enter' ? (e.preventDefault(), openSession({ Terminal: t.id })) : e.key === ' ' && e.preventDefault())}
     >
       <span class="pl-6"><Status tone={t.alive ? 'shell' : 'stopped'} /></span>

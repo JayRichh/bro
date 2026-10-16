@@ -32,6 +32,9 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_
 # The done / needs-you toast and its click (alerts.rs): WinRT, on the same
 # `windows` crate Tauri already builds, so no new crate in the tree.
 windows = { version = "0.62", features = ["Data_Xml_Dom", "Foundation", "UI_Notifications"] }
+# WebView2's own menu and browser keys off, the clipboard read granted
+# (quiet.rs): the version Tauri already builds (`cargo tree -i webview2-com`).
+webview2-com = "0.39.1"
 
 [dev-dependencies]
 kete-ado = { path = "../../crates/kete-ado", features = ["test-support"] }

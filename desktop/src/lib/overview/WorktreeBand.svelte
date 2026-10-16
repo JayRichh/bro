@@ -10,6 +10,7 @@
   import { emptyCopy } from '../learn';
   import { api } from '../api';
   import { openMenu } from '../ui/ui.svelte';
+  import { ownMenu } from '../menus/router';
   import { age } from '../status';
   import RunButton from './RunButton.svelte';
   import SessionTree from './SessionTree.svelte';
@@ -42,10 +43,9 @@
           .join(' \u00b7 '),
   );
 
-  function menu(e: MouseEvent) {
-    e.preventDefault();
-    openMenu(worktreeMenu(w), { x: e.clientX, y: e.clientY }, w.branch);
-  }
+  /** The band's right-click menu, over its chips and verbs too, not only
+   *  its title (the `[data-target]`): menus/router.ts. */
+  const bandMenu = () => ({ items: worktreeMenu(w), label: w.branch });
 
   /** The row's own keys; the shortcut table's row keys (t, Shift+O, c)
    *  reach it through `data-target`. */
@@ -98,7 +98,7 @@
     class="group/wt relative flex min-h-8 min-w-0 items-center gap-3 border-b border-rule bg-bg pr-4 pl-6 {over === 'onto' && drag.item
       ? 'outline-2 -outline-offset-2 outline-ember'
       : ''}"
-    oncontextmenu={menu}
+    use:ownMenu={bandMenu}
     ondragenter={dragOver}
     ondragover={dragOver}
     ondragleave={(e) => leftFor(e) && (over = null)}

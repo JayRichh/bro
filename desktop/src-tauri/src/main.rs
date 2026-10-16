@@ -21,6 +21,8 @@ mod pr_poll;
 mod presets;
 mod profiles;
 mod projects;
+#[cfg(windows)]
+mod quiet;
 mod sessions;
 mod settings;
 mod settings_io;
@@ -888,6 +890,9 @@ fn main() {
             tauri::async_runtime::spawn(pr_poll::poll_prs(client.clone(), handle));
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.set_title("kete");
+                // WebView2's own menu and browser keys off (quiet.rs).
+                #[cfg(windows)]
+                quiet::quiet(&w);
             }
             Ok(())
         })
