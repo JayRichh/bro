@@ -167,6 +167,22 @@ flow('a Review card opens the review split: the diff against base with its commi
   await d.waitForText('add the feature');
   await d.waitForText('feature.txt');
   await d.waitForText('made by the fake agent');
+  // The diff's own menu: Copy path:line copies the file on disk at the line
+  // under the pointer.
+  await d.contextClick('.editor.modified .view-line');
+  const rows = await d.menu('Viewer');
+  assert.deepEqual(rows.map((r) => r.label), ['Copy', 'Select all', 'Copy path:line']);
+  assert.equal((await lastRightClick(d)).kind, 'viewer');
+  const st = await d.invoke('get_state');
+  const wt = st.worktrees.find((w) => w.id === st.agents.find((a) => a.id === id).worktree_id).path;
+  const saved = clipboardText();
+  try {
+    await d.click('[role="menu"] [role="menuitem"]', 'Copy path:line');
+    await d.waitFor('the path and line on the clipboard', () => clipboardText().endsWith('feature.txt:1'));
+    assert.ok(clipboardText().startsWith(wt), 'the path is under the worktree');
+  } finally {
+    if (saved) setClipboard(saved);
+  }
   await d.press('a', Key.Alt);
   await d.waitForText('Archive session');
   await d.click('[role="dialog"] button, [role="alertdialog"] button', 'Archive');
@@ -233,6 +249,17 @@ flow('? on a Review card lists Create pull request', { script: FEATURE }, async 
 
 flow("right-click a field opens Kete's Edit menu, never WebView2's; Paste fills it; Alt+Left goes back", { env: { KETE_BROWSER_KEYS: 'off' } }, async (d) => {
   const repo = d.makeRepo('menu-proj');
+  // A field's menu in a dialog shows over the dialog.
+  await d.click('button', 'Add a repo');
+  await d.contextClick('input[aria-label="Repo folder"]');
+  await d.menu('Edit');
+  const onTop = await d.wd.exec(`const r = document.querySelector('[role="menu"]').getBoundingClientRect();
+    return !!document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest('[role="menu"]');`);
+  assert.equal(onTop, true, 'the menu is drawn over the dialog');
+  await d.press(Key.Escape);
+  await menuGone(d);
+  await d.press(Key.Escape);
+  await d.waitForGone('Repo folder');
   await d.addRepo(repo);
   const prompt = 'form[aria-label="Start a session"] textarea[aria-label="Prompt"]';
   const inField = (js) => d.wd.exec(`const f = document.querySelector(arguments[0]); ${js}`, prompt);
@@ -344,6 +371,17 @@ flow("right-click a terminal, a board card and Shift+F10 open Kete's menus, one 
   await d.el('[role="menu"] [role="menuitem"]', 'Archive');
   await new Promise((r) => setTimeout(r, 400));
   assert.equal(await d.wd.exec(`return document.querySelectorAll('[role="menu"]').length;`), 1);
+  await d.press(Key.Escape);
+  await menuGone(d);
+  // The session's worktree band on the overview: the band's own menu (Open
+  // folder, Copy path), over its title's data-target too.
+  await d.click('[aria-label="Home view"] button', 'Overview');
+  const st = await d.invoke('get_state');
+  const branch = st.worktrees.find((w) => w.id === st.agents.find((a) => a.id === id).worktree_id).branch;
+  await d.contextClick(`[data-target^="worktree:"]`, branch);
+  const band = await d.menu(branch);
+  for (const row of ['Open folder', 'Copy path']) assert.ok(band.some((r) => r.label === row), `the band's ${row}`);
+  assert.equal((await lastRightClick(d)).kind, 'own');
   await d.press(Key.Escape);
   await menuGone(d);
 });
