@@ -69,7 +69,7 @@ pub fn run(op: WakeOp) -> Result<()> {
         } => {
             let mode = mode
                 .as_deref()
-                .map(WakeMode::parse)
+                .map(WakeMode::parse_choice)
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
             match (account, all) {
@@ -437,11 +437,13 @@ struct Outcome {
     mode: WakeMode,
 }
 
+/// `mode` is this run's `--mode`: None keeps each schedule's, Some(None)
+/// is auto.
 fn wake(
     one: Option<&str>,
     force: bool,
     dry_run: bool,
-    mode: Option<WakeMode>,
+    mode: Option<Option<WakeMode>>,
     json: bool,
 ) -> Result<()> {
     let now = nebula_core::clock::now_secs() as i64;
@@ -533,10 +535,14 @@ fn wake(
     let mut outcomes = Vec::new();
     let mut any_failed = false;
     for ((account, schedule), decision) in targets.iter().zip(decisions) {
-        let mode = mode.unwrap_or(schedule.mode);
+        // A mode named (here or in the schedule) is pinned; auto runs
+        // interactive and may fall back to print.
+        let chosen = mode.unwrap_or(schedule.mode);
+        let may_fall_back = chosen.is_none();
+        let mode = chosen.unwrap_or_default();
         if dry_run {
             if !json {
-                println!("{}: {}", account.key, dry_line(&decision, offset, mode));
+                println!("{}: {}", account.key, dry_line(&decision, offset, chosen));
             }
             outcomes.push(Outcome {
                 account: account.key.clone(),
@@ -603,10 +609,27 @@ fn wake(
                     };
                     println!("{}: waking ({how})…", account.key);
                 }
-                let report = match mode {
+                let mut ran = mode;
+                let mut report = match mode {
                     WakeMode::Interactive => fire_interactive(&rt, &mut conn, account),
                     WakeMode::Print => fire_print(account),
                 };
+                // Auto mode, and the daemon couldn't run it (older than 61
+                // until its restart, or not there): print mode still does
+                // something useful.
+                let mut fallback: Option<(String, String)> = None;
+                if falls_back(may_fall_back, mode, &report) {
+                    let why = report.error.clone().unwrap_or_default();
+                    if !json {
+                        println!("{}: {why}; falling back to claude -p…", account.key);
+                    }
+                    fallback = Some((report.reason.clone(), why.clone()));
+                    report = fire_print(account);
+                    ran = WakeMode::Print;
+                    if let Some(e) = &report.error {
+                        report.error = Some(format!("interactive: {why}; print: {e}"));
+                    }
+                }
                 let ok = report.error.is_none();
                 any_failed |= !ok;
                 let entry = log::Entry {
@@ -617,18 +640,21 @@ fn wake(
                     } else {
                         log::Outcome::Failed
                     },
-                    reason: if !ok {
-                        report.reason.clone()
-                    } else if force {
-                        "forced".into()
-                    } else {
-                        decision.code().into()
+                    reason: match (&fallback, ok) {
+                        (_, false) => report.reason.clone(),
+                        (Some((why, _)), true) => format!("{}{why}", log::PRINT_FALLBACK),
+                        (None, true) if force => "forced".into(),
+                        (None, true) => decision.code().into(),
                     },
-                    mode,
+                    mode: ran,
                     resets_before: report.resets_before,
                     // No reading after it: unknown, not "didn't move".
                     resets_after: report.read.then_some(report.resets_after).flatten(),
-                    detail: report.error.clone(),
+                    detail: match (&report.error, &fallback) {
+                        (Some(e), _) => Some(e.clone()),
+                        (None, Some((_, why))) => Some(why.clone()),
+                        (None, None) => None,
+                    },
                     slot: (!force).then_some(*slot),
                     forced: force,
                 };
@@ -642,7 +668,7 @@ fn wake(
                     account: account.key.clone(),
                     decision,
                     report: Some(report),
-                    mode,
+                    mode: ran,
                 });
                 continue;
             }
@@ -683,7 +709,16 @@ fn wake(
     Ok(())
 }
 
-fn dry_line(decision: &Decision, offset: i32, mode: WakeMode) -> String {
+/// Does an interactive run that ended in `report` go again in print
+/// mode? Only in auto mode, and only when the daemon couldn't run it: one
+/// older than protocol 61, or none to reach. A turn that ran and failed
+/// (no prompt, a timeout) would fail the same way under `-p`.
+fn falls_back(auto: bool, mode: WakeMode, report: &WakeReport) -> bool {
+    auto && mode == WakeMode::Interactive
+        && matches!(report.reason.as_str(), "old_daemon" | "no_daemon")
+}
+
+fn dry_line(decision: &Decision, offset: i32, mode: Option<WakeMode>) -> String {
     match decision {
         Decision::Fire {
             slot_min, catch_up, ..
@@ -691,17 +726,24 @@ fn dry_line(decision: &Decision, offset: i32, mode: WakeMode) -> String {
             "would wake now ({} {}, {} mode)",
             wake::hhmm(*slot_min),
             if *catch_up { "catch-up" } else { "on time" },
-            mode.as_str()
+            mode.map_or("auto", WakeMode::as_str)
         ),
         Decision::Skip(skip) => format!("would skip: {}", skip.describe(offset)),
     }
 }
 
 fn fired_line(entry: &log::Entry, offset: i32) -> String {
+    let via = entry
+        .fallback()
+        .map(|why| format!(" (print fallback: {why})"))
+        .unwrap_or_default();
     match entry.decision {
         log::Outcome::Failed => format!(
             "failed: {}",
             entry.detail.as_deref().unwrap_or(&entry.reason)
+        ),
+        _ if !via.is_empty() => format!(
+            "fired{via}: claude -p sent the prompt; it may bill API credits rather than start the window. `kete kill` lets Kete restart the daemon for interactive wake-ups"
         ),
         _ => match (entry.resets_before, entry.resets_after, entry.started_window()) {
             (_, Some(after), Some(true)) => format!(
@@ -762,7 +804,7 @@ fn set(args: SetArgs) -> Result<()> {
         s.skip_idle_days = (n > 0).then_some(n);
     }
     if let Some(mode) = &args.mode {
-        s.mode = WakeMode::parse(mode).map_err(anyhow::Error::msg)?;
+        s.mode = WakeMode::parse_choice(mode).map_err(anyhow::Error::msg)?;
     }
     if let Some(on) = args.wake_pc {
         s.wake_pc = on;
@@ -814,7 +856,7 @@ fn describe_schedule(s: &WakeSchedule) -> String {
     if s.wake_pc {
         parts.push("wakes the PC".into());
     }
-    parts.push(format!("{} mode", s.mode.as_str()));
+    parts.push(format!("{} mode", s.mode_word()));
     parts.join(", ")
 }
 
@@ -1114,6 +1156,32 @@ mod tests {
     }
 
     #[test]
+    fn only_auto_mode_falls_back_and_only_when_the_daemon_could_not_run_it() {
+        let report = |reason: &str| failed(reason, "why".into(), None);
+        assert!(falls_back(
+            true,
+            WakeMode::Interactive,
+            &report("old_daemon")
+        ));
+        assert!(falls_back(
+            true,
+            WakeMode::Interactive,
+            &report("no_daemon")
+        ));
+        assert!(
+            !falls_back(false, WakeMode::Interactive, &report("old_daemon")),
+            "pinned"
+        );
+        assert!(!falls_back(true, WakeMode::Interactive, &report("timeout")));
+        assert!(!falls_back(
+            true,
+            WakeMode::Interactive,
+            &report("no_prompt")
+        ));
+        assert!(!falls_back(true, WakeMode::Print, &report("old_daemon")));
+    }
+
+    #[test]
     fn a_schedule_reads_back_in_words() {
         let s = WakeSchedule {
             enabled: true,
@@ -1121,7 +1189,7 @@ mod tests {
             days: wake::WEEKDAYS,
             keep_rolling: true,
             skip_idle_days: Some(3),
-            mode: WakeMode::Interactive,
+            mode: Some(WakeMode::Interactive),
             wake_pc: true,
         };
         assert_eq!(

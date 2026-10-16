@@ -80,6 +80,20 @@ impl WakeMode {
             other => Err(format!("unknown mode `{other}`: use interactive or print")),
         }
     }
+
+    /// [`WakeMode::parse`], with `auto` as None: interactive, falling back
+    /// to print when the daemon can't run it.
+    pub fn parse_choice(word: &str) -> Result<Option<WakeMode>, String> {
+        match word.trim().to_ascii_lowercase().as_str() {
+            "auto" | "default" => Ok(None),
+            _ => WakeMode::parse(word).map(Some).map_err(|_| {
+                format!(
+                    "unknown mode `{}`: use auto, interactive or print",
+                    word.trim()
+                )
+            }),
+        }
+    }
 }
 
 /// One account's wake-up schedule.
@@ -100,7 +114,12 @@ pub struct WakeSchedule {
     /// Don't wake an account that saw no use in this many days.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skip_idle_days: Option<u32>,
-    pub mode: WakeMode,
+    /// How it runs. None (auto) is interactive, falling back to print when
+    /// the daemon can't run it (one older than protocol 61, or none to
+    /// reach), so a run between an upgrade and the daemon's restart still
+    /// does something; a mode set here is pinned and never falls back.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<WakeMode>,
     /// Let the scheduled task wake the PC from sleep to run.
     pub wake_pc: bool,
 }
@@ -113,13 +132,23 @@ impl Default for WakeSchedule {
             days: ALL_DAYS,
             keep_rolling: false,
             skip_idle_days: None,
-            mode: WakeMode::Interactive,
+            mode: None,
             wake_pc: false,
         }
     }
 }
 
 impl WakeSchedule {
+    /// The mode it runs in first.
+    pub fn run_mode(&self) -> WakeMode {
+        self.mode.unwrap_or_default()
+    }
+
+    /// `auto`, `interactive` or `print`: what `--mode` and the apps show.
+    pub fn mode_word(&self) -> &'static str {
+        self.mode.map_or("auto", WakeMode::as_str)
+    }
+
     /// The anchor as stored, put on the grid: inside the day, on a
     /// [`STEP_MIN`] step (a hand edit of `07:07` reads as 07:00).
     pub fn anchor(&self) -> u16 {
@@ -360,9 +389,12 @@ pub fn set_in(
             else {
                 unreachable!("a schedule serializes to an object");
             };
-            // `skip_idle_days` off is its absence.
+            // Idle-skipping off, and the auto mode, are absences.
             if schedule.skip_idle_days.is_none() {
                 entry.remove("skip_idle_days");
+            }
+            if schedule.mode.is_none() {
+                entry.remove("mode");
             }
             entry.extend(known);
             map.insert(account.to_string(), Value::Object(entry));
@@ -516,7 +548,7 @@ mod tests {
             days: WEEKDAYS,
             keep_rolling: true,
             skip_idle_days: Some(3),
-            mode: WakeMode::Print,
+            mode: Some(WakeMode::Print),
             wake_pc: true,
         };
         set_in(&config, &local, "work", Some(&s)).unwrap();
@@ -538,11 +570,15 @@ mod tests {
         // entry drops the map.
         let off = WakeSchedule {
             skip_idle_days: None,
+            mode: None,
             ..s.clone()
         };
         set_in(&config, &local, "work", Some(&off)).unwrap();
         let saved: Value = serde_json::from_str(&std::fs::read_to_string(&local).unwrap()).unwrap();
         assert!(saved["wake"]["work"].get("skip_idle_days").is_none());
+        assert!(saved["wake"]["work"].get("mode").is_none(), "auto");
+        assert_eq!(load_in(&local)["work"].run_mode(), WakeMode::Interactive);
+        assert_eq!(load_in(&local)["work"].mode_word(), "auto");
         set_in(&config, &local, "work", None).unwrap();
         set_in(&config, &local, "@claude", None).unwrap();
         let saved: Value = serde_json::from_str(&std::fs::read_to_string(&local).unwrap()).unwrap();

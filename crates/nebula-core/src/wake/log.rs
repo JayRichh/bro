@@ -16,6 +16,10 @@ use super::WakeMode;
 /// Rotate past this size.
 pub const MAX_BYTES: u64 = 1_000_000;
 
+/// The reason prefix of a fire that fell back from interactive to print
+/// mode; what follows it is why (`print_fallback:old_daemon`).
+pub const PRINT_FALLBACK: &str = "print_fallback:";
+
 /// What became of a heartbeat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -84,20 +88,31 @@ impl Entry {
         })
     }
 
+    /// Why an interactive run fell back to print (`old_daemon`,
+    /// `no_daemon`), when it did: its reason is `print_fallback:<why>`.
+    pub fn fallback(&self) -> Option<&str> {
+        self.reason.strip_prefix(PRINT_FALLBACK)
+    }
+
     /// `05:02 fired · window to 10:02`, `05:00 skipped: a window is
     /// already live` — one line, local time by `offset_secs`.
     pub fn summary(&self, offset_secs: i32) -> String {
         let at = super::hhmm(super::LocalTime::at(self.at, offset_secs).minute);
         let mut line = format!("{at} {}", self.decision.as_str());
         match self.decision {
-            Outcome::Fired => match (self.started_window(), self.resets_after) {
-                (Some(true), Some(after)) => {
-                    let until = super::LocalTime::at(after, offset_secs).minute;
-                    line.push_str(&format!(" \u{b7} window to {}", super::hhmm(until)));
+            Outcome::Fired => {
+                if let Some(why) = self.fallback() {
+                    line.push_str(&format!(" (print fallback: {why})"));
                 }
-                (Some(false), _) => line.push_str(" \u{b7} didn't start a window"),
-                _ => line.push_str(" \u{b7} no reading yet"),
-            },
+                match (self.started_window(), self.resets_after) {
+                    (Some(true), Some(after)) => {
+                        let until = super::LocalTime::at(after, offset_secs).minute;
+                        line.push_str(&format!(" \u{b7} window to {}", super::hhmm(until)));
+                    }
+                    (Some(false), _) => line.push_str(" \u{b7} didn't start a window"),
+                    _ => line.push_str(" \u{b7} no reading yet"),
+                }
+            }
             Outcome::Skipped | Outcome::Failed => {
                 let why = self.detail.as_deref().unwrap_or(&self.reason);
                 line.push_str(&format!(": {why}"));
@@ -261,6 +276,19 @@ mod tests {
         s.detail = Some("a window is live until 07:00".into());
         assert_eq!(s.summary(0), "05:00 skipped: a window is live until 07:00");
         assert_eq!(s.started_window(), None);
+    }
+
+    #[test]
+    fn a_print_fallback_says_why_in_its_line() {
+        let mut e = entry(5 * 3600, "work", Outcome::Fired);
+        e.reason = format!("{PRINT_FALLBACK}old_daemon");
+        e.mode = WakeMode::Print;
+        assert_eq!(e.fallback(), Some("old_daemon"));
+        assert_eq!(
+            e.summary(0),
+            "05:00 fired (print fallback: old_daemon) \u{b7} no reading yet"
+        );
+        assert_eq!(entry(0, "work", Outcome::Fired).fallback(), None);
     }
 
     #[test]

@@ -237,21 +237,22 @@ At the hour you pick, Kete sends one tiny prompt ("hi", to haiku) under an accou
 
 ```sh
 kete wake set <account> --at HH:MM [--days all|mon-fri|weekends|mon,wed,…]
-              [--keep-rolling] [--skip-idle N] [--mode interactive|print] [--wake-pc]
+              [--keep-rolling] [--skip-idle N] [--mode auto|interactive|print] [--wake-pc]
                                 # switch it on; options left out keep their values.
                                 # --at suggested takes the hour that fits your usual day
 kete wake off <account>       # switch it off; the hour and options are kept
 kete wake status [--json]     # schedules, next wake-up, live window, usual hours,
                                 # the suggested hour, and the last decision
 kete wake <account> --dry-run # what would happen now; runs nothing
-kete wake <account> [--force] [--mode print|interactive]
+kete wake <account> [--force] [--mode auto|interactive|print]
                                 # run it now if the rules allow (--force: whatever they say)
 kete wake --all [--dry-run]   # every switched-on account: what the scheduled task runs
 ```
 
 A heartbeat goes out only when the switch is on, it's one of its days and the hour has come, the account is switched on and logged in, it has no live five-hour window, and that hour hasn't had one. If the PC slept through the hour, it still goes out on waking, but only while it's earlier than your usual start (an hour's grace while Kete doesn't know your usual hours yet). `--keep-rolling` also starts the next window at each 5-hour step inside your usual hours, so resets stay on the anchor's grid. `--skip-idle N` leaves an account alone after N days without use.
 
-- **Interactive** (the default) runs a hidden Claude session in the daemon, in Kete's empty `wake` folder under the data dir: never listed, killed when the reply lands or after two minutes. Kete's status line reads the new reset time off it.
+- **Auto** (the default) runs interactive, and falls back to print when the daemon can't run it (one older than this kete, until `kete kill` lets it restart, or none to reach); the log says `fired (print fallback: old_daemon)`. Naming `--mode interactive` pins it: no fallback.
+- **Interactive** runs a hidden Claude session in the daemon, in Kete's empty `wake` folder under the data dir: never listed, killed when the reply lands or after two minutes. Kete's status line reads the new reset time off it.
 - **Print** runs `claude -p` instead. It needs no daemon, but it may bill your plan's API credits rather than start the window.
 
 On Windows, `kete wake set` and `off` keep one Task Scheduler task, `Kete\Whakaoho`, that runs `kete wake --all` at every switched-on hour (Kete open or not; `--wake-pc` lets it wake the PC). It is removed when no account is on. On macOS and Linux, `kete wake set` prints the crontab lines to add instead. Schedules live in this machine's `config.local.json` under `wake` (never exported or sent to remotes), and every decision is a line in `<data dir>/wake-log.jsonl`, with the reset time before and after, so a heartbeat that didn't start a window shows as one.

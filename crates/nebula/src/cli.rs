@@ -392,7 +392,7 @@ pub(crate) enum Command {
         /// Say what would happen; run nothing.
         #[arg(long)]
         dry_run: bool,
-        /// interactive (a hidden session, the default) or print (claude -p).
+        /// auto (interactive, print if the daemon can't), interactive, or print.
         #[arg(long, value_name = "MODE")]
         mode: Option<String>,
         /// Print JSON instead of text.
@@ -1096,7 +1096,8 @@ pub(crate) enum WakeAction {
         /// Skip it after N days without use (0: never skip).
         #[arg(long, value_name = "N")]
         skip_idle: Option<u32>,
-        /// interactive (the default) or print.
+        /// auto (the default: interactive, falling back to print while the
+        /// daemon can't run it), interactive (never falls back), or print.
         #[arg(long, value_name = "MODE")]
         mode: Option<String>,
         /// Let the scheduled task wake the PC from sleep.
