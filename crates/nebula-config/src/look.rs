@@ -602,12 +602,12 @@ pub fn repair(p: &mut Palette) {
     if contrast(muted, bg) >= contrast(ink, bg) || muted == ink {
         muted = mix(bg, ink, 0.72);
     }
-    put(p, "color-muted", lift(muted, &[bg], light, 4.5));
+    put(p, "color-muted", lift(muted, &[bg, surface], light, 4.5));
     let mut faint = get(p, "color-faint");
     if contrast(faint, bg) >= contrast(get(p, "color-muted"), bg) {
         faint = mix(bg, ink, 0.48);
     }
-    put(p, "color-faint", lift(faint, &[bg], light, 3.0));
+    put(p, "color-faint", lift(faint, &[bg, surface], light, 3.0));
 
     // Ember's text tone and what is written on an ember fill.
     let ember = get(p, "color-ember");
@@ -617,14 +617,18 @@ pub fn repair(p: &mut Palette) {
         mix(ember, Rgba::rgb(255, 255, 255), 0.25)
     };
     put(p, "color-ember-ink", lift(ember_ink, &[bg], light, 4.5));
+    // The ink or the canvas, whichever reads better on ember, taken
+    // further from it until it reads at AA.
     let on = if contrast(ink, ember) >= contrast(bg, ember) {
         ink
     } else {
         bg
     };
-    put(p, "color-on-ember", on);
+    let darker = luminance(on) < luminance(ember);
+    put(p, "color-on-ember", lift(on, &[ember], darker, 4.5));
 
-    // Statuses, git letters and syntax: 3:1 on the canvas.
+    // Statuses and git letters: 3:1 on the canvas and the surface; the
+    // syntax and the gutter, on the editor's canvas.
     for k in [
         "color-unread",
         "color-done",
@@ -635,6 +639,11 @@ pub fn repair(p: &mut Palette) {
         "color-git-deleted",
         "color-git-renamed",
         "color-git-conflict",
+    ] {
+        let c = lift(get(p, k), &[bg, surface], light, 3.0);
+        put(p, k, c);
+    }
+    for k in [
         "color-syn-comment",
         "color-syn-keyword",
         "color-syn-string",
@@ -813,6 +822,10 @@ mod tests {
         assert!(contrast(tok(&p, "color-ink"), tok(&p, "color-surface")) >= 4.5);
         assert!(contrast(tok(&p, "color-muted"), bg) >= 4.5);
         assert!(contrast(tok(&p, "color-faint"), bg) >= 3.0);
+        let surface = tok(&p, "color-surface");
+        assert!(contrast(tok(&p, "color-muted"), surface) >= 4.5);
+        assert!(contrast(tok(&p, "color-faint"), surface) >= 3.0);
+        assert!(contrast(tok(&p, "color-done"), surface) >= 3.0);
         assert!(contrast(tok(&p, "color-done"), bg) >= 3.0);
         assert!(contrast(tok(&p, "color-syn-comment"), bg) >= 3.0);
         assert!(contrast(tok(&p, "color-ember-ink"), bg) >= 4.5);
