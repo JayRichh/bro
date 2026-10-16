@@ -19,6 +19,8 @@
   - `session`: the session a review is of. With more than one session's
     snapshots in the worktree, the header offers "This session / All in
     this worktree" (L); all by default.
+  - `lands`: open on the file the Files tree's Diff this file names
+    (files/landing.svelte.ts); the Diff view's own pane only.
 -->
 <script lang="ts">
   import { onDestroy, onMount, tick, type Snippet } from 'svelte';
@@ -43,6 +45,7 @@
   import { ownMenu, type Opened } from './menus/router';
   import { diffFileMenu } from './menus/targets';
   import { ask } from './ui/ui.svelte';
+  import { diffLanding, takeLanding } from './files/landing.svelte';
   import type * as Monaco from 'monaco-esm/editor/editor.api.js';
 
   let {
@@ -56,6 +59,7 @@
     trail,
     pick,
     session = null,
+    lands = false,
   }: {
     worktree: string | null;
     range?: DiffRange | null;
@@ -67,6 +71,7 @@
     trail?: Snippet;
     pick?: Snippet;
     session?: string | null;
+    lands?: boolean;
   } = $props();
 
   /** `absent`: the status says this side has no file, so why. */
@@ -181,8 +186,12 @@
         }
       }
       files = list;
-      const again = keep && current ? list.find((f) => f.path === current!.path) : undefined;
-      await show(again ?? list[0] ?? null, !!again);
+      // Diff this file from the Files tree: that file first.
+      const landing = lands && !r ? takeLanding(wt) : null;
+      const landed = landing ? list.find((f) => f.path === landing) : undefined;
+      const again = landed ?? (keep && current ? list.find((f) => f.path === current!.path) : undefined);
+      await show(again ?? list[0] ?? null, !!again && !landed);
+      if (landed) scrollFile();
     } catch (e) {
       if (mine !== loadSeq) return;
       error = String(e);
@@ -655,6 +664,18 @@
       current = null;
       load(false);
     }
+  });
+  // Diff this file on the checkout already shown: that file, or the list
+  // read again when it isn't in it yet (the load lands on it).
+  $effect(() => {
+    void diffLanding.seq;
+    const wt = worktree;
+    if (!lands || range || !ready || loading || diffLanding.worktree !== wt || !diffLanding.path) return;
+    const f = files.find((x) => x.path === diffLanding.path);
+    if (!f) return void load(true);
+    takeLanding(wt);
+    void show(f);
+    scrollFile();
   });
   $effect(() => {
     const m = mode;

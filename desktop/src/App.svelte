@@ -36,6 +36,8 @@
   import { onReviewOpened, openOrchestrator } from './lib/orch.svelte';
   import { opensOnOrchestrator, orchestratorOf, placeKey } from './lib/orchestrator';
   import FileSheet from './lib/files/FileSheet.svelte';
+  import FilesView from './lib/files/FilesView.svelte';
+  import FilesToggle from './lib/files/FilesToggle.svelte';
   import AccountsView from './lib/accounts/AccountsView.svelte';
   import WakeView from './lib/wake/WakeView.svelte';
   import AddAccount from './lib/accounts/AddAccount.svelte';
@@ -104,7 +106,7 @@
   // session in the shared pane on the right (one pane per session, so the
   // terminal is never attached twice).
   const orchView = $derived(view === 'orchestrator');
-  const split = $derived(view === 'session' || view === 'diff' || (orchView && !!orch));
+  const split = $derived(view === 'session' || view === 'diff' || view === 'files' || (orchView && !!orch));
   // Full pane (Z, Ctrl+Shift+M): the right side takes the window. Leaving the
   // split brings it back down, so the next split opens beside the list.
   const full = $derived(split && app.paneMax);
@@ -299,6 +301,7 @@
         title={withKey(view === 'diff' ? 'Close the diff: back to where it was opened' : 'Diff the checkout in context: the focused row, the session, the repo', ['diff', 'open_diff'])}
         onclick={toggleDiff}><Icon name="diff" size={12} /><span class="hidden @min-[700px]:inline">Diff</span></button
       >
+      <FilesToggle />
       <div class="flex h-6 flex-none border border-rule" role="radiogroup" aria-label="Home view">
         {#each [{ id: 'overview', label: 'Overview' }, { id: 'board', label: 'Board' }] as h, i (h.id)}
           {@const on = app.home === h.id}
@@ -405,6 +408,7 @@
           {#if diffEverOpened}
             <div class="absolute inset-0 {view === 'diff' ? 'z-10' : 'hidden'}"><Diff /></div>
           {/if}
+          {#if view === 'files'}<div class="absolute inset-0 z-10"><FilesView /></div>{/if}
         </div>
       {/if}
     </div>

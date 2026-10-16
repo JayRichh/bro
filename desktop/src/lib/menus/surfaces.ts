@@ -4,6 +4,7 @@
 // theirs while they are mounted.
 
 import type * as Monaco from 'monaco-esm/editor/editor.api.js';
+import type { SessionRef } from '../api';
 
 /** A terminal pane, as its menu (builtin.ts) works it. */
 export interface TerminalSurface {
@@ -22,6 +23,9 @@ export interface TerminalSurface {
   /** The URL under the pointer, while the web-links addon has one. */
   link(): string | null;
   openLink(url: string): void;
+  /** The session attached once its replay has been read (a write before
+   *  then is dropped), else null: where a dropped path can go. */
+  ready(): SessionRef | null;
 }
 
 /** A Monaco viewer: one editor, or a diff's two. */
@@ -43,10 +47,27 @@ function nearest<T>(map: WeakMap<Element, T>, el: Element | null): T | null {
   return null;
 }
 
+/** Every terminal pane mounted, to find the one a session is in. */
+const panes = new Set<TerminalSurface>();
+
 /** Register a terminal pane's host; returns the unregister. */
 export function registerTerminal(host: Element, s: TerminalSurface): () => void {
   terminals.set(host, s);
-  return () => terminals.delete(host);
+  panes.add(s);
+  return () => {
+    terminals.delete(host);
+    panes.delete(s);
+  };
+}
+
+/** The pane whose session `key` (store.svelte.ts `sessionKey`) is attached
+ *  and read, if one is. */
+export function terminalFor(key: string, keyOf: (s: SessionRef) => string): TerminalSurface | null {
+  for (const s of panes) {
+    const at = s.ready();
+    if (at && keyOf(at) === key) return s;
+  }
+  return null;
 }
 
 /** Register a viewer's host; returns the unregister. */

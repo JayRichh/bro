@@ -63,6 +63,9 @@
       const ref = (r: string) => r.replace(/^refs\/(heads|remotes)\//, '');
       if (d.range) out.push({ label: `${ref(d.range.base)}...${ref(d.range.tip)}`, mono: true });
       else if (d.worktree) out.push({ label: placeOf(m, d.worktree).branch, mono: true, menu: of({ kind: 'worktree', id: d.worktree }, true) });
+    } else if (p.view === 'files') {
+      out.push({ label: 'Files', menu: views });
+      if (p.item && m.worktrees.some((w) => w.id === p.item)) out.push({ label: placeOf(m, p.item).branch, mono: true, menu: of({ kind: 'worktree', id: p.item }, true) });
     }
     return out;
   });

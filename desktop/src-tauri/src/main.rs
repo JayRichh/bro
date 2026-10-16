@@ -28,6 +28,7 @@ mod sessions;
 mod settings;
 mod settings_io;
 mod ship;
+mod tree;
 mod update;
 mod wake;
 
@@ -1005,6 +1006,7 @@ fn main() {
             editors::path_reveal,
             editors::path_open_default,
             editors::worktree_file_read,
+            tree::worktree_tree,
             update::update_status,
             launchables,
             startup,

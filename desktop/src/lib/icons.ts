@@ -7,6 +7,8 @@ import map from './material-map.json';
 
 interface Table {
   file: string;
+  folder: string;
+  folderExpanded: string;
   fileNames: Record<string, string>;
   fileExtensions: Record<string, string>;
   light: { fileNames: Record<string, string>; fileExtensions: Record<string, string> };
@@ -23,6 +25,11 @@ export function fileIcon(path: string, dark: boolean): string {
     for (let i = 1; i < parts.length && !icon; i++) icon = exts[parts.slice(i).join('.')];
   }
   return `/material-icons/${icon ?? t.file}.svg`;
+}
+
+/** A folder's icon, shut or open (the theme's generic one). */
+export function folderIcon(open: boolean): string {
+  return `/material-icons/${open ? t.folderExpanded : t.folder}.svg`;
 }
 
 const LANG: Record<string, string> = {

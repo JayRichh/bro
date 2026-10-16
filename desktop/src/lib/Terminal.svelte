@@ -9,7 +9,8 @@
   import { api, Channel, decodeB64, type PtyEvent, type SessionRef } from './api';
   import { termFamily, xtermTheme } from './theme';
   import { app, sessionKey, sessionWorktree, toast } from './store.svelte';
-  import { registerTerminal } from './menus/surfaces';
+  import { registerTerminal, terminalAt } from './menus/surfaces';
+  import { pathDrop } from './files/drop.svelte';
 
   let { session, dark }: { session: SessionRef; dark: boolean } = $props();
 
@@ -143,7 +144,7 @@
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true;
       // App chords reach the window, not the CLI.
-      if (e.ctrlKey && e.shiftKey && /^[BDLMNOPT]$/i.test(e.key)) return false;
+      if (e.ctrlKey && e.shiftKey && /^[BDELMNOPT]$/i.test(e.key)) return false;
       if (e.ctrlKey && !e.shiftKey && e.key === 'c' && term!.hasSelection()) {
         navigator.clipboard.writeText(term!.getSelection()).catch(() => {});
         term!.clearSelection();
@@ -177,6 +178,7 @@
       },
       link: () => link,
       openLink: (url) => void api.openUrl(url).catch((e) => toast(String(e))),
+      ready: () => (phase === 'live' && !replaying ? attached : null),
     });
     try {
       const gl = new WebglAddon();
@@ -229,7 +231,8 @@
   });
 </script>
 
-<div class="relative h-full min-h-0 bg-term-bg">
+<!-- A Files row dropped here types its path, as Ctrl+V would. -->
+<div class="relative h-full min-h-0 bg-term-bg" use:pathDrop={{ target: () => attached, pane: () => terminalAt(host) }}>
   <div class="absolute inset-[8px_4px_4px_12px] [&_.xterm]:h-full [&_.xterm-viewport]:bg-transparent!" bind:this={host}></div>
   {#if phase === 'booting'}
     <div class="absolute top-3.5 right-[18px] flex items-center gap-2 font-mono text-[12px] text-muted">

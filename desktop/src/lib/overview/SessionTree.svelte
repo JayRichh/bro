@@ -15,6 +15,8 @@
   import { agentDropOk, drag, dropAgent, endDrag, leftFor, offsetIn, startDrag } from '../reorder.svelte';
   import { dropZone, type Place } from '../order';
   import { withKey } from '../shortcuts';
+  // A Files row dropped on a session or terminal types its path there.
+  import { pathDrop } from '../files/drop.svelte';
 
   let { repo, forest, terminals }: { repo: string; forest: Node[]; terminals: TerminalTab[] } = $props();
 
@@ -128,6 +130,7 @@
       ondragover={(e) => over(e, n)}
       ondragleave={(e) => leftFor(e) && mark?.id === n.agent?.id && (mark = null)}
       ondrop={(e) => dropOn(e, n)}
+      use:pathDrop={{ target: () => (n.agent ? { Agent: n.agent.id } : null) }}
       onclick={() => openNode(n)}
       onkeydown={(e) => onRowKey(e, n, expanded, hasKids)}
     >
@@ -220,6 +223,7 @@
       tabindex="0"
       data-row
       data-target="terminal:{t.id}"
+      use:pathDrop={{ target: () => ({ Terminal: t.id }) }}
       class="{ROW} {sel ? 'bg-surface' : 'hover:bg-surface'}"
       onclick={() => openSession({ Terminal: t.id })}
       onkeydown={(e) => (e.key === 'Enter' ? (e.preventDefault(), openSession({ Terminal: t.id })) : e.key === ' ' && e.preventDefault())}

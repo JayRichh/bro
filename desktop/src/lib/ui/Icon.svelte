@@ -14,6 +14,7 @@
     | 'maximize'
     | 'restore'
     | 'diff'
+    | 'files'
     | 'dots'
     | 'help'
     | 'palette'
@@ -53,6 +54,8 @@
     <path d="M13.5 6.5h-4v-4M2.5 9.5h4v4M9.5 6.5L14 2M6.5 9.5L2 14" fill="none" stroke="currentColor" stroke-width="1.4" />
   {:else if name === 'diff'}
     <path d="M5 2.5v6M2 5.5h6M2 12.5h6M10 2.5h4v11h-4" fill="none" stroke="currentColor" stroke-width="1.4" />
+  {:else if name === 'files'}
+    <path d="M1.5 3.5h4.5l1.5 1.5h7v8.5h-13zM1.5 7h13" fill="none" stroke="currentColor" stroke-width="1.3" />
   {:else if name === 'dots'}
     <rect x="2" y="7" width="2.4" height="2.4" fill="currentColor" /><rect x="6.8" y="7" width="2.4" height="2.4" fill="currentColor" /><rect
       x="11.6"
