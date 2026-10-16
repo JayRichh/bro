@@ -151,6 +151,14 @@ pub(crate) fn right_click(app: &mut App, mouse: MouseEvent, out: &mut Vec<Client
         }
         hit => {
             let target = hit_to_target(app, &hit);
+            // A panel's row: that panel takes the keys, as the left
+            // button's click gives them.
+            match hit {
+                HitTarget::ProjectRow(_) => app.nav.focus = Focus::Projects,
+                HitTarget::WorktreeRow(_) => app.nav.focus = Focus::Worktrees,
+                HitTarget::SessionRow(_) => app.nav.focus = Focus::Sessions,
+                _ => {}
+            }
             let moved = select_clicked_row(app, &hit, out);
             match target {
                 Some(t) => open_target_menu(app, &t, at),

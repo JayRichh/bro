@@ -4874,8 +4874,8 @@ mod tests {
     /// An EMPTY BAND whose checkout has a detected pull request is still
     /// an empty band (#104): `d` opens the worktree's confirm its hint
     /// promises, not the flash that the pull request's link can't be
-    /// deleted, and a right-click — on the band, or on the `#7` on its
-    /// rule — opens the worktree's menu, not the link's.
+    /// deleted, and a right-click on the band opens the worktree's menu,
+    /// not the link's; on the `#7` on its rule, the pull request's own.
     #[test]
     fn an_empty_band_on_a_pull_request_still_deletes_the_worktree() {
         with_default_config(|| {

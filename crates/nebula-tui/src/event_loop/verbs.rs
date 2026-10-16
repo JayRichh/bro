@@ -302,15 +302,17 @@ pub(crate) fn menu_action(app: &App, action: Action, t: &Target) -> Option<MenuA
                 // none, the merge while one is open and published, a
                 // comment on one open or a draft (matrix §5.1).
                 Action::CreatePullRequest => {
-                    ships(app, &w).then(|| MenuAction::CreatePullRequest {
+                    ships(app, &w).then_some(MenuAction::CreatePullRequest {
                         worktree: w,
                         agent: Some(id),
                     })
                 }
-                Action::MergePullRequest => merges(app, &w).then(|| MenuAction::MergePullRequest {
-                    worktree: w,
-                    agent: Some(id),
-                }),
+                Action::MergePullRequest => {
+                    merges(app, &w).then_some(MenuAction::MergePullRequest {
+                        worktree: w,
+                        agent: Some(id),
+                    })
+                }
                 Action::CommentPullRequest if pr_live(app, &w) => keyed(app),
                 Action::CommentPullRequest => None,
                 Action::CopyPath => local
@@ -692,6 +694,13 @@ fn label(app: &App, action: Action, t: &Target) -> String {
         },
         (Action::FocusScope, Target::Worktree(_)) if widens(app, t) => "Widen to the repo".into(),
         (Action::FocusScope, Target::Repo(_)) if widens(app, t) => "Widen to everything".into(),
+        // A checkout whose pull request merged is the one to clear away.
+        (Action::DeleteWorktree, Target::Worktree(w))
+            if crate::launcher::worktree_pr(app, w)
+                .is_some_and(|pr| pr.standing == crate::pull_request::Standing::Merged) =>
+        {
+            "Delete worktree (pull request merged)\u{2026}".into()
+        }
         _ => menu_label(id, t.kind()).to_string(),
     }
 }
@@ -843,10 +852,70 @@ pub(crate) fn menu_for(app: &App, t: &Target) -> Vec<MenuItem> {
         }
     }
     let mut items = fold(app, t, items);
+    // The connections the go-to rows end on (matrix §6): a checkout's
+    // run terminal, a repo's linked worktrees. Last of the Go section,
+    // ahead of what opens another app.
+    let go = match t {
+        Target::Worktree(w) => run_terminal_row(app, w).into_iter().collect(),
+        Target::Repo(p) => worktrees_row(app, p).into_iter().collect(),
+        _ => Vec::new(),
+    };
+    if !go.is_empty() {
+        let at = items
+            .iter()
+            .position(|i| past_go(t, i))
+            .unwrap_or(items.len());
+        items.splice(at..at, go);
+    }
     if let Some(checkout) = checkout_row(app, t, &items) {
         items.push(checkout);
     }
     items
+}
+
+/// Is `item` past the Go section of `t`'s menu: a row of a later section,
+/// or a submenu of them (`Open in ▸`, `Copy ▸`, `Move ▸`).
+fn past_go(t: &Target, item: &MenuItem) -> bool {
+    let first = match &item.action {
+        MenuAction::Submenu { items, .. } => items.first(),
+        _ => Some(item),
+    };
+    first
+        .and_then(id_of)
+        .and_then(|id| nebula_config::actions::section_of(id, t.kind()))
+        .is_some_and(|s| s > nebula_config::actions::MenuSection::Go)
+}
+
+/// **Show run terminal** on a checkout whose run command's terminal is
+/// alive: the way from the dev server to the process behind it.
+fn run_terminal_row(app: &App, w: &WorktreeId) -> Option<MenuItem> {
+    let term = app
+        .tree
+        .terminals
+        .iter()
+        .find(|x| &x.worktree_id == w && x.alive && x.run_command.is_some())?;
+    Some(MenuItem::new(
+        "Show run terminal",
+        MenuAction::Attach(SessionRef::Terminal(term.id.clone())),
+    ))
+}
+
+/// **Worktrees ▸** on a repo with linked worktrees: one row each, landing
+/// on its band, the jump list the desktop's repo menu gives too.
+fn worktrees_row(app: &App, p: &ProjectId) -> Option<MenuItem> {
+    let rows: Vec<MenuItem> = app
+        .tree
+        .worktrees
+        .iter()
+        .filter(|w| &w.project_id == p && !w.is_main && !app.is_placeholder_worktree(&w.id))
+        .map(|w| {
+            MenuItem::new(
+                w.branch.clone(),
+                MenuAction::Jump(crate::palette::PaletteTarget::Worktree(w.id.clone())),
+            )
+        })
+        .collect();
+    (!rows.is_empty()).then(|| submenu("Worktrees", rows))
 }
 
 /// **Open parent session ‹name›** on a session another one spawned, while
@@ -901,6 +970,14 @@ fn checkout_row(app: &App, t: &Target, card: &[MenuItem]) -> Option<MenuItem> {
             }
         }
         items.push(item);
+    }
+    if let Some(run) = run_terminal_row(app, &w) {
+        let on = Target::Worktree(w.clone());
+        let at = items
+            .iter()
+            .position(|i| past_go(&on, i))
+            .unwrap_or(items.len());
+        items.insert(at, run);
     }
     if items.is_empty() {
         return None;
