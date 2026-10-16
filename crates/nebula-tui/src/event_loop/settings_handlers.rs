@@ -548,9 +548,13 @@ pub(crate) fn open_theme_picker(app: &mut App) {
 /// A row of the THEME PICKER: the settings back on screen, the theme
 /// saved and worn at once.
 pub(crate) fn pick_theme(app: &mut App, name: &str) {
-    match app.modals.verbs_under.take() {
-        Some(under) => app.modals.overlay = Some(*under),
-        None => reopen_settings(app),
+    // The settings the picker stood on, put back (by the menu, or here);
+    // reopened on the remembered row if they were let go.
+    if let Some(under) = app.modals.verbs_under.take() {
+        app.modals.overlay = Some(*under);
+    }
+    if !matches!(app.modals.overlay, Some(Overlay::Settings(_))) {
+        reopen_settings(app);
     }
     let mut cfg = crate::config::Config::load();
     if cfg.theme == name {
