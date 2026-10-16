@@ -716,7 +716,7 @@ export async function archiveDone(list: () => Agent[], where: string) {
   if (n) toast(`Archived ${n} done ${n === 1 ? 'session' : 'sessions'}.`);
 }
 
-/** Open `url`; `said`: what it is, for a failure. */
+/** Open `url` in the browser. */
 function openLink(url: string) {
   api.openUrl(url).catch((e) => toast(String(e)));
 }
@@ -843,12 +843,6 @@ export function runVerb(t: Target, id: ActionId): boolean {
   if (!v || v.disabled) return false;
   void v.run();
   return true;
-}
-
-/** Move up / Move down, the keyboard's (and the menu's) drag. */
-export function moveItems(t: { kind: string; id: string }, where: StepIn = 'tree'): MenuEntry[] {
-  const on: AppliesTo = t.kind === 'project' ? 'repo' : t.kind === 'worktree' ? 'worktree' : 'session';
-  return [entry('reorder_up', on, { run: () => moveStep(t, -1, where) }), entry('reorder_down', on, { run: () => moveStep(t, 1, where) })];
 }
 
 /** How a menu is asked for. `jump`: the surface doesn't show the

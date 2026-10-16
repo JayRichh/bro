@@ -1,15 +1,31 @@
 // The account verbs the window offers outside the Accounts view too: move
 // a session to another account (its menu, its header chip), a repo's
-// default account (its menu), running a login in a terminal. The words and
-// choices come from view.ts; this half asks, writes and says what happened.
+// default account (its menu), running a login in a terminal, and the
+// account's own verbs (default, switch on or off, duplicate, rename,
+// remove, copy the sign-in command) that the rail's menu and the Accounts
+// view's rows and buttons share. The words and choices come from view.ts;
+// this half asks, writes and says what happened.
 
 import { api, type AccountRow, type Agent } from '../api';
 import { app, openSession, refreshAccounts, refreshLaunchables, sessionWorktree, toast } from '../store.svelte';
 import { nav } from '../shell/history.svelte';
 import { ask, type MenuEntry } from '../ui/ui.svelte';
 import { keysOf, withKey } from '../shortcuts';
+import { copyText } from '../menus/clipboard';
 import { sessionHarness } from './usage';
-import { canSwitch, projectAccount, switchConfirm, switchTargets, type SwitchTarget } from './view';
+import { removeWarning } from './pick';
+import {
+  canSwitch,
+  nameProblem,
+  projectAccount,
+  projectsDefaultingTo,
+  renameBlocker,
+  sessionsFollow,
+  suggestName,
+  switchConfirm,
+  switchTargets,
+  type SwitchTarget,
+} from './view';
 import { watchSignIn } from './add.svelte';
 
 /** Why the move is not offered, for a disabled control's tooltip. */
@@ -144,4 +160,136 @@ export async function runLogin(r: Pick<AccountRow, 'key' | 'name' | 'profile'>):
     toast(String(e));
     return false;
   }
+}
+
+// ---- an account's own verbs ----
+
+/** Make a profile its harness's default; nothing when it already is. */
+export async function setDefaultAccount(r: AccountRow) {
+  if (r.default) return;
+  try {
+    await api.profileSetDefault(r.name);
+    refreshLaunchables();
+  } catch (e) {
+    toast(String(e));
+  }
+}
+
+/** Switch a profile on when it is off, off when it is on. */
+export async function setAccountEnabled(r: AccountRow) {
+  try {
+    await api.profileSetEnabled(r.name, r.disabled);
+    toast(r.disabled ? `${r.name} is on.` : `${r.name} is off: launches that pick no account skip it.`);
+    refreshLaunchables();
+  } catch (e) {
+    toast(String(e));
+  }
+}
+
+/** A new profile like `r`, in a home of its own, then offer to sign it in. */
+export async function duplicateAccount(r: AccountRow) {
+  const taken = app.accounts.filter((x) => x.profile).map((x) => x.name);
+  const v = await ask.prompt({
+    title: `Duplicate ${r.name}`,
+    note: `A new ${r.harness} account with the same variables and kind of login, in a home of its own: it signs in separately.`,
+    fields: [{ key: 'name', label: 'Name', value: suggestName(r.name, taken), mono: true }],
+    confirm: 'Duplicate',
+  });
+  if (!v) return;
+  const why = nameProblem(v.name, taken);
+  if (why) return toast(why);
+  try {
+    const out = await api.profileDuplicate(r.name, v.name.trim());
+    refreshLaunchables();
+    if (out.login) {
+      const go = await ask.confirm({
+        title: `Sign ${v.name.trim()} in`,
+        message: `${v.name.trim()} is added. Sign it in now? The login runs in a new terminal.`,
+        detail: [out.login],
+        confirm: 'Sign in',
+      });
+      if (go.ok) {
+        const rows = await api.accounts();
+        app.accounts = rows;
+        const row = rows.find((x) => x.profile && x.name === v.name.trim());
+        if (row) await runLogin(row);
+      }
+    } else toast(`Added ${v.name.trim()}.`);
+  } catch (e) {
+    toast(String(e));
+  }
+}
+
+/** Remove a profile, its home kept or deleted as the confirm says. */
+export async function removeAccount(r: AccountRow) {
+  const projects = projectsDefaultingTo(app.launch, app.model.projects, r.harness, r.name);
+  const detail = [
+    ...(r.home ? [`Its home is ${r.home}: it stays unless you tick the box below.`] : []),
+    ...(projects.length ? [`Default account of ${projects.map((p) => p.name).join(', ')}: those fall back to the spread.`] : []),
+  ];
+  const ok = await ask.confirm({
+    title: 'Remove account',
+    message: removeWarning(r.name, app.model.agents),
+    detail: detail.length ? detail : undefined,
+    confirm: 'Remove',
+    danger: true,
+    // The purge `kete profile remove --purge` does: the login goes too.
+    check: r.home ? `Also delete ${r.home} and the login in it` : undefined,
+  });
+  if (!ok.ok) return;
+  try {
+    const out = await api.profileRemove(r.name, !!r.home && ok.checked);
+    toast(
+      out.purged ? `Removed ${r.name} and deleted ${out.home}.` : out.home ? `Removed ${r.name}. Its home stays at ${out.home}.` : `Removed ${r.name}.`,
+    );
+    refreshLaunchables();
+  } catch (e) {
+    toast(String(e));
+  }
+}
+
+export const RENAME_OFFLINE = 'Not connected to the kete daemon: a rename checks the sessions on the account first.';
+
+/** Why `r` cannot be renamed now, or null: a daemon that does not move
+ *  sessions with a rename refuses while any names the profile; offline,
+ *  nothing can say. The rename's tooltip and its menu row's reason. */
+export function renameBlocked(r: Pick<AccountRow, 'name'>): string | null {
+  return app.model.connected ? renameBlocker(r.name, app.model.agents, sessionsFollow(app.model)) : RENAME_OFFLINE;
+}
+
+/** Rename: refused while a session names it; the home, the repos it is
+ *  the default of and its reading move with the name. */
+export async function renameAccount(r: AccountRow) {
+  const blocked = renameBlocked(r);
+  if (blocked) return toast(blocked);
+  const taken = app.accounts.filter((x) => x.profile && x.key !== r.key).map((x) => x.name);
+  const v = await ask.prompt({
+    title: `Rename ${r.name}`,
+    note: r.home
+      ? `Its home moves from ${r.home} to the new name; repos that start on it follow.`
+      : `Repos that start on it follow the new name.`,
+    fields: [{ key: 'name', label: 'New name', value: r.name, mono: true }],
+    confirm: 'Rename',
+  });
+  if (!v || v.name.trim() === r.name) return;
+  const why = nameProblem(v.name, taken);
+  if (why) return toast(why);
+  try {
+    const out = await api.profileRename(r.name, v.name.trim());
+    const repos = out.projects.length ? `, the default of ${out.projects.length} ${out.projects.length === 1 ? 'repo' : 'repos'}` : '';
+    const archived = out.archived.length ? ` ${out.archived.length} archived ${out.archived.length === 1 ? 'session still names' : 'sessions still name'} ${r.name}.` : '';
+    const followed = out.followed
+      ? ` ${out.followed} ${out.followed === 1 ? 'session follows' : 'sessions follow'} (a running one on its next restart).`
+      : '';
+    toast(`Renamed ${r.name} to ${out.name}${repos}.${archived}${followed}`);
+    refreshLaunchables();
+    refreshAccounts();
+  } catch (e) {
+    toast(String(e));
+  }
+}
+
+/** Put an account's sign-in command on the clipboard. */
+export function copySignIn(r: Pick<AccountRow, 'loginHint'>) {
+  if (r.loginHint) void copyText(r.loginHint, `${r.loginHint}. Run it in a terminal to sign in.`);
 }

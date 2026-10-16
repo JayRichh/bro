@@ -20,8 +20,9 @@
 //      whose menu needs what only it knows (a diff file row's staging); a
 //      target inside it (the band's PR chip, `pr:`, and ports, `port:`)
 //      keeps its own menu. A `row` is built by the target's kind (the part
-//      before the colon), so a new kind needs no change here. Never put an
-//      own menu on a container of other rows: the background is `none`'s.
+//      before the colon), so a new kind needs no change here. An own menu
+//      on a container of rows (the orchestrator panel) covers its empty
+//      space; the rows inside keep theirs.
 //   6. Anything else: `none` (the background menu, menus/background.ts).
 
 /** As much of an element as the resolution reads. */

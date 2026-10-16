@@ -7,9 +7,8 @@
   import { app, toast } from '../store.svelte';
   import { api } from '../api';
   import { nav } from '../shell/history.svelte';
-  import { ownMenu } from '../menus/router';
   import { age } from '../status';
-  import { checkoutMenu, newWorktree, openTargetMenu } from '../actions';
+  import { newWorktree, openTargetMenu } from '../actions';
   import RunButton from '../overview/RunButton.svelte';
   import { firstDir, gitSignal, groupOf, prLabel, sortRows, tableRow, type SortDir, type SortKey } from './groups';
   import { refreshGit, rows, watchGit } from './rows.svelte';
@@ -132,7 +131,7 @@
         data-row
         data-target="worktree:{w.id}"
         title={w.path}
-        use:ownMenu={() => ({ items: checkoutMenu(w, { jump: true }), label: w.branch })}
+        data-menu-jump
         onkeydown={(e) => onKey(e, w.id)}
       >
         <span class="flex min-w-0 items-center gap-2">

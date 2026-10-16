@@ -6,10 +6,10 @@
   // terminal); a broken profile shows what is wrong and the way to fix it.
   // The heading opens the Accounts view, where everything else lives.
   import { onMount } from 'svelte';
-  import { api, type AccountRow } from '../api';
-  import { app, focusQuickPrompt, openSession, refreshAccounts, refreshLaunchables, toast } from '../store.svelte';
+  import type { AccountRow } from '../api';
+  import { app, focusQuickPrompt, openSession, refreshAccounts, refreshLaunchables } from '../store.svelte';
   import { nav } from '../shell/history.svelte';
-  import { openAccounts, runLogin as startLogin } from './actions';
+  import { copySignIn, openAccounts, runLogin as startLogin, setAccountEnabled, setDefaultAccount } from './actions';
   import { openAddAccount } from './add.svelte';
   import UsageBar from './UsageBar.svelte';
   import { bars, liveUsage, loginTitle, mergeRows, ownLoginSessionHarnesses, sessionsOn, shownAt, staleAt, starTitle, usageTitle, windowLabel } from './usage';
@@ -22,35 +22,6 @@
   let sessionsOpen = $state<string | null>(null);
 
   const GLYPH: Record<string, string> = { claude: 'C', codex: 'X', copilot: 'G', cursor: 'U', pi: 'P', opencode: 'O' };
-
-  async function setDefault(r: AccountRow) {
-    if (r.default) return;
-    try {
-      await api.profileSetDefault(r.name);
-      refreshLaunchables();
-    } catch (e) {
-      toast(String(e));
-    }
-  }
-
-  async function setEnabled(r: AccountRow) {
-    try {
-      await api.profileSetEnabled(r.name, r.disabled);
-      toast(r.disabled ? `${r.name} is on.` : `${r.name} is off: launches that pick no profile skip it.`);
-      refreshLaunchables();
-    } catch (e) {
-      toast(String(e));
-    }
-  }
-
-  async function copy(text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      toast('Copied. Run it in a terminal to sign in.');
-    } catch {
-      toast(text);
-    }
-  }
 
   async function runLogin(r: AccountRow) {
     if (await startLogin(r)) loginOpen = null;
@@ -122,7 +93,7 @@
       {@const u = liveUsage(r, app.model.accounts ?? {})}
       {@const [top, bottom] = bars(u)}
       {@const on = sessionsOn(r, app.model.agents)}
-      <li class="group px-4 py-1.5 {r.disabled && !r.problem ? 'opacity-55' : ''}">
+      <li class="group px-4 py-1.5 {r.disabled && !r.problem ? 'opacity-55' : ''}" data-target="account:{r.key}">
         <div class="flex min-w-0 items-center gap-2">
           <span
             class="grid size-[14px] flex-none place-items-center border font-mono text-[9px] leading-none font-semibold {r.problem
@@ -176,7 +147,7 @@
                 : dimStar
                   ? 'text-ember opacity-45'
                   : 'text-faint hover:text-ink'}"
-              onclick={() => setDefault(r)}
+              onclick={() => setDefaultAccount(r)}
               title={starTitle(r)}
               aria-label={r.default ? `${r.name} is the default` : dimStar ? `${r.name} is the default (disabled)` : `Make ${r.name} the default`}
               aria-pressed={r.default}
@@ -195,8 +166,8 @@
               class="relative h-[12px] w-[22px] flex-none border p-0 {r.disabled ? 'border-rule bg-transparent' : 'border-rule-strong bg-ink'}"
               role="switch"
               aria-checked={!r.disabled}
-              onclick={() => setEnabled(r)}
-              title={r.disabled ? `Off: launches that pick no profile skip ${r.name}. Switch on` : `On. Switch ${r.name} off`}
+              onclick={() => setAccountEnabled(r)}
+              title={r.disabled ? `Off: launches that pick no account skip ${r.name}. Switch on` : `On. Switch ${r.name} off`}
               aria-label="{r.name} enabled"
             >
               <span class="absolute top-[1px] size-[8px] {r.disabled ? 'left-[1px] bg-faint' : 'right-[1px] bg-bg'}" aria-hidden="true"></span>
@@ -244,7 +215,7 @@
             >
             <button
               class="flex-none border border-rule bg-bg px-1.5 text-[11px] text-ink hover:border-rule-strong"
-              onclick={() => copy(r.loginHint ?? '')}>Copy</button
+              onclick={() => copySignIn(r)}>Copy</button
             >
             <button
               class="flex-none border border-rule-strong bg-bg px-1.5 text-[11px] text-ink hover:bg-surface"

@@ -31,9 +31,11 @@ import {
   menuFor,
   newWorktree,
   openTargetMenu,
+  parseTarget,
   refreshPrs,
   registryRows,
   runRowKey,
+  type MenuOpts,
   type Target,
   type VerbTable,
 } from './actions';
@@ -291,7 +293,8 @@ export function backgroundMenu(): MenuEntry[] {
 /** `?`: the verbs of the focused row (or of what the view shows), each
  *  with its key, searchable, All keys last. */
 export function openVerbs(): boolean {
-  const { items, title } = verbsMenu(selectedTarget() ?? viewTarget());
+  const jump = !!document.activeElement?.closest('[data-menu-jump]');
+  const { items, title } = verbsMenu(selectedTarget() ?? viewTarget(), { jump });
   const row = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('[data-target], [data-verb-bar]');
   const at = row ?? { x: Math.max(8, Math.round(window.innerWidth / 2 - 180)), y: 96 };
   openMenu(items, at, title, { search: true });
@@ -300,8 +303,8 @@ export function openVerbs(): boolean {
 
 /** The verbs menu for `t` (the window's own verbs for none): its menu's
  *  rows, then All keys. */
-export function verbsMenu(t: Target | null): { items: MenuEntry[]; title: string } {
-  const items: MenuEntry[] = t ? menuFor(t) : backgroundMenu();
+export function verbsMenu(t: Target | null, opts: MenuOpts = {}): { items: MenuEntry[]; title: string } {
+  const items: MenuEntry[] = t ? menuFor(t, opts) : backgroundMenu();
   return { items: [...items, 'sep', allKeysItem()], title: t ? targetName(t) : 'Verbs' };
 }
 
@@ -359,13 +362,21 @@ export function runShortcut(id: ShortcutId): boolean {
   };
   const f = go[id];
   if (f) return f() !== false;
+  // A chip with a menu of its own (a pull request, a port) under the Menu
+  // key: the key's own contextmenu follows, and the router opens the
+  // chip's menu, not its row's.
+  if (id === 'row_menu') {
+    const near = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('[data-target]');
+    if (near && !parseTarget(near.dataset.target)) return false;
+  }
   // Row keys act on the focused row or card.
   const t = focusedTarget();
   if (!t) return false;
   if (id === 'move_up' || id === 'move_down') return moveStep(t, id === 'move_up' ? -1 : 1, stepInFor(document.activeElement));
   // The Menu key: the row's menu, named for it, as a right-click opens it.
   if (id === 'row_menu') {
-    openTargetMenu(t, document.activeElement as HTMLElement);
+    const el = document.activeElement as HTMLElement;
+    openTargetMenu(t, el, { jump: !!el.closest('[data-menu-jump]') });
     return true;
   }
   return runRowKey(id, t);

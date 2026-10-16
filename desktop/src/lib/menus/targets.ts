@@ -1,12 +1,13 @@
 // The menus for the window's other targets, read off the model: a GitHub
 // pull request chip (`pr:<worktree>`), a port chip (`port:<worktree>:<port>`),
 // a board lane's header (`lane:<lane>`), an attention count
-// (`attention:<status>`), the orchestrator (`orchestrator:rail`), a view
-// crumb (`view:<view>`), the registry's rows with the opened-by-a-crumb
-// jump list (`data-menu-jump`), the background (empty space anywhere), and
-// a file's (the diff's file list, the opened files' tabs). The rows are
-// rows.ts's; this half reads the state and runs the verbs. builtin.ts
-// imports it, so the router knows them from the start.
+// (`attention:<status>`), the orchestrator (`orchestrator:rail`), a
+// worktree's where its sessions aren't on screen (`data-menu-jump`), the
+// background (empty space anywhere), and, for the surfaces that own them
+// (`ownMenu`), the breadcrumb's views and a file's (the diff's file list,
+// the opened files' tabs). The rows are rows.ts's; this half reads the
+// state and runs the verbs. builtin.ts imports it, so the router knows them
+// from the start.
 
 import { api, type Agent } from '../api';
 import { app, openSession, toast } from '../store.svelte';
@@ -39,6 +40,8 @@ import { hasChildren, leafItems } from './model';
 import { setBuilder, setRowBuilder, type Opened } from './router';
 import { attentionItems, fileItems, laneItems, orchestratorItems, portItems, prItems, viewItems, type LaneId, type PrStanding } from './rows';
 import { joinPath } from './surfaces';
+// The account rows' menu (`account:<key>`): its own module, registered here.
+import '../accounts/account-menu';
 
 const m = () => app.model;
 const copy = (text: string, said: string) => void copyText(text, said);
@@ -53,8 +56,8 @@ function sessionsIn(w: string): Agent[] {
 
 // ---- the registry's rows, from a crumb or the Worktrees view ----
 
-// A worktree opened from somewhere its sessions aren't on screen (the
-// session header's branch, a breadcrumb) lists them to open.
+// A worktree's menu opened somewhere its sessions aren't on screen (the
+// Worktrees view, the session header's branch) lists them to open.
 setRowBuilder('worktree', (id, el, target) => {
   const t = parseTarget(target);
   if (!t) return null;
@@ -96,7 +99,8 @@ export function githubPrMenu(wt: string): Opened | null {
 }
 setRowBuilder('pr', githubPrMenu);
 
-setRowBuilder('port', (id) => {
+/** A port chip's menu: `id` is `<worktree>:<port>`. */
+export function portMenu(id: string): Opened | null {
   const cut = id.lastIndexOf(':');
   const wt = id.slice(0, cut);
   const port = Number(id.slice(cut + 1));
@@ -114,7 +118,8 @@ setRowBuilder('port', (id) => {
     },
   );
   return { items, label: `localhost:${port}` };
-});
+}
+setRowBuilder('port', portMenu);
 
 // ---- board lanes (\u00a75.16) ----
 
@@ -123,7 +128,8 @@ const LANE_WORDS: Record<LaneId, string> = { needs: 'Needs you', running: 'Runni
 /** Where Open next running got to, round the lane. */
 let runningAt = -1;
 
-setRowBuilder('lane', (id) => {
+/** A board lane header's menu. */
+export function laneMenu(id: string): Opened | null {
   const lane = id as LaneId;
   if (!LANE_IDS.includes(lane)) return null;
   const agents = () => (m().lanes[lane] ?? []).flatMap((x) => m().agents.filter((a) => a.id === x));
@@ -145,11 +151,13 @@ setRowBuilder('lane', (id) => {
     { next: verbKeys('next_attention') },
   );
   return { items, label: LANE_WORDS[lane] };
-});
+}
+setRowBuilder('lane', laneMenu);
 
 // ---- the attention strip (\u00a75.19) ----
 
-setRowBuilder('attention', (id) => {
+/** An attention count's menu: the sessions it counts. */
+export function attentionMenu(id: string): Opened | null {
   const status = id as Status;
   const nodes = tally(repoRows(scopeModel(m())))[status] ?? [];
   const ids = [...new Set(nodes.map((n) => n.agent?.id ?? n.sub?.parent_agent).filter((x): x is string => !!x))];
@@ -167,7 +175,8 @@ setRowBuilder('attention', (id) => {
     { open: (x) => openSession({ Agent: x }), markSeen: () => markAllSeen(agents) },
   );
   return items.length ? { items, label: status } : null;
-});
+}
+setRowBuilder('attention', attentionMenu);
 
 // ---- the orchestrator (\u00a75.14) ----
 
@@ -221,7 +230,6 @@ export function viewMenu(): MenuEntry[] {
   }
   return rows;
 }
-setRowBuilder('view', () => ({ items: viewMenu(), label: 'View' }));
 
 // ---- the background (\u00a75.15) ----
 
