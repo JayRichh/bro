@@ -3,9 +3,13 @@
 // WCAG AA (4.5:1) on the canvas and the surface, the faint tier, the
 // status colours and the syntax at 3:1 on the canvas.
 
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
+// Read as written, from disk: through Vite, `?raw` hands back the CSS
+// after Tailwind has compiled its `@theme` block away. (Named by a
+// variable so the type check, which has no Node types, leaves it be.)
+const fsModule = 'node:fs';
+const { readFileSync } = (await import(/* @vite-ignore */ fsModule)) as { readFileSync: (path: URL, encoding: 'utf8') => string };
 const css = readFileSync(new URL('../theme.css', import.meta.url), 'utf8');
 
 /** The `--color-*` hex tokens of the block that opens with `selector`. */
