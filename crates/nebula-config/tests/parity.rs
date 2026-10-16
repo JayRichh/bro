@@ -485,3 +485,27 @@ fn the_critters_rows_are_shared_and_the_editors_are_the_windows() {
     assert_eq!(cfg.critters_often_word(), "normal");
     assert_eq!(DesktopPrefs::load_at(&path, &local).editor_file, "kete");
 }
+
+/// WHAKAOHO's schedules live in `config.local.json` under `wake`, which
+/// `Config` has no field for: a settings write from either app keeps them
+/// there and never copies them into `config.json` (which `kete ssh`
+/// carries to other machines), and the wake writer keeps every setting.
+#[test]
+fn the_wake_map_stays_local_through_settings_writes() {
+    let (_dir, path, local) = layers();
+    std::fs::write(&path, r#"{"editor": "hx"}"#).unwrap();
+    let schedule = nebula_core::wake::WakeSchedule {
+        enabled: true,
+        ..Default::default()
+    };
+    nebula_core::wake::set_in(&path, &local, "work", Some(&schedule)).unwrap();
+    let global = |key: &str| Target::Global { key: key.into() };
+    set_in(&path, &local, &global("kanban"), &json!(true)).unwrap();
+    Config::update_in(&path, &local, |c| c.editor = "nvim".into()).unwrap();
+    assert!(read(&path).get("wake").is_none(), "{}", read(&path));
+    assert_eq!(read(&local)["wake"]["work"]["enabled"], true);
+    assert_eq!(nebula_core::wake::load_in(&local)["work"], schedule);
+    nebula_core::wake::set_in(&path, &local, "work", None).unwrap();
+    assert_eq!(read(&path)["editor"], "nvim");
+    assert_eq!(read(&path)["kanban"], true);
+}

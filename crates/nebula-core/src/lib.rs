@@ -25,6 +25,7 @@ pub mod settings;
 pub mod shell;
 pub mod tracked_settings;
 pub mod usage;
+pub mod wake;
 
 pub use entities::*;
 pub use harness::*;

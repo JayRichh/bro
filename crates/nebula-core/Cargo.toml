@@ -22,7 +22,12 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_ProcessStatus",
     "Win32_System_SystemInformation",
     "Win32_System_Threading",
+    "Win32_System_Time",
 ] }
+
+# The local UTC offset (`clock::local_offset_secs_at`).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["io-util", "rt", "macros"] }
