@@ -20,6 +20,7 @@ import { canSwitchBranch, openBranchSwitch } from './worktrees/switcher.svelte';
 import { checkoutSessions, deleteAllSessions } from './checkout';
 import { moveToAccount, pickProjectAccount, SWITCH_UNAVAILABLE } from './accounts/actions';
 import { canSwitch } from './accounts/view';
+import { openWake, wake, wakeNowFor } from './wake/state.svelte';
 import { rows as gitRows, whileCutting } from './worktrees/rows.svelte';
 import { moveStep, stepInFor, type StepIn } from './reorder.svelte';
 import { openComposer, openMerge } from './ship/sheet.svelte';
@@ -33,7 +34,9 @@ export type Target =
   | { kind: 'agent'; id: string; viaSub?: boolean }
   | { kind: 'terminal'; id: string }
   | { kind: 'worktree'; id: string }
-  | { kind: 'project'; id: string };
+  | { kind: 'project'; id: string }
+  /** An ACCOUNT, by its key: a profile's name, or `@claude`. */
+  | { kind: 'account'; id: string };
 
 /** A target as a string, for `data-session` attributes. */
 export function targetKey(t: Target): string {
@@ -44,7 +47,7 @@ export function parseTarget(k: string | null | undefined): Target | null {
   const i = k.indexOf(':');
   const kind = k.slice(0, i);
   const id = k.slice(i + 1);
-  if (kind === 'agent' || kind === 'terminal' || kind === 'worktree' || kind === 'project') return { kind, id };
+  if (kind === 'agent' || kind === 'terminal' || kind === 'worktree' || kind === 'project' || kind === 'account') return { kind, id };
   if (kind === 'subagent') return { kind: 'agent', id, viaSub: true };
   return null;
 }
@@ -625,6 +628,8 @@ export function verbTable(t: Target): VerbTable {
     }
     case 'project':
       return projectVerbs(t.id);
+    case 'account':
+      return accountVerbs(t.id);
   }
 }
 
@@ -675,6 +680,36 @@ export function terminalMenu(t: TerminalTab): MenuEntry[] {
   return [...rows('terminal', terminalVerbs(t)), 'sep', ...worktreeItems(worktreeOf(t.worktree_id))];
 }
 
+/** Whakaoho runs Claude accounts only: `@claude`, or a profile on Claude. */
+function isClaudeAccount(key: string): boolean {
+  if (key === '@claude') return true;
+  if (key.startsWith('@')) return false;
+  const harness = app.accounts.find((r) => r.key === key)?.harness;
+  return harness === undefined || harness === 'claude';
+}
+
+/** What the window can do to an account: Wake up now (Claude accounts;
+ *  one already waking says so). */
+function accountVerbs(key: string): VerbTable {
+  if (!isClaudeAccount(key)) {
+    return { wake_account: { run: () => {}, disabled: true, why: 'Wake-up runs Claude accounts only.' } };
+  }
+  return {
+    wake_account: wake.waking[key]
+      ? { run: () => {}, disabled: true, why: 'Waking now: up to two minutes.' }
+      : { run: () => wakeNowFor(key) },
+  };
+}
+
+/** An account's menu: the registry's rows, then the window's own
+ *  "Wake-up schedule...", which opens the Whakaoho view on it. (A registry
+ *  `wake_schedule` verb, from lane/menu-matrix, takes this row's place.) */
+export function accountMenu(key: string): MenuEntry[] {
+  const out: MenuEntry[] = rows('account', accountVerbs(key));
+  if (isClaudeAccount(key)) out.push({ label: 'Wake-up schedule\u2026', run: () => openWake(key) });
+  return out;
+}
+
 export function projectMenu(project: string): MenuEntry[] {
   const linked = m()
     .worktrees.filter((w) => w.project_id === project && !w.is_main)
@@ -711,6 +746,8 @@ export function menuFor(t: Target): MenuEntry[] {
       return worktreeItems(worktreeOf(t.id));
     case 'project':
       return projectMenu(t.id);
+    case 'account':
+      return accountMenu(t.id);
   }
 }
 

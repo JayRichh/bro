@@ -33,6 +33,7 @@ import { attentionSessions, stepRing, type PaletteCommand } from './palette';
 import { askStartOrchestrator, openOrchestrator, orchestratorCommands } from './orch.svelte';
 import { orchestratorOf } from './orchestrator';
 import { openAccounts } from './accounts/actions';
+import { openWake } from './wake/state.svelte';
 import { openAddAccount } from './accounts/add.svelte';
 import { moveStep, rootOf, stepInFor } from './reorder.svelte';
 import { railOrder, repoRows } from './overview/repos';
@@ -223,6 +224,8 @@ export function targetName(t: Target): string {
     }
     case 'project':
       return `repo ${m.projects.find((p) => p.id === t.id)?.name ?? ''}`;
+    case 'account':
+      return `account ${t.id}`;
   }
 }
 
@@ -296,7 +299,7 @@ export function runShortcut(id: ShortcutId): boolean {
     orchestrator_f10: orchestratorKey,
     accounts: openAccounts,
     close_split: () => {
-      if (!split() && nav.current.view !== 'settings' && nav.current.view !== 'accounts') return false;
+      if (!split() && nav.current.view !== 'settings' && nav.current.view !== 'accounts' && nav.current.view !== 'whakaoho') return false;
       // A full pane comes back down first; the next Esc closes the split.
       if (app.paneMax && split()) return void (app.paneMax = false);
       if (nav.current.view === 'diff') return closeDiff();
@@ -376,6 +379,7 @@ export function paletteCommands(): Command[] {
     cmd('export-settings', menuLabel('export_settings', 'global'), 'Window', exportSettings, undefined, 'backup config save file'),
     cmd('import-settings', menuLabel('import_settings', 'global'), 'Window', importSettings, undefined, 'restore config load file'),
     cmd('accounts', 'Accounts', 'Window', openAccounts, 'accounts', 'profiles login usage spread subscription'),
+    cmd('whakaoho', 'Whakaoho \u00b7 Wake-up', 'Window', () => openWake(), undefined, 'wake wake-up morning heartbeat 5-hour window reset schedule'),
     cmd('add-account', 'Add an account\u2026', 'Window', () => openAddAccount(), undefined, 'profile login new subscription'),
     cmd('profiles', 'Profiles', 'Window', openAccounts, undefined, 'accounts login'),
     cmd('help', 'Keyboard shortcuts', 'Window', () => (ui.help = true), 'help_f1', 'help keys'),

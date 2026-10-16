@@ -387,6 +387,21 @@ into your repo). It runs your own statusLine after it, or prints `ctx 34% · 5h 
 takes the place of Claude's footer hints; Settings, Sessions, **Usage status line** turns it off.
 See [Profiles](docs/profiles.md).
 
+**Whakaoho (wake-up)** starts an account's 5-hour window at an hour you pick, so it resets earlier
+in your day: at 05:00 Kete sends one tiny prompt to haiku under that account, with your own
+subscription. It is off by default and set per account, in the window's rail (**Whakaoho**), the
+terminal's accounts overlay (its **Wake** view) or the command line; a Windows scheduled task runs
+it with Kete closed. It shows your usual hours from Kete's sessions and suggests the hour that gives
+the most fresh windows inside them.
+
+```powershell
+kete wake set max2 --at 05:00      # on, every day at 05:00 (or --at suggested)
+kete wake status                   # schedules, next and last wake-ups, the suggestion
+kete wake max2 --dry-run           # what would happen now
+```
+
+See [Commands](docs/commands.md#wake-up-whakaoho).
+
 ## Ports per worktree
 
 Every worktree gets its own block of localhost ports (`3000`, `3010`, `3020`, ...), handed to its

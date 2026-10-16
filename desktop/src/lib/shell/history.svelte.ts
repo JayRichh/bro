@@ -15,7 +15,8 @@ export type View =
   | 'settings'
   | 'orchestrator'
   | 'worktrees'
-  | 'accounts';
+  | 'accounts'
+  | 'whakaoho';
 export type Place = { view: View; repo?: string; item?: string };
 export type UiState = Record<string, unknown>;
 export type Saver = (view: string, repo: string, state: UiState) => void;

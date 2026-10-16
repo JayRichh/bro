@@ -26,6 +26,7 @@ mod settings;
 mod settings_io;
 mod ship;
 mod update;
+mod wake;
 
 use ado::client::CmdError;
 use ado::prs::{self, PrCtx, PrCtxExt};
@@ -948,6 +949,10 @@ fn main() {
             profiles::profile_remove,
             profiles::profile_set_default,
             accounts::accounts_list,
+            // Whakaoho (wake-up)
+            wake::wake_overview,
+            wake::wake_now,
+            wake::wake_set,
             accounts::account_switch,
             accounts::project_set_account,
             profiles::profile_duplicate,
