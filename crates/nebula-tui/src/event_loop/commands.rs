@@ -882,6 +882,11 @@ pub(crate) fn run_menu_action(app: &mut App, action: MenuAction, out: &mut Vec<C
             remote,
         } => super::ado::checkout_branch(app, project, branch, remote, out),
         MenuAction::FileGit { root, rel, op } => file_git(app, root, rel, op),
+        MenuAction::FoldTree(open) => {
+            if let Some(Overlay::Tree(view)) = &mut app.modals.overlay {
+                view.set_subtree(open);
+            }
+        }
     }
 }
 

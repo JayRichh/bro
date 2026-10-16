@@ -536,6 +536,10 @@ pub enum MenuAction {
         rel: String,
         op: FileOp,
     },
+    /// The TREE BROWSER's folder under its cursor and every folder in it
+    /// opened (`true`) or folded: a folder's **Expand all** / **Collapse
+    /// all**.
+    FoldTree(bool),
 }
 
 /// What a diff file row's git row does to the file.

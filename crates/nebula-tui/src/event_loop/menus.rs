@@ -283,7 +283,8 @@ pub(crate) fn keeps_overlay(action: &MenuAction) -> bool {
         | MenuAction::OpenLink(_)
         | MenuAction::OverlayKey(..)
         | MenuAction::OverlayKeys(_)
-        | MenuAction::FileGit { .. } => true,
+        | MenuAction::FileGit { .. }
+        | MenuAction::FoldTree(_) => true,
         MenuAction::Verb { action, .. } => matches!(
             action,
             Action::OpenInVscode
@@ -780,8 +781,16 @@ fn tree_row_menu(app: &mut App, pos: Position) -> Option<(String, Vec<MenuItem>)
     view.select(index as i64);
     let node = view.selected_node()?.clone();
     let root = view.root.clone();
+    // A folder's own: open it all, or fold it all, while the tree is
+    // not filtered (a filter opens every folder it keeps).
+    let folds = node.is_dir && !node.children.is_empty() && view.list.query.is_empty();
     let items = if node.is_dir {
-        folder_items(app, &root, &node.path)
+        let mut items = folder_items(app, &root, &node.path);
+        if folds {
+            items.push(MenuItem::new("Expand all", MenuAction::FoldTree(true)));
+            items.push(MenuItem::new("Collapse all", MenuAction::FoldTree(false)));
+        }
+        items
     } else {
         file_items(app, &root, &node.path, &FileState::default())
     };
@@ -824,8 +833,15 @@ fn key(code: char) -> (KeyCode, KeyModifiers) {
 /// An account's menu (matrix §5.9), from what its row says now: its
 /// sessions, a login to renew and its command, its switches, wake-up, the
 /// session under the grid's cursor moved onto it, its own edits, its
-/// removal. In the accounts overlay, so not **Account details…**.
-fn account_items(app: &App, row: &crate::accounts_overlay::AccountRow) -> Vec<MenuItem> {
+/// removal. In the accounts overlay, so not **Account details…**; no Use
+/// for… with no repo to use it for (`repos`), no Rename… while sessions
+/// on it block one (`renames`).
+fn account_items(
+    app: &App,
+    row: &crate::accounts_overlay::AccountRow,
+    repos: bool,
+    renames: bool,
+) -> Vec<MenuItem> {
     let t = Target::Account(row.key.clone());
     let profile = row.profile.is_some() && row.problem.is_none();
     let press =
@@ -852,7 +868,9 @@ fn account_items(app: &App, row: &crate::accounts_overlay::AccountRow) -> Vec<Me
             }
         };
         items.push(press(&checked(row.default, "Make default"), key('d')));
-        items.push(press("Use for\u{2026}", key('p')));
+        if repos {
+            items.push(press("Use for\u{2026}", key('p')));
+        }
         items.push(press(&checked(!row.disabled(), "Switch on"), key(' ')));
     }
     if row.harness == "claude" && row.problem.is_none() {
@@ -872,7 +890,9 @@ fn account_items(app: &App, row: &crate::accounts_overlay::AccountRow) -> Vec<Me
         if row.problem.is_none() {
             items.push(press("Edit\u{2026}", (KeyCode::Enter, KeyModifiers::NONE)));
         }
-        items.push(press("Rename\u{2026}", key('r')));
+        if renames {
+            items.push(press("Rename\u{2026}", key('r')));
+        }
         items.push(press("Duplicate\u{2026}", key('c')));
         items.push(verbs::overlay_key_row(
             "Remove\u{2026}",
@@ -936,11 +956,16 @@ fn accounts_row_menu(app: &mut App, pos: Option<Position>) -> Option<(String, Ve
         view.cursor = row.min(view.rows.len().saturating_sub(1));
     }
     let row = view.selected()?.clone();
+    let repos = !view.projects.is_empty();
+    let blocked = row.profile.as_ref().is_some_and(|p| {
+        !view.sessions_follow
+            && nebula_core::profiles::rename_blocker(&app.tree.agents, &p.name).is_some()
+    });
     let title = match account_banner(&row) {
         Some(banner) => format!("account {} \u{b7} {banner}", row.label()),
         None => format!("account {}", row.label()),
     };
-    Some((title, account_items(app, &row)))
+    Some((title, account_items(app, &row, repos, !blocked)))
 }
 
 // ---- Azure DevOps ----
