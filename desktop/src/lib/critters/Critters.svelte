@@ -149,6 +149,17 @@
         e.ignoreFocus = on;
         e.update();
       },
+      /** Stop the clock (or start it again): the world moves only by `step`. */
+      freeze: (on = true) => {
+        e.frozen = on;
+        e.update();
+      },
+      /** Everyone off screen at once, the next visitor in a few seconds. */
+      clear: () => {
+        e.world.clear();
+        e.world.resume();
+        e.poke();
+      },
       /** Step the world `secs` at once. */
       step: (secs: number) => e.step(secs),
       list: () =>

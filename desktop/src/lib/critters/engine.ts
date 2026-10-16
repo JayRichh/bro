@@ -5,7 +5,7 @@
 // hidden or unfocused. Svelte-free: Critters.svelte owns the elements and
 // the app state, this owns the clock.
 
-import { SPECIES } from './cast.gen';
+import { FLAGS, SPECIES } from './cast.gen';
 import { paint } from './paint';
 import { World, type AppEvent, type Input, type Note, type Pointer, type Rect } from './world';
 
@@ -40,6 +40,8 @@ export class Engine {
   allIdle = false;
   /** Tests (the e2e window may never have the OS focus). */
   ignoreFocus = false;
+  /** Tests: the clock stopped, the world moved only by `step`. */
+  frozen = false;
   /** Frames painted, timer wakes and ticks: the idle-cost check reads them. */
   readonly stats = { frames: 0, wakes: 0, ticks: 0 };
 
@@ -79,6 +81,9 @@ export class Engine {
     window.addEventListener('blur', this.onFocus);
     document.addEventListener('visibilitychange', this.onFocus);
     this.dirty = true;
+    // Turned on: the first visitor comes in a few seconds, not after
+    // whatever gap was left from before.
+    if (!this.world.active() && this.world.spawning) this.world.resume();
     this.update();
   }
 
@@ -98,7 +103,7 @@ export class Engine {
 
   /** Runs while started and in view (or forced by a test). */
   update() {
-    const want = this.started && (this.ignoreFocus || (document.visibilityState === 'visible' && document.hasFocus()));
+    const want = this.started && !this.frozen && (this.ignoreFocus || (document.visibilityState === 'visible' && document.hasFocus()));
     if (want === this.running) return;
     this.running = want;
     if (want) {
@@ -263,11 +268,14 @@ export class Engine {
     this.css = devicePerSprite(this.size, dpr) / dpr;
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    let floorCss = vh - FLOOR_FALLBACK;
+    // The highest marked bar in the bottom of the window (the quick
+    // prompt's top edge), else a bar's height above the bottom.
+    let floorCss = Infinity;
     for (const el of document.querySelectorAll<HTMLElement>('[data-critter-floor]')) {
       const r = el.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0 && r.top > vh * 0.3) floorCss = Math.min(floorCss === vh - FLOOR_FALLBACK ? r.top : floorCss, r.top);
+      if (r.width > 0 && r.height > 0 && r.top > vh * 0.3) floorCss = Math.min(floorCss, r.top);
     }
+    if (!Number.isFinite(floorCss)) floorCss = vh - FLOOR_FALLBACK;
     this.floorCss = floorCss;
     const w = Math.ceil(vw / this.css);
     const h = Math.ceil(vh / this.css);
@@ -436,7 +444,10 @@ export class Engine {
       this.dragged = false;
       return;
     }
-    if (e.detail === 2) this.world.feed(id);
+    const c = this.world.get(id);
+    if (!c) return;
+    // A balloon isn't fed: its second click would stop it popping.
+    if (e.detail === 2 && !(SPECIES[c.species].flags & FLAGS.inanimate)) this.world.feed(id);
     else if (e.detail <= 1) this.world.pet(id);
     this.poke();
   }

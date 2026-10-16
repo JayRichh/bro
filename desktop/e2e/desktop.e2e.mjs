@@ -5,6 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
 import { Desktop, FEATURE, Key, git, ghDirs } from './harness.mjs';
 
 /** One window per test, closed (driver, daemon, temp root) however it ends. */
@@ -218,4 +219,115 @@ flow('? on a Review card lists Create pull request', { script: FEATURE }, async 
   await d.waitForText('Create pull request');
   await d.press(Key.Escape);
   await d.waitForGone('Create pull request');
+});
+
+// ---- critters ----
+
+/** The arrow keys, as W3C key codes. */
+const ARROW = { up: '', down: '', left: '', right: '' };
+
+/** A mouse gesture as W3C pointer actions: synthetic input inside the
+ *  WebView, never the OS pointer. `keep` leaves the button down for the
+ *  next call (a drag checked halfway). */
+async function mouse(d, steps, keep = false) {
+  await d.wd.call('POST', '/actions', { actions: [{ type: 'pointer', id: 'mouse', parameters: { pointerType: 'mouse' }, actions: steps }] });
+  if (!keep) await d.wd.call('DELETE', '/actions');
+}
+const moveTo = (p, dx = 0, dy = 0) => ({ type: 'pointerMove', duration: 0, origin: 'viewport', x: Math.round(p.x + dx), y: Math.round(p.y + dy) });
+const press = (button) => ({ type: 'pointerDown', button });
+const lift = (button) => ({ type: 'pointerUp', button });
+
+flow('critters: the verb turns them on, a click pets, a right-click opens the critter menu, a drag picks one up, Konami brings them back', {}, async (d) => {
+  await d.el('[aria-label="Home view"]');
+  const on = () => {
+    try {
+      return d.config().critters === true;
+    } catch {
+      return false;
+    }
+  };
+  assert.equal(on(), false, 'off until found');
+  // The `critters` verb, from the palette.
+  await d.press('k', Key.Control);
+  await d.type('[aria-label="Command palette"] input', 'critters');
+  await d.click('[role="listbox"] [role="option"]', 'Turn critters on');
+  await d.waitFor('critters on in config.json', on);
+  await d.waitForText('Critters are on');
+  // The debug build's hook: the clock stopped, the world stepped by hand.
+  const k = (body, ...args) => d.wd.exec(`const k = window.__kete_critters; ${body}`, ...args);
+  await d.waitFor('the critters test hook', () => k('return !!k;'));
+  await k('k.freeze(true); k.clear();');
+  const id = await k(`return k.spawn('kiwi');`);
+  assert.ok(id, 'a kiwi summoned');
+  const kiwi = `return k.list().find((c) => c.id === arguments[0]) ?? null;`;
+  await d.waitFor('the kiwi walked on', async () => {
+    await k('for (let i = 0; i < 4; i++) k.step(0.5);');
+    const c = await k(kiwi, id);
+    return c && c.entered && c.mode === 'brain';
+  });
+  if (process.env.KETE_E2E_SHOTS) {
+    await k(`k.spawn('cow'); for (let i = 0; i < 6; i++) k.step(0.5);`);
+    fs.writeFileSync(path.join(process.env.KETE_E2E_SHOTS, 'critters.png'), Buffer.from(await d.wd.screenshot(), 'base64'));
+  }
+
+  // A click pets it (a heart), and the quick prompt keeps the focus.
+  await d.wd.exec(`document.querySelector('form[aria-label="Start a session"] textarea').focus();`);
+  const focused = `return document.activeElement?.getAttribute('aria-label') ?? null;`;
+  assert.equal(await d.wd.exec(focused), 'Prompt');
+  const p = await k('return k.point(arguments[0]);', id);
+  assert.ok(p, 'a drawn pixel to click');
+  await mouse(d, [moveTo(p), press(0), lift(0)]);
+  await d.waitFor('a heart over the kiwi', () => k(`return k.particles().includes('icon:heart');`));
+  assert.equal(await d.wd.exec(focused), 'Prompt', 'a click on a critter takes no focus');
+
+  // A right-click opens the critter menu, every row in it.
+  await mouse(d, [moveTo(await k('return k.point(arguments[0]);', id)), press(2), lift(2)]);
+  await d.el('[role="menu"] [role="menuitem"]', 'Feed');
+  const rows = await d.wd.exec(`return [...document.querySelectorAll('[role="menu"] [role="menuitem"]')].map((e) => e.innerText.trim());`);
+  for (const r of ['Pet', 'Feed', 'Name', 'Shoo', 'Hide critters until tomorrow', 'Critter log', 'Critter settings']) {
+    assert.ok(rows.some((x) => x.startsWith(r)), `the menu has ${r}: ${rows.join(', ')}`);
+  }
+  await d.press(Key.Escape);
+  await d.waitFor('the menu closed', async () => !(await d.wd.exec(`return !!document.querySelector('[role="menu"]');`)));
+
+  // The visit and the pet reach the collection log.
+  const log = () => {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(d.dataDir, 'critters.json'), 'utf8'));
+    } catch {
+      return null;
+    }
+  };
+  await d.waitFor('critters.json counts the kiwi', () => log()?.species?.kiwi?.seen >= 1 && log().species.kiwi.pets >= 1);
+
+  // A drag picks it up; letting go drops it, and it lands on its feet.
+  const q = await k('return k.point(arguments[0]);', id);
+  await mouse(d, [moveTo(q), press(0), moveTo(q, 6, -6), moveTo(q, 20, -30), moveTo(q, 40, -60)], true);
+  await d.waitFor('the kiwi held', async () => (await k(kiwi, id))?.mode === 'held');
+  await mouse(d, [lift(0)]);
+  assert.notEqual((await k(kiwi, id))?.mode, 'held', 'let go');
+  await d.waitFor('the kiwi landed', async () => {
+    await k('k.step(0.25);');
+    return (await k(kiwi, id))?.mode === 'brain';
+  });
+  assert.equal(await d.wd.exec(focused), 'Prompt', 'a drag takes no focus either');
+
+  // Nobody on screen: no animation frames, one timer to the next visitor.
+  await k('k.clear(); k.ignoreFocus(true); k.freeze(false);');
+  const before = await k('return k.stats();');
+  await new Promise((r) => setTimeout(r, 1500));
+  const after = await k('return k.stats();');
+  assert.equal(after.active, false);
+  assert.equal(after.frames, before.frames, 'no frames while nobody is on screen');
+  assert.ok(after.wake > 0, 'a timer for the next visitor');
+  assert.equal(after.boxes, 0, 'no hit boxes');
+
+  // Off with the verb; the Konami code, outside a text field, turns them on.
+  await d.press('k', Key.Control);
+  await d.type('[aria-label="Command palette"] input', 'critters');
+  await d.click('[role="listbox"] [role="option"]', 'Turn critters off');
+  await d.waitFor('critters off in config.json', () => !on());
+  await d.wd.exec('document.activeElement?.blur();');
+  for (const key of [ARROW.up, ARROW.up, ARROW.down, ARROW.down, ARROW.left, ARROW.right, ARROW.left, ARROW.right, 'b', 'a']) await d.press(key);
+  await d.waitFor('critters on again', on);
 });
