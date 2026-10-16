@@ -23,6 +23,8 @@
   import Presets from './Presets.svelte';
   import Profiles from './Profiles.svelte';
   import { exportSettings, importSettings } from './io';
+  import { critters, loadCritters } from '../critters/state.svelte';
+  import { openCritterLog } from '../critters/sheet.svelte';
 
   /** Tabs the window draws itself, after the schema's: their data is not
    *  settings rows but lists (agent_presets.json, config.json profiles). */
@@ -104,6 +106,11 @@
       refreshLaunchables();
     if (t.scope === 'project' && t.field === 'run_command') refreshRunCommands();
     if (t.scope === 'global' && t.key === 'show_tips' && typeof value === 'boolean') setShowTips(value);
+    // The overlay follows its rows at once (Animations is the terminal app's).
+    if (t.scope === 'global' && t.key.startsWith('critters')) {
+      if (t.key === 'critters' && typeof value === 'boolean') critters.prefs = { ...critters.prefs, on: value };
+      loadCritters();
+    }
   }
 
   async function write(row: SettingRow, value: boolean | string, el?: HTMLInputElement) {
@@ -379,6 +386,24 @@
                     <div class="flex justify-end">{@render control(row)}</div>
                   </li>
                 {/each}
+                {#if g.title === 'Critters' && tab?.id === 'appearance'}
+                  <!-- Not a setting: the visitors so far, from critters.json. -->
+                  <li class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-6 border-b border-rule px-6 py-3">
+                    <div class="min-w-0">
+                      <span class="text-[14px] font-medium text-ink">Critter log</span>
+                      <p class="m-0 mt-0.5 max-w-[68ch] text-[13px] leading-snug text-muted">
+                        Every species that has visited, with pets and names; silhouettes for the ones still to come. Kept on this machine only.
+                      </p>
+                    </div>
+                    <div class="flex justify-end">
+                      <button
+                        class="h-7 flex-none border border-rule bg-transparent px-2.5 text-[13px] whitespace-nowrap text-ink hover:border-rule-strong"
+                        title="Open the critter log"
+                        onclick={() => openCritterLog()}>Open&hellip;</button
+                      >
+                    </div>
+                  </li>
+                {/if}
               </ul>
               {#if tabId === 'desktop' && g.title === 'Editors'}<EditorInstalls />{/if}
             </section>

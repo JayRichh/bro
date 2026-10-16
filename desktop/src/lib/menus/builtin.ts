@@ -16,6 +16,7 @@ import { fieldItems, selectionItems, terminalItems, viewerItems, type FieldState
 import { installMenuRouter, setBuilder, setRowBuilder, type Opened } from './router';
 import { joinPath, terminalAt, viewerAt } from './surfaces';
 import { lineEditor, openLine } from '../editors/verbs';
+import { critterOpened } from '../critters/state.svelte';
 
 type Field = HTMLInputElement | HTMLTextAreaElement | HTMLElement;
 
@@ -183,6 +184,11 @@ setBuilder('viewer', (hit, at): Opened | null => {
   );
   return { items, label: 'Viewer', keep: true };
 });
+
+// A critter's hit box (`critter:<id>`, critters/engine.ts): its menu, any
+// drag let go first. A right-click on it while another menu is up reopens
+// here, as everywhere.
+setRowBuilder('critter', (id) => critterOpened(Number(id)));
 
 // The registry's rows: the same menu as the row's Menu key (Shift+F10),
 // named for the row. A worktree's, and the window's other targets (pull

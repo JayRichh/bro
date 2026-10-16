@@ -58,6 +58,7 @@
   class="relative flex h-9 flex-none items-center gap-1.5 overflow-hidden border-t border-rule bg-bg px-3"
   bind:clientWidth={barW}
   data-verb-bar
+  data-critter-floor
   role="toolbar"
   aria-label="Verbs for {what}"
 >

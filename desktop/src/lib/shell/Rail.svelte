@@ -14,6 +14,7 @@
   import { drag, dropProject, endDrag, leftFor, moveOnto, offsetIn, rootOf, startDrag } from '../reorder.svelte';
   import { dropZone, type Zone } from '../order';
   import { withKey, type ShortcutId } from '../shortcuts';
+  import { discover } from '../critters/state.svelte';
 
   /** Icons only, for a narrow window: the repos as their initials. */
   let { compact = false }: { compact?: boolean } = $props();
@@ -97,6 +98,17 @@
   }
   const THEME_WORD: Record<ThemePref, string> = { system: 'System', light: 'Light', dark: 'Dark' };
 
+  // The critters' secret: five quick clicks on the kete mark, and a kiwi
+  // climbs out of the basket (and the critters turn on).
+  let markClicks: number[] = [];
+  function markClick(e: MouseEvent) {
+    const now = Date.now();
+    markClicks = [...markClicks.filter((t) => now - t < 2500), now];
+    if (markClicks.length < 5) return;
+    markClicks = [];
+    discover('mark', (e.currentTarget as Element).getBoundingClientRect());
+  }
+
   const item =
     'flex w-full min-w-0 items-center gap-2 border-0 px-4 py-1.5 text-left text-[14px] hover:bg-surface focus-visible:-outline-offset-2';
   const heading = 'px-4 pt-5 pb-1.5 text-[12px] font-medium text-muted';
@@ -121,7 +133,8 @@
 <aside class="flex min-h-0 flex-col border-r border-rule bg-bg">
   {#if compact}
     <div class="flex h-10 flex-none items-center justify-center border-b border-rule" title={app.model.connected ? `kete: daemon pid ${app.model.daemon_pid}` : 'kete: not connected to the daemon'}>
-      <svg class="flex-none text-ink" width="20" height="20" viewBox="0 0 64 64" aria-hidden="true">
+      <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+      <svg class="flex-none text-ink" width="20" height="20" viewBox="0 0 64 64" aria-hidden="true" onclick={markClick}>
         <path d="M11 31h42l-6.5 26h-29z" fill="currentColor" />
         <path d="M21 31V22a11 11 0 0 1 22 0a5.5 5.5 0 0 1 -11 0" fill="none" stroke="currentColor" stroke-width="6" />
         <circle class={app.model.connected ? 'fill-ember' : 'fill-fail'} cx="32" cy="22" r="3.2" />
@@ -234,7 +247,8 @@
     </div>
   {:else}
   <div class="flex h-10 flex-none items-center gap-2 border-b border-rule px-4">
-    <svg class="flex-none text-ink" width="20" height="20" viewBox="0 0 64 64" aria-hidden="true">
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+    <svg class="flex-none text-ink" width="20" height="20" viewBox="0 0 64 64" aria-hidden="true" onclick={markClick}>
       <path d="M11 31h42l-6.5 26h-29z" fill="currentColor" />
       <path d="M21 31V22a11 11 0 0 1 22 0a5.5 5.5 0 0 1 -11 0" fill="none" stroke="currentColor" stroke-width="6" />
       <circle class="fill-ember" cx="32" cy="22" r="3.2" />

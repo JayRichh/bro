@@ -1967,6 +1967,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "kete-critters"
+version = "0.53.1"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "kete-desktop"
 version = "0.53.1"
 dependencies = [
@@ -1974,6 +1981,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "kete-ado",
+ "kete-critters",
  "nebula-config",
  "nebula-core",
  "serde",

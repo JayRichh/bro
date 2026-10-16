@@ -101,6 +101,7 @@
       ? 'outline-2 -outline-offset-2 outline-ember'
       : ''}"
     use:ownMenu={bandMenu}
+    data-perch
     ondragenter={dragOver}
     ondragover={dragOver}
     ondragleave={(e) => leftFor(e) && (over = null)}

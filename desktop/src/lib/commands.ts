@@ -57,6 +57,8 @@ import { inScope, isEverything, scopedRepo, scopedWorktree } from './scope';
 import { leafItems } from './menus/model';
 import { insertRows, layout } from './menus/layout';
 import { exportSettings, importSettings } from './settings/io';
+import { bringBack, critters, hiddenNow, hideUntilTomorrow, toggleCritters } from './critters/state.svelte';
+import { openCritterLog } from './critters/sheet.svelte';
 
 /** F10: the orchestrator, or the Start form when there is none. */
 function orchestratorKey() {
@@ -257,34 +259,6 @@ function scopedSessions() {
   return app.model.agents.filter((a) => !a.archived && inScope(app.model, a.id));
 }
 
-/** The shared critters setting (config.json `critters`, which the terminal
- *  app's critters follow), as the window last read or wrote it: null until
- *  read. The desktop's own critters (lane/critters-desk) take this row over
- *  with their state once they land. */
-let crittersOn: boolean | null = null;
-
-async function readCritters(): Promise<boolean> {
-  const schema = await api.settingsSchema();
-  const row = schema.tabs
-    .flatMap((t) => t.groups.flatMap((g) => g.rows))
-    .find((r) => r.target.scope === 'global' && r.target.key === 'critters');
-  crittersOn = row?.value === true;
-  return crittersOn;
-}
-
-/** Critters on or off: the shared setting flipped, as the terminal app's
- *  verb flips it (read fresh, so a change made elsewhere is not undone). */
-async function toggleCritters() {
-  try {
-    const on = !(await readCritters());
-    await api.settingsSet({ scope: 'global', key: 'critters' }, on);
-    crittersOn = on;
-    toast(on ? 'Critters on: they wander through the terminal app.' : 'Critters off.');
-  } catch (e) {
-    toast(String(e));
-  }
-}
-
 /** The background's menu (\u00a75.15): the window's own verbs, for a
  *  right-click on empty space and `?` with nothing selected. View \u25b8 ticks
  *  the home in use and the archived sessions shown; Mark all seen and
@@ -303,10 +277,9 @@ export function backgroundMenu(): MenuEntry[] {
     wake_schedule: { run: openWakeView, checked: view === 'whakaoho', radio: true },
     toggle_archived: { run: toggleArchived, checked: app.showArchived },
     settings: { run: () => openSettings() },
-    // Ticked once the setting is read; this open reads it for the next.
-    critters: { run: toggleCritters, ...(crittersOn === null ? {} : { checked: crittersOn }) },
+    // The critters' own toggle (the shared `critters` setting), ticked while on.
+    critters: { run: () => void toggleCritters(), checked: critters.prefs.on },
   };
-  void readCritters().catch(() => {});
   const where = isEverything(app.model.scope) ? 'across every repo' : 'in the scope';
   if (scopedSessions().some((a) => a.unseen)) t.mark_seen = { run: () => markAllSeen(scopedSessions()) };
   if (scopedSessions().some(isDone)) t.archive_done = { run: () => archiveDone(scopedSessions, where) };
@@ -441,6 +414,22 @@ export function diffAgainstCommand(
   return [cmd('diff-against', label, 'Window', () => (app.diffAgainst = toBase ? 'base' : 'head'), undefined, 'merge-base base head against branch committed')];
 }
 
+/** The `critters` verb (on or off, the one shared setting), and while
+ *  they're on, the way to hide them for the day (or bring them back) and
+ *  the log: the critter menu's rows for the keyboard. */
+function critterCommands(cmd: (id: string, label: string, group: string, run: () => unknown, key?: ShortcutId, words?: string) => Command): Command[] {
+  const words = 'critters easter egg pixel visitors animals';
+  const out = [cmd('critters', critters.prefs.on ? 'Turn critters off' : 'Turn critters on', 'Window', toggleCritters, undefined, words)];
+  if (!critters.prefs.on) return out;
+  out.push(
+    hiddenNow()
+      ? cmd('critters-back', 'Bring the critters back today', 'Window', bringBack, undefined, words)
+      : cmd('critters-hide', 'Hide critters until tomorrow', 'Window', hideUntilTomorrow, undefined, words),
+    cmd('critter-log', 'Critter log\u2026', 'Window', openCritterLog, undefined, `${words} collection log seen`),
+  );
+  return out;
+}
+
 /** Everything the palette offers besides jumping: the window's actions,
  *  then the shown session's own verbs. */
 export function paletteCommands(): Command[] {
@@ -493,6 +482,7 @@ export function paletteCommands(): Command[] {
     cmd('help', 'Keyboard shortcuts', 'Window', () => (ui.help = true), 'help_f1', 'help keys'),
     cmd('whats-new', "What's new", 'Window', () => (learn.whatsNew = true), 'whats_new', 'changes release notes changelog keys moved'),
     cmd('add-repo', 'Add a repo\u2026', 'Window', () => addRepo(), undefined, 'project folder'),
+    ...critterCommands(cmd),
     ...orchestratorCommands(),
     // With a repo in view these come from its menu, below.
     ...(currentRepo()

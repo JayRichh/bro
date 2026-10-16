@@ -255,8 +255,14 @@
         ondrop={(e) => dropOn(e, lane.id)}
       >
         <!-- Its right-click: the lane's own verb (open the next, mark all
-             seen, archive the done ones), menus/rows.ts laneItems. -->
-        <header class="flex h-10 flex-none items-center gap-2 border-b border-rule-strong px-4" data-target="lane:{lane.id}" title="{lane.title}: right-click for the lane's actions">
+             seen, archive the done ones), menus/rows.ts laneItems. Critters
+             perch on its strong rule. -->
+        <header
+          class="flex h-10 flex-none items-center gap-2 border-b border-rule-strong px-4"
+          data-target="lane:{lane.id}"
+          data-perch="bottom"
+          title="{lane.title}: right-click for the lane's actions"
+        >
           <h2 class="m-0 text-[15px] font-semibold {lane.id === 'needs' && cards.length ? 'text-ember-ink' : 'text-ink'}">{lane.title}</h2>
           <span class="ml-auto font-mono text-[12px] font-bold {cards.length ? 'text-ink' : 'text-muted'}">{cards.length}</span>
         </header>

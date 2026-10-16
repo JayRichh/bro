@@ -1106,12 +1106,23 @@ fn load_log(c: &mut Critters) {
 }
 
 /// Changes the log: read the file fresh, apply, write it back, so what
-/// the other app wrote meanwhile isn't lost.
+/// the other app wrote meanwhile isn't lost. All of it under the lock the
+/// desktop's `critters_log_update` takes (desktop/src-tauri/src/critters.rs),
+/// written the same way, so neither app reads the other's old counts. A
+/// lock that can't be had (a stale one, a read-only dir) doesn't stop a
+/// tally.
 fn update_log(c: &mut Critters, change: impl FnOnce(&mut CritterLog)) {
+    let path = log_path();
+    let _lock = nebula_core::settings::lock(&path).ok();
     load_log(c);
     change(&mut c.log);
-    let path = log_path();
-    if let Err(err) = crate::pr_cache::write_json_atomic(&path, &c.log) {
+    let written = serde_json::to_vec_pretty(&c.log)
+        .map_err(|e| e.to_string())
+        .and_then(|mut bytes| {
+            bytes.push(b'\n');
+            nebula_core::settings::write_atomic(&path, &bytes).map_err(|e| e.to_string())
+        });
+    if let Err(err) = written {
         tracing::warn!("failed to save {}: {err}", path.display());
     }
 }
@@ -1188,6 +1199,37 @@ mod tests {
     use super::*;
 
     const R: Rgb = (200, 40, 40);
+
+    /// A change waits for the lock the desktop holds while it folds its
+    /// notes in, then lands, and leaves no lock behind.
+    #[test]
+    fn the_log_is_changed_under_the_desktops_lock() {
+        use std::time::{Duration, Instant};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("critters.json");
+        with_log_path(path.clone(), || {
+            let held = nebula_core::settings::lock(&path).unwrap();
+            let release = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(300));
+                drop(held);
+            });
+            let mut c = Critters::default();
+            let at = Instant::now();
+            update_log(&mut c, |log| log.hidden_on = Some("2026-10-16".into()));
+            assert!(
+                at.elapsed() >= Duration::from_millis(250),
+                "it waited for the lock"
+            );
+            release.join().unwrap();
+            let read: CritterLog =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            assert_eq!(read.hidden_on.as_deref(), Some("2026-10-16"));
+            assert!(
+                !dir.path().join("critters.json.lock").exists(),
+                "no lock left behind"
+            );
+        });
+    }
 
     #[test]
     fn colors_fall_back_to_the_256_cube() {
