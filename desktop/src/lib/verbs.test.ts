@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { barVerbs, filterRows, menuIds, menuLabel, topVerbs, verbKeys, wordOf } from './verbs';
+import { barVerbs, filterRows, groupOf, menuIds, menuLabel, sectionOf, topVerbs, verbKeys, wordOf } from './verbs';
+import { MENU_SECTION_ORDER, MENUS, type AppliesTo } from './actions.gen';
 import type { Shortcut } from './shortcuts';
 import { fuzzyMatch } from './fuzzy';
 
@@ -19,11 +20,33 @@ describe('the registry words', () => {
     const session = menuIds('session');
     expect(session[0]).toBe('activate');
     expect(session.slice(-1)).toEqual(['delete']);
-    expect(menuIds('terminal')).toEqual(['activate', 'rename', 'delete']);
-    expect(menuIds('account')).toEqual(['wake_account']);
+    expect(menuIds('terminal')).toEqual(['activate', 'copy_path', 'rename', 'delete']);
+    expect(menuIds('account')).toEqual(['scope_account', 'accounts', 'wake_account', 'wake_schedule']);
     expect(menuIds('folder')).toEqual(['open_in_vscode', 'reveal_in_explorer', 'copy_path', 'copy_relative_path']);
     expect(menuIds('file')[0]).toBe('open_file_in_kete');
-    expect(menuLabel('open_in_vscode', 'worktree')).toBe('VS Code');
+    // A row alone says the whole thing; in its submenu, the short word.
+    expect(menuLabel('open_in_vscode', 'worktree')).toBe('Open in VS Code');
+    expect(menuLabel('mark_seen', 'repo')).toBe('Mark all seen');
+  });
+
+  it('reads the sections and submenus the way the terminal app does', () => {
+    expect(sectionOf('activate', 'session')).toBe('act');
+    expect(sectionOf('delete', 'session')).toBe('away');
+    // The kind's own section first.
+    expect(sectionOf('wake_schedule', 'account')).toBe('change');
+    expect(sectionOf('wake_schedule', 'global')).toBe('go');
+    const vs = groupOf('open_in_vscode', 'worktree');
+    expect([vs?.group.title, vs?.label]).toEqual(['Open in', 'VS Code']);
+    // A file's menu never folds.
+    expect(groupOf('open_in_vscode', 'file')).toBeUndefined();
+    expect(groupOf('open_repo', 'repo')?.group.id).toBe('remote');
+    expect(groupOf('open_repo', 'worktree')).toBeUndefined();
+    // Every menu runs through the sections in order.
+    const order = MENU_SECTION_ORDER;
+    for (const [kind, ids] of Object.entries(MENUS)) {
+      const at = (ids ?? []).map((id) => order.indexOf(sectionOf(id, kind as AppliesTo)!));
+      expect(at.every((s, i) => s >= 0 && (i === 0 || s >= at[i - 1])), kind).toBe(true);
+    }
   });
 });
 

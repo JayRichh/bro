@@ -766,12 +766,18 @@ fn the_new_verbs_have_rows_and_say_they_are_coming() {
             .position(|x| *x == l)
             .unwrap_or_else(|| panic!("{l}: {labels:?}"))
     };
-    assert!(pos("Follow-up prompt\u{2026}") < pos("VS Code"));
-    assert!(pos("VS Code") < pos("Visual Studio"));
-    assert!(pos("Copy branch") < pos("Restart agent"));
+    assert!(pos("Follow-up prompt\u{2026}") < pos("Open in VS Code"));
+    assert!(pos("Open in VS Code") < pos("Open in Visual Studio"));
+    assert!(pos("Copy branch name") < pos("Restart agent"));
     assert_eq!(labels.iter().filter(|l| **l == "Copy path").count(), 1);
     let mut out = Vec::new();
-    for action in [Action::OpenInVscode, Action::CopyPath, Action::Critters] {
+    for action in [
+        Action::OpenInVscode,
+        Action::CopyPath,
+        Action::Critters,
+        Action::MarkSeen,
+        Action::ArchiveDone,
+    ] {
         app.chrome.flash = None;
         run_action(&mut app, action, &mut out);
         let label = crate::keymap::spec_of(action).unwrap().label;
@@ -781,4 +787,78 @@ fn the_new_verbs_have_rows_and_say_they_are_coming() {
         );
     }
     assert!(out.is_empty(), "nothing sent: {out:?}");
+}
+
+/// The menu matrix's rows show only where they can act: Mark seen on an
+/// unread card, a pull request's rows with one, the dev server while it
+/// listens, a repo's remote lists by host, Archive done with a finished
+/// session already read.
+#[test]
+fn the_matrix_rows_follow_their_state() {
+    let mut app = bench();
+    let a1 = AgentId("a1".into());
+    let rows = app.visible_session_rows();
+    app.nav.sel_session = rows
+        .iter()
+        .position(|r| r.sref() == Some(SessionRef::Agent(a1.clone())))
+        .unwrap();
+    let labels = |app: &App, t: &Target| -> Vec<String> {
+        verbs::menu_for(app, t)
+            .into_iter()
+            .map(|i| i.label)
+            .collect()
+    };
+    let has = |app: &App, t: &Target, l: &str| labels(app, t).iter().any(|x| x == l);
+    let card = Target::Session(a1.clone());
+    let root = Target::Worktree(WorktreeId("w1".into()));
+    let repo = Target::Repo(ProjectId("p1".into()));
+
+    // Read: no Mark seen; unread: the card's, its checkout's, its repo's.
+    let set = |app: &mut App, unseen: bool| {
+        for a in app.tree.agents.iter_mut().filter(|a| a.id == a1) {
+            a.status = nebula_core::AgentStatus::Finished;
+            a.unseen = unseen;
+        }
+    };
+    set(&mut app, false);
+    assert!(!has(&app, &card, "Mark seen"));
+    assert!(!has(&app, &root, "Mark all seen"));
+    assert!(
+        has(&app, &root, "Archive done sessions\u{2026}"),
+        "{:?}",
+        labels(&app, &root)
+    );
+    set(&mut app, true);
+    assert!(has(&app, &card, "Mark seen"));
+    assert!(has(&app, &root, "Mark all seen"));
+    assert!(has(&app, &repo, "Mark all seen"));
+
+    // No pull request on the checkout: no link to copy, nothing to
+    // comment on, no Open pull request in its menu.
+    for t in [&card, &root] {
+        assert!(!has(&app, t, "Copy pull request link"), "{t:?}");
+        assert!(!has(&app, t, "Comment on pull request\u{2026}"), "{t:?}");
+    }
+    assert!(!has(&app, &root, "Open pull request"));
+
+    // The dev server only while something listens.
+    assert!(!has(&app, &card, "Open localhost in a browser"));
+    app.tree.ports.insert(
+        WorktreeId("w1".into()),
+        nebula_core::ports::WorktreePorts {
+            worktree: WorktreeId("w1".into()),
+            block: None,
+            live: vec![5173],
+        },
+    );
+    assert!(has(&app, &card, "Open localhost in a browser"));
+    assert!(has(&app, &root, "Open localhost in a browser"));
+
+    // A repo's lists by host.
+    app.desk.ado_remote.insert(ProjectId("p1".into()), false);
+    assert!(!has(&app, &repo, "Azure DevOps"));
+    assert!(has(&app, &repo, "GitHub pull requests"));
+    app.desk.ado_remote.insert(ProjectId("p1".into()), true);
+    assert!(has(&app, &repo, "Azure DevOps"));
+    assert!(!has(&app, &repo, "GitHub issues"));
 }
