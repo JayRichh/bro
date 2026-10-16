@@ -140,7 +140,8 @@ export function watchGit(): () => void {
     }, POLL_MS);
     stopTurns = watchTurns();
   }
-  refreshGit(shownIds());
+  // A turn may have ended while this view was unmounted; bypass the read gap.
+  refreshGit(shownIds(), true);
   return () => {
     watchers -= 1;
     if (watchers === 0) {
