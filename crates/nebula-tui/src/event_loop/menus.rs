@@ -1197,7 +1197,7 @@ fn ado_branch_items(
         }
     }
     items.extend(copies(&[("Name", b.name.clone())]));
-    if let Some(url) = branch_page(app, project, &b.name) {
+    if let Some(url) = branch_page(view, &b.name) {
         items.push(MenuItem::new(
             "Open in Azure DevOps",
             MenuAction::OpenLink(url),
@@ -1206,16 +1206,18 @@ fn ado_branch_items(
     items
 }
 
-/// A branch's page on Azure DevOps (`…/_git/<repo>?version=GB<name>`), read
-/// off the project's remote — the same one the overlay was opened on.
-fn branch_page(app: &App, project: &ProjectId, name: &str) -> Option<String> {
-    let repo = app.tree.projects.iter().find(|p| &p.id == project)?;
-    let remote = crate::ado::remote_url(&repo.repo_path)?;
-    let ado = kete_ado::remote::parse_remote(&remote)?;
-    Some(format!(
-        "{}/{}/_git/{}?version=GB{}",
-        ado.org_url, ado.project, ado.repo, name
-    ))
+/// A branch's page on Azure DevOps (`…/_git/<repo>?version=GB<name>`),
+/// read off a pull request of the same repo the overlay has loaded — a
+/// menu never runs `git` on the loop to find the remote. None until the
+/// pull requests are in.
+fn branch_page(view: &crate::ado::AdoView, name: &str) -> Option<String> {
+    let crate::ado::Load::Ready(prs) = &view.prs else {
+        return None;
+    };
+    let repo = prs
+        .iter()
+        .find_map(|p| p.url.split_once("/pullrequest/").map(|(repo, _)| repo))?;
+    Some(format!("{repo}?version=GB{name}"))
 }
 
 // ---- the pull requests' and the issues' modals ----

@@ -1193,3 +1193,65 @@ fn a_stopped_sessions_menu_says_why_and_leads_with_its_login() {
     assert_eq!(first.label, format!("Log in to {name}\u{2026}"));
     assert_eq!(first.action, MenuAction::LogIn(account));
 }
+
+/// An Azure DevOps branch's menu: the worktree it is checked out in, its
+/// name, its pull request, and its page, built from a pull request the
+/// overlay already read (no `git` on the loop).
+#[test]
+fn an_azure_devops_branch_reaches_its_worktree_and_its_page() {
+    use crate::ado::{AdoBranch, AdoPr, AdoTab, AdoView, Load};
+    let mut app = bench();
+    app.modals.overlay = Some(Overlay::Ado(AdoView {
+        project: Some(ProjectId("p1".into())),
+        tab: AdoTab::Branches,
+        prs: Load::Ready(vec![AdoPr {
+            id: 7,
+            title: "Polish".into(),
+            source: "refs/heads/feat".into(),
+            target: "refs/heads/main".into(),
+            is_draft: false,
+            created_by: "someone".into(),
+            url: "https://dev.azure.com/o/p/_git/r/pullrequest/7".into(),
+            mine: true,
+        }]),
+        branches: Load::Ready(vec![AdoBranch {
+            name: "feat".into(),
+            local: true,
+            remote: None,
+        }]),
+        ..AdoView::default()
+    }));
+    let mut out = Vec::new();
+    handle_overlay_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+        &mut out,
+    );
+    let Some(Overlay::Menu(menu)) = &app.modals.overlay else {
+        panic!("no menu over Azure DevOps: {:?}", app.modals.overlay);
+    };
+    assert_eq!(menu.title.as_deref(), Some("branch feat"));
+    let row = |label: &str| {
+        menu.items
+            .iter()
+            .find(|i| i.label == label)
+            .unwrap_or_else(|| panic!("{label}: {:?}", menu.items))
+            .action
+            .clone()
+    };
+    assert_eq!(
+        row("Go to worktree feat"),
+        MenuAction::Jump(crate::palette::PaletteTarget::Worktree(WorktreeId(
+            "w2".into()
+        )))
+    );
+    assert_eq!(row("Copy name"), MenuAction::Copy("feat".into()));
+    assert_eq!(
+        row("Open pull request !7"),
+        MenuAction::OpenLink("https://dev.azure.com/o/p/_git/r/pullrequest/7".into())
+    );
+    assert_eq!(
+        row("Open in Azure DevOps"),
+        MenuAction::OpenLink("https://dev.azure.com/o/p/_git/r?version=GBfeat".into())
+    );
+}
