@@ -21,7 +21,8 @@
 //! there wherever a paste goes (bracketed into a pane that asked for it,
 //! into an overlay's field, nowhere near the grid's hotkeys). Anything
 //! shorter is replayed key for key, exactly as it arrived. A lone key —
-//! everything typed — is never held at all.
+//! everything typed — is never held at all, but in the [`TAIL`] of a big
+//! paste, where it waits [`QUIET`] to show whether it is the paste's.
 //!
 //! A burst is read as fast as the host hands it over: the Windows console's
 //! text keys in bulk (HOST INPUT, host_input.rs), tens of thousands of
@@ -78,6 +79,14 @@ pub(super) fn draw_at(
     }
 }
 
+/// How long after a big paste settles its TAIL may still come: the rest
+/// of a paste the host paused in (a busy console, a slow machine — seen
+/// as the closing line break arriving on its own, which typed would
+/// submit). Text keys pressed and released together in this time are the
+/// paste's, even one. A typed key comes up a keystroke after it went
+/// down, so an Enter typed in this time still goes through as the key.
+const TAIL: Duration = Duration::from_millis(1000);
+
 /// More characters than this in one burst is a paste even on one line:
 /// a slow frame can queue a few typed keys, never this many.
 const MIN_PASTE_CHARS: usize = 16;
@@ -90,6 +99,11 @@ pub(crate) struct PasteBurst {
     last: Option<Instant>,
     /// The text the held presses type, in bytes: the status bar's count.
     bytes: usize,
+    /// Until when keys may still be a big paste's [`TAIL`].
+    tail_until: Option<Instant>,
+    /// The held keys began inside a [`TAIL`]: any text they spell is
+    /// pasted, however short.
+    in_tail: bool,
 }
 
 impl PasteBurst {
@@ -111,9 +125,13 @@ impl PasteBurst {
     /// and return what is to be handled now, in order. A batch with no
     /// burst in it (one key: anything typed) comes straight back.
     pub(super) fn feed(&mut self, batch: Vec<Event>, now: Instant) -> Vec<Event> {
-        let starts = batch.iter().filter(|e| is_text_press(e)).count() >= 2;
-        if self.held.is_empty() && !starts {
-            return batch;
+        let presses = batch.iter().filter(|e| is_text_press(e)).count();
+        let in_tail = presses >= 1 && self.tail_until.is_some_and(|until| now < until);
+        if self.held.is_empty() {
+            if presses < 2 && !in_tail {
+                return batch;
+            }
+            self.in_tail = in_tail;
         }
         let mut out = Vec::new();
         for event in batch {
@@ -132,18 +150,26 @@ impl PasteBurst {
 
     /// Settle the burst: one paste, or its keys as they came.
     pub(super) fn settle(&mut self) -> Vec<Event> {
-        self.last = None;
+        let last = self.last.take();
+        let big = self.bytes >= SHOW_BYTES;
         self.bytes = 0;
+        let in_tail = std::mem::take(&mut self.in_tail);
         let held = std::mem::take(&mut self.held);
-        match pasted_text(&held) {
-            Some(text) => vec![Event::Paste(text)],
+        match pasted_text(&held, in_tail) {
+            Some(text) => {
+                if big {
+                    self.tail_until = last.map(|last| last + QUIET + TAIL);
+                }
+                vec![Event::Paste(text)]
+            }
             None => held,
         }
     }
 }
 
-/// The text a burst spells, when it reads as a paste.
-fn pasted_text(held: &[Event]) -> Option<String> {
+/// The text a burst spells, when it reads as a paste. In a big paste's
+/// [`TAIL`], any text pressed and released together does.
+fn pasted_text(held: &[Event], in_tail: bool) -> Option<String> {
     let mut text = String::new();
     let mut chars = 0;
     let mut releases = 0;
@@ -173,7 +199,12 @@ fn pasted_text(held: &[Event]) -> Option<String> {
     // are presses with one release at the end: `j` held through a slow
     // frame is navigation, never a paste the grid would drop.
     let paired = releases * 2 >= chars;
-    (paired && chars >= 2 && (line_break || chars > MIN_PASTE_CHARS)).then_some(text)
+    let pasted = if in_tail {
+        chars >= 1 && releases >= chars
+    } else {
+        chars >= 2 && (line_break || chars > MIN_PASTE_CHARS)
+    };
+    (paired && pasted).then_some(text)
 }
 
 /// The bytes a held key adds to the text: a press's character, nothing
@@ -373,6 +404,60 @@ mod tests {
             .collect();
         assert!(burst.feed(repeats.clone(), Instant::now()).is_empty());
         assert_eq!(burst.settle(), repeats);
+    }
+
+    /// A paste the host hands over with a pause in it longer than
+    /// [`QUIET`] settles in two. The tail that comes after the pause —
+    /// often just the closing line break — is still the paste's: it must
+    /// never reach the pane as a typed Enter, which would submit.
+    #[test]
+    fn a_tail_after_a_pause_stays_pasted() {
+        let mut burst = PasteBurst::default();
+        let t0 = Instant::now();
+        let head: String = (0..200).map(|i| format!("line {i}\n")).collect();
+        assert!(burst.feed(typed(&head), t0).is_empty());
+        assert_eq!(burst.settle(), vec![Event::Paste(head)]);
+        let later = t0 + QUIET + Duration::from_millis(400);
+        for tail in ["\r", "x\r", "\r\n"] {
+            let mut out = burst.feed(typed(tail), later);
+            out.extend(burst.settle());
+            assert_eq!(out, vec![Event::Paste(tail.into())], "{tail:?}");
+        }
+    }
+
+    /// An Enter typed straight after a big paste goes down a keystroke
+    /// before it comes up: the key, not the paste's tail.
+    #[test]
+    fn an_enter_typed_after_a_paste_submits() {
+        let mut burst = PasteBurst::default();
+        let t0 = Instant::now();
+        let head: String = (0..200).map(|i| format!("line {i}\n")).collect();
+        burst.feed(typed(&head), t0);
+        burst.settle();
+        let press = typed("\r")[..1].to_vec();
+        let mut out = burst.feed(press.clone(), t0 + Duration::from_millis(300));
+        out.extend(burst.settle());
+        assert_eq!(out, press, "inside the tail");
+        let enter = typed("\r");
+        assert_eq!(
+            burst.feed(enter.clone(), t0 + Duration::from_secs(3)),
+            enter,
+            "after it"
+        );
+    }
+
+    /// A small paste arms no tail: an Enter right after it is the key.
+    #[test]
+    fn a_small_paste_has_no_tail() {
+        let mut burst = PasteBurst::default();
+        let t0 = Instant::now();
+        burst.feed(typed("one\ntwo\n"), t0);
+        burst.settle();
+        let enter = typed("\r");
+        assert_eq!(
+            burst.feed(enter.clone(), t0 + Duration::from_millis(100)),
+            enter
+        );
     }
 
     /// A lone release (a typed key coming up) is never a burst.
