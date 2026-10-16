@@ -178,6 +178,7 @@ fn every_global_row_takes_each_of_its_values() {
             Control::Toggle => vec![json!(true), json!(false)],
             Control::Choice { options, .. } => options.iter().map(|o| json!(o)).collect(),
             Control::Text { .. } => vec![json!("develop"), json!("")],
+            Control::Font { .. } => vec![json!("Fira Code"), json!("")],
         };
         for value in values {
             let mut cfg = Config::default();
@@ -334,6 +335,88 @@ fn reset_puts_rows_back_and_keeps_what_it_does_not_show() {
     assert_eq!(raw["profiles"][0]["name"], "work");
     assert_eq!(raw["desktop"]["theme"], "system");
     assert_eq!(raw["desktop"]["later"], true);
+}
+
+/// Every row of the window's own tab takes each of the values it offers
+/// (a font row, a family or empty) and reads it back; the Appearance
+/// group holds the theme, the fonts and the sizes, and the Theme row lists
+/// an imported theme by its name.
+#[test]
+fn every_desktop_row_takes_each_of_its_values() {
+    let mut prefs = DesktopPrefs::default();
+    let palette = nebula_config::look::from_vscode(
+        &nebula_config::vscode::ThemeData::default(),
+        false,
+        "Atom One Dark",
+    );
+    prefs.import_theme(palette).unwrap();
+    let (_dir, path, local) = layers();
+    // The import is on disk, so the Theme row's `import:` value is too.
+    nebula_config::desktop::DesktopPrefs::update_in(&path, &local, |p| {
+        *p = prefs.clone();
+        Ok(())
+    })
+    .unwrap();
+    let schema = export(&Config::default(), &prefs, &[]);
+    let desktop = schema.tabs.iter().find(|t| t.id == "desktop").unwrap();
+    let look = desktop
+        .groups
+        .iter()
+        .find(|g| g.title == "Appearance")
+        .expect("an Appearance group");
+    let keys: Vec<&str> = look
+        .rows
+        .iter()
+        .map(|r| match &r.target {
+            Target::Desktop { key } => key.as_str(),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            "theme",
+            "font_ui",
+            "ui_size",
+            "font_mono",
+            "font_term",
+            "term_size",
+            "term_line",
+            "editor_size"
+        ]
+    );
+    let Control::Choice { options, labels } = &look.rows[0].control else {
+        panic!("the theme is a choice");
+    };
+    assert_eq!(
+        options.last().map(String::as_str),
+        Some("import:atom-one-dark")
+    );
+    assert_eq!(labels.last().map(String::as_str), Some("Atom One Dark"));
+    for row in desktop.groups.iter().flat_map(|g| &g.rows) {
+        let Target::Desktop { key } = &row.target else {
+            panic!("the window's tab writes the window's preferences");
+        };
+        let values: Vec<Value> = match &row.control {
+            Control::Choice { options, .. } => options.iter().map(|o| json!(o)).collect(),
+            Control::Font { .. } => vec![json!("Fira Code"), json!("")],
+            other => panic!("{key}: {other:?}"),
+        };
+        for value in values {
+            set_in(&path, &local, &row.target, &value).unwrap_or_else(|e| panic!("{key}: {e}"));
+            assert_eq!(
+                DesktopPrefs::load_at(&path, &local).get(key),
+                value.as_str().unwrap(),
+                "{key}"
+            );
+        }
+    }
+    // The window's Reset leaves the imported themes to pick again.
+    schema::reset_in(&path, &local).unwrap();
+    let after = DesktopPrefs::load_at(&path, &local);
+    assert_eq!(after.theme, "system");
+    assert_eq!(after.term_size, "13");
+    assert!(after.themes.contains_key("atom-one-dark"));
 }
 
 #[test]
