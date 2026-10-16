@@ -688,17 +688,31 @@ function isClaudeAccount(key: string): boolean {
   return harness === undefined || harness === 'claude';
 }
 
-/** What the window can do to an account: Wake up now (Claude accounts;
- *  one already waking says so). */
+/** What the window can do to an account: Wake up now, on a Claude
+ *  account that is signed in and not already waking. One whose window is
+ *  live says until when: a wake then starts nothing new. */
 function accountVerbs(key: string): VerbTable {
   if (!isClaudeAccount(key)) {
     return { wake_account: { run: () => {}, disabled: true, why: 'Wake-up runs Claude accounts only.' } };
   }
+  const row = app.accounts.find((r) => r.key === key);
+  if (row?.login === 'needs_login') {
+    return { wake_account: { run: () => {}, disabled: true, why: `Log in first: ${row.loginHint ?? 'sign it in'}` } };
+  }
+  if (wake.waking[key]) return { wake_account: { run: () => {}, disabled: true, why: 'Waking now: up to two minutes.' } };
+  const live = m().accounts?.[key]?.windows.find((w) => w.kind === 'session' && (w.resets_at ?? 0) * 1000 > Date.now());
   return {
-    wake_account: wake.waking[key]
-      ? { run: () => {}, disabled: true, why: 'Waking now: up to two minutes.' }
-      : { run: () => wakeNowFor(key) },
+    wake_account: {
+      run: () => wakeNowFor(key),
+      ...(live?.resets_at ? { label: `${menuLabel('wake_account', 'account')} (window live until ${clock(live.resets_at)})` } : {}),
+    },
   };
+}
+
+/** `HH:MM` on the local clock for an epoch second. */
+function clock(epoch: number): string {
+  const d = new Date(epoch * 1000);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 /** An account's menu: the registry's rows, then the window's own

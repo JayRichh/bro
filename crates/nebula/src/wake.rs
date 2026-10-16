@@ -299,9 +299,12 @@ fn fire_interactive(
     }
     match rt.block_on(send_wake(c, &account.key)) {
         Ok(report) => report,
+        // Asked, then lost (a timeout, a dropped connection): the daemon
+        // may have sent the prompt already, so this is never a reason to
+        // send another through print mode.
         Err(e) => {
             *conn = None;
-            failed("no_daemon", format!("{e:#}"), before)
+            failed("daemon_lost", format!("{e:#}"), before)
         }
     }
 }
@@ -710,9 +713,10 @@ fn wake(
 }
 
 /// Does an interactive run that ended in `report` go again in print
-/// mode? Only in auto mode, and only when the daemon couldn't run it: one
+/// mode? Only in auto mode, and only when the daemon was never asked: one
 /// older than protocol 61, or none to reach. A turn that ran and failed
-/// (no prompt, a timeout) would fail the same way under `-p`.
+/// (no prompt, a timeout) would fail the same way under `-p`, and one
+/// asked and then lost (`daemon_lost`) may have gone out already.
 fn falls_back(auto: bool, mode: WakeMode, report: &WakeReport) -> bool {
     auto && mode == WakeMode::Interactive
         && matches!(report.reason.as_str(), "old_daemon" | "no_daemon")
@@ -1201,6 +1205,10 @@ mod tests {
             "pinned"
         );
         assert!(!falls_back(true, WakeMode::Interactive, &report("timeout")));
+        assert!(
+            !falls_back(true, WakeMode::Interactive, &report("daemon_lost")),
+            "asked, then lost: it may have gone out already"
+        );
         assert!(!falls_back(
             true,
             WakeMode::Interactive,

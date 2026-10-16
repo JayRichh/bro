@@ -1941,6 +1941,16 @@ mod tests {
                 assert!(flash.contains("Claude accounts only"), "{flash}");
                 let work = at(&app, "work");
                 view_mut(&mut app).cursor = work;
+                // Not signed in yet: the session would sit at Claude's
+                // login until it timed out, so it never starts.
+                view_mut(&mut app).rows[work].login = nebula_core::accounts::LoginState::NeedsLogin;
+                key(&mut app, KeyCode::Char('w'), &mut out);
+                let flash = app.chrome.flash.clone().unwrap_or_default();
+                assert!(
+                    flash.contains("log work in first: kete profile login work"),
+                    "{flash}"
+                );
+                view_mut(&mut app).rows[work].login = nebula_core::accounts::LoginState::LoggedIn;
                 key(&mut app, KeyCode::Char('w'), &mut out);
                 assert_eq!(app.chrome.flash.as_deref(), Some("waking work\u{2026}"));
                 app.chrome.flash = None;

@@ -1096,10 +1096,18 @@ impl AccountsView {
     /// only).
     pub fn wake_target(&self) -> Result<String, String> {
         match self.tab {
-            Tab::Wake => self
-                .wake
-                .selected_key()
-                .ok_or_else(|| "no account to wake yet: the list is still loading".to_string()),
+            Tab::Wake => {
+                let row = self
+                    .wake
+                    .selected()
+                    .ok_or("no account to wake yet: the list is still loading")?;
+                // A session that can't sign in would sit at Claude's login
+                // until the two minutes run out: say so now instead.
+                if !row.logged_in {
+                    return Err(format!("log {} in first: {}", row.account, row.login_hint));
+                }
+                Ok(row.account.clone())
+            }
             Tab::Accounts => {
                 let row = self.selected().ok_or("no account selected")?;
                 if row.harness != "claude" {
@@ -1111,6 +1119,11 @@ impl AccountsView {
                 }
                 if let Some(problem) = &row.problem {
                     return Err(format!("{}: {problem}", row.label()));
+                }
+                if row.login == LoginState::NeedsLogin {
+                    let how = accounts::login_command(row.profile.as_ref(), &row.harness)
+                        .unwrap_or_else(|| "sign it in".into());
+                    return Err(format!("log {} in first: {how}", row.label()));
                 }
                 Ok(row.key.clone())
             }

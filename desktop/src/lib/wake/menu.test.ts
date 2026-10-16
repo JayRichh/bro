@@ -46,6 +46,31 @@ describe("an account's menu", () => {
     delete wake.waking['@claude'];
   });
 
+  it('asks for a login first and says when a window is live', () => {
+    app.accounts = [{ ...row('work', 'claude'), login: 'needs_login', loginHint: 'kete profile login work' }];
+    const [now] = actions.menuFor({ kind: 'account', id: 'work' });
+    expect(now).toMatchObject({ label: 'Wake up now', disabled: true, title: 'Log in first: kete profile login work' });
+    expect(actions.runVerb({ kind: 'account', id: 'work' }, 'wake_account')).toBe(false);
+    app.accounts = [row('work', 'claude')];
+    const resets = Math.floor(Date.now() / 1000) + 3600;
+    app.model = {
+      ...app.model,
+      accounts: {
+        work: {
+          account: 'work',
+          harness: 'claude',
+          windows: [{ kind: 'session', label: null, percent: 30, resets_at: resets, read_at: resets - 600 }],
+          source: 'statusline',
+          at: Date.now(),
+          plan: null,
+        },
+      },
+    };
+    const [live] = actions.menuFor({ kind: 'account', id: 'work' });
+    expect(live).not.toHaveProperty('disabled');
+    expect(typeof live === 'object' && 'label' in live ? live.label : '').toMatch(/^Wake up now \(window live until \d\d:\d\d\)$/);
+  });
+
   it('round-trips as a target key', () => {
     expect(actions.parseTarget(actions.targetKey({ kind: 'account', id: '@claude' }))).toEqual({ kind: 'account', id: '@claude' });
   });
