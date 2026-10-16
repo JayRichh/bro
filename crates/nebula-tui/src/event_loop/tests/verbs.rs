@@ -948,12 +948,19 @@ fn pull_request_rows_follow_its_state() {
     assert!(!has(&app, Action::CreatePullRequest));
     assert!(has(&app, Action::MergePullRequest));
     assert!(has(&app, Action::OpenPullRequest));
-    assert!(top(&app).contains(&"Pull request".to_string()), "{:?}", top(&app));
+    assert!(
+        top(&app).contains(&"Pull request".to_string()),
+        "{:?}",
+        top(&app)
+    );
 
     app.github
         .pull_requests
         .insert(feat.clone(), Some(pr_on_feat(STATE_OPEN, true)));
-    assert!(!has(&app, Action::MergePullRequest), "a draft is published first");
+    assert!(
+        !has(&app, Action::MergePullRequest),
+        "a draft is published first"
+    );
     assert!(has(&app, Action::OpenPullRequest));
 
     for (state, words) in [
