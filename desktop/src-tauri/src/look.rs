@@ -200,7 +200,8 @@ pub async fn look_import_file(app: tauri::AppHandle) -> Res<Option<DesktopPrefs>
 /// followed, its lightness from its `type` (else its canvas), its name
 /// from its `name` (else the file's).
 fn palette_of_file(path: &std::path::Path) -> Res<Palette> {
-    let data = vscode::load_theme(path).ok_or("that file isn't a VS Code theme (JSON with comments, at most 4 MiB)")?;
+    let data = vscode::load_theme(path)
+        .ok_or("that file isn't a VS Code theme (JSON with comments, at most 4 MiB)")?;
     if data.colors.is_empty() && data.tokens.is_empty() {
         return Err("that file has no colors or tokenColors: not a VS Code theme".into());
     }
@@ -248,7 +249,8 @@ pub struct FontsTaken {
 #[tauri::command]
 pub fn look_use_vscode_fonts() -> Res<FontsTaken> {
     let install = vscode::install().ok_or("VS Code's settings weren't found")?;
-    let settings = vscode::read_settings(&install).ok_or("VS Code's settings.json can't be read")?;
+    let settings =
+        vscode::read_settings(&install).ok_or("VS Code's settings.json can't be read")?;
     let fonts = vscode::fonts(&settings);
     let mut said = Vec::new();
     let prefs = DesktopPrefs::update(|p| take_fonts(p, &fonts, &mut said))?;
