@@ -178,6 +178,7 @@ impl Daemon {
                 } => vec![book.start(parent, id.clone(), info.kind.unwrap_or_default(), now)],
                 HookEvent::SubagentStop {
                     subagent_id: Some(id),
+                    ..
                 } => book.end(parent, Some(id), SubagentStatus::Done, now),
                 _ => Vec::new(),
             }
@@ -277,6 +278,7 @@ mod tests {
     fn stop(id: &str) -> HookEvent {
         HookEvent::SubagentStop {
             subagent_id: Some(id.into()),
+            background: None,
         }
     }
 

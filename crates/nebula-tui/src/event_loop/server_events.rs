@@ -31,6 +31,7 @@ pub(crate) fn handle_server_event(app: &mut App, event: ServerEvent, out: &mut V
         }
         ServerEvent::AccountUsage { accounts } => accounts::on_account_usage(app, accounts),
         ServerEvent::SessionContexts { contexts } => accounts::on_session_contexts(app, contexts),
+        ServerEvent::SessionStops { stops } => accounts::on_session_stops(app, stops),
         ServerEvent::SubagentChanged { sub } => desk::on_subagent_changed(app, sub),
         ServerEvent::WorktreeBases { bases } => {
             app.tree.bases = bases
@@ -72,6 +73,9 @@ fn handle_snapshot_event(app: &mut App, event: ServerEvent, out: &mut Vec<Client
             app.tree.agents = agents;
             app.tree.terminals = terminals;
             app.tree.links = links;
+            // The daemon sends every stop note again after a Snapshot:
+            // what was held may be stale.
+            app.launcher.session_stops.clear();
             app.github.pr_seen = pr_seen.into_iter().map(|s| (s.url, s.marker)).collect();
             // The cache painted rows for whatever the last run's tree had;
             // the ones this tree no longer has go, before they could be
@@ -527,6 +531,12 @@ fn handle_tree_event(app: &mut App, event: ServerEvent, out: &mut Vec<ClientRequ
         ServerEvent::EntityRemoved { id } => {
             let before = selection_snapshot(app);
             apply_removal(app, &id);
+            // A removed project or checkout takes its sessions with it,
+            // and their stop notes.
+            let agents = &app.tree.agents;
+            app.launcher
+                .session_stops
+                .retain(|agent, _| agents.iter().any(|a| &a.id == agent));
             app.prune_term_cache();
             // The cursor that was on the removed row now sits on its
             // neighbor — show that neighbor's session/context.

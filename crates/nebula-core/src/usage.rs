@@ -424,11 +424,41 @@ pub struct StatuslineReading {
     pub usage_cleared: bool,
     pub session_id: Option<String>,
     pub transcript_path: Option<String>,
+    /// `effort.level`: the reasoning effort the session runs at now,
+    /// mid-session `/effort` changes and the model's cap included
+    /// (`low` … `max`). Absent on a model with no effort parameter.
+    pub effort: Option<String>,
+    /// `model.id` (`claude-opus-5-5`). Read for what it says, never
+    /// stored as the row's model: it drops the `[1m]` context suffix a
+    /// `--model` needs (`session_model` reads the transcript instead).
+    pub model_id: Option<String>,
+}
+
+/// The non-blank string at `path` in `v`.
+fn str_at(v: &Value, path: &[&str]) -> Option<String> {
+    let mut cur = v;
+    for key in path {
+        cur = cur.get(key)?;
+    }
+    cur.as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+/// The effort level a statusLine or hook payload reports
+/// (`{"effort": {"level": "high"}}`), when it reports one.
+pub fn effort_level(v: &Value) -> Option<String> {
+    str_at(v, &["effort", "level"])
 }
 
 /// Read Claude Code's statusLine JSON.
 pub fn claude_statusline(v: &Value) -> StatuslineReading {
-    let mut out = StatuslineReading::default();
+    let mut out = StatuslineReading {
+        effort: effort_level(v),
+        model_id: str_at(v, &["model", "id"]),
+        ..StatuslineReading::default()
+    };
     for (key, kind) in [
         ("five_hour", WindowKind::Session),
         ("seven_day", WindowKind::Weekly),
@@ -1046,6 +1076,22 @@ mod tests {
         assert_eq!(r.context_window, Some(200000));
         assert!(!r.usage_cleared);
         assert_eq!(r.session_id.as_deref(), Some("abc123"));
+        assert_eq!(r.model_id.as_deref(), Some("claude-opus-4-7"));
+        assert_eq!(r.effort, None, "no effort parameter on the model");
+    }
+
+    /// The docs' statusLine fields for the model and the live effort,
+    /// and the same `effort` object a hook payload carries.
+    #[test]
+    fn a_statusline_names_the_live_effort_and_the_model_id() {
+        let mut v = statusline_fixture();
+        v["model"] = json!({"id": "claude-opus-5-5", "display_name": "Opus"});
+        v["effort"] = json!({"level": "high"});
+        let r = claude_statusline(&v);
+        assert_eq!(r.effort.as_deref(), Some("high"));
+        assert_eq!(r.model_id.as_deref(), Some("claude-opus-5-5"));
+        assert_eq!(effort_level(&json!({"effort": {"level": " "}})), None);
+        assert_eq!(effort_level(&json!({"effort": "high"})), None, "odd shape");
     }
 
     #[test]

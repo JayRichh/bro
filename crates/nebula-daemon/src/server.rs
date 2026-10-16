@@ -968,12 +968,13 @@ impl ClientConnection {
             ports: self.daemon.worktree_ports(),
         })
         .await;
-        // RECORDED BASES, ACCOUNT USAGE and SESSION CONTEXT too, to a peer
-        // that reads them.
+        // RECORDED BASES, ACCOUNT USAGE, SESSION CONTEXT and STOP NOTES
+        // too, to a peer that reads them.
         for ev in base_events(&self.daemon, self.peer_protocol)
             .await
             .into_iter()
             .chain(usage_events(&self.daemon, self.peer_protocol).await)
+            .chain(stop_events(&self.daemon, self.peer_protocol))
         {
             self.send(ev).await;
         }
@@ -1514,6 +1515,18 @@ async fn usage_events(daemon: &Arc<Daemon>, peer: u32) -> Vec<ServerEvent> {
     .unwrap_or_default()
 }
 
+/// The STOP NOTES a subscriber at `peer` gets beside the Snapshot (the
+/// whole list, so a resync replaces its own): none for a peer older than
+/// `LIMITS_PROTOCOL`.
+fn stop_events(daemon: &Daemon, peer: u32) -> Vec<ServerEvent> {
+    if peer < nebula_core::LIMITS_PROTOCOL {
+        return Vec::new();
+    }
+    vec![ServerEvent::SessionStops {
+        stops: daemon.session_stops(),
+    }]
+}
+
 /// The recorded worktree bases a subscriber at `peer` gets beside the
 /// Snapshot: none for a peer older than `RECORDED_BASE_PROTOCOL`.
 async fn base_events(daemon: &Arc<Daemon>, peer: u32) -> Vec<ServerEvent> {
@@ -1546,6 +1559,7 @@ async fn send_snapshot(daemon: &Arc<Daemon>, tx: &mpsc::Sender<ServerEvent>, pee
         .await
         .into_iter()
         .chain(usage_events(daemon, peer).await)
+        .chain(stop_events(daemon, peer))
     {
         if tx.send(ev).await.is_err() {
             return false;

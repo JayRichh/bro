@@ -10,7 +10,7 @@ use std::path::PathBuf;
 ///
 /// Bump on every protocol change. Additive changes keep
 /// [`MIN_COMPATIBLE_PROTOCOL`] where it is; breaking changes bump both.
-pub const PROTOCOL_VERSION: u32 = 60;
+pub const PROTOCOL_VERSION: u32 = 62;
 
 /// Oldest IPC protocol this build can safely talk to.
 ///
@@ -59,6 +59,7 @@ impl ServerEvent {
             }
             ServerEvent::WorktreeBases { .. } => peer_version >= RECORDED_BASE_PROTOCOL,
             ServerEvent::SessionChanges { .. } => peer_version >= SESSION_CHANGES_PROTOCOL,
+            ServerEvent::SessionStops { .. } => peer_version >= LIMITS_PROTOCOL,
             _ => true,
         }
     }
@@ -97,6 +98,14 @@ pub const SESSION_CHANGES_PROTOCOL: u32 = 59;
 /// request and would drop the connection, so the rename keeps refusing
 /// while a session names the profile (`profiles::rename`).
 pub const RENAME_PROFILE_PROTOCOL: u32 = 60;
+
+/// The first protocol whose peers decode [`ServerEvent::SessionStops`]:
+/// why a Claude session's turn stopped short (a usage limit it is waiting
+/// out, a login it needs, an API error), beside its status. Pushed
+/// unasked, after the Snapshot and as notes change, so the daemon sends it
+/// only to a peer that said this or later at Hello. An older client just
+/// never shows the note.
+pub const LIMITS_PROTOCOL: u32 = 62;
 
 /// Max IPC frame size (length prefix sanity bound).
 pub const MAX_FRAME_LEN: u32 = 4 * 1024 * 1024;
@@ -1086,6 +1095,15 @@ pub enum ServerEvent {
         req_id: u64,
         changes: crate::session_snapshot::SessionChanges,
     },
+
+    // -- protocol 62, appended; pushed only to 62+ peers
+    // (`ServerEvent::decodable_by`). --
+    /// Why sessions' last turns stopped short (`crate::stop`): every known
+    /// note after the Snapshot, then one at a time as they change. A
+    /// `None` note clears that session's. Folded in by agent id.
+    SessionStops {
+        stops: Vec<crate::stop::SessionStop>,
+    },
 }
 
 /// One row of `ServerEvent::OrchestratorSessions`: the `kete sessions`
@@ -1645,6 +1663,47 @@ mod tests {
         assert_eq!(changes.sessions, 2);
         assert_eq!(changes.last.as_ref().unwrap().tree, None, "unavailable");
         assert_eq!(changes.trees(), None);
+    }
+
+    /// 62 appends `SessionStops`: older peers stay in range and are never
+    /// pushed it, and a note (and a clear) round-trips.
+    #[test]
+    fn protocol_62_stop_notes_round_trip_and_are_held_back_from_older_peers() {
+        use crate::stop::{SessionStop, StopNote};
+        const { assert!(LIMITS_PROTOCOL <= PROTOCOL_VERSION) };
+        assert_eq!(MIN_COMPATIBLE_PROTOCOL, 53, "62 is additive");
+        assert!(protocol_compatible_with(61));
+        let stops = ServerEvent::SessionStops {
+            stops: vec![
+                SessionStop {
+                    agent: AgentId("a".into()),
+                    note: Some(StopNote {
+                        reason: "rate_limit".into(),
+                        waiting: true,
+                        resumes: Some("3:45pm".into()),
+                        resets_at: Some(1_791_891_379),
+                        detail: Some("429 Too Many Requests".into()),
+                        at: 9,
+                    }),
+                },
+                SessionStop {
+                    agent: AgentId("b".into()),
+                    note: None,
+                },
+            ],
+        };
+        assert!(stops.decodable_by(LIMITS_PROTOCOL));
+        assert!(
+            !stops.decodable_by(LIMITS_PROTOCOL - 1),
+            "an older peer would drop the connection"
+        );
+        let back: ServerEvent = rmp_serde::from_slice(&encode(&stops)).unwrap();
+        let (ServerEvent::SessionStops { stops: got }, ServerEvent::SessionStops { stops: sent }) =
+            (back, stops)
+        else {
+            panic!("not SessionStops");
+        };
+        assert_eq!(got, sent);
     }
 
     #[test]

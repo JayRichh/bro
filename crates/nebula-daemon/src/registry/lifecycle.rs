@@ -160,7 +160,7 @@ impl Daemon {
     /// held end finish the turn after all.
     pub fn complete_pending_move(self: &Arc<Self>, id: &AgentId, event: &HookEvent) {
         let turn_over = match event {
-            HookEvent::Stop => true,
+            HookEvent::Stop { .. } => true,
             HookEvent::Notification { notification_type } => {
                 notification_type.as_deref() == Some("idle_prompt")
             }
@@ -258,7 +258,7 @@ impl Daemon {
                 return;
             }
             machine.set_relocating(false);
-            machine.handle(HookEvent::Stop, None, Instant::now())
+            machine.handle(HookEvent::Stop { background: None }, None, Instant::now())
         };
         self.apply_status_effects(id, effects);
     }
@@ -444,6 +444,7 @@ impl Daemon {
         self.pending_moves.lock().remove(id);
         self.forget_subagents(id);
         self.forget_context(id);
+        self.forget_stop(id);
         let refs = self
             .store
             .get_agent(id)?

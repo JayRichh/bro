@@ -4625,6 +4625,10 @@ pub struct LauncherState {
     /// Each session's context window (`ServerEvent::SessionContexts`).
     pub session_contexts:
         std::collections::HashMap<nebula_core::AgentId, nebula_core::usage::ContextUsage>,
+    /// Why each session's last turn stopped short — `resumes 3:45pm`,
+    /// `logged out` (`ServerEvent::SessionStops`). The daemon sends the
+    /// whole list again after every Snapshot, so a Snapshot clears it.
+    pub session_stops: std::collections::HashMap<nebula_core::AgentId, nebula_core::stop::StopNote>,
 }
 
 pub struct ChromeState {

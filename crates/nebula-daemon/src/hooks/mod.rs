@@ -173,6 +173,11 @@ pub struct HookDelivery {
     /// Subagent news riding the event: its type, or a Task / Agent tool
     /// call's description (`registry::subagents`).
     pub subagent: SubagentHookInfo,
+    /// The reasoning effort the session runs at now (`effort.level`, on
+    /// tool, Stop and SubagentStop payloads): Claude route, foreground
+    /// payloads only — a subagent's hook reports the subagent's own
+    /// (`Daemon::adopt_claude_effort`).
+    pub effort: Option<String>,
 }
 
 /// One statusLine JSON `kete _statusline` POSTed for an agent: plan
@@ -221,9 +226,62 @@ pub struct HookPayload {
     pub cwd: Option<String>,
     /// Cursor sends no `cwd`; its first workspace root plays the role.
     pub workspace_roots: Option<Vec<String>>,
+    /// `StopFailure`'s error kind (`rate_limit`, `authentication_failed`,
+    /// …). Untyped like every field below: a shape a later CLI changes must
+    /// lose that one field, never the whole payload and its session id.
+    pub error: Option<serde_json::Value>,
+    /// `StopFailure`'s "additional details about the error, when available".
+    pub error_details: Option<serde_json::Value>,
+    /// On `StopFailure`, the error line Claude showed ("API Error: Rate
+    /// limit reached"); on `Stop`, Claude's reply, which is not read.
+    pub last_assistant_message: Option<serde_json::Value>,
+    /// `{"level": "high"}`: the effort in effect as the hook runs.
+    pub effort: Option<serde_json::Value>,
+    /// Stop / SubagentStop (2.1.145+): the session's tasks still in
+    /// flight, each `{"id", "type", "status", …}`.
+    pub background_tasks: Option<serde_json::Value>,
+}
+
+/// The most of Claude's error words a stop note carries: a tooltip's worth.
+const STOP_DETAIL_MAX: usize = 200;
+
+/// A payload field as non-blank text.
+fn text_of(value: Option<&serde_json::Value>) -> Option<String> {
+    value
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
 impl HookPayload {
+    /// What `background_tasks` says of the work still in flight: how many
+    /// of its tasks carry the work on (`status::holds_turn`; one with no
+    /// type does). None without a list — absent is not the same as empty.
+    fn background(&self) -> Option<crate::status::Background> {
+        let tasks = self.background_tasks.as_ref()?.as_array()?;
+        let holders = tasks
+            .iter()
+            .filter(|task| {
+                task.get("type")
+                    .and_then(serde_json::Value::as_str)
+                    .is_none_or(crate::status::holds_turn)
+            })
+            .count();
+        Some(crate::status::Background { holders })
+    }
+
+    /// `StopFailure`'s words for a tooltip: its details, else the error
+    /// line itself, cut to [`STOP_DETAIL_MAX`] characters.
+    fn stop_detail(&self) -> Option<String> {
+        let text = text_of(self.error_details.as_ref())
+            .or_else(|| text_of(self.last_assistant_message.as_ref()))?;
+        Some(match text.char_indices().nth(STOP_DETAIL_MAX) {
+            Some((cut, _)) => format!("{}…", &text[..cut]),
+            None => text,
+        })
+    }
+
     fn session_id(&self) -> Option<String> {
         self.session_id
             .clone()
@@ -252,7 +310,16 @@ pub struct HookQuery {
 pub fn parse_event(hook_event: &str, payload: &HookPayload) -> Option<HookEvent> {
     Some(match hook_event {
         "UserPromptSubmit" => HookEvent::UserPromptSubmit,
-        "Stop" => HookEvent::Stop,
+        "Stop" => HookEvent::Stop {
+            background: payload.background(),
+        },
+        // What the daemon knows of a limit's wait is filled in on the way
+        // to the status machine (`Daemon::apply_hook_event`).
+        "StopFailure" => HookEvent::StopFailure {
+            error: text_of(payload.error.as_ref()),
+            detail: payload.stop_detail(),
+            limit: crate::status::LimitOutlook::Unknown,
+        },
         "SessionStart" => HookEvent::SessionStart {
             source: payload.source.clone(),
         },
@@ -275,6 +342,7 @@ pub fn parse_event(hook_event: &str, payload: &HookPayload) -> Option<HookEvent>
         },
         "SubagentStop" => HookEvent::SubagentStop {
             subagent_id: payload.subagent_id(),
+            background: payload.background(),
         },
         _ => return None,
     })
@@ -552,6 +620,15 @@ async fn receive_hook(
         task: tool_input_text("description"),
         task_kind: tool_input_text("subagent_type").filter(|k| !k.is_empty()),
     };
+    // Claude's effort for the session: never off a subagent's payload,
+    // whose level is the subagent's own (the Agent tool takes an effort).
+    let effort = match cli {
+        HookCli::Claude if payload.subagent_id().is_none() => payload
+            .effort
+            .as_ref()
+            .and_then(|e| text_of(e.get("level"))),
+        _ => None,
+    };
     let _ = state
         .tx
         .send(HookDelivery {
@@ -562,6 +639,7 @@ async fn receive_hook(
             transcript,
             prompt,
             subagent,
+            effort,
         })
         .await;
 
@@ -721,6 +799,194 @@ mod tests {
         .await;
         assert_eq!(status, 200);
         assert!(usage.try_recv().is_err(), "nothing queued for a bad body");
+    }
+
+    /// Claude's documented `StopFailure` payload, POSTed the way the hook
+    /// does: its error kind and details reach the status machine (the
+    /// wait's outlook is the daemon's to fill in), a missing detail falls
+    /// back to the error line, and a payload whose `error` is not text
+    /// still delivers the event and its session id.
+    #[tokio::test]
+    async fn a_stop_failure_post_carries_its_error_to_the_status_machine() {
+        use crate::status::LimitOutlook;
+        let store = seeded_store();
+        let (env, mut rx, _) = start_hook_server(store, None).await.unwrap();
+        let post = |body: &'static str| {
+            let (port, token) = (env.port, env.token.clone());
+            async move {
+                http_post(
+                    port,
+                    "/api/hooks/claude?agentId=titled&hookEvent=StopFailure",
+                    &token,
+                    body,
+                )
+                .await
+            }
+        };
+        let (status, body) = post(
+            r#"{"session_id":"abc123","hook_event_name":"StopFailure","error":"rate_limit","error_details":"429 Too Many Requests","last_assistant_message":"API Error: Rate limit reached"}"#,
+        )
+        .await;
+        assert_eq!((status, body.as_str()), (200, HOOK_OK));
+        let got = rx.recv().await.unwrap();
+        assert_eq!(got.session_id.as_deref(), Some("abc123"));
+        assert_eq!(
+            got.event,
+            HookEvent::StopFailure {
+                error: Some("rate_limit".into()),
+                detail: Some("429 Too Many Requests".into()),
+                limit: LimitOutlook::Unknown,
+            }
+        );
+
+        post(r#"{"session_id":"abc123","error":"authentication_failed","last_assistant_message":"Invalid API key · Please run /login"}"#).await;
+        let got = rx.recv().await.unwrap();
+        assert_eq!(
+            got.event,
+            HookEvent::StopFailure {
+                error: Some("authentication_failed".into()),
+                detail: Some("Invalid API key · Please run /login".into()),
+                limit: LimitOutlook::Unknown,
+            }
+        );
+
+        post(r#"{"session_id":"abc123","error":{"kind":"later"},"error_details":7}"#).await;
+        let got = rx.recv().await.unwrap();
+        assert_eq!(got.session_id.as_deref(), Some("abc123"));
+        assert_eq!(
+            got.event,
+            HookEvent::StopFailure {
+                error: None,
+                detail: None,
+                limit: LimitOutlook::Unknown,
+            }
+        );
+
+        // The usage-limit notifications ride the Notification route as is.
+        let (status, _) = http_post(
+            env.port,
+            "/api/hooks/claude?agentId=titled&hookEvent=Notification",
+            &env.token,
+            r#"{"session_id":"abc123","hook_event_name":"Notification","message":"Continuing","notification_type":"quota_auto_resume_fired"}"#,
+        )
+        .await;
+        assert_eq!(status, 200);
+        assert_eq!(
+            rx.recv().await.unwrap().event,
+            HookEvent::Notification {
+                notification_type: Some("quota_auto_resume_fired".into())
+            }
+        );
+    }
+
+    /// `background_tasks` on a Stop (the docs' own example: one shell left
+    /// running) and on a SubagentStop counts the tasks that carry the work
+    /// on; no list is no count, and a list of another shape loses only
+    /// that field.
+    #[test]
+    fn background_tasks_count_what_holds_the_turn() {
+        use crate::status::Background;
+        let stop = |body: &str| {
+            let payload: HookPayload = serde_json::from_str(body).unwrap_or_default();
+            (
+                parse_event("Stop", &payload),
+                parse_event("SubagentStop", &payload),
+                payload.session_id,
+            )
+        };
+        let docs = r#"{"session_id":"abc123","hook_event_name":"Stop","stop_hook_active":true,
+            "last_assistant_message":"I've completed the refactoring.",
+            "background_tasks":[{"id":"task-001","type":"shell","status":"running",
+                "description":"tail logs","command":"tail -f /var/log/syslog"}],
+            "session_crons":[{"id":"cron-001","schedule":"0 9 * * 1-5","recurring":true,"prompt":"check the build"}]}"#;
+        let (s, sub, sid) = stop(docs);
+        let none_hold = Some(Background { holders: 0 });
+        assert_eq!(
+            s,
+            Some(HookEvent::Stop {
+                background: none_hold
+            })
+        );
+        assert_eq!(
+            sub,
+            Some(HookEvent::SubagentStop {
+                subagent_id: None,
+                background: none_hold
+            })
+        );
+        assert_eq!(sid.as_deref(), Some("abc123"));
+
+        let (s, ..) = stop(
+            r#"{"background_tasks":[{"type":"subagent","agent_type":"Explore"},
+                {"type":"workflow","name":"ship"},{"type":"teammate"},{"type":"monitor"},
+                {"type":"MCP task"},{"type":"cloud session"},{"id":"no-type"}]}"#,
+        );
+        assert_eq!(
+            s,
+            Some(HookEvent::Stop {
+                background: Some(Background { holders: 4 })
+            })
+        );
+        let (s, ..) = stop(r#"{"background_tasks":[]}"#);
+        assert_eq!(
+            s,
+            Some(HookEvent::Stop {
+                background: none_hold
+            })
+        );
+        let (s, ..) = stop(r#"{"session_id":"s1"}"#);
+        assert_eq!(s, Some(HookEvent::Stop { background: None }));
+        let (s, _, sid) = stop(r#"{"session_id":"s1","background_tasks":{"odd":1}}"#);
+        assert_eq!(
+            (s, sid.as_deref()),
+            (Some(HookEvent::Stop { background: None }), Some("s1"))
+        );
+    }
+
+    /// The effort a Claude tool or Stop payload reports rides the delivery
+    /// for the row to follow, but never a subagent's (its own level) and
+    /// never another CLI's.
+    #[tokio::test]
+    async fn a_foreground_claude_payload_carries_its_effort() {
+        let store = seeded_store();
+        let (env, mut rx, _) = start_hook_server(store, None).await.unwrap();
+        let post = |route: &'static str, body: &'static str| {
+            let (port, token) = (env.port, env.token.clone());
+            async move {
+                http_post(
+                    port,
+                    &format!("/api/hooks/{route}?agentId=titled&hookEvent=PostToolUse"),
+                    &token,
+                    body,
+                )
+                .await
+            }
+        };
+        post(
+            "claude",
+            r#"{"session_id":"s1","tool_name":"Bash","effort":{"level":"high"}}"#,
+        )
+        .await;
+        assert_eq!(rx.recv().await.unwrap().effort.as_deref(), Some("high"));
+        post(
+            "claude",
+            r#"{"session_id":"s1","agent_id":"sub1","tool_name":"Bash","effort":{"level":"low"}}"#,
+        )
+        .await;
+        assert_eq!(rx.recv().await.unwrap().effort, None, "a subagent's");
+        post(
+            "codex",
+            r#"{"session_id":"s1","tool_name":"Bash","effort":{"level":"low"}}"#,
+        )
+        .await;
+        assert_eq!(rx.recv().await.unwrap().effort, None, "not Claude");
+        post("claude", r#"{"session_id":"s1","effort":"max"}"#).await;
+        let got = rx.recv().await.unwrap();
+        assert_eq!(
+            (got.effort, got.session_id.as_deref()),
+            (None, Some("s1")),
+            "an odd shape loses the field, not the payload"
+        );
     }
 
     /// The reply's `sessionTitle` is how a nebula-side name reaches
@@ -1073,7 +1339,7 @@ mod tests {
         // Another event with a prompt field is not a prompt.
         post("Stop", r#"{"session_id":"s1","prompt":"leftover"}"#).await;
         let delivery = rx.recv().await.unwrap();
-        assert_eq!(delivery.event, HookEvent::Stop);
+        assert_eq!(delivery.event, HookEvent::Stop { background: None });
         assert!(delivery.prompt.is_none());
     }
 

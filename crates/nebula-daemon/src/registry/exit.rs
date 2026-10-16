@@ -126,6 +126,16 @@ impl Daemon {
                             daemon.on_pty_usage(id, usage);
                         }
                     }
+                    // Claude's USAGE-LIMIT WAIT: when it carries on, which
+                    // no hook says. Owned PTYs only, as above: a killed
+                    // CLI's last screen speaks for nobody.
+                    Ok(PtyEvent::Limit { line }) => {
+                        if let SessionRef::Agent(id) = &sref {
+                            if daemon.owns_session(&sref, &session) {
+                                daemon.on_pty_limit(id, line);
+                            }
+                        }
+                    }
                     // Cursor's ask-question dialog, which no hook reports
                     // (see `pty::question`). Owned PTYs only, as above.
                     Ok(PtyEvent::Question { open }) => {

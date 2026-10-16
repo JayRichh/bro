@@ -249,6 +249,12 @@ pub enum PtyEvent {
     Usage {
         usage: nebula_core::profiles::Usage,
     },
+    /// Claude's USAGE-LIMIT WAIT, as its screen tells it: when it will
+    /// carry on, when the limit resets, or that the wait ended. Scanned
+    /// with the plan usage, on Claude sessions only.
+    Limit {
+        line: usage::LimitLine,
+    },
 }
 
 enum ReaderMsg {
@@ -1092,11 +1098,12 @@ async fn pump(session: Arc<PtySession>, mut rx: mpsc::Receiver<ReaderMsg>) {
             .lock()
             .as_mut()
             .and_then(|scanner| scanner.feed(pending, std::time::Instant::now()));
-        let usage_reading = session
+        let usage_scan = session
             .usage
             .lock()
             .as_mut()
-            .and_then(|scanner| scanner.feed(pending));
+            .map(|scanner| scanner.feed(pending))
+            .unwrap_or_default();
         let seq = session.ring.lock().append(pending);
         let _ = session.events.send(PtyEvent::Output {
             seq,
@@ -1122,9 +1129,13 @@ async fn pump(session: Arc<PtySession>, mut rx: mpsc::Receiver<ReaderMsg>) {
             tracing::debug!(session = ?session.sref, open, "child question dialog changed");
             let _ = session.events.send(PtyEvent::Question { open });
         }
-        if let Some(usage) = usage_reading {
+        if let Some(usage) = usage_scan.usage {
             tracing::debug!(session = ?session.sref, usage = %usage.summary(), "child printed its plan usage");
             let _ = session.events.send(PtyEvent::Usage { usage });
+        }
+        for line in usage_scan.limits {
+            tracing::debug!(session = ?session.sref, ?line, "child printed a usage-limit wait line");
+            let _ = session.events.send(PtyEvent::Limit { line });
         }
     };
 
