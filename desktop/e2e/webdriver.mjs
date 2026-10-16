@@ -14,7 +14,6 @@ export const Key = {
   ArrowLeft: '\uE012',
   ArrowRight: '\uE014',
   F2: '\uE032',
-  F5: '\uE035',
   F10: '\uE03A',
 };
 

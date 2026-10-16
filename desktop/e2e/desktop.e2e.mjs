@@ -288,9 +288,7 @@ flow("right-click a field opens Kete's Edit menu, never WebView2's; Paste fills 
   // Ctrl+P and the like are checked with real keystrokes, not here.
 });
 
-// The webview's settings land late here (KETE_QUIET_DELAY_MS, debug
-// builds): the app's page is restarted under them and still comes up.
-flow("right-click a terminal, a board card and Shift+F10 open Kete's menus, one at a time", { script: 'stop;echo', env: { KETE_QUIET_DELAY_MS: '1500' } }, async (d) => {
+flow("right-click a terminal, a board card and Shift+F10 open Kete's menus, one at a time", { script: 'stop;echo' }, async (d) => {
   const repo = d.makeRepo('menu-board-proj');
   await d.addRepo(repo);
   await toBoard(d);
@@ -340,9 +338,29 @@ flow("right-click a terminal, a board card and Shift+F10 open Kete's menus, one 
   // Shift+F10 on the focused card: one menu, not the key's and the router's.
   await d.wd.exec(`document.querySelector(arguments[0] + ' > button').focus();`, card(id));
   await d.press(Key.F10, Key.Shift);
-  await d.menu(name);
+  // The row key's menu (labelled Actions; the right-click's is named for the
+  // row), with the card's verbs.
+  await d.menu('Actions');
+  await d.el('[role="menu"] [role="menuitem"]', 'Archive');
   await new Promise((r) => setTimeout(r, 400));
   assert.equal(await d.wd.exec(`return document.querySelectorAll('[role="menu"]').length;`), 1);
   await d.press(Key.Escape);
   await menuGone(d);
+});
+
+// The webview's settings held back (KETE_QUIET_DELAY_MS, debug builds) until
+// the app's page shows: it is restarted under them and comes up again, not
+// blank.
+flow('the window comes up when the webview settings land late', { env: { KETE_QUIET_DELAY_MS: '1500' } }, async (d) => {
+  const said = () => {
+    try {
+      return fs.readFileSync(d.driverLog, 'utf8');
+    } catch {
+      return '';
+    }
+  };
+  await d.waitFor('the late settings restarting the page', () => said().includes('kete-desktop: webview settings set, restarting'));
+  await d.waitFor('the app page back', () =>
+    d.wd.exec(`return location.host === 'tauri.localhost' && !!window.__keteContextMenu && document.body.innerText.includes('Add a repo');`),
+  );
 });
