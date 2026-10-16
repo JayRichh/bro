@@ -71,7 +71,7 @@
   $effect(() => {
     const e = engine;
     const h = hidden;
-    if (!e) return;
+    if (!e || !enabled) return;
     untrack(() => {
       if (h && e.world.spawning) e.world.scatter();
       else if (!h && !e.world.spawning) e.world.resume();

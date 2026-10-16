@@ -71,10 +71,10 @@ describe('the critter menu', () => {
 describe('the pixel font', () => {
   it('sets macrons above the cap, as font.rs does', () => {
     expect(textHeight('kia ora')).toBe(5);
-    expect(textHeight('Pūkeko')).toBe(7);
+    expect(textHeight('P\u016bkeko')).toBe(7);
     expect(textWidth('A')).toBe(3);
     expect(textWidth('AA')).toBe(7);
-    const px = textPixels('ū');
+    const px = textPixels('\u016b');
     const has = (x: number, y: number) => px.some(([a, b]) => a === x && b === y);
     expect(has(0, 0) && has(2, 0)).toBe(true);
     expect(px.some(([, y]) => y === 1), 'a clear row under the bar').toBe(false);

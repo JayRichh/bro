@@ -227,7 +227,9 @@ export class Engine {
 
   private tick() {
     const now = performance.now();
-    const dt = Math.min(Math.max((now - this.last) / 1000, 0), 1);
+    // Wall time since the last tick, uncapped: a wake after a long gap
+    // must reach the visitor (the world caps time while anyone is here).
+    const dt = Math.max((now - this.last) / 1000, 0);
     this.last = now;
     this.stats.ticks++;
     this.world.tick(dt, this.input());
